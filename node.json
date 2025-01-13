@@ -1,0 +1,93 @@
+And let's rename this node to HuggingFace Downloader. And update node.json . Set sefault category checkpoints and default input fields empty
+
+
+{
+  "last_node_id": 2,
+  "last_link_id": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "DownloadLinkChecker",
+      "pos": [
+        270,
+        160
+      ],
+      "size": {
+        "0": 315,
+        "1": 178
+      },
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "outputs": [
+        {
+          "name": "LIST",
+          "type": "LIST",
+          "links": [
+            1
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "DownloadLinkChecker"
+      },
+      "widgets_values": [
+        "https://huggingface.co/xxxxa/flast-lora_xxxra-000005.safetensors?download=true",
+        "/home/studio-lab-user/testuda/ComfyUI",
+        0,
+        5,
+        "",
+        "HF TOKEN BITCH"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "ShowFileNames",
+      "pos": [
+        643,
+        156
+      ],
+      "size": {
+        "0": 216.59999084472656,
+        "1": 26
+      },
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "file_names",
+          "type": "LIST",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": null,
+          "shape": 3
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ShowFileNames"
+      }
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "LIST"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}

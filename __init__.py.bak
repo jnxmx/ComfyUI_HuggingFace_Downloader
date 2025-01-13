@@ -1,0 +1,178 @@
+import os
+import subprocess
+import logging
+from comfy.utils import ProgressBar
+from folder_paths import get_folder_paths, folder_names_and_paths
+
+def file_exists_and_valid(path, expected_size=None):
+    """Check if a file exists and optionally validate its size."""
+    if not os.path.exists(path):
+        return False
+    if expected_size:
+        actual_size = os.path.getsize(path)
+        if actual_size != expected_size:
+            return False
+    return True
+
+def download_file_with_check(repo_id, file_path, full_output_path, token=None):
+    """Download a file using huggingface-cli with real-time progress bar in the terminal."""
+    target_file_path = os.path.join(full_output_path, file_path)
+    if os.path.exists(target_file_path):
+        logging.info(f"File already exists: {target_file_path}")
+        return target_file_path
+
+    logging.info(f"Downloading file: {file_path} to {target_file_path}")
+
+    try:
+        # Build the CLI command
+        command = [
+            "huggingface-cli", "download", repo_id, file_path,
+            "--local-dir", full_output_path
+        ]
+        if token:
+            command.extend(["--use-auth-token", token])
+
+        # Run the command directly
+        subprocess.run(command, check=True)
+
+        logging.info("Download complete!")
+        return target_file_path
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error during download: {e}")
+        raise
+
+class HuggingFaceHubDownload:
+    @classmethod
+    def INPUT_TYPES(cls):
+        subfolders = []
+
+        for model_type in folder_names_and_paths:
+            paths = get_folder_paths(model_type)
+            for path in paths:
+                relative_path = os.path.relpath(path, start=os.path.dirname(path))
+                subfolders.append(relative_path)
+
+        subfolders = sorted(set(subfolders))
+
+        return {
+            "required": {
+                "FILES": ("STRING", {"multiline": True, "default": ""}),
+                "FOLDERS": ("STRING", {"multiline": True, "default": ""}),
+                "OUTPUT_SUBFOLDER": (subfolders, {}),
+            },
+            "optional": {
+                "huggingface_token_for_private_repo": ("STRING", {}),
+                "debug_mode": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    RETURN_TYPES = ("LIST",)
+    FUNCTION = "check_download_link"
+    CATEGORY = "examples"
+
+    def check_download_link(self, FILES, FOLDERS, OUTPUT_SUBFOLDER, huggingface_token_for_private_repo=None, debug_mode=False, force_download=False):
+        full_output_path = os.path.abspath(os.path.join("models", OUTPUT_SUBFOLDER))
+
+        if not os.path.exists(full_output_path):
+            os.makedirs(full_output_path)
+
+        downloaded_files = []
+        file_links = [link.strip() for link in FILES.splitlines() if link.strip()]
+
+        pbar = ProgressBar(len(file_links))  # Initialize progress bar for all files
+
+        try:
+            for LINK in file_links:
+                logging.info(f"Processing file link: {LINK}")
+                if "huggingface.co" in LINK:
+                    repo_id, file_path = self.parse_huggingface_link(LINK)
+                    logging.info(f"Parsed repo_id: {repo_id}, file_path: {file_path}")
+
+                    if file_path and "?" in file_path:
+                        file_path = file_path.split("?")[0]
+                        logging.info(f"Sanitized file_path: {file_path}")
+
+                    if force_download and os.path.exists(os.path.join(full_output_path, file_path)):
+                        logging.info(f"Force download enabled. Removing existing file: {file_path}")
+                        os.remove(os.path.join(full_output_path, file_path))
+
+                    downloaded_file = download_file_with_check(
+                        repo_id=repo_id,
+                        file_path=file_path,
+                        full_output_path=full_output_path,
+                        token=huggingface_token_for_private_repo
+                    )
+                    downloaded_files.append(downloaded_file)
+
+                    pbar.update(1)  # Update progress bar after each file
+                else:
+                    logging.warning(f"Unsupported link format: {LINK}")
+
+            folder_links = [link.strip() for link in FOLDERS.splitlines() if link.strip()]
+            for LINK in folder_links:
+                logging.info(f"Processing folder link: {LINK}")
+                if "huggingface.co" in LINK:
+                    repo_id, _ = self.parse_huggingface_link(LINK)
+                    logging.info(f"Parsed repo_id: {repo_id}")
+
+                    logging.info(f"Starting folder download with repo_id: {repo_id}")
+                    snapshot_download(
+                        repo_id=repo_id,
+                        local_dir=full_output_path,
+                        local_dir_use_symlinks=False,
+                        token=huggingface_token_for_private_repo
+                    )
+
+                    folder_files = [os.path.join(full_output_path, f) for f in os.listdir(full_output_path)]
+                    downloaded_files.extend(folder_files)
+                else:
+                    logging.warning(f"Unsupported folder link format: {LINK}")
+
+            logging.info(f"Total downloaded files: {downloaded_files}")
+            return downloaded_files
+
+        except Exception as e:
+            if debug_mode:
+                logging.error(f"Detailed Error: {e}", exc_info=True)
+            else:
+                logging.error(f"Error during download: {e}")
+            return [f"Error: {str(e)}"]
+
+    @staticmethod
+    def parse_huggingface_link(link):
+        try:
+            if "resolve/main" in link:
+                parts = link.split("resolve/main/")
+                repo_id = parts[0].split("huggingface.co/")[-1].strip("/")
+                file_path = parts[1]
+            else:
+                repo_id = link.split("huggingface.co/")[-1].strip("/")
+                file_path = None
+            return repo_id, file_path
+        except Exception as e:
+            logging.error(f"Failed to parse Hugging Face link: {link}. Error: {e}")
+            raise ValueError(f"Invalid Hugging Face link: {link}")
+
+class ShowFileNames:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "file_names": ("LIST", {"items": ("STRING", {})})
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "show_file_names"
+    OUTPUT_NODE = True
+
+    CATEGORY = "utils"
+
+    def show_file_names(self, file_names):
+        file_names_text = "\n".join(file_names)
+        return {"ui": {"text": file_names_text}, "result": (file_names_text,)}
+
+NODE_CLASS_MAPPINGS = {
+    "HuggingFace Downloader": HuggingFaceHubDownload,
+    "Show filenames from list": ShowFileNames
+}
