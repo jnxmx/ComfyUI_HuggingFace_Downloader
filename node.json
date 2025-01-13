@@ -1,16 +1,13 @@
-And let's rename this node to HuggingFace Downloader. And update node.json . Set sefault category checkpoints and default input fields empty
-
-
 {
   "last_node_id": 2,
   "last_link_id": 1,
   "nodes": [
     {
       "id": 1,
-      "type": "DownloadLinkChecker",
+      "type": "HuggingFace Model Selector",
       "pos": [
-        270,
-        160
+        100,
+        100
       ],
       "size": {
         "0": 315,
@@ -21,8 +18,8 @@ And let's rename this node to HuggingFace Downloader. And update node.json . Set
       "mode": 0,
       "outputs": [
         {
-          "name": "LIST",
-          "type": "LIST",
+          "name": "HF_LINK",
+          "type": "HF_LINK",
           "links": [
             1
           ],
@@ -31,49 +28,42 @@ And let's rename this node to HuggingFace Downloader. And update node.json . Set
         }
       ],
       "properties": {
-        "Node name for S&R": "DownloadLinkChecker"
+        "Node name for S&R": "HuggingFace Model Selector"
       },
       "widgets_values": [
-        "https://huggingface.co/xxxxa/flast-lora_xxxra-000005.safetensors?download=true",
-        "/home/studio-lab-user/testuda/ComfyUI",
-        0,
-        5,
+        "https://huggingface.co/someuser/some-model-file.safetensors?download=true",
         "",
-        "HF TOKEN BITCH"
+        "checkpoints"
       ]
     },
     {
       "id": 2,
-      "type": "ShowFileNames",
+      "type": "HuggingFace Downloader",
       "pos": [
-        643,
-        156
+        400,
+        100
       ],
       "size": {
-        "0": 216.59999084472656,
-        "1": 26
+        "0": 350,
+        "1": 200
       },
       "flags": {},
       "order": 1,
       "mode": 0,
       "inputs": [
         {
-          "name": "file_names",
-          "type": "LIST",
+          "name": "HF_LINK_1",
+          "type": "HF_LINK",
           "link": 1
         }
       ],
-      "outputs": [
-        {
-          "name": "STRING",
-          "type": "STRING",
-          "links": null,
-          "shape": 3
-        }
-      ],
+      "outputs": [],
       "properties": {
-        "Node name for S&R": "ShowFileNames"
-      }
+        "Node name for S&R": "HuggingFace Downloader"
+      },
+      "widgets_values": [
+        "my_hf_token"
+      ]
     }
   ],
   "links": [
@@ -83,7 +73,7 @@ And let's rename this node to HuggingFace Downloader. And update node.json . Set
       0,
       2,
       0,
-      "LIST"
+      "HF_LINK"
     ]
   ],
   "groups": [],
