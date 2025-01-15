@@ -1,0 +1,138 @@
+{
+  "last_node_id": 22,
+  "last_link_id": 11,
+  "nodes": [
+    {
+      "id": 17,
+      "type": "HuggingFace Downloader",
+      "pos": [
+        1465.0760498046875,
+        1124.2637939453125
+      ],
+      "size": [
+        300.68865966796875,
+        303.110107421875
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "HuggingFace Downloader"
+      },
+      "widgets_values": [
+        "diffusion_models",
+        "",
+        "https://huggingface.co/Kijai/flux-fp8/resolve/main/flux1-dev-fp8-e4m3fn.safetensors?download=true",
+        "",
+        ""
+      ],
+      "color": "#323",
+      "bgcolor": "#535"
+    },
+    {
+      "id": 19,
+      "type": "HuggingFace Downloader",
+      "pos": [
+        2086.31591796875,
+        1127.91748046875
+      ],
+      "size": [
+        300.68865966796875,
+        303.110107421875
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "HuggingFace Downloader"
+      },
+      "widgets_values": [
+        "vae",
+        "",
+        "https://huggingface.co/Kijai/flux-fp8/resolve/main/flux-vae-bf16.safetensors?download=true",
+        "",
+        ""
+      ],
+      "color": "#322",
+      "bgcolor": "#533"
+    },
+    {
+      "id": 18,
+      "type": "HuggingFace Downloader",
+      "pos": [
+        1777.5283203125,
+        1125.746826171875
+      ],
+      "size": [
+        300.68865966796875,
+        303.110107421875
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "HuggingFace Downloader"
+      },
+      "widgets_values": [
+        "clip",
+        "",
+        "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn_scaled.safetensors?download=true\nhttps://huggingface.co/comfyanonymous/flux_text_encoders/blob/main/clip_l.safetensors",
+        "",
+        ""
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 20,
+      "type": "HuggingFace Downloader",
+      "pos": [
+        2397.44921875,
+        1128.3402099609375
+      ],
+      "size": [
+        300.68865966796875,
+        303.110107421875
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "HuggingFace Downloader"
+      },
+      "widgets_values": [
+        "clip_vision",
+        "",
+        "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors?download=true",
+        "",
+        ""
+      ]
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 1.2284597357367988,
+      "offset": [
+        -936.6376870786057,
+        -849.1638756338131
+      ]
+    },
+    "node_versions": {
+      "ComfyUI_HuggingFace_Downloader": "90366dca9ad69dd7836047d5de7c0e3ece89ba41"
+    },
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0
+  },
+  "version": 0.4
+}
