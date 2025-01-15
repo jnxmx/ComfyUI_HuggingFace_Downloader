@@ -1,3 +1,4 @@
+import os
 from server import PromptServer
 from ..modules.downloaders import HuggingFaceDownloader
 from ..utils.file_helpers import create_folder, clear_cache
@@ -5,9 +6,25 @@ from ..utils.file_helpers import create_folder, clear_cache
 class HuggingFaceDownloaderNode:
     @classmethod
     def INPUT_TYPES(cls):
+        prioritized_folders = [
+            "checkpoints", "loras", "controlnet", "vae", "diffusion_models", "clip", "upscale_models", "clip_vision"
+        ]
+
+        # Fetch only first-level folders in the models directory
+        models_dir = os.path.abspath("models")
+        first_level_folders = []
+        if os.path.exists(models_dir):
+            first_level_folders = [
+                folder for folder in os.listdir(models_dir)
+                if os.path.isdir(os.path.join(models_dir, folder))
+            ]
+
+        # Combine prioritized folders with others, maintaining their order
+        combined_folders = prioritized_folders + sorted(set(first_level_folders) - set(prioritized_folders))
+
         return {
             "required": {
-                "local_folder": (["checkpoints", "loras", "controlnet"], {}),
+                "local_folder": (combined_folders, {}),
                 "subfolder": ("STRING", {"default": ""}),
                 "download_file": ("STRING", {"multiline": True, "default": ""}),
                 "download_folder": ("STRING", {"multiline": True, "default": ""}),
