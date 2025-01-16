@@ -4,11 +4,8 @@ The **ComfyUI HuggingFace Downloader** is a custom node extension for [ComfyUI](
 
 ## Features
 
-- **Model Selector Node**
-  - Allows you to specify links to files and folders on the Hugging Face Hub.
+  - Allows you to specify links to files and folders/repos on the Hugging Face Hub.
   - Dropdown selection for model types prioritizes commonly used folders.
-
-- **Downloader Node**
   - Handles multiple inputs and downloads all specified files.
   - Supports authentication via Hugging Face tokens for private repositories.
 
@@ -26,8 +23,7 @@ The **ComfyUI HuggingFace Downloader** is a custom node extension for [ComfyUI](
 1. Use the `HuggingFace Model Selector` node to specify:
    - Links to files or folders.
    - Desired model type (e.g., `vae`).
-2. Connect the `HF_LINK` output to the `HuggingFace Downloader` node.
-3. Execute the workflow to download the resources.
+2. Execute the workflow to download the resources.
 
 ## AI's Role in Development
 
