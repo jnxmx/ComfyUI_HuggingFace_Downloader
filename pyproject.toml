@@ -1,0 +1,15 @@
+[project]
+name = "huggingface_downloader"
+description = "The ComfyUI HuggingFace Downloader is a custom node extension for ComfyUI, designed to streamline the process of downloading models, checkpoints, and other resources from the Hugging Face Hub directly into your models directory. This tool simplifies workflow integration by providing a seamless interface to select and download required resources."
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = ["huggingface_hub", "huggingface_hub[hf_transfer]"]
+
+[project.urls]
+Repository = "https://github.com/jnxmx/ComfyUI_HuggingFace_Downloader"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI_HuggingFace_Downloader"
+Icon = ""
