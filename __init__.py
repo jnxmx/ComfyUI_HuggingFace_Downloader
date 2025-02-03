@@ -1,9 +1,11 @@
-from .nodes.huggingface_downloader import HuggingFaceDownloaderNode
+from .HuggingFaceDownloadModel import HuggingFaceDownloadModel
+from .HuggingFaceDownloadFolder import HuggingFaceDownloadFolder
 
 NODE_CLASS_MAPPINGS = {
-    "HuggingFace Downloader": HuggingFaceDownloaderNode,
+    "Hugging Face Download Model": HuggingFaceDownloadModel,
+    "Hugging Face Download Folder": HuggingFaceDownloadFolder,
 }
 
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "HuggingFace Downloader": "HuggingFace Downloader Node",
-}
+WEB_DIRECTORY = "./js"
+
+__all__ = ["NODE_CLASS_MAPPINGS", "WEB_DIRECTORY"]
