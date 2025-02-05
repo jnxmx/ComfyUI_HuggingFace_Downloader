@@ -14,7 +14,6 @@ def _make_target_folder_list():
     """
     from .file_manager import get_model_subfolders
     subfolders = get_model_subfolders()
-    # Insert 'custom' at the front:
     return ["custom"] + subfolders
 
 class HuggingFaceDownloadModel:
@@ -41,46 +40,71 @@ class HuggingFaceDownloadModel:
 
     def download_model(self, target_folder, link, custom_path="", token="", download_in_background=False):
         """
-        1. If target_folder == 'custom', we interpret custom_path as final_folder.
-        2. Else final_folder = target_folder.
-        3. Then parse link for single-file info, run run_download.
-        4. Return the file name as the node's output. (No special logic for removing segments.)
+        1) If user picks 'custom' in the combo, we interpret custom_path as final_folder, else just target_folder.
+        2) parse link => subfolder/file for single file
+        3) call run_download(...) which uses hf_hub_download so hf_transfer can be used
+        4) node's return:
+           - if target_folder != 'custom', we do just the filename
+           - if 'custom', remove the first segment of custom_path (if any), then leftover + "/" + filename
         """
         from .parse_link import parse_link
         from .downloader import run_download
 
-        # 1) Determine final_folder from the user's picks
+        # Step 1: final_folder logic
         if target_folder == "custom":
-            # user typed something like 'loras/test2'
             final_folder = custom_path.strip().rstrip("/\\")
         else:
             final_folder = target_folder.strip().rstrip("/\\")
 
-        # 2) parse link => may yield subfolder, file, etc.
+        # Step 2: parse link
         try:
             parsed = parse_link(link)
         except Exception as e:
             return (f"Error parsing link: {e}",)
 
-        # If it's missing 'file', we might do something else, but let's proceed:
-        # We'll let run_download handle the scenario for single file.
-
-        # 3) We'll do a background or sync call
+        # Step 3: run in background or sync
         if download_in_background:
+            # background => we can't get final local_path after the call
             threading.Thread(
                 target=run_download,
                 args=(parsed, final_folder, token),
                 daemon=True
             ).start()
-            # We can't know the final file name if we're backgrounding, but let's guess
+            # best guess: use parsed["file"]
             if "file" in parsed:
-                return (parsed["file"],)
+                guessed_file = parsed["file"].strip("/")
+                # if user used 'custom', do leftover logic
+                if target_folder == "custom":
+                    segments = custom_path.strip("/\\").split("/")
+                    if len(segments) > 1:
+                        leftover = "/".join(segments[1:]).strip("/")
+                        if leftover:
+                            return (leftover + "/" + os.path.basename(guessed_file),)
+                        else:
+                            return (os.path.basename(guessed_file),)
+                    else:
+                        return (os.path.basename(guessed_file),)
+                else:
+                    return (os.path.basename(guessed_file),)
             else:
-                return ("",)
+                return ("",)  # no file known
         else:
+            # sync => we get final_message and local_path
             final_message, local_path = run_download(parsed, final_folder, token, sync=True)
-            # We'll guess we want to return the file name from the local_path
             if local_path:
-                return (os.path.basename(local_path),)
+                # user wants leftover + "/" + filename if custom
+                filename = os.path.basename(local_path)
+                if target_folder == "custom":
+                    segments = custom_path.strip("/\\").split("/")
+                    if len(segments) > 1:
+                        leftover = "/".join(segments[1:]).strip("/")
+                        if leftover:
+                            return (leftover + "/" + filename,)
+                        else:
+                            return (filename,)
+                    else:
+                        return (filename,)
+                else:
+                    return (filename,)
             else:
                 return ("",)
