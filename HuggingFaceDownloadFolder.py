@@ -36,15 +36,15 @@ class HuggingFaceDownloadFolder:
 
     def download_folder(self, target_folder, link, custom_path="", token="", download_in_background=False):
         """
-        1) If user picks 'custom' => final_folder= custom_path. else => final_folder=target_folder
-        2) parse link => we get subfolder path => last_segment. 
-           if subfolder is empty => last_segment= the second half of parsed["repo"] 
-           else => last_segment= the last segment of subfolder
+        1) If user picks 'custom', final_folder= custom_path, else final_folder= target_folder
+        2) parse link => subfolder path => last_segment
+           if subfolder empty => use second half of the repo => "clip-vit-large-patch14"
         3) call run_download_folder
-        4) Node output => if custom, remove first path segment from custom_path => leftover => leftover + last_segment
+        4) final node output => leftover from custom path minus first segment + last_segment
         """
         from .parse_link import parse_link
         from .downloader import run_download_folder
+        import os
 
         if target_folder == "custom":
             final_folder = custom_path.strip().rstrip("/\\")
@@ -57,12 +57,11 @@ class HuggingFaceDownloadFolder:
             return (f"Error parsing link: {e}",)
 
         remote_subfolder_path = parsed.get("subfolder", "").strip("/")
-        # If subfolder is empty => last_segment= the second part of the repo. e.g. "openai/clip-vit-large-patch14" => "clip-vit-large-patch14"
         if not remote_subfolder_path:
-            # splitted = parsed["repo"].split("/",1) => splitted[0] + splitted[1]
+            # if empty => last_segment= second half of repo => e.g. "openai/clip-vit-large-patch14" => "clip-vit-large-patch14"
             splitted = parsed["repo"].split("/",1)
-            if len(splitted) > 1:
-                last_segment = splitted[1]  # second half
+            if len(splitted)>1:
+                last_segment = splitted[1]
             else:
                 last_segment = splitted[0]
         else:
@@ -77,13 +76,12 @@ class HuggingFaceDownloadFolder:
         else:
             run_download_folder(parsed, final_folder, token, remote_subfolder_path, last_segment, sync=True)
 
-        # Node output name logic #3:
-        # if custom => remove first segment from custom_path => leftover => leftover + last_segment
-        if target_folder == "custom":
-            segments = custom_path.strip("/\\").split("/")
-            if len(segments) > 1:
-                leftover_segments = segments[1:]
-                leftover = "/".join(leftover_segments).strip("/")
+        # node output => leftover + last_segment if custom
+        if target_folder=="custom":
+            segments=custom_path.strip("/\\").split("/")
+            if len(segments)>1:
+                leftover_segments=segments[1:]
+                leftover="/".join(leftover_segments).strip("/")
                 if leftover and last_segment:
                     return (leftover + "/" + last_segment,)
                 elif leftover:
@@ -93,13 +91,11 @@ class HuggingFaceDownloadFolder:
                 else:
                     return ("",)
             else:
-                # if custom_path has only one segment => leftover= empty => just last_segment
                 if last_segment:
                     return (last_segment,)
                 else:
                     return ("",)
         else:
-            # if not custom => just last_segment + "/"
             if last_segment:
                 return (last_segment + "/",)
             else:
