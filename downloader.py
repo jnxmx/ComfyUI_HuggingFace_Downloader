@@ -239,7 +239,7 @@ def run_download_folder(parsed_data: dict,
     else:
         from .downloader import traverse_subfolders
         segments=remote_subfolder_path.split("/") if remote_subfolder_path else []
-        source_folder=traverse_subfolders(downloaded_folder,segs)
+        source_folder = traverse_subfolders(downloaded_folder, segments)
         print("[DEBUG] final source =>", source_folder)
 
         os.makedirs(dest_path, exist_ok=True)
