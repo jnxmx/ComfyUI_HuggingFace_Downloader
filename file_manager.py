@@ -4,7 +4,7 @@ def get_model_subfolders(models_dir: str = None) -> list:
     if models_dir is None:
         models_dir = os.path.join(os.getcwd(), "models")
     if not os.path.exists(models_dir):
-        return ["vae", "ckpt", "diffusion_models"]
+        return []
     subfolders = [name for name in os.listdir(models_dir)
                   if os.path.isdir(os.path.join(models_dir, name))]
     subfolders.sort()
