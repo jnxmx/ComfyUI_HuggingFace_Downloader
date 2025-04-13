@@ -8,8 +8,8 @@ import threading
 
 # Always enable fast Rust-based hf_transfer if installed
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
-# Use global HF_HOME if already set; otherwise, default to ComfyUI/temp/hf-cache
-os.environ.setdefault("HF_HOME", os.path.join(os.getcwd(), "temp", "hf-cache"))
+# Removed custom HF_HOME assignment.
+# If no HF_HOME is set in the environment, the system-wide value will be used.
 
 from huggingface_hub import snapshot_download, hf_hub_download
 
@@ -27,7 +27,7 @@ def folder_size(directory):
 
 def traverse_subfolders(root_folder: str, segments: list[str]) -> str:
     """
-    For each segment in 'segments' (e.g. ["transformer.opt","fp4"]),
+    For each segment in 'segments' (e.g. ["transformer.opt", "fp4"]),
     we search for a subfolder with that exact name, ignoring .cache.
     If not found, we stop early. Return the final path we get.
     """
@@ -52,10 +52,10 @@ def run_download(parsed_data: dict,
                  sync: bool = False) -> tuple[str, str]:
     """
     Single-file approach using hf_hub_download => uses HF_TRANSFER if installed,
-    storing cache in HF_HOME. Copies the file to models/<final_folder>/filename then
-    deletes the source file to avoid duplicate disk usage.
+    storing cache in the global HF_HOME. Moves final file to models/<final_folder>/filename.
     """
     print("[DEBUG] run_download (single-file) started.")
+    import os
     target_path = os.path.join(os.getcwd(), "models", final_folder)
     os.makedirs(target_path, exist_ok=True)
 
@@ -78,7 +78,7 @@ def run_download(parsed_data: dict,
     if os.path.exists(dest_path):
         try:
             fs = os.path.getsize(dest_path)
-            fg = fs / (1024**3)
+            fg = fs / (1024 ** 3)
         except:
             fg = 0
         final_message = f"{local_filename} already exists | {fg:.3f} GB"
@@ -86,9 +86,9 @@ def run_download(parsed_data: dict,
         try:
             from server import PromptServer
             PromptServer.instance.send_sync("huggingface.download.complete",
-                                            {"message": final_message,
-                                             "local_path": dest_path,
-                                             "no_popup": True})
+                                              {"message": final_message,
+                                               "local_path": dest_path,
+                                               "no_popup": True})
         except:
             pass
         if sync:
@@ -98,7 +98,7 @@ def run_download(parsed_data: dict,
     try:
         repo_id = parsed_data["repo"]
         revision = parsed_data.get("revision", None)
-        # hf_hub_download uses HF_TRANSFER if installed
+        # hf_hub_download => uses HF_TRANSFER if installed
         file_path_in_cache = hf_hub_download(
             repo_id=repo_id,
             filename=remote_filename,
@@ -108,17 +108,12 @@ def run_download(parsed_data: dict,
         print("[DEBUG] hf_hub_download =>", file_path_in_cache)
 
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        # Copy the file from cache to destination
         shutil.copyfile(file_path_in_cache, dest_path)
-        # Delete the original file to prevent duplicate storage
-        try:
-            os.remove(file_path_in_cache)
-            print("[DEBUG] Deleted the file from cache:", file_path_in_cache)
-        except Exception as e:
-            print("[DEBUG] Failed to delete file from cache:", e)
 
-        fs = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
-        fg = fs / (1024**3)
+        fs = 0
+        if os.path.exists(dest_path):
+            fs = os.path.getsize(dest_path)
+        fg = fs / (1024 ** 3)
         final_message = f"File downloaded successfully: {local_filename} | {fg:.3f} GB"
         print("[DEBUG]", final_message)
     except Exception as e:
@@ -140,20 +135,21 @@ def run_download(parsed_data: dict,
     return "", ""
 
 def run_download_folder(parsed_data: dict,
-                        final_folder: str,      
+                        final_folder: str,
                         token: str = "",
                         remote_subfolder_path: str = "",
                         last_segment: str = "",
                         sync: bool = False):
     """
-    Partial subfolder approach => snapshot_download with allow_patterns if remote_subfolder_path is not empty.
-    We store in HF_HOME (or the default ComfyUI/temp/hf-cache) plus a separate temp_dir for partial snapshot,
-    then traverse to the final subfolder => move => models/<final_folder>/<last_segment> if last_segment is provided.
+    Partial subfolder approach => snapshot_download with allow_patterns if remote_subfolder_path is provided.
+    It uses the global HF_HOME for caching along with a separate temporary directory for a partial snapshot,
+    then traverses to the final subfolder => copying it to models/<final_folder>/<last_segment> if last_segment is provided.
     """
     print("[DEBUG] run_download_folder started (folder).")
+    import os
     base_dir = os.path.join(os.getcwd(), "models", final_folder)
     os.makedirs(base_dir, exist_ok=True)
-    # if last_segment is provided, add it as a subfolder
+    # If last_segment is provided, add a subfolder.
     if last_segment:
         dest_path = os.path.join(base_dir, last_segment)
     else:
@@ -163,15 +159,15 @@ def run_download_folder(parsed_data: dict,
 
     if os.path.exists(dest_path) and os.listdir(dest_path):
         fz = folder_size(dest_path)
-        fg = fz / (1024**3)
+        fg = fz / (1024 ** 3)
         final_message = f"{os.path.basename(dest_path)} already exists | {fg:.3f} GB"
         print("[DEBUG]", final_message)
         try:
             from server import PromptServer
             PromptServer.instance.send_sync("huggingface.download.complete",
-                                            {"message": final_message,
-                                             "local_path": dest_path,
-                                             "no_popup": True})
+                                              {"message": final_message,
+                                               "local_path": dest_path,
+                                               "no_popup": True})
         except:
             pass
         if sync:
@@ -236,7 +232,6 @@ def run_download_folder(parsed_data: dict,
         final_message = f"Download failed: {e}"
         print("[DEBUG]", final_message)
     else:
-        from .downloader import traverse_subfolders
         segments = remote_subfolder_path.split("/") if remote_subfolder_path else []
         source_folder = traverse_subfolders(downloaded_folder, segments)
         print("[DEBUG] final source =>", source_folder)
@@ -247,17 +242,16 @@ def run_download_folder(parsed_data: dict,
                 continue
             s = os.path.join(source_folder, item)
             d = os.path.join(dest_path, item)
-            # Use move to avoid duplicating files
             shutil.move(s, d)
         elap = time.time() - start_t
         fsz = folder_size(dest_path)
-        fgb = fsz / (1024**3)
+        fgb = fsz / (1024 ** 3)
         final_message = f"Folder downloaded successfully: {os.path.basename(dest_path)} | {fgb:.3f} GB | {elap:.1f} sec"
         print("[DEBUG]", final_message)
 
     progress_event.set()
     shutil.rmtree(temp_dir, ignore_errors=True)
-    print("[DEBUG] Removed temp directory =>", temp_dir)
+    print("[DEBUG] removed temp =>", temp_dir)
 
     try:
         from server import PromptServer
