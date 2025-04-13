@@ -46,6 +46,19 @@ def traverse_subfolders(root_folder: str, segments: list[str]) -> str:
             break
     return current
 
+def link_or_move(src: str, dst: str):
+    """
+    Tries to create a hard link from src to dst; if that fails, falls back to a move.
+    This avoids duplicating the file on disk while ensuring that the final file is "linked".
+    """
+    try:
+        os.link(src, dst)
+        os.remove(src)
+        print(f"[DEBUG] Hardlink created from {src} to {dst}")
+    except Exception as e:
+        print(f"[DEBUG] Hardlink failed ({e}); falling back to move.")
+        shutil.move(src, dst)
+
 def run_download(parsed_data: dict,
                  final_folder: str,
                  token: str = "",
@@ -53,7 +66,8 @@ def run_download(parsed_data: dict,
     """
     Single-file approach using hf_hub_download => uses HF_TRANSFER if installed,
     storing the file in the cache defined by the global HF_HOME.
-    The file is then moved to models/<final_folder>/filename to avoid duplicate storage.
+    The file is then transferred to models/<final_folder>/filename using a hard link (or move fallback),
+    so no duplicate disk usage is incurred.
     """
     print("[DEBUG] run_download (single-file) started.")
     target_path = os.path.join(os.getcwd(), "models", final_folder)
@@ -108,8 +122,8 @@ def run_download(parsed_data: dict,
         print("[DEBUG] hf_hub_download =>", file_path_in_cache)
 
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        # Use move instead of copy to avoid duplicate file storage
-        shutil.move(file_path_in_cache, dest_path)
+        # Use a hard link (or fallback to move) to avoid duplicate storage and maintain linking expectations.
+        link_or_move(file_path_in_cache, dest_path)
 
         fs = 0
         if os.path.exists(dest_path):
@@ -144,12 +158,14 @@ def run_download_folder(parsed_data: dict,
     """
     Partial subfolder approach => snapshot_download w/ allow_patterns if remote_subfolder_path is not empty.
     We store in the cache defined by HF_HOME plus a separate temp_dir for partial snapshot,
-    then traverse to final subfolder => move the files to models/<final_folder>/<last_segment> if last_segment != "" else models/<final_folder>.
+    then traverse to final subfolder and transfer files to models/<final_folder>/<last_segment>
+    (or models/<final_folder> if last_segment is empty) using hard links (or move fallback),
+    so no duplicate storage is incurred.
     """
     print("[DEBUG] run_download_folder started (folder).")
     base_dir = os.path.join(os.getcwd(), "models", final_folder)
     os.makedirs(base_dir, exist_ok=True)
-    # if last_segment => add subfolder
+    # If last_segment is provided, use it as an additional subfolder.
     if last_segment:
         dest_path = os.path.join(base_dir, last_segment)
     else:
@@ -245,7 +261,7 @@ def run_download_folder(parsed_data: dict,
                 continue
             s = os.path.join(source_folder, item)
             d = os.path.join(dest_path, item)
-            shutil.move(s, d)
+            link_or_move(s, d)
         elap = time.time() - start_t
         fsz = folder_size(dest_path)
         fgb = fsz / (1024**3)
