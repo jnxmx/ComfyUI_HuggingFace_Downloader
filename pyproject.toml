@@ -1,8 +1,8 @@
 [project]
 name = "ComfyUI_HuggingFace_Downloader"
 description = "Nodes for auto download models from Hugging Face using their filenames as part of workflows"
-version = "0.3-beta"
-# some lark versions older than 1.1.9 apparently have a bug that breaks things, see https://github.com/asagi4/comfyui-prompt-control/issues/35
+version = "0.4-beta"
+
 dependencies = ["hf_transfer"]
 
 [project.urls]
