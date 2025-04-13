@@ -8,8 +8,8 @@ import threading
 
 # Always enable fast Rust-based hf_transfer if installed
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
-# Place the huggingface cache in ComfyUI/temp/hf-cache
-os.environ["HF_HOME"] = os.path.join(os.getcwd(), "temp", "hf-cache")
+# Note: Removed custom setting of HF_HOME so that the global (externally set) HF_HOME is used.
+# If HF_HOME is not set, ensure you set it in your environment.
 
 from huggingface_hub import snapshot_download, hf_hub_download
 
@@ -46,17 +46,16 @@ def traverse_subfolders(root_folder: str, segments: list[str]) -> str:
             break
     return current
 
-
 def run_download(parsed_data: dict,
                  final_folder: str,
                  token: str = "",
                  sync: bool = False) -> tuple[str, str]:
     """
     Single-file approach using hf_hub_download => uses HF_TRANSFER if installed,
-    storing cache in temp/hf-cache. Moved final file to models/<final_folder>/filename.
+    storing the file in the cache defined by the global HF_HOME.
+    The file is then moved to models/<final_folder>/filename to avoid duplicate storage.
     """
     print("[DEBUG] run_download (single-file) started.")
-    import os
     target_path = os.path.join(os.getcwd(), "models", final_folder)
     os.makedirs(target_path, exist_ok=True)
 
@@ -64,7 +63,7 @@ def run_download(parsed_data: dict,
     remote_filename = ""
     if "file" in parsed_data:
         file_name = parsed_data["file"].strip("/")
-        sub = parsed_data.get("subfolder","").strip("/")
+        sub = parsed_data.get("subfolder", "").strip("/")
         if sub:
             remote_filename = os.path.join(sub, file_name)
         else:
@@ -78,12 +77,12 @@ def run_download(parsed_data: dict,
 
     if os.path.exists(dest_path):
         try:
-            fs=os.path.getsize(dest_path)
-            fg=fs/(1024**3)
+            fs = os.path.getsize(dest_path)
+            fg = fs / (1024**3)
         except:
-            fg=0
+            fg = 0
         final_message = f"{local_filename} already exists | {fg:.3f} GB"
-        print("[DEBUG]",final_message)
+        print("[DEBUG]", final_message)
         try:
             from server import PromptServer
             PromptServer.instance.send_sync("huggingface.download.complete",
@@ -93,7 +92,7 @@ def run_download(parsed_data: dict,
         except:
             pass
         if sync:
-            return final_message,dest_path
+            return final_message, dest_path
         return "", ""
 
     try:
@@ -109,12 +108,13 @@ def run_download(parsed_data: dict,
         print("[DEBUG] hf_hub_download =>", file_path_in_cache)
 
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        shutil.copyfile(file_path_in_cache, dest_path)
+        # Use move instead of copy to avoid duplicate file storage
+        shutil.move(file_path_in_cache, dest_path)
 
-        fs=0
+        fs = 0
         if os.path.exists(dest_path):
-            fs=os.path.getsize(dest_path)
-        fg=fs/(1024**3)
+            fs = os.path.getsize(dest_path)
+        fg = fs / (1024**3)
         final_message = f"File downloaded successfully: {local_filename} | {fg:.3f} GB"
         print("[DEBUG]", final_message)
     except Exception as e:
@@ -124,7 +124,7 @@ def run_download(parsed_data: dict,
     # notify UI
     try:
         from server import PromptServer
-        PromptServer.instance.send_sync("huggingface.download.progress", {"progress":100})
+        PromptServer.instance.send_sync("huggingface.download.progress", {"progress": 100})
         PromptServer.instance.send_sync("huggingface.download.complete",
                                         {"message": final_message,
                                          "local_path": dest_path})
@@ -135,20 +135,18 @@ def run_download(parsed_data: dict,
         return final_message, dest_path
     return "", ""
 
-
 def run_download_folder(parsed_data: dict,
-                        final_folder: str,      
+                        final_folder: str,
                         token: str = "",
                         remote_subfolder_path: str = "",
                         last_segment: str = "",
                         sync: bool = False):
     """
     Partial subfolder approach => snapshot_download w/ allow_patterns if remote_subfolder_path is not empty.
-    We store in ComfyUI/temp/hf-cache plus a separate temp_dir for partial snapshot,
-    then traverse to final subfolder => copy => models/<final_folder>/<last_segment> if last_segment != "" else models/<final_folder>.
+    We store in the cache defined by HF_HOME plus a separate temp_dir for partial snapshot,
+    then traverse to final subfolder => move the files to models/<final_folder>/<last_segment> if last_segment != "" else models/<final_folder>.
     """
     print("[DEBUG] run_download_folder started (folder).")
-    import os
     base_dir = os.path.join(os.getcwd(), "models", final_folder)
     os.makedirs(base_dir, exist_ok=True)
     # if last_segment => add subfolder
@@ -160,20 +158,20 @@ def run_download_folder(parsed_data: dict,
     print("[DEBUG] Folder final dest =>", dest_path)
 
     if os.path.exists(dest_path) and os.listdir(dest_path):
-        fz=folder_size(dest_path)
-        fg=fz/(1024**3)
-        final_message=f"{os.path.basename(dest_path)} already exists | {fg:.3f} GB"
-        print("[DEBUG]",final_message)
+        fz = folder_size(dest_path)
+        fg = fz / (1024**3)
+        final_message = f"{os.path.basename(dest_path)} already exists | {fg:.3f} GB"
+        print("[DEBUG]", final_message)
         try:
             from server import PromptServer
             PromptServer.instance.send_sync("huggingface.download.complete",
-                                            {"message":final_message,
-                                             "local_path":dest_path,
-                                             "no_popup":True})
+                                            {"message": final_message,
+                                             "local_path": dest_path,
+                                             "no_popup": True})
         except:
             pass
         if sync:
-            return final_message,dest_path
+            return final_message, dest_path
         return "", ""
 
     comfy_temp = os.path.join(os.getcwd(), "temp")
@@ -181,7 +179,7 @@ def run_download_folder(parsed_data: dict,
     temp_dir = tempfile.mkdtemp(prefix="hf_dl_", dir=comfy_temp)
     print("[DEBUG] Temp folder =>", temp_dir)
 
-    allow_patterns=None
+    allow_patterns = None
     if remote_subfolder_path:
         allow_patterns = [f"{remote_subfolder_path}/**"]
     print("[DEBUG] allow_patterns =>", allow_patterns)
@@ -198,75 +196,74 @@ def run_download_folder(parsed_data: dict,
     if allow_patterns:
         kwargs["allow_patterns"] = allow_patterns
 
-    progress_event=threading.Event()
-    last_percent=-1
-    final_total=0
+    progress_event = threading.Event()
+    last_percent = -1
+    final_total = 0
 
     def folder_monitor():
-        nonlocal final_total,last_percent
-        print("[DEBUG] Folder monitor on",temp_dir)
+        nonlocal final_total, last_percent
+        print("[DEBUG] Folder monitor on", temp_dir)
         while not progress_event.is_set():
-            csz=folder_size(temp_dir)
-            if final_total>0:
-                pct=(csz/final_total)*100
+            csz = folder_size(temp_dir)
+            if final_total > 0:
+                pct = (csz / final_total) * 100
             else:
-                pct=0
-            ip=int(pct)
-            if ip>last_percent:
+                pct = 0
+            ip = int(pct)
+            if ip > last_percent:
                 sys.stdout.write(f"\r[DEBUG] [Folder Monitor] {ip}%")
                 sys.stdout.flush()
-                last_percent=ip
+                last_percent = ip
                 try:
                     from server import PromptServer
-                    PromptServer.instance.send_sync("huggingface.download.progress",{"progress":ip})
+                    PromptServer.instance.send_sync("huggingface.download.progress", {"progress": ip})
                 except:
                     pass
             time.sleep(1)
         print()
     threading.Thread(target=folder_monitor, daemon=True).start()
 
-    start_t=time.time()
-    final_message="Download failed???"
+    start_t = time.time()
+    final_message = "Download failed???"
     try:
         print("[DEBUG] Starting snapshot_download (partial if subfolder).")
         downloaded_folder = snapshot_download(**kwargs)
         print("[DEBUG] snapshot_download =>", downloaded_folder)
-        final_total=folder_size(downloaded_folder)
+        final_total = folder_size(downloaded_folder)
         print("[DEBUG] final_total =>", final_total)
     except Exception as e:
-        final_message=f"Download failed: {e}"
+        final_message = f"Download failed: {e}"
         print("[DEBUG]", final_message)
     else:
-        from .downloader import traverse_subfolders
-        segments=remote_subfolder_path.split("/") if remote_subfolder_path else []
+        segments = remote_subfolder_path.split("/") if remote_subfolder_path else []
         source_folder = traverse_subfolders(downloaded_folder, segments)
         print("[DEBUG] final source =>", source_folder)
 
         os.makedirs(dest_path, exist_ok=True)
         for item in os.listdir(source_folder):
-            if item==".cache":
+            if item == ".cache":
                 continue
-            s=os.path.join(source_folder, item)
-            d=os.path.join(dest_path, item)
-            shutil.move(s,d)
-        elap=time.time()-start_t
-        fsz=folder_size(dest_path)
-        fgb=fsz/(1024**3)
-        final_message=f"Folder downloaded successfully: {os.path.basename(dest_path)} | {fgb:.3f} GB | {elap:.1f} sec"
-        print("[DEBUG]",final_message)
+            s = os.path.join(source_folder, item)
+            d = os.path.join(dest_path, item)
+            shutil.move(s, d)
+        elap = time.time() - start_t
+        fsz = folder_size(dest_path)
+        fgb = fsz / (1024**3)
+        final_message = f"Folder downloaded successfully: {os.path.basename(dest_path)} | {fgb:.3f} GB | {elap:.1f} sec"
+        print("[DEBUG]", final_message)
 
     progress_event.set()
     shutil.rmtree(temp_dir, ignore_errors=True)
-    print("[DEBUG] removed temp =>",temp_dir)
+    print("[DEBUG] removed temp =>", temp_dir)
 
     try:
         from server import PromptServer
-        PromptServer.instance.send_sync("huggingface.download.progress",{"progress":100})
+        PromptServer.instance.send_sync("huggingface.download.progress", {"progress": 100})
         PromptServer.instance.send_sync("huggingface.download.complete",
-                                        {"message":final_message,"local_path":dest_path})
+                                        {"message": final_message, "local_path": dest_path})
     except:
         pass
 
     if sync:
-        return final_message,dest_path
+        return final_message, dest_path
     return "", ""
