@@ -27,7 +27,7 @@ def folder_size(directory):
 
 def traverse_subfolders(root_folder: str, segments: list[str]) -> str:
     """
-    For each segment in 'segments' (e.g. ["transformer.opt", "fp4"]),
+    For each segment in 'segments' (e.g. ["transformer.opt","fp4"]),
     we search for a subfolder with that exact name, ignoring .cache.
     If not found, we stop early. Return the final path we get.
     """
@@ -46,14 +46,14 @@ def traverse_subfolders(root_folder: str, segments: list[str]) -> str:
             break
     return current
 
-
 def run_download(parsed_data: dict,
                  final_folder: str,
                  token: str = "",
                  sync: bool = False) -> tuple[str, str]:
     """
     Single-file approach using hf_hub_download => uses HF_TRANSFER if installed,
-    storing cache in HF_HOME. Moved final file to models/<final_folder>/filename.
+    storing cache in HF_HOME. Copies the file to models/<final_folder>/filename then
+    deletes the source file to avoid duplicate disk usage.
     """
     print("[DEBUG] run_download (single-file) started.")
     target_path = os.path.join(os.getcwd(), "models", final_folder)
@@ -98,7 +98,7 @@ def run_download(parsed_data: dict,
     try:
         repo_id = parsed_data["repo"]
         revision = parsed_data.get("revision", None)
-        # hf_hub_download uses HF_TRANSFER if installed.
+        # hf_hub_download uses HF_TRANSFER if installed
         file_path_in_cache = hf_hub_download(
             repo_id=repo_id,
             filename=remote_filename,
@@ -108,13 +108,16 @@ def run_download(parsed_data: dict,
         print("[DEBUG] hf_hub_download =>", file_path_in_cache)
 
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        # Move the file from the cache to the destination
-        shutil.move(file_path_in_cache, dest_path)
+        # Copy the file from cache to destination
+        shutil.copyfile(file_path_in_cache, dest_path)
+        # Delete the original file to prevent duplicate storage
+        try:
+            os.remove(file_path_in_cache)
+            print("[DEBUG] Deleted the file from cache:", file_path_in_cache)
+        except Exception as e:
+            print("[DEBUG] Failed to delete file from cache:", e)
 
-        if os.path.exists(dest_path):
-            fs = os.path.getsize(dest_path)
-        else:
-            fs = 0
+        fs = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
         fg = fs / (1024**3)
         final_message = f"File downloaded successfully: {local_filename} | {fg:.3f} GB"
         print("[DEBUG]", final_message)
@@ -136,16 +139,15 @@ def run_download(parsed_data: dict,
         return final_message, dest_path
     return "", ""
 
-
 def run_download_folder(parsed_data: dict,
-                        final_folder: str,
+                        final_folder: str,      
                         token: str = "",
                         remote_subfolder_path: str = "",
                         last_segment: str = "",
                         sync: bool = False):
     """
     Partial subfolder approach => snapshot_download with allow_patterns if remote_subfolder_path is not empty.
-    We store in ComfyUI/temp/hf-cache plus a separate temp_dir for partial snapshot,
+    We store in HF_HOME (or the default ComfyUI/temp/hf-cache) plus a separate temp_dir for partial snapshot,
     then traverse to the final subfolder => move => models/<final_folder>/<last_segment> if last_segment is provided.
     """
     print("[DEBUG] run_download_folder started (folder).")
@@ -245,6 +247,7 @@ def run_download_folder(parsed_data: dict,
                 continue
             s = os.path.join(source_folder, item)
             d = os.path.join(dest_path, item)
+            # Use move to avoid duplicating files
             shutil.move(s, d)
         elap = time.time() - start_t
         fsz = folder_size(dest_path)
