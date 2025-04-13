@@ -150,3 +150,142 @@ def run_download_folder(parsed_data: dict,
                         remote_subfolder_path: str = "",
                         last_segment: str = "",
                         sync: bool = False):
+    """
+    Partial subfolder approach => snapshot_download w/ allow_patterns if remote_subfolder_path is not empty.
+    We store using the global HF_HOME plus a separate temp_dir for partial snapshot,
+    then traverse to final subfolder => copy => models/<final_folder>/<last_segment> if last_segment != "" else models/<final_folder>.
+    After moving files, extra deletion is attempted in case the source files remain.
+    """
+    print("[DEBUG] run_download_folder started (folder).")
+    base_dir = os.path.join(os.getcwd(), "models", final_folder)
+    os.makedirs(base_dir, exist_ok=True)
+    # if last_segment => add subfolder
+    if last_segment:
+        dest_path = os.path.join(base_dir, last_segment)
+    else:
+        dest_path = base_dir
+
+    print("[DEBUG] Folder final dest =>", dest_path)
+
+    if os.path.exists(dest_path) and os.listdir(dest_path):
+        fz = folder_size(dest_path)
+        fg = fz / (1024**3)
+        final_message = f"{os.path.basename(dest_path)} already exists | {fg:.3f} GB"
+        print("[DEBUG]", final_message)
+        try:
+            from server import PromptServer
+            PromptServer.instance.send_sync("huggingface.download.complete",
+                                            {"message": final_message,
+                                             "local_path": dest_path,
+                                             "no_popup": True})
+        except:
+            pass
+        if sync:
+            return final_message, dest_path
+        return "", ""
+
+    comfy_temp = os.path.join(os.getcwd(), "temp")
+    os.makedirs(comfy_temp, exist_ok=True)
+    temp_dir = tempfile.mkdtemp(prefix="hf_dl_", dir=comfy_temp)
+    print("[DEBUG] Temp folder =>", temp_dir)
+
+    allow_patterns = None
+    if remote_subfolder_path:
+        allow_patterns = [f"{remote_subfolder_path}/**"]
+    print("[DEBUG] allow_patterns =>", allow_patterns)
+
+    repo_id = parsed_data["repo"]
+    revision = parsed_data.get("revision", None)
+    kwargs = {
+        "repo_id": repo_id,
+        "local_dir": temp_dir,
+        "token": token if token else None,
+    }
+    if revision:
+        kwargs["revision"] = revision
+    if allow_patterns:
+        kwargs["allow_patterns"] = allow_patterns
+
+    progress_event = threading.Event()
+    last_percent = -1
+    final_total = 0
+
+    def folder_monitor():
+        nonlocal final_total, last_percent
+        print("[DEBUG] Folder monitor on", temp_dir)
+        while not progress_event.is_set():
+            csz = folder_size(temp_dir)
+            pct = (csz / final_total) * 100 if final_total > 0 else 0
+            ip = int(pct)
+            if ip > last_percent:
+                sys.stdout.write(f"\r[DEBUG] [Folder Monitor] {ip}%")
+                sys.stdout.flush()
+                last_percent = ip
+                try:
+                    from server import PromptServer
+                    PromptServer.instance.send_sync("huggingface.download.progress", {"progress": ip})
+                except:
+                    pass
+            time.sleep(1)
+        print()
+    threading.Thread(target=folder_monitor, daemon=True).start()
+
+    start_t = time.time()
+    final_message = "Download failed???"
+    try:
+        print("[DEBUG] Starting snapshot_download (partial if subfolder).")
+        downloaded_folder = snapshot_download(**kwargs)
+        print("[DEBUG] snapshot_download =>", downloaded_folder)
+        final_total = folder_size(downloaded_folder)
+        print("[DEBUG] final_total =>", final_total)
+    except Exception as e:
+        final_message = f"Download failed: {e}"
+        print("[DEBUG]", final_message)
+    else:
+        # Traverse to the desired subfolder
+        segments = remote_subfolder_path.split("/") if remote_subfolder_path else []
+        source_folder = traverse_subfolders(downloaded_folder, segments)
+        print("[DEBUG] final source =>", source_folder)
+
+        os.makedirs(dest_path, exist_ok=True)
+        for item in os.listdir(source_folder):
+            if item == ".cache":
+                continue
+            s = os.path.join(source_folder, item)
+            d = os.path.join(dest_path, item)
+            shutil.move(s, d)
+            # Ensure deletion of the original file if it still exists.
+            if os.path.exists(s):
+                if os.path.isfile(s):
+                    try:
+                        os.remove(s)
+                        print("[DEBUG] Deleted file after moving:", s)
+                    except Exception as del_err:
+                        print("[DEBUG] Failed to delete file:", del_err)
+                elif os.path.isdir(s):
+                    try:
+                        shutil.rmtree(s, ignore_errors=True)
+                        print("[DEBUG] Deleted folder after moving:", s)
+                    except Exception as del_err:
+                        print("[DEBUG] Failed to delete folder:", del_err)
+        elap = time.time() - start_t
+        fsz = folder_size(dest_path)
+        fgb = fsz / (1024**3)
+        final_message = f"Folder downloaded successfully: {os.path.basename(dest_path)} | {fgb:.3f} GB | {elap:.1f} sec"
+        print("[DEBUG]", final_message)
+
+    progress_event.set()
+    shutil.rmtree(temp_dir, ignore_errors=True)
+    print("[DEBUG] removed temp =>", temp_dir)
+
+    try:
+        from server import PromptServer
+        PromptServer.instance.send_sync("huggingface.download.progress", {"progress": 100})
+        PromptServer.instance.send_sync("huggingface.download.complete",
+                                        {"message": final_message, "local_path": dest_path})
+    except:
+        pass
+
+    if sync:
+        return final_message, dest_path
+    return "", ""
