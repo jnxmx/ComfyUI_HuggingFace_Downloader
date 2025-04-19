@@ -5,27 +5,87 @@ app.registerExtension({
     settings: [
         {
             id: "downloader.hf_token",
+            category: ['Hugging Face downloader', 'Tokens', 'Hugging Face Token'],
             name: "Hugging Face Token",
-            type: "text",
+            type: "password",
             defaultValue: "",
-            tooltip: "Enter your Hugging Face token",
+            tooltip: "Enter your Hugging Face token to enable downloads from gated repos",
             onChange: (newVal, oldVal) => {
-                console.log(`Hugging Face token changed from ${oldVal} to ${newVal}`);
-                try {
-                    if (newVal) {
-                        // Set the HF_TOKEN environment variable to the new value
+                console.log(`Hugging Face token changed.`);
+                if (newVal) {
+                    // Set the HF_TOKEN environment variable
+                    try {
                         window.process.env.HF_TOKEN = newVal;
                         console.log("HF_TOKEN environment variable updated.");
-                    } else if (oldVal) {
-                        // If the new value is empty, retain the old value
-                        window.process.env.HF_TOKEN = oldVal;
-                        console.log("HF_TOKEN environment variable retained.");
-                    } else {
-                        // If both new and old values are empty, use the existing environment variable
-                        console.log("HF_TOKEN environment variable remains unchanged.");
+                    } catch (error) {
+                        console.error("Failed to update HF_TOKEN environment variable:", error);
                     }
+                }
+            },
+        },
+        {
+            id: "backup.folders_to_backup",
+            category: ['Hugging Face downloader', 'Backup', 'Folders to Backup'],
+            name: "Folders to Backup",
+            type: "textarea",
+            defaultValue: "models/loras\ncustom_nodes",
+            tooltip: "List of local folders to backup to Hugging Face, one per line.",
+        },
+        {
+            id: "backup.repo_name",
+            category: ['Hugging Face downloader', 'Backup', 'Hugging Face Repo for Backup'],
+            name: "Hugging Face Repo for Backup",
+            type: "text",
+            defaultValue: "",
+            tooltip: "Enter the Hugging Face repo name or parsable link.",
+            onChange: (newVal, oldVal) => {
+                console.log(`Hugging Face repo changed from ${oldVal} to ${newVal}`);
+            },
+        },
+        {
+            id: "backup.file_size_limit",
+            category: ['Hugging Face downloader', 'Backup', 'Limit Individual File Size'],
+            name: "Limit Individual File Size (GB)",
+            type: "number",
+            defaultValue: 5,
+            tooltip: "Set the maximum size for individual files in GB.",
+            attrs: {
+                min: 1,
+                max: 50,
+                step: 1,
+            },
+        },
+        {
+            id: "backup.backup_button",
+            category: ['Hugging Face downloader', 'Backup', 'Actions'],
+            name: "Backup to Hugging Face (overwrite)",
+            type: "button",
+            onClick: async () => {
+                console.log("Backup to Hugging Face initiated.");
+                try {
+                    const folders = app.extensionManager.setting.get("backup.folders_to_backup").split("\n");
+                    const repo = app.extensionManager.setting.get("backup.repo_name");
+                    const sizeLimit = app.extensionManager.setting.get("backup.file_size_limit");
+                    const { backup_to_huggingface } = await import("./backup.py");
+                    await backup_to_huggingface(repo, folders, sizeLimit);
                 } catch (error) {
-                    console.error("Failed to update HF_TOKEN environment variable:", error);
+                    console.error("Backup failed:", error);
+                }
+            },
+        },
+        {
+            id: "backup.restore_button",
+            category: ['Hugging Face downloader', 'Backup', 'Actions'],
+            name: "Restore from Hugging Face",
+            type: "button",
+            onClick: async () => {
+                console.log("Restore from Hugging Face initiated.");
+                try {
+                    const repo = app.extensionManager.setting.get("backup.repo_name");
+                    const { restore_from_huggingface } = await import("./backup.py");
+                    await restore_from_huggingface(repo);
+                } catch (error) {
+                    console.error("Restore failed:", error);
                 }
             },
         },
