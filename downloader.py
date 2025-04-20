@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import threading
 import time
+import json
 from dotenv import load_dotenv
 
 from huggingface_hub import (
@@ -54,6 +55,22 @@ def clear_cache_for_path(downloaded_path: str):
         print(f"[DEBUG] Cache cleaning failed: {e}")
 
 
+def get_token():
+    """
+    Load the Hugging Face token from comfy.settings.json.
+    If not found or empty, fall back to the HF_TOKEN environment variable.
+    """
+    settings_path = os.path.join("user", "default", "comfy.settings.json")
+    token = ""
+    if os.path.exists(settings_path):
+        with open(settings_path, "r") as f:
+            settings = json.load(f)
+        token = settings.get("downloader.hf_token", "").strip()
+    if not token:  # Fallback to HF_TOKEN environment variable
+        token = os.getenv("HF_TOKEN", "").strip()
+    return token
+
+
 def run_download(parsed_data: dict,
                  final_folder: str,
                  sync: bool = False) -> tuple[str, str]:
@@ -61,7 +78,7 @@ def run_download(parsed_data: dict,
     Downloads a single file from Hugging Face Hub and copies it to models/<final_folder>.
     Cleans up the cached copy to save disk space.
     """
-    token = token_override
+    token = get_token()
     print("[DEBUG] run_download (single-file) started")
 
     file_name = parsed_data.get("file", "unknown.bin").strip("/")
@@ -111,7 +128,7 @@ def run_download_folder(parsed_data: dict,
     Downloads a folder or subfolder from Hugging Face Hub using snapshot_download.
     The result is placed in models/<final_folder>/<last_segment> if provided.
     """
-    token = token_override
+    token = get_token()
     print("[DEBUG] run_download_folder started")
 
     base_dir = os.path.join(os.getcwd(), "models", final_folder)

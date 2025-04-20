@@ -47,15 +47,14 @@ class HuggingFaceDownloadFolder:
         """
         from .parse_link import parse_link
         from .downloader import run_download_folder
-        import os
 
-        token = token_override
-
+        # Step 1: final_folder logic
         if target_folder == "custom":
             final_folder = custom_path.strip().rstrip("/\\")
         else:
             final_folder = target_folder.strip().rstrip("/\\")
 
+        # Step 2: parse link
         try:
             parsed = parse_link(link)
         except Exception as e:
@@ -72,14 +71,15 @@ class HuggingFaceDownloadFolder:
         else:
             last_segment = os.path.basename(remote_subfolder_path)
 
+        # Step 3: run in background or sync
         if download_in_background:
             threading.Thread(
                 target=run_download_folder,
-                args=(parsed, final_folder, token, remote_subfolder_path, last_segment),
+                args=(parsed, final_folder),
                 daemon=True
             ).start()
         else:
-            run_download_folder(parsed, final_folder, token, remote_subfolder_path, last_segment, sync=True)
+            run_download_folder(parsed, final_folder, sync=True)
 
         # node output => leftover + last_segment if custom
         if target_folder=="custom":

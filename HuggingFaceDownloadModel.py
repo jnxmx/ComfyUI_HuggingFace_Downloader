@@ -1,6 +1,6 @@
 import os
 import threading
-from dotenv import load_dotenv
+import json
 
 class AnyType(str):
     def __ne__(self, __value: object) -> bool:
@@ -16,9 +16,6 @@ def _make_target_folder_list():
     from .file_manager import get_model_subfolders
     subfolders = get_model_subfolders()
     return ["custom"] + subfolders
-
-load_dotenv()
-token_override = os.getenv("HF_TOKEN_FOR_HFD") or os.getenv("HF_TOKEN")
 
 class HuggingFaceDownloadModel:
     CATEGORY = "Hugging Face Downloaders"
@@ -53,8 +50,6 @@ class HuggingFaceDownloadModel:
         from .parse_link import parse_link
         from .downloader import run_download
 
-        token = token_override
-
         # Step 1: final_folder logic
         if target_folder == "custom":
             final_folder = custom_path.strip().rstrip("/\\")
@@ -69,10 +64,9 @@ class HuggingFaceDownloadModel:
 
         # Step 3: run in background or sync
         if download_in_background:
-            # background => we can't get final local_path after the call
             threading.Thread(
                 target=run_download,
-                args=(parsed, final_folder, token),
+                args=(parsed, final_folder),
                 daemon=True
             ).start()
             # best guess: use parsed["file"]
@@ -95,7 +89,7 @@ class HuggingFaceDownloadModel:
                 return ("",)  # no file known
         else:
             # sync => we get final_message and local_path
-            final_message, local_path = run_download(parsed, final_folder, token, sync=True)
+            final_message, local_path = run_download(parsed, final_folder, sync=True)
             if local_path:
                 # user wants leftover + "/" + filename if custom
                 filename = os.path.basename(local_path)

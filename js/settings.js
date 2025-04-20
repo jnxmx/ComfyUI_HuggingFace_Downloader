@@ -1,14 +1,4 @@
 import { app } from "../../scripts/app.js";
-import { execSync } from "child_process";
-
-function updateTokenInEnv(newVal) {
-  try {
-    execSync(`python3 -m tokenhandling update ${newVal || ""}`, { stdio: "inherit" });
-    console.log(newVal ? "HF_TOKEN_FOR_HFD updated in .env file." : "HF_TOKEN_FOR_HFD removed from .env file.");
-  } catch (error) {
-    console.error("Failed to update HF_TOKEN_FOR_HFD:", error);
-  }
-}
 
 app.registerExtension({
   name: "ComfyUI_HuggingFace_Downloader",
@@ -20,8 +10,17 @@ app.registerExtension({
       type: "password",
       defaultValue: "",
       tooltip: "Enter your Hugging Face token to enable downloads from gated repos.",
-      onChange: (newVal) => {
-        updateTokenInEnv(newVal);
+      onChange: async (newVal) => {
+        const response = await fetch("/update-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: newVal }),
+        });
+        if (response.ok) {
+          console.log(newVal ? "HF_TOKEN_FOR_HFD updated in .env file." : "HF_TOKEN_FOR_HFD removed from .env file.");
+        } else {
+          console.error("Failed to update HF_TOKEN_FOR_HFD.");
+        }
       },
     },
     {

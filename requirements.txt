@@ -2,3 +2,4 @@ huggingface_hub
 huggingface_hub[hf_transfer]
 hf_transfer
 python-dotenv
+Flask
