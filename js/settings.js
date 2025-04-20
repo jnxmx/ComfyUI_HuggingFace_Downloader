@@ -43,22 +43,29 @@ app.registerExtension({
               child: "<div>Run Backup to Hugging Face Repo</div>",
             }),
             $el("td", {
-              child: $el('button.hfd-button[text="Run Backup"]', {
-                events: {
-                  click: async () => {
-                    try {
-                      const response = await fetch("/run-backup", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ repoName: app.settings.get("backup.repo_name") }),
-                      });
-                      const result = await response.json();
-                      alert(result.message || "Backup completed successfully.");
-                    } catch (error) {
-                      console.error("Backup failed:", error);
-                      alert("Backup failed. Check the console for details.");
-                    }
-                  },
+              child: $el("button", {
+                class: "hfd-button",
+                textContent: "Run Backup",
+                onclick: async () => {
+                  try {
+                    const response = await fetch("/run-backup", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        repoName: app.settings.get("backup.repo_name"),
+                      }),
+                    });
+                    const result = await response.json();
+                    alert(result.message || "Backup completed successfully.");
+                  } catch (error) {
+                    console.error("Backup failed:", error);
+                    alert("Backup failed. Check the console for details.");
+                  }
+                },
+                style: {
+                  fontSize: "14px",
+                  display: "block",
+                  marginTop: "5px",
                 },
               }),
             }),
