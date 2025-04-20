@@ -1,4 +1,14 @@
 import { app } from "../../scripts/app.js";
+import { execSync } from "child_process";
+
+function updateTokenInEnv(newVal) {
+  try {
+    execSync(`python3 -m tokenhandling update ${newVal || ""}`, { stdio: "inherit" });
+    console.log(newVal ? "HF_TOKEN_FOR_HFD updated in .env file." : "HF_TOKEN_FOR_HFD removed from .env file.");
+  } catch (error) {
+    console.error("Failed to update HF_TOKEN_FOR_HFD:", error);
+  }
+}
 
 app.registerExtension({
   name: "ComfyUI_HuggingFace_Downloader",
@@ -11,32 +21,8 @@ app.registerExtension({
       defaultValue: "",
       tooltip: "Enter your Hugging Face token to enable downloads from gated repos.",
       onChange: (newVal) => {
-        if (newVal) {
-          window.localStorage.setItem("HF_TOKEN", newVal);
-          console.log("HF_TOKEN saved to localStorage.");
-        }
+        updateTokenInEnv(newVal);
       },
-    },
-    {
-      id: "backup.folders_to_backup",
-      category: ["Hugging Face downloader", "Backup", "Folders to Backup"],
-      name: "Folders to Backup",
-      type: () => $el("div.folders-to-backup-container", {
-        children: [
-          $el("label", { textContent: "Folders to Backup:" }),
-          $el("textarea", {
-            rows: 5,
-            cols: 50,
-            placeholder: "Enter folders to backup, one per line...",
-            value: app.extensionManager.setting.get("backup.folders_to_backup") || "",
-            events: {
-              input: (e) => {
-                app.extensionManager.setting.set("backup.folders_to_backup", e.target.value);
-              },
-            },
-          }),
-        ],
-      }),
     },
     {
       id: "backup.repo_name",
@@ -56,47 +42,7 @@ app.registerExtension({
       type: "number",
       defaultValue: 5,
       tooltip: "Maximum file size allowed for backup (in GB).",
-      attrs: { min: 1, max: 50, step: 1 },
-    },
-    {
-      id: "backup.backup_button",
-      category: ["Hugging Face downloader", "Backup", "Actions"],
-      name: "Backup to Hugging Face (overwrite)",
-      type: () => $el("button", {
-        textContent: "Backup to Hugging Face",
-        className: "backup-button",
-        onclick: async () => {
-          console.log("Starting backup...");
-          try {
-            const folders = (app.extensionManager.setting.get("backup.folders_to_backup") || "").split("\n").filter(Boolean);
-            const repo = app.extensionManager.setting.get("backup.repo_name");
-            const sizeLimit = app.extensionManager.setting.get("backup.file_size_limit");
-            const { backup_to_huggingface } = await import("./backup.py");
-            await backup_to_huggingface(repo, folders, sizeLimit);
-          } catch (error) {
-            console.error("Backup error:", error);
-          }
-        },
-      }),
-    },
-    {
-      id: "backup.restore_button",
-      category: ["Hugging Face downloader", "Backup", "Actions"],
-      name: "Restore from Hugging Face",
-      type: () => $el("button", {
-        textContent: "Restore from Hugging Face",
-        className: "restore-button",
-        onclick: async () => {
-          console.log("Starting restore...");
-          try {
-            const repo = app.extensionManager.setting.get("backup.repo_name");
-            const { restore_from_huggingface } = await import("./backup.py");
-            await restore_from_huggingface(repo);
-          } catch (error) {
-            console.error("Restore error:", error);
-          }
-        },
-      }),
+      attrs: { min: 1, max: 100, step: 1 },
     },
   ],
 });

@@ -1,5 +1,6 @@
 import os
 import threading
+from dotenv import load_dotenv
 
 class AnyType(str):
     def __ne__(self, __value: object) -> bool:
@@ -16,6 +17,9 @@ def _make_target_folder_list():
     subfolders = get_model_subfolders()
     return ["custom"] + subfolders
 
+load_dotenv()
+token_override = os.getenv("HF_TOKEN_FOR_HFD") or os.getenv("HF_TOKEN")
+
 class HuggingFaceDownloadModel:
     CATEGORY = "Hugging Face Downloaders"
     OUTPUT_NODE = True
@@ -29,7 +33,6 @@ class HuggingFaceDownloadModel:
             },
             "optional": {
                 "custom_path": ("STRING", {"default": ""}),
-                "token": ("STRING", {"forceInput": True, "default": ""}),
                 "download_in_background": ("BOOLEAN", {"default": False, "label": "Download in background"}),
             }
         }
@@ -38,7 +41,7 @@ class HuggingFaceDownloadModel:
     RETURN_NAMES = ("model name",)
     FUNCTION = "download_model"
 
-    def download_model(self, target_folder, link, custom_path="", token="", download_in_background=False):
+    def download_model(self, target_folder, link, custom_path="", download_in_background=False):
         """
         1) If user picks 'custom' in the combo, we interpret custom_path as final_folder, else just target_folder.
         2) parse link => subfolder/file for single file
@@ -49,6 +52,8 @@ class HuggingFaceDownloadModel:
         """
         from .parse_link import parse_link
         from .downloader import run_download
+
+        token = token_override
 
         # Step 1: final_folder logic
         if target_folder == "custom":

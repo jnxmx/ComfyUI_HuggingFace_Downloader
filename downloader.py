@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import threading
 import time
+from dotenv import load_dotenv
 
 from huggingface_hub import (
     hf_hub_download,
@@ -11,6 +12,8 @@ from huggingface_hub import (
     scan_cache_dir
 )
 
+load_dotenv()
+token_override = os.getenv("HF_TOKEN_FOR_HFD") or os.getenv("HF_TOKEN")
 
 def folder_size(directory: str) -> int:
     total = 0
@@ -53,12 +56,12 @@ def clear_cache_for_path(downloaded_path: str):
 
 def run_download(parsed_data: dict,
                  final_folder: str,
-                 token: str = "",
                  sync: bool = False) -> tuple[str, str]:
     """
     Downloads a single file from Hugging Face Hub and copies it to models/<final_folder>.
     Cleans up the cached copy to save disk space.
     """
+    token = token_override
     print("[DEBUG] run_download (single-file) started")
 
     file_name = parsed_data.get("file", "unknown.bin").strip("/")
@@ -101,7 +104,6 @@ def run_download(parsed_data: dict,
 
 def run_download_folder(parsed_data: dict,
                         final_folder: str,
-                        token: str = "",
                         remote_subfolder_path: str = "",
                         last_segment: str = "",
                         sync: bool = False) -> tuple[str, str]:
@@ -109,6 +111,7 @@ def run_download_folder(parsed_data: dict,
     Downloads a folder or subfolder from Hugging Face Hub using snapshot_download.
     The result is placed in models/<final_folder>/<last_segment> if provided.
     """
+    token = token_override
     print("[DEBUG] run_download_folder started")
 
     base_dir = os.path.join(os.getcwd(), "models", final_folder)

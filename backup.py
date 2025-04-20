@@ -1,14 +1,17 @@
 import os
 import shutil
+from dotenv import load_dotenv
 from huggingface_hub import HfApi
 from .parse_link import parse_link
+
+load_dotenv()
+token = os.getenv("HF_TOKEN_FOR_HFD") or os.getenv("HF_TOKEN")
 
 def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb):
     """
     Backup specified folders to a Hugging Face repository.
     """
     api = HfApi()
-    token = os.getenv("HF_TOKEN")  # Use HF_TOKEN from environment variables
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
 
@@ -59,7 +62,6 @@ def restore_from_huggingface(repo_name_or_link):
     Restore folders from a Hugging Face repository.
     """
     api = HfApi()
-    token = os.getenv("HF_TOKEN")  # Use HF_TOKEN from environment variables
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
 

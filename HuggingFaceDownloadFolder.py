@@ -1,5 +1,6 @@
 import os
 import threading
+from dotenv import load_dotenv
 
 class AnyType(str):
     def __ne__(self, __value: object) -> bool:
@@ -11,6 +12,9 @@ def _make_target_folder_list():
     from .file_manager import get_model_subfolders
     subfolders = get_model_subfolders()
     return ["custom"] + subfolders
+
+load_dotenv()
+token_override = os.getenv("HF_TOKEN_FOR_HFD") or os.getenv("HF_TOKEN")
 
 class HuggingFaceDownloadFolder:
     CATEGORY = "Hugging Face Downloaders"
@@ -25,7 +29,6 @@ class HuggingFaceDownloadFolder:
             },
             "optional": {
                 "custom_path": ("STRING", {"default": ""}),
-                "token": ("STRING", {"forceInput": True, "default": ""}),
                 "download_in_background": ("BOOLEAN", {"default": False, "label": "Download in background"}),
             }
         }
@@ -34,7 +37,7 @@ class HuggingFaceDownloadFolder:
     RETURN_NAMES = ("folder name",)
     FUNCTION = "download_folder"
 
-    def download_folder(self, target_folder, link, custom_path="", token="", download_in_background=False):
+    def download_folder(self, target_folder, link, custom_path="", download_in_background=False):
         """
         1) If user picks 'custom', final_folder= custom_path, else final_folder= target_folder
         2) parse link => subfolder path => last_segment
@@ -45,6 +48,8 @@ class HuggingFaceDownloadFolder:
         from .parse_link import parse_link
         from .downloader import run_download_folder
         import os
+
+        token = token_override
 
         if target_folder == "custom":
             final_folder = custom_path.strip().rstrip("/\\")
