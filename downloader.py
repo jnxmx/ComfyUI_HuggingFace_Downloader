@@ -112,9 +112,24 @@ def run_download(parsed_data: dict,
         print("[DEBUG]", final_message)
         return (final_message, dest_path) if sync else ("", "")
     except Exception as e:
-        error_msg = f"Download failed: {e}"
+        # Provide clearer feedback for common authentication/authorization problems
+        if "Invalid credentials" in str(e) or "401" in str(e):
+            error_msg = (
+                f"Invalid Hugging Face token for repository '{parsed_data['repo']}'.\n"
+                "Add a valid token in ComfyUI settings or set the HF_TOKEN environment variable.\n"
+                "Create/manage tokens at https://huggingface.co/settings/tokens/"
+            )
+        elif "403" in str(e) or "gated" in str(e) or "permission" in str(e):
+            repo_url = f"https://huggingface.co/{parsed_data['repo']}"
+            error_msg = (
+                f"The repository '{parsed_data['repo']}' is gated or you do not have permission to access it.\n"
+                f"Visit {repo_url}, accept its terms or request access, then retry the download."
+            )
+        else:
+            error_msg = f"Download failed: {e}"
         print("[DEBUG]", error_msg)
-        return (error_msg, "") if sync else ("", "")
+        # Raise so ComfyUI shows the standard error dialog, not just console output
+        raise RuntimeError(error_msg)
 
 
 def run_download_folder(parsed_data: dict,
