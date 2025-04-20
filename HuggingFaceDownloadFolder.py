@@ -14,7 +14,6 @@ def _make_target_folder_list():
     return ["custom"] + subfolders
 
 load_dotenv()
-token_override = os.getenv("HF_TOKEN_FOR_HFD") or os.getenv("HF_TOKEN")
 
 class HuggingFaceDownloadFolder:
     CATEGORY = "Hugging Face Downloaders"

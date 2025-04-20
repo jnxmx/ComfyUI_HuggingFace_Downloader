@@ -1,17 +1,30 @@
 import os
 import shutil
-from dotenv import load_dotenv
+import json
 from huggingface_hub import HfApi
 from .parse_link import parse_link
 
-load_dotenv()
-token = os.getenv("HF_TOKEN_FOR_HFD") or os.getenv("HF_TOKEN")
+def get_token():
+    """
+    Load the Hugging Face token from comfy.settings.json.
+    If not found or empty, fall back to the HF_TOKEN environment variable.
+    """
+    settings_path = os.path.join("user", "default", "comfy.settings.json")
+    token = ""
+    if os.path.exists(settings_path):
+        with open(settings_path, "r") as f:
+            settings = json.load(f)
+        token = settings.get("downloader.hf_token", "").strip()
+    if not token:  # Fallback to HF_TOKEN environment variable
+        token = os.getenv("HF_TOKEN", "").strip()
+    return token
 
 def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb):
     """
     Backup specified folders to a Hugging Face repository.
     """
     api = HfApi()
+    token = get_token()
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
 
@@ -62,6 +75,7 @@ def restore_from_huggingface(repo_name_or_link):
     Restore folders from a Hugging Face repository.
     """
     api = HfApi()
+    token = get_token()
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
 

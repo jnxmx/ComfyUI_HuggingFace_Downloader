@@ -5,7 +5,6 @@ import tempfile
 import threading
 import time
 import json
-from dotenv import load_dotenv
 
 from huggingface_hub import (
     hf_hub_download,
@@ -13,8 +12,7 @@ from huggingface_hub import (
     scan_cache_dir
 )
 
-load_dotenv()
-token_override = os.getenv("HF_TOKEN_FOR_HFD") or os.getenv("HF_TOKEN")
+token_override = os.getenv("HF_TOKEN")
 
 def folder_size(directory: str) -> int:
     total = 0
