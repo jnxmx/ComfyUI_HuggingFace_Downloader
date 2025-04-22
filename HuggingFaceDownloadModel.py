@@ -17,7 +17,7 @@ def _make_target_folder_list():
     return ["custom"] + subfolders
 
 class HuggingFaceDownloadModel:
-    CATEGORY = "🤗 Hugging Face downloaders"
+    CATEGORY = "Hugging Face downloaders"
     OUTPUT_NODE = True
 
     @classmethod

@@ -14,7 +14,7 @@ def _make_target_folder_list():
 
 
 class HuggingFaceDownloadFolder:
-    CATEGORY = "🤗 Hugging Face downloaders"
+    CATEGORY = "Hugging Face downloaders"
     OUTPUT_NODE = True
 
     @classmethod
