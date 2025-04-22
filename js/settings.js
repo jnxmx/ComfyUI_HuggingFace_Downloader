@@ -12,7 +12,7 @@ app.registerExtension({
       tooltip: "Enter your Hugging Face token to enable downloads from gated repos.",
     },
     {
-      id: "downloaderbackup.repo_name",
+      id: "backup.repo_name",
       category: ["Hugging Face downloader", "Backup", "Hugging Face Repo for Backup"],
       name: "Hugging Face Repo for Backup",
       type: "text",
@@ -23,7 +23,7 @@ app.registerExtension({
       },
     },
     {
-      id: "downloaderbackup.file_size_limit",
+      id: "backup.file_size_limit",
       category: ["Hugging Face downloader", "Backup", "Limit Individual File Size"],
       name: "Limit Individual File Size (GB)",
       type: "number",
@@ -32,4 +32,35 @@ app.registerExtension({
       attrs: { min: 1, max: 100, step: 1 },
     }
   ],
+  init() {
+    const id = "downloader.run_backup";
+    app.ui.settings.addSetting({
+      id,
+      name: "Run Backup",
+      defaultValue: null,
+      category: ["Hugging Face downloader", "Actions"],
+      type: "button",
+      attrs: {
+        label: "Run Backup",
+        severity: "primary",
+        raised: true,
+      },
+      onChange: async () => {
+        try {
+          const response = await fetch("/run-backup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              repoName: app.settings.get("backup.repo_name"),
+            }),
+          });
+          const result = await response.json();
+          alert(result.message || "Backup completed successfully.");
+        } catch (error) {
+          console.error("Backup failed:", error);
+          alert("Backup failed. Check the console for details.");
+        }
+      }
+    });
+  }
 });
