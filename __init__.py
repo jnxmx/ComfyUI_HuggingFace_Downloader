@@ -2,8 +2,8 @@ from .HuggingFaceDownloadModel import HuggingFaceDownloadModel
 from .HuggingFaceDownloadFolder import HuggingFaceDownloadFolder
 
 NODE_CLASS_MAPPINGS = {
-    "Hugging Face Download Model": HuggingFaceDownloadModel,
-    "Hugging Face Download Folder": HuggingFaceDownloadFolder,
+    "🤗 Hugging Face download model": HuggingFaceDownloadModel,
+    "🤗 Hugging Face download folder": HuggingFaceDownloadFolder,
 }
 
 WEB_DIRECTORY = "./js"

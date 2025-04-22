@@ -1,6 +1,5 @@
 import os
 import threading
-import json
 
 class AnyType(str):
     def __ne__(self, __value: object) -> bool:
@@ -18,7 +17,7 @@ def _make_target_folder_list():
     return ["custom"] + subfolders
 
 class HuggingFaceDownloadModel:
-    CATEGORY = "Hugging Face Downloaders"
+    CATEGORY = "🤗 Hugging Face downloaders"
     OUTPUT_NODE = True
 
     @classmethod
@@ -26,13 +25,32 @@ class HuggingFaceDownloadModel:
         return {
             "required": {
                 "target_folder": (_make_target_folder_list(), {"default": "loras"}),
-                "link": ("STRING",),
+                "link": ("STRING", {
+                    "onChange": cls.update_link_field
+                }),
             },
             "optional": {
                 "custom_path": ("STRING", {"default": ""}),
                 "download_in_background": ("BOOLEAN", {"default": False, "label": "Download in background"}),
             }
         }
+
+    @staticmethod
+    def update_link_field(new_value, old_value):
+        """
+        Update the link field to show the parsed view.
+        """
+        from .parse_link import parse_link
+        try:
+            parsed = parse_link(new_value)
+            repo = parsed.get("repo", "")
+            subfolder = parsed.get("subfolder", "").strip("/")
+            file = parsed.get("file", "").strip("/")
+            updated_value = "/".join(filter(None, [repo, subfolder, file]))
+            return updated_value
+        except Exception as e:
+            print(f"[ERROR] Failed to parse link: {e}")
+            return new_value
 
     RETURN_TYPES = (any_typ,)
     RETURN_NAMES = ("model name",)
