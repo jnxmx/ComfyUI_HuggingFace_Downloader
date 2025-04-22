@@ -39,39 +39,28 @@ app.registerExtension({
       name: "Run Backup",
       defaultValue: null,
       category: ["Hugging Face downloader", "Actions"],
-      type: (name, setter, value) => {
-        return $el("tr.hfd-settings-row", [
-          $el("td", {
-            child: "<div>Run Backup to Hugging Face Repo</div>",
-          }),
-          $el("td", {
-            child: $el("button", {
-              textContent: "Run Backup",
-              onclick: async () => {
-                try {
-                  const response = await fetch("/run-backup", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      repoName: app.settings.get("backup.repo_name"),
-                    }),
-                  });
-                  const result = await response.json();
-                  alert(result.message || "Backup completed successfully.");
-                } catch (error) {
-                  console.error("Backup failed:", error);
-                  alert("Backup failed. Check the console for details.");
-                }
-              },
-              style: {
-                fontSize: "14px",
-                display: "block",
-                marginTop: "5px",
-              },
-            }),
-          }),
-        ]);
+      type: "button",
+      attrs: {
+        label: "Run Backup",
+        severity: "primary",
+        raised: true,
       },
+      onChange: async () => {
+        try {
+          const response = await fetch("/run-backup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              repoName: app.settings.get("backup.repo_name"),
+            }),
+          });
+          const result = await response.json();
+          alert(result.message || "Backup completed successfully.");
+        } catch (error) {
+          console.error("Backup failed:", error);
+          alert("Backup failed. Check the console for details.");
+        }
+      }
     });
   }
 });
