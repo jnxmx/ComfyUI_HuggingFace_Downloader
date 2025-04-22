@@ -22,9 +22,7 @@ class HuggingFaceDownloadFolder:
         return {
             "required": {
                 "target_folder": (_make_target_folder_list(), {"default": "loras"}),
-                "link": ("STRING", {
-                    "onChange": cls.update_link_field
-                }),
+                "link": ("STRING", {"default": ""}),
             },
             "optional": {
                 "custom_path": ("STRING", {"default": ""}),
