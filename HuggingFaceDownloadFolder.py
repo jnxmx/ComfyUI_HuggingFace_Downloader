@@ -25,9 +25,11 @@ class HuggingFaceDownloadFolder:
                 "link": ("STRING", {"default": ""}),
             },
             "optional": {
-                "custom_path": ("STRING", {"default": ""})
-                #,
-                #"download_in_background": ("BOOLEAN", {"default": False, "label": "Download in background"}),
+                "custom_path": ("STRING", {
+                    "default": "",
+                    "visible_if": {"target_folder": "custom"}
+                }),
+                # "download_in_background": ("BOOLEAN", {"default": False, "label": "Download in background"}),
             }
         }
 

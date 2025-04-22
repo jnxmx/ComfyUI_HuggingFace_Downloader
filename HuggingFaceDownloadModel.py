@@ -30,7 +30,7 @@ class HuggingFaceDownloadModel:
             "optional": {
                 "custom_path": ("STRING", {
                     "default": "",
-                    "visible": lambda inputs: inputs["target_folder"] == "custom"
+                    "visible_if": {"target_folder": "custom"}
                 }),
                 # "download_in_background": ("BOOLEAN", {"default": False, "label": "Download in background"}),
             }
