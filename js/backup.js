@@ -1,5 +1,10 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
+import { createApp, h } from "vue";
+import PrimeVue from "primevue/config";
+import Dialog from "primevue/dialog";
+import Textarea from "primevue/textarea";
+import Button from "primevue/button";
 
 /**
  * Minimal scaffold + “Backup ComfyUI to Hugging Face” dialog.
@@ -14,111 +19,89 @@ app.registerExtension({
 			// Keep just one instance alive
 			let dlg = document.getElementById("backup-hf-dialog");
 			if (dlg) {
-				dlg.style.display = "flex";
+				dlg.__vue_app__.config.globalProperties.visible = true;
 				return;
 			}
 
-			// Overlay
-			dlg = document.createElement("div");
-			dlg.id = "backup-hf-dialog";
-			Object.assign(dlg.style, {
-				position: "fixed",
-				top: 0,
-				left: 0,
-				width: "100vw",
-				height: "100vh",
-				display: "flex",
-				alignItems: "center",
-				justifyContent: "center",
-				background: "rgba(0,0,0,0.5)",
-				zIndex: 9999,
-			});
-			// Click outside panel to close
-			dlg.addEventListener("click", (e) => {
-				if (e.target === dlg) dlg.style.display = "none";
-			});
+			// Create Vue app for the dialog
+			const appContainer = document.createElement("div");
+			appContainer.id = "backup-hf-dialog";
+			document.body.appendChild(appContainer);
 
-			// Panel
-			const panel = document.createElement("div");
-			Object.assign(panel.style, {
-				background: "#222",
-				color: "#fff",
-				padding: "30px", // Increased padding
-				borderRadius: "8px",
-				minWidth: "480px", // Increased width
-				display: "flex",
-				flexDirection: "column",
-				gap: "16px", // Increased gap
-				boxShadow: "0 6px 16px rgba(0,0,0,0.5)", // Slightly stronger shadow
-			});
-
-			// Multiline input
-			const ta = document.createElement("textarea");
-			ta.rows = 5;
-			ta.placeholder = "Enter message for backup…";
-			ta.value = `custom_nodes/ #Custom nodes folder
+			const appInstance = createApp({
+				data() {
+					return {
+						visible: true,
+						backupContent: `custom_nodes/ #Custom nodes folder
 user/ #User settings and workflows folder
 models/loras 
-models/checkpoints/ #Below the size limit`; // Default content
-			Object.assign(ta.style, {
-				width: "100%",
-				resize: "vertical",
-				padding: "6px",
-				borderRadius: "4px",
+models/checkpoints/ #Below the size limit`,
+					};
+				},
+				methods: {
+					handleBackup() {
+						console.log("Backup upload clicked", this.backupContent);
+						// TODO: call actual upload routine here
+						this.visible = false;
+					},
+					handleRestore() {
+						console.log("Backup restore clicked", this.backupContent);
+						// TODO: call actual restore routine here
+						this.visible = false;
+					},
+				},
+				render() {
+					return h(Dialog, {
+						visible: this.visible,
+						modal: true,
+						style: { width: "500px" },
+						"onUpdate:visible": (val) => (this.visible = val),
+					}, {
+						default: () => [
+							h(Textarea, {
+								modelValue: this.backupContent,
+								"onUpdate:modelValue": (val) => (this.backupContent = val),
+								rows: 5,
+								autoResize: true,
+								style: { width: "100%" },
+							}),
+							h("div", {
+								style: {
+									display: "flex",
+									justifyContent: "space-between",
+									marginTop: "16px",
+								},
+							}, [
+								h(Button, {
+									label: "Cancel",
+									class: "p-button-secondary",
+									onClick: () => (this.visible = false),
+								}),
+								h("div", {
+									style: { display: "flex", gap: "8px" },
+								}, [
+									h(Button, {
+										label: "Backup",
+										class: "p-button-success",
+										onClick: this.handleBackup,
+									}),
+									h(Button, {
+										label: "Download",
+										class: "p-button-info",
+										onClick: this.handleRestore,
+									}),
+								]),
+							]),
+						],
+					});
+				},
 			});
 
-			// Buttons
-			const btnRow = document.createElement("div");
-			Object.assign(btnRow.style, {
-				display: "flex",
-				justifyContent: "space-between", // Adjusted for grouped buttons
-				gap: "8px",
-			});
-
-			// Cancel button
-			const cancelButton = document.createElement("button");
-			cancelButton.textContent = "Cancel";
-			cancelButton.className = "p-button p-component p-button-secondary"; // PrimeVue styling
-			cancelButton.onclick = () => {
-				dlg.style.display = "none";
-			};
-			btnRow.appendChild(cancelButton);
-
-			// Grouped buttons (Upload and Restore)
-			const actionGroup = document.createElement("div");
-			Object.assign(actionGroup.style, {
-				display: "flex",
-				gap: "8px",
-			});
-
-			// Upload button
-			const uploadButton = document.createElement("button");
-			uploadButton.textContent = "Backup";
-			uploadButton.className = "p-button p-component p-button-success"; // PrimeVue styling
-			uploadButton.onclick = () => {
-				console.log("Backup upload clicked", ta.value);
-				// TODO: call actual upload routine here
-				dlg.style.display = "none";
-			};
-			actionGroup.appendChild(uploadButton);
-
-			// Restore button
-			const restoreButton = document.createElement("button");
-			restoreButton.textContent = "Download";
-			restoreButton.className = "p-button p-component p-button-info"; // PrimeVue styling
-			restoreButton.onclick = () => {
-				console.log("Backup restore clicked", ta.value);
-				// TODO: call actual restore routine here
-				dlg.style.display = "none";
-			};
-			actionGroup.appendChild(restoreButton);
-
-			btnRow.appendChild(actionGroup);
-
-			panel.appendChild(ta);
-			panel.appendChild(btnRow);
-			dlg.appendChild(panel);
-			document.body.appendChild(dlg);
+			appInstance.use(PrimeVue);
+			appInstance.component("Dialog", Dialog);
+			appInstance.component("Textarea", Textarea);
+			appInstance.component("Button", Button);
+			appInstance.mount(appContainer);
 		};
 
 		/* ─────────── Canvas-menu injection ─────────── */
