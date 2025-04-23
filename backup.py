@@ -201,12 +201,31 @@ def backup_to_huggingface(repo_name_or_link, folders, on_backup_start=None, on_b
             shutil.rmtree(temp_dir, ignore_errors=True)
             print(f"[INFO] Removed temporary sanitized folder '{temp_dir}'.")
 
+def _safe_move_or_copy(src, dst):
+    """Helper to move files when possible, fall back to copy if on different devices"""
+    try:
+        # Try to move first (more efficient)
+        shutil.move(src, dst)
+    except OSError:
+        # If move fails (e.g., across devices), fall back to copy
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
+
 def restore_from_huggingface(repo_name_or_link, target_dir=None):
     """
     Restore the 'ComfyUI' folder from a Hugging Face repository.
+    Uses hf_transfer for faster downloads.
     """
+    from huggingface_hub import hf_hub_download
+    import hf_transfer
+
+    # Enable hf_transfer
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+    
     api = HfApi()
-    token, _ = get_token_and_size_limit()  # Use existing function, ignore size limit
+    token, _ = get_token_and_size_limit()
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
 
@@ -216,17 +235,47 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     if target_dir is None:
         target_dir = os.getcwd()
 
-    print(f"[INFO] Restoring 'ComfyUI' folder from '{repo_name}' to '{target_dir}'...")
-    files = api.list_repo_files(repo_id=repo_name, token=token)
-    for file in files:
-        if not file.startswith("ComfyUI/"):
-            continue
-        local_path = os.path.join(target_dir, file)
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
-        print(f"[INFO] Downloading '{file}' to '{local_path}'...")
-        api.download_file(
-            repo_id=repo_name,
-            filename=file,
-            local_dir=os.path.dirname(local_path),
-            token=token,
-        )
+    print(f"[INFO] Checking files in '{repo_name}' (using hf_transfer)...")
+    try:
+        # Get list of all files and their info from repo
+        repo_files = api.list_repo_files(repo_id=repo_name, token=token)
+        comfy_files = [f for f in repo_files if f.startswith("ComfyUI/")]
+        
+        if not comfy_files:
+            raise ValueError("No ComfyUI folder found in backup")
+
+        for file in comfy_files:
+            local_path = os.path.join(target_dir, file.replace("ComfyUI/", "", 1))
+            
+            # Skip if file exists and has same size
+            try:
+                file_info = api.get_info_from_repo(
+                    repo_id=repo_name,
+                    filename=file,
+                    token=token
+                )
+                if os.path.exists(local_path):
+                    local_size = os.path.getsize(local_path)
+                    if local_size == file_info.size:
+                        print(f"[INFO] Skipping existing file: {local_path}")
+                        continue
+            except Exception as e:
+                print(f"[WARNING] Could not check file info for {file}: {e}")
+
+            # Download if missing or different
+            print(f"[INFO] Downloading: {file}")
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            hf_hub_download(
+                repo_id=repo_name,
+                filename=file,
+                token=token,
+                local_dir=target_dir,
+                local_dir_use_symlinks=False
+            )
+
+        print(f"[INFO] Successfully restored backup to {target_dir}")
+        return target_dir
+
+    except Exception as e:
+        print(f"[ERROR] Failed to restore: {e}")
+        raise
