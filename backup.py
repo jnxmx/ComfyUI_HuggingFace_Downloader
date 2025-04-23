@@ -89,13 +89,14 @@ def _restore_big_files(moved):
         except Exception:
             pass
 
-def backup_to_huggingface(repo_name_or_link, folders):
+def backup_to_huggingface(repo_name_or_link, folders, *args, **kwargs):
     """
     Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root,
     preserving the relative folder structure. Skips .cache folders.
     If uploading 'user' or any subfolder, strips downloader.hf_token from comfy.settings.json.
     Uses upload_folder (not upload_large_folder).
     Respects file size limit from settings.
+    Accepts extra unused arguments for compatibility with various callers.
     """
     import threading
 
