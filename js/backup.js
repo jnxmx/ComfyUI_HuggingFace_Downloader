@@ -6,7 +6,7 @@ import { api } from "../../../scripts/api.js";
  * Flesh the guts out later: actual backup logic, HF auth, etc.
  */
 app.registerExtension({
-	name: "myCustomExtension",
+	name: "backupToHuggingFace", // Renamed extension
 	setup() {
 
 		/* ──────────────── D I A L O G ──────────────── */
@@ -56,6 +56,10 @@ app.registerExtension({
 			const ta = document.createElement("textarea");
 			ta.rows = 5;
 			ta.placeholder = "Enter message for backup…";
+			ta.value = `custom_nodes/ #Custom nodes folder
+user/ #User settings and workflows folder
+models/loras 
+models/checkpoints/ #Below the size limit`; // Default content
 			Object.assign(ta.style, {
 				width: "100%",
 				resize: "vertical",
@@ -67,20 +71,37 @@ app.registerExtension({
 			const btnRow = document.createElement("div");
 			Object.assign(btnRow.style, {
 				display: "flex",
-				justifyContent: "flex-end",
+				justifyContent: "space-between", // Adjusted for button layout
 				gap: "8px",
 			});
 
-			["1", "2", "3"].forEach((label) => {
-				const b = document.createElement("button");
-				b.textContent = label;
-				b.onclick = () => {
-					console.log(`Backup button ${label} clicked`, ta.value);
-					// TODO: call actual backup routine here
-					dlg.style.display = "none";
-				};
-				btnRow.appendChild(b);
-			});
+			// Cancel button
+			const cancelButton = document.createElement("button");
+			cancelButton.textContent = "Cancel";
+			cancelButton.onclick = () => {
+				dlg.style.display = "none";
+			};
+			btnRow.appendChild(cancelButton);
+
+			// Upload button
+			const uploadButton = document.createElement("button");
+			uploadButton.textContent = "Backup";
+			uploadButton.onclick = () => {
+				console.log("Backup upload clicked", ta.value);
+				// TODO: call actual upload routine here
+				dlg.style.display = "none";
+			};
+			btnRow.appendChild(uploadButton);
+
+			// Restore button
+			const restoreButton = document.createElement("button");
+			restoreButton.textContent = "Download";
+			restoreButton.onclick = () => {
+				console.log("Backup restore clicked", ta.value);
+				// TODO: call actual restore routine here
+				dlg.style.display = "none";
+			};
+			btnRow.appendChild(restoreButton);
 
 			panel.appendChild(ta);
 			panel.appendChild(btnRow);
