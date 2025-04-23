@@ -12,17 +12,19 @@ def get_token_and_size_limit():
     """
     settings_path = os.path.join("user", "default", "comfy.settings.json")
     token = ""
-    size_limit_gb = 5
+    size_limit_gb = None
     if os.path.exists(settings_path):
         with open(settings_path, "r") as f:
             settings = json.load(f)
         token = settings.get("downloader.hf_token", "").strip()
         try:
-            size_limit_gb = float(settings.get("downloaderbackup.file_size_limit", 5))
+            size_limit_gb = float(settings.get("downloaderbackup.file_size_limit"))
         except Exception:
-            size_limit_gb = 5
+            size_limit_gb = None
     if not token:
         token = os.getenv("HF_TOKEN", "").strip()
+    if size_limit_gb is None:
+        size_limit_gb = 5
     return token, size_limit_gb
 
 
@@ -100,13 +102,14 @@ def backup_to_huggingface(repo_name_or_link, folders, *args, **kwargs):
     """
     import threading
 
+    upload_popup_shown = [False]  # mutable flag
+
     def show_upload_popup():
         try:
             import tkinter as tk
             from tkinter import messagebox
             root = tk.Tk()
             root.withdraw()
-            # Show popup immediately and allow mainloop to process events
             def show_and_destroy():
                 messagebox.showinfo(
                     "ComfyUI HuggingFace Backup",
@@ -117,13 +120,19 @@ def backup_to_huggingface(repo_name_or_link, folders, *args, **kwargs):
             root.mainloop()
         except Exception:
             print("[INFO] Backup upload started! (Could not show popup window; monitor the console for status.)")
+        upload_popup_shown[0] = True
 
-    # On macOS, use a thread (not a process) for tkinter popup, but ensure mainloop runs before upload
+    # Start popup thread and wait for it to show before upload
     popup_thread = threading.Thread(target=show_upload_popup)
     popup_thread.start()
-    # Give the popup a moment to appear before starting the upload
     import time
-    time.sleep(0.5)
+    # Wait until popup is shown or a timeout
+    for _ in range(20):
+        if upload_popup_shown[0]:
+            break
+        time.sleep(0.05)
+    else:
+        print("[INFO] Backup upload started! (Popup may not have appeared.)")
 
     api = HfApi()
     token, size_limit_gb = get_token_and_size_limit()
