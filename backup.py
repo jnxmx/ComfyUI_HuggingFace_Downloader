@@ -206,7 +206,7 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     Restore the 'ComfyUI' folder from a Hugging Face repository.
     """
     api = HfApi()
-    token = get_token()
+    token, _ = get_token_and_size_limit()  # Use existing function, ignore size limit
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
 
