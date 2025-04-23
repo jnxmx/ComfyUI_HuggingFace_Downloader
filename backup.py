@@ -16,7 +16,7 @@ def get_token():
         with open(settings_path, "r") as f:
             settings = json.load(f)
         token = settings.get("downloader.hf_token", "").strip()
-    if not token:  # Fallback to HF_TOKEN environment variable
+    if not token:
         token = os.getenv("HF_TOKEN", "").strip()
     return token
 
@@ -66,11 +66,10 @@ def _copy_and_strip_token(src_folder, temp_dir):
                     print(f"[WARNING] Could not clean token from {fpath}: {e}")
     return dst_folder
 
-def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5, use_large_folder=True):
+def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5):
     """
     Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root,
     preserving the relative folder structure. Skips .cache folders.
-    Always uses upload_large_folder for reliability.
     If uploading 'user' or any subfolder, strips downloader.hf_token from comfy.settings.json.
     """
     import threading
@@ -124,27 +123,30 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5, use_large
         print(f"[INFO] Uploading '{upload_path}' to repo '{repo_name}' as '{comfyui_subpath}'...")
         print("[INFO] Upload started. Check the console for status updates.")
 
-        # Use upload_large_folder for top-level ComfyUI subfolder upload (no path_in_repo argument)
-        # So we must create a temp folder with the correct structure if needed
         with tempfile.TemporaryDirectory() as temp_root:
             target_root = os.path.join(temp_root, "ComfyUI")
             os.makedirs(target_root, exist_ok=True)
-            # Copy the upload_path into the correct subpath under ComfyUI
             dest = os.path.join(target_root, os.path.basename(rel_path))
             if os.path.isdir(upload_path):
                 shutil.copytree(upload_path, dest, dirs_exist_ok=True)
             else:
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 shutil.copy2(upload_path, dest)
-            api.upload_large_folder(
-                folder_path=target_root,
-                repo_id=repo_name,
-                repo_type="model",
-                token=token,
-                ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
-                allow_patterns=None,  # Add this line for clarity, but it's the default
-                delete_patterns=None, # Add this line for clarity, but it's the default
-            )
+            original_hf_token = os.environ.get("HF_TOKEN")
+            if token:
+                os.environ["HF_TOKEN"] = token
+            try:
+                api.upload_large_folder(
+                    folder_path=target_root,
+                    repo_id=repo_name,
+                    repo_type="model",
+                    ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
+                )
+            finally:
+                if original_hf_token is not None:
+                    os.environ["HF_TOKEN"] = original_hf_token
+                elif "HF_TOKEN" in os.environ:
+                    del os.environ["HF_TOKEN"]
         print(f"[INFO] Upload of '{upload_path}' complete.")
 
         if temp_dir:
