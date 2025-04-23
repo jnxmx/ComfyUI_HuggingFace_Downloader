@@ -43,13 +43,13 @@ app.registerExtension({
 			Object.assign(panel.style, {
 				background: "#222",
 				color: "#fff",
-				padding: "20px",
+				padding: "30px", // Increased padding
 				borderRadius: "8px",
-				minWidth: "320px",
+				minWidth: "480px", // Increased width
 				display: "flex",
 				flexDirection: "column",
-				gap: "12px",
-				boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+				gap: "16px", // Increased gap
+				boxShadow: "0 6px 16px rgba(0,0,0,0.5)", // Slightly stronger shadow
 			});
 
 			// Multiline input
@@ -71,37 +71,49 @@ models/checkpoints/ #Below the size limit`; // Default content
 			const btnRow = document.createElement("div");
 			Object.assign(btnRow.style, {
 				display: "flex",
-				justifyContent: "space-between", // Adjusted for button layout
+				justifyContent: "space-between", // Adjusted for grouped buttons
 				gap: "8px",
 			});
 
 			// Cancel button
 			const cancelButton = document.createElement("button");
 			cancelButton.textContent = "Cancel";
+			cancelButton.className = "p-button p-component p-button-secondary"; // PrimeVue styling
 			cancelButton.onclick = () => {
 				dlg.style.display = "none";
 			};
 			btnRow.appendChild(cancelButton);
 
+			// Grouped buttons (Upload and Restore)
+			const actionGroup = document.createElement("div");
+			Object.assign(actionGroup.style, {
+				display: "flex",
+				gap: "8px",
+			});
+
 			// Upload button
 			const uploadButton = document.createElement("button");
 			uploadButton.textContent = "Backup";
+			uploadButton.className = "p-button p-component p-button-success"; // PrimeVue styling
 			uploadButton.onclick = () => {
 				console.log("Backup upload clicked", ta.value);
 				// TODO: call actual upload routine here
 				dlg.style.display = "none";
 			};
-			btnRow.appendChild(uploadButton);
+			actionGroup.appendChild(uploadButton);
 
 			// Restore button
 			const restoreButton = document.createElement("button");
 			restoreButton.textContent = "Download";
+			restoreButton.className = "p-button p-component p-button-info"; // PrimeVue styling
 			restoreButton.onclick = () => {
 				console.log("Backup restore clicked", ta.value);
 				// TODO: call actual restore routine here
 				dlg.style.display = "none";
 			};
-			btnRow.appendChild(restoreButton);
+			actionGroup.appendChild(restoreButton);
+
+			btnRow.appendChild(actionGroup);
 
 			panel.appendChild(ta);
 			panel.appendChild(btnRow);
