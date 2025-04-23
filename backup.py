@@ -91,53 +91,24 @@ def _restore_big_files(moved):
         except Exception:
             pass
 
-def backup_to_huggingface(repo_name_or_link, folders, *args, **kwargs):
+def backup_to_huggingface(repo_name_or_link, folders, on_backup_start=None, on_backup_progress=None, *args, **kwargs):
     """
-    Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root,
-    preserving the relative folder structure. Skips .cache folders.
-    If uploading 'user' or any subfolder, strips downloader.hf_token from comfy.settings.json.
-    Uses upload_folder (not upload_large_folder).
-    Respects file size limit from settings.
-    Accepts extra unused arguments for compatibility with various callers.
+    Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root.
+    
+    Callbacks:
+    - on_backup_start(): Called when backup starts 
+    - on_backup_progress(folder, progress_pct): Called during backup with current folder and progress
     """
-    import threading
-
-    upload_popup_shown = [False]  # mutable flag
-
-    def show_upload_popup():
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk()
-            root.withdraw()
-            def show_and_destroy():
-                messagebox.showinfo(
-                    "ComfyUI HuggingFace Backup",
-                    "Backup upload started!\n\nMonitor the console for upload progress and status."
-                )
-                root.destroy()
-            root.after(100, show_and_destroy)
-            root.mainloop()
-        except Exception:
-            print("[INFO] Backup upload started! (Could not show popup window; monitor the console for status.)")
-        upload_popup_shown[0] = True
-
-    # Start popup thread and wait for it to show before upload
-    popup_thread = threading.Thread(target=show_upload_popup)
-    popup_thread.start()
-    import time
-    # Wait until popup is shown or a timeout
-    for _ in range(20):
-        if upload_popup_shown[0]:
-            break
-        time.sleep(0.05)
-    else:
-        print("[INFO] Backup upload started! (Popup may not have appeared.)")
-
     api = HfApi()
     token, size_limit_gb = get_token_and_size_limit()
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
+
+    if on_backup_start:
+        try:
+            on_backup_start()
+        except Exception as e:
+            print(f"[WARNING] Backup start callback failed: {e}")
 
     parsed = parse_link(repo_name_or_link)
     repo_name = parsed.get("repo", repo_name_or_link)
@@ -145,7 +116,8 @@ def backup_to_huggingface(repo_name_or_link, folders, *args, **kwargs):
     temp_dirs = []
     moved_big_files = []
     try:
-        for folder in folders:
+        total_folders = len([f for f in folders if f and os.path.exists(f.strip())])
+        for i, folder in enumerate(folders, 1):
             folder = folder.strip()
             if not folder or not os.path.exists(folder):
                 continue
@@ -169,6 +141,12 @@ def backup_to_huggingface(repo_name_or_link, folders, *args, **kwargs):
 
             print(f"[INFO] Uploading '{upload_path}' to repo '{repo_name}' with path '{path_in_repo}'...")
             print(f"[INFO] Upload started. File size limit: {size_limit_gb} GB. Check the console for status updates.")
+
+            if on_backup_progress:
+                try:
+                    on_backup_progress(path_in_repo, (i / total_folders) * 100)
+                except Exception as e:
+                    print(f"[WARNING] Progress callback failed: {e}")
 
             moved_big_files.extend(_move_big_files(upload_path, size_limit_gb))
             api.upload_folder(

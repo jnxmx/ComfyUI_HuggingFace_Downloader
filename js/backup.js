@@ -124,31 +124,55 @@ models/checkpoints/ #Below the size limit`; // Default content
 			// Upload button (moved down)
 			const uploadButton = document.createElement("button");
 			uploadButton.textContent = "Backup";
-			uploadButton.className = "p-button p-component p-button-success"; // PrimeVue styling
+			uploadButton.className = "p-button p-component p-button-success";
+			
+			const setBackupState = (isBackingUp) => {
+				panel.style.opacity = isBackingUp ? "0.7" : "1";
+				ta.disabled = isBackingUp;
+				uploadButton.textContent = isBackingUp ? "Cancel" : "Backup";
+				uploadButton.className = isBackingUp 
+					? "p-button p-component p-button-danger"
+					: "p-button p-component p-button-success";
+				cancelButton.disabled = isBackingUp;
+				restoreButton.disabled = isBackingUp;
+			};
+
 			uploadButton.onclick = async () => {
+				if (uploadButton.textContent === "Cancel") {
+					dlg.style.display = "none";
+					return;
+				}
+
 				const folders = ta.value
 					.split("\n")
 					.map(line => line.split("#")[0].trim())
 					.filter(line => !!line);
-				const sizeLimit = 5; // Or read from settings if needed
-				console.log("Backup upload clicked", folders);
+				const sizeLimit = 5;
+
 				try {
+					setBackupState(true);
 					const resp = await fetch("/backup_to_hf", {
 						method: "POST",
 						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({ folders, size_limit_gb: sizeLimit })
+						body: JSON.stringify({ 
+							folders, 
+							size_limit_gb: sizeLimit,
+						})
 					});
 					const result = await resp.json();
 					if (result.status === "ok") {
-						alert("Backup started!");
+						// Success, dialog will close automatically
 					} else {
 						alert("Backup failed: " + result.message);
 					}
 				} catch (err) {
 					alert("Backup error: " + err);
+				} finally {
+					setBackupState(false);
+					dlg.style.display = "none";
 				}
-				dlg.style.display = "none";
 			};
+
 			actionGroup.appendChild(uploadButton);
 
 			btnRow.appendChild(actionGroup);
