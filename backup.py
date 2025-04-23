@@ -124,14 +124,27 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5, use_large
         print(f"[INFO] Uploading '{upload_path}' to repo '{repo_name}' as '{comfyui_subpath}'...")
         print("[INFO] Upload started. Check the console for status updates.")
 
-        api.upload_large_folder(
-            folder_path=upload_path,
-            repo_id=repo_name,
-            path_in_repo=comfyui_subpath,
-            repo_type="model",
-            token=token,
-            ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
-        )
+        # Use upload_large_folder for top-level ComfyUI subfolder upload (no path_in_repo argument)
+        # So we must create a temp folder with the correct structure if needed
+        with tempfile.TemporaryDirectory() as temp_root:
+            target_root = os.path.join(temp_root, "ComfyUI")
+            os.makedirs(target_root, exist_ok=True)
+            # Copy the upload_path into the correct subpath under ComfyUI
+            dest = os.path.join(target_root, os.path.basename(rel_path))
+            if os.path.isdir(upload_path):
+                shutil.copytree(upload_path, dest, dirs_exist_ok=True)
+            else:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copy2(upload_path, dest)
+            api.upload_large_folder(
+                folder_path=target_root,
+                repo_id=repo_name,
+                repo_type="model",
+                token=token,
+                ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
+                allow_patterns=None,  # Add this line for clarity, but it's the default
+                delete_patterns=None, # Add this line for clarity, but it's the default
+            )
         print(f"[INFO] Upload of '{upload_path}' complete.")
 
         if temp_dir:
