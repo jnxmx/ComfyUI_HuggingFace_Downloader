@@ -168,11 +168,12 @@ def backup_to_huggingface(repo_name_or_link, folders, *args, **kwargs):
         moved_big_files = []
         try:
             moved_big_files = _move_big_files(comfyui_root, size_limit_gb)
+            # --- FIX: Use upload_folder with repo_type=None for model repos (default), and do NOT set path_in_repo ---
             api.upload_folder(
                 folder_path=comfyui_root,
                 repo_id=repo_name,
-                path_in_repo="ComfyUI",
-                repo_type="model",
+                # path_in_repo="ComfyUI",  # REMOVE this line!
+                # repo_type="model",       # REMOVE this line! (let it default)
                 token=token,
                 ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
             )
