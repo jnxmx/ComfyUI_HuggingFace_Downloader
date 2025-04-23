@@ -166,7 +166,7 @@ def backup_to_huggingface(repo_name_or_link, folders, *args, **kwargs):
                 folder_path=upload_path,
                 repo_id=repo_name,
                 token=token,
-                path_in_repo = path_in_repo,
+                path_in_repo = "ComfyUI/" + path_in_repo,
                 ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
             )
             print(f"[INFO] Upload of '{upload_path}' complete.")
