@@ -220,6 +220,7 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     """
     from huggingface_hub import hf_hub_download
     import hf_transfer
+    from collections import defaultdict
 
     # Enable hf_transfer
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
@@ -244,34 +245,55 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
         if not comfy_files:
             raise ValueError("No ComfyUI folder found in backup")
 
+        # Group files by subfolder
+        subfolder_files = defaultdict(list)
         for file in comfy_files:
-            local_path = os.path.join(target_dir, file.replace("ComfyUI/", "", 1))
-            
-            # Skip if file exists and has same size
-            try:
-                file_info = api.get_info_from_repo(
+            # Remove ComfyUI/ prefix and split path
+            rel_path = file.replace("ComfyUI/", "", 1)
+            subfolder = os.path.dirname(rel_path)
+            if not subfolder:
+                subfolder = "root"
+            subfolder_files[subfolder].append(file)
+
+        # Process each subfolder
+        for subfolder, files in subfolder_files.items():
+            if subfolder == "root":
+                print(f"[INFO] Processing root files...")
+            else:
+                print(f"[INFO] Processing subfolder: {subfolder}")
+                
+            # Create subfolder structure
+            if subfolder != "root":
+                os.makedirs(os.path.join(target_dir, subfolder), exist_ok=True)
+
+            # Download files in this subfolder
+            for file in files:
+                final_path = os.path.join(target_dir, file.replace("ComfyUI/", "", 1))
+                
+                # Skip if file exists and has same size
+                try:
+                    file_info = api.get_info_from_repo(
+                        repo_id=repo_name,
+                        filename=file,
+                        token=token
+                    )
+                    if os.path.exists(final_path):
+                        local_size = os.path.getsize(final_path)
+                        if local_size == file_info.size:
+                            print(f"[INFO] Skipping existing file: {final_path}")
+                            continue
+                except Exception as e:
+                    print(f"[WARNING] Could not check file info for {file}: {e}")
+
+                # Download file
+                print(f"[INFO] Downloading: {file}")
+                hf_hub_download(
                     repo_id=repo_name,
                     filename=file,
-                    token=token
+                    token=token,
+                    local_dir=target_dir,
+                    local_dir_use_symlinks=False
                 )
-                if os.path.exists(local_path):
-                    local_size = os.path.getsize(local_path)
-                    if local_size == file_info.size:
-                        print(f"[INFO] Skipping existing file: {local_path}")
-                        continue
-            except Exception as e:
-                print(f"[WARNING] Could not check file info for {file}: {e}")
-
-            # Download if missing or different
-            print(f"[INFO] Downloading: {file}")
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-            hf_hub_download(
-                repo_id=repo_name,
-                filename=file,
-                token=token,
-                local_dir=target_dir,
-                local_dir_use_symlinks=False
-            )
 
         print(f"[INFO] Successfully restored backup to {target_dir}")
         return target_dir
