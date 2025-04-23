@@ -2,6 +2,7 @@ import os
 import json
 import tempfile
 import shutil
+import time
 from huggingface_hub import HfApi
 from .parse_link import parse_link
 
@@ -91,9 +92,34 @@ def _restore_big_files(moved):
         except Exception:
             pass
 
+def _retry_upload(api, upload_path, repo_name, token, path_in_repo, max_retries=3, initial_delay=1):
+    """Helper function to retry uploads with exponential backoff"""
+    delay = initial_delay
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            return api.upload_folder(
+                folder_path=upload_path,
+                repo_id=repo_name,
+                token=token,
+                path_in_repo=path_in_repo,
+                ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
+            )
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                print(f"[WARNING] Upload attempt {attempt + 1} failed: {str(e)}")
+                print(f"[INFO] Retrying in {delay} seconds...")
+                time.sleep(delay)
+                delay *= 2
+            
+    raise RuntimeError(f"Upload failed after {max_retries} attempts. Last error: {str(last_error)}")
+
 def backup_to_huggingface(repo_name_or_link, folders, on_backup_start=None, on_backup_progress=None, *args, **kwargs):
     """
     Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root.
+    Uses retry logic for better reliability.
     
     Callbacks:
     - on_backup_start(): Called when backup starts 
@@ -149,14 +175,23 @@ def backup_to_huggingface(repo_name_or_link, folders, on_backup_start=None, on_b
                     print(f"[WARNING] Progress callback failed: {e}")
 
             moved_big_files.extend(_move_big_files(upload_path, size_limit_gb))
-            api.upload_folder(
-                folder_path=upload_path,
-                repo_id=repo_name,
-                token=token,
-                path_in_repo = "ComfyUI/" + path_in_repo,
-                ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
-            )
-            print(f"[INFO] Upload of '{upload_path}' complete.")
+            try:
+                _retry_upload(
+                    api=api,
+                    upload_path=upload_path,
+                    repo_name=repo_name,
+                    token=token,
+                    path_in_repo="ComfyUI/" + path_in_repo
+                )
+                print(f"[INFO] Upload of '{upload_path}' complete.")
+            except Exception as e:
+                print(f"[ERROR] Upload failed for '{upload_path}': {str(e)}")
+                if "Stream" in str(e) and "reset by remote peer" in str(e):
+                    print("[INFO] This appears to be a connection issue. You may want to:")
+                    print("1. Check your internet connection")
+                    print("2. Try uploading fewer/smaller files at once")
+                    print("3. Ensure you have sufficient permissions on Hugging Face")
+                raise
     except Exception as e:
         print(f"[ERROR] Backup failed: {e}")
         raise

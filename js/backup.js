@@ -114,10 +114,25 @@ models/checkpoints/ #Below the size limit`; // Default content
 			const restoreButton = document.createElement("button");
 			restoreButton.textContent = "Download";
 			restoreButton.className = "p-button p-component"; // Removed p-button-info
-			restoreButton.onclick = () => {
-				console.log("Backup restore clicked", ta.value);
-				// TODO: call actual restore routine here
-				dlg.style.display = "none";
+			restoreButton.onclick = async () => {
+				try {
+					setBackupState(true);
+					const resp = await fetch("/restore_from_hf", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" }
+					});
+					const result = await resp.json();
+					if (result.status === "ok") {
+						alert("Restore completed successfully!");
+					} else {
+						alert("Restore failed: " + result.message);
+					}
+				} catch (err) {
+					alert("Restore error: " + err);
+				} finally {
+					setBackupState(false);
+					dlg.style.display = "none";
+				}
 			};
 			actionGroup.appendChild(restoreButton);
 

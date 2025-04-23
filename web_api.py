@@ -22,5 +22,22 @@ async def backup_to_hf(request):
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
+async def restore_from_hf(request):
+    # Read repo name from comfy.settings.json
+    settings_path = os.path.join("user", "default", "comfy.settings.json")
+    repo_name = ""
+    if os.path.exists(settings_path):
+        with open(settings_path, "r") as f:
+            settings = json.load(f)
+        repo_name = settings.get("downloaderbackup.repo_name", "").strip()
+    if not repo_name:
+        return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
+    try:
+        restore_from_huggingface(repo_name)
+        return web.json_response({"status": "ok"})
+    except Exception as e:
+        return web.json_response({"status": "error", "message": str(e)}, status=500)
+
 def setup(app):
     app.router.add_post("/backup_to_hf", backup_to_hf)
+    app.router.add_post("/restore_from_hf", restore_from_hf)
