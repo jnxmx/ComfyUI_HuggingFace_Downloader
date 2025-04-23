@@ -1,7 +1,5 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
-import fs from "fs";
-import path from "path";
 
 /**
  * Minimal scaffold + “Backup ComfyUI to Hugging Face” dialog.
@@ -13,23 +11,6 @@ app.registerExtension({
 
 		/* ──────────────── D I A L O G ──────────────── */
 		const showBackupDialog = () => {
-			// Directly access the settings file
-			const settingsPath = path.join("user", "default", "comfy.settings.json");
-			let repoName = "";
-
-			try {
-				const settingsContent = fs.readFileSync(settingsPath, "utf-8");
-				const settingsData = JSON.parse(settingsContent);
-				repoName = settingsData?.downloaderbackup?.repo_name?.trim() || "";
-			} catch (error) {
-				console.error("Error reading settings file:", error);
-			}
-
-			if (!repoName) {
-				alert("Please set up a repository for backup in the settings file first.");
-				return;
-			}
-
 			// Keep just one instance alive
 			let dlg = document.getElementById("backup-hf-dialog");
 			if (dlg) {
