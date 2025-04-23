@@ -1,7 +1,7 @@
 import os
 import json
 from aiohttp import web
-from .backup import backup_to_huggingface
+from .backup import backup_to_huggingface, restore_from_huggingface
 
 async def backup_to_hf(request):
     data = await request.json()
