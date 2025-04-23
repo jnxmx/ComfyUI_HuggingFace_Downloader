@@ -1,4 +1,4 @@
-# ComfyUI HuggingFace Downloader
+# ComfyUI Hugging Face Downloader
 
 This repository provides custom nodes for ComfyUI that enable seamless downloading of models and folders from Hugging Face using a fast and efficient library. These nodes are designed to integrate smoothly into your workflows.
 
