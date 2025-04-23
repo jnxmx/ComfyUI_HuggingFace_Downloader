@@ -133,21 +133,15 @@ def backup_to_huggingface(repo_name_or_link, folders, *args, **kwargs):
     parsed = parse_link(repo_name_or_link)
     repo_name = parsed.get("repo", repo_name_or_link)
 
-    with tempfile.TemporaryDirectory() as temp_root:
-        comfyui_root = os.path.join(temp_root, "ComfyUI")
-        os.makedirs(comfyui_root, exist_ok=True)
-        temp_dirs = []
+    temp_dirs = []
+    moved_big_files = []
+    try:
         for folder in folders:
             folder = folder.strip()
             if not folder or not os.path.exists(folder):
                 continue
             folder = os.path.normpath(folder)
-            rel_path = folder
-            if os.path.isabs(folder):
-                try:
-                    rel_path = os.path.relpath(folder, os.getcwd())
-                except ValueError:
-                    rel_path = os.path.basename(folder)
+            rel_path = os.path.basename(folder)
             is_user = rel_path == "user" or rel_path.startswith("user" + os.sep)
             upload_path = folder
             temp_dir = None
@@ -156,34 +150,34 @@ def backup_to_huggingface(repo_name_or_link, folders, *args, **kwargs):
                 upload_path = _copy_and_strip_token(folder, temp_dir)
                 temp_dirs.append(temp_dir)
                 print(f"[INFO] Created sanitized copy of '{folder}' at '{upload_path}' for upload.")
-            dest = os.path.join(comfyui_root, rel_path)
-            if os.path.isdir(upload_path):
-                shutil.copytree(upload_path, dest, dirs_exist_ok=True)
-            else:
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                shutil.copy2(upload_path, dest)
-        print(f"[INFO] Uploading '{comfyui_root}' to repo '{repo_name}' as 'ComfyUI'...")
-        print(f"[INFO] Upload started. File size limit: {size_limit_gb} GB. Check the console for status updates.")
 
-        moved_big_files = []
-        try:
-            moved_big_files = _move_big_files(comfyui_root, size_limit_gb)
-            # --- FIX: Use upload_folder with repo_type=None for model repos (default), and do NOT set path_in_repo ---
+            path_in_repo = os.path.basename(folder) # Default to base name
+            if os.path.isabs(folder):
+                try:
+                    path_in_repo = os.path.relpath(folder, os.getcwd())
+                except ValueError:
+                    path_in_repo = os.path.basename(folder)
+
+            print(f"[INFO] Uploading '{upload_path}' to repo '{repo_name}' with path '{path_in_repo}'...")
+            print(f"[INFO] Upload started. File size limit: {size_limit_gb} GB. Check the console for status updates.")
+
+            moved_big_files.extend(_move_big_files(upload_path, size_limit_gb))
             api.upload_folder(
-                folder_path=comfyui_root,
+                folder_path=upload_path,
                 repo_id=repo_name,
                 token=token,
+                path_in_repo = path_in_repo,
                 ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
             )
-            print(f"[INFO] Upload of '{comfyui_root}' complete.")
-        except Exception as e:
-            print(f"[ERROR] Backup failed: {e}")
-            raise
-        finally:
-            _restore_big_files(moved_big_files)
-            for temp_dir in temp_dirs:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                print(f"[INFO] Removed temporary sanitized folder '{temp_dir}'.")
+            print(f"[INFO] Upload of '{upload_path}' complete.")
+    except Exception as e:
+        print(f"[ERROR] Backup failed: {e}")
+        raise
+    finally:
+        _restore_big_files(moved_big_files)
+        for temp_dir in temp_dirs:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            print(f"[INFO] Removed temporary sanitized folder '{temp_dir}'.")
 
 def restore_from_huggingface(repo_name_or_link, target_dir=None):
     """
