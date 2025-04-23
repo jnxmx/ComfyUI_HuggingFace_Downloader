@@ -69,8 +69,7 @@ app.registerExtension({
 			const ta = document.createElement("textarea");
 			ta.rows = 8;
 			ta.placeholder = "Enter folders to backup, one per line...";
-			ta.value = `# List of folders to backup (newer versions overwrite older ones):
-custom_nodes/ #Custom nodes folder
+			ta.value = `custom_nodes/ #Custom nodes folder
 user/ #User settings and workflows folder
 models/loras 
 models/checkpoints/ #Below the size limit`; // Default content
@@ -126,9 +125,28 @@ models/checkpoints/ #Below the size limit`; // Default content
 			const uploadButton = document.createElement("button");
 			uploadButton.textContent = "Backup";
 			uploadButton.className = "p-button p-component p-button-success"; // PrimeVue styling
-			uploadButton.onclick = () => {
-				console.log("Backup upload clicked", ta.value);
-				// TODO: call actual upload routine here
+			uploadButton.onclick = async () => {
+				const folders = ta.value
+					.split("\n")
+					.map(line => line.split("#")[0].trim())
+					.filter(line => !!line);
+				const sizeLimit = 5; // Or read from settings if needed
+				console.log("Backup upload clicked", folders);
+				try {
+					const resp = await fetch("/backup_to_hf", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ folders, size_limit_gb: sizeLimit })
+					});
+					const result = await resp.json();
+					if (result.status === "ok") {
+						alert("Backup started!");
+					} else {
+						alert("Backup failed: " + result.message);
+					}
+				} catch (err) {
+					alert("Backup error: " + err);
+				}
 				dlg.style.display = "none";
 			};
 			actionGroup.appendChild(uploadButton);
