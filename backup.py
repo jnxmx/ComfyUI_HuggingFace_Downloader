@@ -172,8 +172,6 @@ def backup_to_huggingface(repo_name_or_link, folders, *args, **kwargs):
             api.upload_folder(
                 folder_path=comfyui_root,
                 repo_id=repo_name,
-                # path_in_repo="ComfyUI",  # REMOVE this line!
-                # repo_type="model",       # REMOVE this line! (let it default)
                 token=token,
                 ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
             )
