@@ -41,30 +41,50 @@ app.registerExtension({
 			// Panel
 			const panel = document.createElement("div");
 			Object.assign(panel.style, {
-				background: "#222",
+				background: "#17191f",
 				color: "#fff",
-				padding: "30px", // Increased padding
-				borderRadius: "8px",
-				minWidth: "480px", // Increased width
+				padding: "40px",
+				borderRadius: "12px",
+				minWidth: "640px",
+				maxWidth: "80vw",
 				display: "flex",
 				flexDirection: "column",
-				gap: "16px", // Increased gap
-				boxShadow: "0 6px 16px rgba(0,0,0,0.5)", // Slightly stronger shadow
+				gap: "20px",
+				boxShadow: "0 0 20px rgba(0,0,0,0.7)",
+				border: "1px solid #3c3c3c",
 			});
+
+			 // Heading text
+			const heading = document.createElement("div");
+			heading.textContent = "Enter list of folders to upload to Hugging Face.\nNewer versions will overwrite older ones.";
+			Object.assign(heading.style, {
+				marginBottom: "10px",
+				color: "#fff",
+				fontSize: "14px",
+				whiteSpace: "pre-line",
+			});
+			panel.appendChild(heading);
 
 			// Multiline input
 			const ta = document.createElement("textarea");
-			ta.rows = 5;
-			ta.placeholder = "Enter message for backup…";
-			ta.value = `custom_nodes/ #Custom nodes folder
+			ta.rows = 8;
+			ta.placeholder = "Enter folders to backup, one per line...";
+			ta.value = `# List of folders to backup (newer versions overwrite older ones):
+custom_nodes/ #Custom nodes folder
 user/ #User settings and workflows folder
 models/loras 
 models/checkpoints/ #Below the size limit`; // Default content
 			Object.assign(ta.style, {
 				width: "100%",
 				resize: "vertical",
-				padding: "6px",
-				borderRadius: "4px",
+				padding: "12px",
+				borderRadius: "8px",
+				background: "#1f2128",
+				border: "1px solid #3c3c3c",
+				color: "#fff",
+				fontSize: "14px",
+				fontFamily: "monospace",
+				minHeight: "180px",
 			});
 
 			// Buttons
