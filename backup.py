@@ -46,7 +46,7 @@ def make_virtual_comfyui_folder(folders, virtual_root):
 def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5, use_large_folder=False):
     """
     Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root,
-    preserving the relative folder structure.
+    preserving the relative folder structure. Skips .cache folders.
     """
     api = HfApi()
     token = get_token()
@@ -56,16 +56,17 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5, use_large
     parsed = parse_link(repo_name_or_link)
     repo_name = parsed.get("repo", repo_name_or_link)
 
+    def ignore_cache(dir, files):
+        # Ignore any .cache folder or file
+        return [f for f in files if f == ".cache" or f.startswith(".cache")]
+
     for folder in folders:
         folder = folder.strip()
         if not folder or not os.path.exists(folder):
             continue
-        # Remove trailing slash and normalize
         folder = os.path.normpath(folder)
-        # Compute relative path for ComfyUI root
         rel_path = folder
         if os.path.isabs(folder):
-            # If absolute, make it relative to current working dir if possible
             try:
                 rel_path = os.path.relpath(folder, os.getcwd())
             except ValueError:
@@ -79,7 +80,7 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5, use_large
             path_in_repo=comfyui_subpath,
             repo_type="model",
             token=token,
-            ignore_patterns=None,
+            ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
         )
         print(f"[INFO] Upload of '{folder}' complete.")
 
