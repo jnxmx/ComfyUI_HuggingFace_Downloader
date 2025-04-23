@@ -216,11 +216,12 @@ def _safe_move_or_copy(src, dst):
 def restore_from_huggingface(repo_name_or_link, target_dir=None):
     """
     Restore the 'ComfyUI' folder from a Hugging Face repository.
-    Uses hf_transfer for faster downloads.
+    Uses snapshot_download for faster parallel downloads.
     """
-    from huggingface_hub import hf_hub_download
+    from huggingface_hub import snapshot_download
     import hf_transfer
     from collections import defaultdict
+    from .downloader import clear_cache_for_path, folder_size
 
     # Enable hf_transfer
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
@@ -236,67 +237,56 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     if target_dir is None:
         target_dir = os.getcwd()
 
-    print(f"[INFO] Checking files in '{repo_name}' (using hf_transfer)...")
+    print(f"[INFO] Starting download from '{repo_name}' (using parallel download)...")
     try:
-        # Get list of all files and their info from repo
+        # Get list of files to download
         repo_files = api.list_repo_files(repo_id=repo_name, token=token)
         comfy_files = [f for f in repo_files if f.startswith("ComfyUI/")]
         
         if not comfy_files:
             raise ValueError("No ComfyUI folder found in backup")
 
-        # Group files by subfolder
-        subfolder_files = defaultdict(list)
-        for file in comfy_files:
-            # Remove ComfyUI/ prefix and split path
-            rel_path = file.replace("ComfyUI/", "", 1)
-            subfolder = os.path.dirname(rel_path)
-            if not subfolder:
-                subfolder = "root"
-            subfolder_files[subfolder].append(file)
+        # Create temp dir for initial download
+        comfy_temp = os.path.join(os.getcwd(), "temp")
+        os.makedirs(comfy_temp, exist_ok=True)
+        temp_dir = tempfile.mkdtemp(prefix="hf_dl_", dir=comfy_temp)
 
-        # Process each subfolder
-        for subfolder, files in subfolder_files.items():
-            if subfolder == "root":
-                print(f"[INFO] Processing root files...")
-            else:
-                print(f"[INFO] Processing subfolder: {subfolder}")
-                
-            # Create subfolder structure
-            if subfolder != "root":
-                os.makedirs(os.path.join(target_dir, subfolder), exist_ok=True)
+        try:
+            # Download all files in parallel using snapshot_download
+            downloaded_folder = snapshot_download(
+                repo_id=repo_name,
+                token=token,
+                local_dir=temp_dir,
+                allow_patterns=["ComfyUI/*"],
+                local_dir_use_symlinks=False,
+                max_workers=4  # Adjust based on system capabilities
+            )
 
-            # Download files in this subfolder
-            for file in files:
-                final_path = os.path.join(target_dir, file.replace("ComfyUI/", "", 1))
-                
-                # Skip if file exists and has same size
-                try:
-                    file_info = api.get_info_from_repo(
-                        repo_id=repo_name,
-                        filename=file,
-                        token=token
-                    )
-                    if os.path.exists(final_path):
-                        local_size = os.path.getsize(final_path)
-                        if local_size == file_info.size:
-                            print(f"[INFO] Skipping existing file: {final_path}")
-                            continue
-                except Exception as e:
-                    print(f"[WARNING] Could not check file info for {file}: {e}")
+            # Move files from snapshot to target directory
+            source_dir = os.path.join(downloaded_folder, "ComfyUI")
+            if os.path.exists(source_dir):
+                for root, dirs, files in os.walk(source_dir):
+                    for d in dirs:
+                        src_dir = os.path.join(root, d)
+                        rel_path = os.path.relpath(src_dir, source_dir)
+                        dst_dir = os.path.join(target_dir, rel_path)
+                        os.makedirs(dst_dir, exist_ok=True)
+                    
+                    for f in files:
+                        src_file = os.path.join(root, f)
+                        rel_path = os.path.relpath(src_file, source_dir)
+                        dst_file = os.path.join(target_dir, rel_path)
+                        if not os.path.exists(dst_file) or os.path.getsize(src_file) != os.path.getsize(dst_file):
+                            _safe_move_or_copy(src_file, dst_file)
 
-                # Download file
-                print(f"[INFO] Downloading: {file}")
-                hf_hub_download(
-                    repo_id=repo_name,
-                    filename=file,
-                    token=token,
-                    local_dir=target_dir,
-                    local_dir_use_symlinks=False
-                )
+            # Clean up
+            clear_cache_for_path(downloaded_folder)
+            print(f"[INFO] Successfully restored backup to {target_dir}")
+            return target_dir
 
-        print(f"[INFO] Successfully restored backup to {target_dir}")
-        return target_dir
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            print("[INFO] Cleaned up temporary files")
 
     except Exception as e:
         print(f"[ERROR] Failed to restore: {e}")
