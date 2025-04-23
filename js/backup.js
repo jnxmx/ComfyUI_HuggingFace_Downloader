@@ -1,12 +1,24 @@
 import { app } from "../../../scripts/app.js";
-import { python } from "../../../scripts/python.js"; // Use Python bridge to call backend functions
+import { api } from "../../../scripts/api.js";
+import { settings } from "../../../scripts/settings.js"; // Ensure settings module is imported
 
+/**
+ * Minimal scaffold + “Backup ComfyUI to Hugging Face” dialog.
+ * Flesh the guts out later: actual backup logic, HF auth, etc.
+ */
 app.registerExtension({
 	name: "myCustomExtension",
 	setup() {
 
 		/* ──────────────── D I A L O G ──────────────── */
 		const showBackupDialog = () => {
+			// Check if repo_name is set in settings
+			const repoName = settings.get("downloaderbackup.repo_name", "").trim();
+			if (!repoName) {
+				alert("Please set up a repository for backup in the settings first.");
+				return;
+			}
+
 			// Keep just one instance alive
 			let dlg = document.getElementById("backup-hf-dialog");
 			if (dlg) {
@@ -48,43 +60,16 @@ app.registerExtension({
 				boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
 			});
 
-			 // Folder structure container
-			const folderContainer = document.createElement("div");
-			Object.assign(folderContainer.style, {
-				maxHeight: "200px",
-				overflowY: "auto",
-				border: "1px solid #444",
-				padding: "10px",
+			// Multiline input
+			const ta = document.createElement("textarea");
+			ta.rows = 5;
+			ta.placeholder = "Enter message for backup…";
+			Object.assign(ta.style, {
+				width: "100%",
+				resize: "vertical",
+				padding: "6px",
 				borderRadius: "4px",
 			});
-
-			// Fetch all folders inside ComfyUI root directory (blocking)
-			const folders = python("file_manager.get_all_subfolders_flat");
-
-			// Create checkboxes for each folder
-			const createCheckboxTree = (folder, parent) => {
-				const checkbox = document.createElement("input");
-				checkbox.type = "checkbox";
-				checkbox.value = folder;
-				checkbox.id = `folder-${folder}`;
-
-				const label = document.createElement("label");
-				label.textContent = folder;
-				label.htmlFor = `folder-${folder}`;
-				label.style.marginLeft = "8px";
-
-				const container = document.createElement("div");
-				container.style.marginLeft = "16px";
-				container.appendChild(checkbox);
-				container.appendChild(label);
-
-				parent.appendChild(container);
-			};
-
-			folders.forEach((folder) => createCheckboxTree(folder, folderContainer));
-
-			// Add folderContainer to panel
-			panel.appendChild(folderContainer);
 
 			// Buttons
 			const btnRow = document.createElement("div");
@@ -94,21 +79,18 @@ app.registerExtension({
 				gap: "8px",
 			});
 
-			const backupButton = document.createElement("button");
-			backupButton.textContent = "Backup";
-			backupButton.onclick = () => {
-				const selectedFolders = Array.from(
-					folderContainer.querySelectorAll("input[type='checkbox']:checked")
-				).map((checkbox) => checkbox.value);
+			["1", "2", "3"].forEach((label) => {
+				const b = document.createElement("button");
+				b.textContent = label;
+				b.onclick = () => {
+					console.log(`Backup button ${label} clicked`, ta.value);
+					// TODO: call actual backup routine here
+					dlg.style.display = "none";
+				};
+				btnRow.appendChild(b);
+			});
 
-				console.log("Selected folders for backup:", selectedFolders);
-				// TODO: Call backup.py with selectedFolders
-				dlg.style.display = "none";
-			};
-
-			btnRow.innerHTML = ""; // Clear existing buttons
-			btnRow.appendChild(backupButton);
-
+			panel.appendChild(ta);
 			panel.appendChild(btnRow);
 			dlg.appendChild(panel);
 			document.body.appendChild(dlg);
