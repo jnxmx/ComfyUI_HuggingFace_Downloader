@@ -43,11 +43,54 @@ def make_virtual_comfyui_folder(folders, virtual_root):
         _safe_symlink(folder, dst)
     return comfyui_path
 
-def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5, use_large_folder=False):
+def _copy_and_strip_token(src_folder, temp_dir):
+    """
+    Copy src_folder to temp_dir, removing 'downloader.hf_token' from any comfy.settings.json found.
+    Returns the path to the copied folder.
+    """
+    dst_folder = os.path.join(temp_dir, os.path.basename(src_folder))
+    shutil.copytree(src_folder, dst_folder)
+    for root, _, files in os.walk(dst_folder):
+        for fname in files:
+            if fname == "comfy.settings.json":
+                fpath = os.path.join(root, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if "downloader.hf_token" in data:
+                        del data["downloader.hf_token"]
+                        with open(fpath, "w", encoding="utf-8") as f:
+                            json.dump(data, f, indent=2)
+                        print(f"[INFO] Stripped downloader.hf_token from {fpath}")
+                except Exception as e:
+                    print(f"[WARNING] Could not clean token from {fpath}: {e}")
+    return dst_folder
+
+def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5, use_large_folder=True):
     """
     Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root,
     preserving the relative folder structure. Skips .cache folders.
+    Always uses upload_large_folder for reliability.
+    If uploading 'user' or any subfolder, strips downloader.hf_token from comfy.settings.json.
     """
+    import threading
+
+    def show_upload_popup():
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showinfo(
+                "ComfyUI HuggingFace Backup",
+                "Backup upload started!\n\nMonitor the console for upload progress and status."
+            )
+            root.destroy()
+        except Exception:
+            print("[INFO] Backup upload started! (Could not show popup window; monitor the console for status.)")
+
+    threading.Thread(target=show_upload_popup, daemon=True).start()
+
     api = HfApi()
     token = get_token()
     if not token:
@@ -55,10 +98,6 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5, use_large
 
     parsed = parse_link(repo_name_or_link)
     repo_name = parsed.get("repo", repo_name_or_link)
-
-    def ignore_cache(dir, files):
-        # Ignore any .cache folder or file
-        return [f for f in files if f == ".cache" or f.startswith(".cache")]
 
     for folder in folders:
         folder = folder.strip()
@@ -72,17 +111,32 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5, use_large
             except ValueError:
                 rel_path = os.path.basename(folder)
         comfyui_subpath = os.path.join("ComfyUI", rel_path)
-        print(f"[INFO] Uploading '{folder}' to repo '{repo_name}' as '{comfyui_subpath}'...")
-        upload_fn = api.upload_large_folder if use_large_folder else api.upload_folder
-        upload_fn(
-            folder_path=folder,
+
+        # Check if this is 'user' or a subfolder of 'user'
+        is_user = rel_path == "user" or rel_path.startswith("user" + os.sep)
+        upload_path = folder
+        temp_dir = None
+        if is_user:
+            temp_dir = tempfile.mkdtemp(prefix="comfyui_user_strip_")
+            upload_path = _copy_and_strip_token(folder, temp_dir)
+            print(f"[INFO] Created sanitized copy of '{folder}' at '{upload_path}' for upload.")
+
+        print(f"[INFO] Uploading '{upload_path}' to repo '{repo_name}' as '{comfyui_subpath}'...")
+        print("[INFO] Upload started. Check the console for status updates.")
+
+        api.upload_large_folder(
+            folder_path=upload_path,
             repo_id=repo_name,
             path_in_repo=comfyui_subpath,
             repo_type="model",
             token=token,
             ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
         )
-        print(f"[INFO] Upload of '{folder}' complete.")
+        print(f"[INFO] Upload of '{upload_path}' complete.")
+
+        if temp_dir:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            print(f"[INFO] Removed temporary sanitized folder '{temp_dir}'.")
 
 def restore_from_huggingface(repo_name_or_link, target_dir=None):
     """
