@@ -111,7 +111,18 @@ models/checkpoints/ #Below the size limit`; // Default content
 				gap: "8px",
 			});
 
-			// Upload button
+			 // Restore button (moved up)
+			const restoreButton = document.createElement("button");
+			restoreButton.textContent = "Download";
+			restoreButton.className = "p-button p-component"; // Removed p-button-info
+			restoreButton.onclick = () => {
+				console.log("Backup restore clicked", ta.value);
+				// TODO: call actual restore routine here
+				dlg.style.display = "none";
+			};
+			actionGroup.appendChild(restoreButton);
+
+			// Upload button (moved down)
 			const uploadButton = document.createElement("button");
 			uploadButton.textContent = "Backup";
 			uploadButton.className = "p-button p-component p-button-success"; // PrimeVue styling
@@ -121,17 +132,6 @@ models/checkpoints/ #Below the size limit`; // Default content
 				dlg.style.display = "none";
 			};
 			actionGroup.appendChild(uploadButton);
-
-			// Restore button
-			const restoreButton = document.createElement("button");
-			restoreButton.textContent = "Download";
-			restoreButton.className = "p-button p-component p-button-info"; // PrimeVue styling
-			restoreButton.onclick = () => {
-				console.log("Backup restore clicked", ta.value);
-				// TODO: call actual restore routine here
-				dlg.style.display = "none";
-			};
-			actionGroup.appendChild(restoreButton);
 
 			btnRow.appendChild(actionGroup);
 
