@@ -45,35 +45,43 @@ def make_virtual_comfyui_folder(folders, virtual_root):
 
 def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=5, use_large_folder=False):
     """
-    Backup specified folders to a Hugging Face repository as a single 'ComfyUI' folder.
+    Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root,
+    preserving the relative folder structure.
     """
     api = HfApi()
     token = get_token()
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
 
-    # Parse repo name if a link is provided
     parsed = parse_link(repo_name_or_link)
     repo_name = parsed.get("repo", repo_name_or_link)
 
-    # Create a temp dir and virtual ComfyUI folder
-    with tempfile.TemporaryDirectory() as tmpdir:
-        virtual_comfyui = make_virtual_comfyui_folder(folders, tmpdir)
-        print(f"[INFO] Created virtual folder at {virtual_comfyui}")
-
-        # Choose upload method
+    for folder in folders:
+        folder = folder.strip()
+        if not folder or not os.path.exists(folder):
+            continue
+        # Remove trailing slash and normalize
+        folder = os.path.normpath(folder)
+        # Compute relative path for ComfyUI root
+        rel_path = folder
+        if os.path.isabs(folder):
+            # If absolute, make it relative to current working dir if possible
+            try:
+                rel_path = os.path.relpath(folder, os.getcwd())
+            except ValueError:
+                rel_path = os.path.basename(folder)
+        comfyui_subpath = os.path.join("ComfyUI", rel_path)
+        print(f"[INFO] Uploading '{folder}' to repo '{repo_name}' as '{comfyui_subpath}'...")
         upload_fn = api.upload_large_folder if use_large_folder else api.upload_folder
-
-        print(f"[INFO] Uploading '{virtual_comfyui}' to repo '{repo_name}' as folder 'ComfyUI'...")
         upload_fn(
-            folder_path=virtual_comfyui,
+            folder_path=folder,
             repo_id=repo_name,
-            path_in_repo="ComfyUI",
+            path_in_repo=comfyui_subpath,
             repo_type="model",
             token=token,
-            ignore_patterns=None,  # Optionally add ignore patterns
+            ignore_patterns=None,
         )
-        print("[INFO] Upload complete.")
+        print(f"[INFO] Upload of '{folder}' complete.")
 
 def restore_from_huggingface(repo_name_or_link, target_dir=None):
     """
