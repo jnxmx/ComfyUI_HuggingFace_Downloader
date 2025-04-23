@@ -218,7 +218,7 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     Restore the 'ComfyUI' folder from a Hugging Face repository.
     Uses snapshot_download for faster parallel downloads.
     """
-    from huggingface_hub import snapshot_download
+    from huggingface_hub import snapshot_download, HfHubHTTPError
     import hf_transfer
     from collections import defaultdict
     from .downloader import clear_cache_for_path, folder_size
@@ -239,14 +239,36 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
 
     print(f"[INFO] Starting download from '{repo_name}' (using parallel download)...")
     try:
+        # Validate repo access first
+        try:
+            repo_info = api.repo_info(repo_id=repo_name, token=token)
+            if not repo_info:
+                raise ValueError(f"Repository {repo_name} not found or not accessible")
+        except HfHubHTTPError as e:
+            if e.response.status_code == 401:
+                raise ValueError(f"Invalid token for repository '{repo_name}'. Please check your token in settings.")
+            elif e.response.status_code == 403:
+                raise ValueError(f"Access denied to repository '{repo_name}'. Please verify permissions and token.")
+            elif e.response.status_code == 404:
+                raise ValueError(f"Repository '{repo_name}' not found. Please verify the repository name/link.")
+            else:
+                raise ValueError(f"Error accessing repository: {str(e)}")
+        except Exception as e:
+            if "<!DOCTYPE" in str(e):
+                raise ValueError("Network error or invalid response from Hugging Face. Please check your internet connection.")
+            raise
+
         # Get list of files to download
-        repo_files = api.list_repo_files(repo_id=repo_name, token=token)
+        try:
+            repo_files = api.list_repo_files(repo_id=repo_name, token=token)
+        except Exception as e:
+            raise ValueError(f"Failed to list repository files: {str(e)}")
+
         comfy_files = [f for f in repo_files if f.startswith("ComfyUI/")]
-        
         if not comfy_files:
             raise ValueError("No ComfyUI folder found in backup")
 
-        # Create temp dir for initial download
+        # Rest of the restore function remains the same
         comfy_temp = os.path.join(os.getcwd(), "temp")
         os.makedirs(comfy_temp, exist_ok=True)
         temp_dir = tempfile.mkdtemp(prefix="hf_dl_", dir=comfy_temp)
