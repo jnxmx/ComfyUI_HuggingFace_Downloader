@@ -130,30 +130,32 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, max_retries=
 def _backup_custom_nodes(target_dir: str) -> str:
     """
     Use comfy-cli to save a snapshot of custom nodes.
-    Returns the path to the snapshot file.
+    Returns the path to the snapshot file and temp dir.
     """
     temp_dir = tempfile.mkdtemp(prefix="comfyui_nodes_snapshot_")
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    snapshot_name = f"backup_{timestamp}"
     
     try:
-        # Save snapshot using comfy-cli
+        # Save snapshot using comfy-cli - must be in a ComfyUI directory
         subprocess.run(
-            ["comfy", "--here", "node", "save-snapshot", snapshot_name],
+            ["comfy", "node", "save-snapshot"],
             check=True,
             capture_output=True,
-            text=True
+            text=True,
+            cwd=os.getcwd()  # Must be in ComfyUI directory
         )
         
-        # Find and copy the snapshot file
+        # Find and copy the snapshot file 
         comfy_dir = os.getcwd()
         snapshot_file = None
         snapshots_dir = os.path.join(comfy_dir, "custom_nodes", "snapshots")
         if os.path.exists(snapshots_dir):
-            for f in os.listdir(snapshots_dir):
-                if f.startswith(snapshot_name):
-                    snapshot_file = os.path.join(snapshots_dir, f)
-                    break
+            # Get most recent snapshot file
+            snapshot_files = [(f, os.path.getmtime(os.path.join(snapshots_dir, f))) 
+                            for f in os.listdir(snapshots_dir)]
+            if snapshot_files:
+                snapshot_files.sort(key=lambda x: x[1], reverse=True)
+                snapshot_file = os.path.join(snapshots_dir, snapshot_files[0][0])
         
         if not snapshot_file:
             raise RuntimeError("Could not find generated snapshot file")
@@ -171,15 +173,14 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     Use comfy-cli to restore custom nodes from a snapshot.
     """
     # First save current state as backup
-    backup_name = f"pre_restore_{time.strftime('%Y%m%d_%H%M%S')}"
     try:
         subprocess.run(
-            ["comfy", "--here", "node", "save-snapshot", backup_name],
+            ["comfy", "node", "save-snapshot"],
             check=True,
             capture_output=True,
             text=True
         )
-        print(f"[INFO] Saved current nodes state as '{backup_name}'")
+        print("[INFO] Saved current nodes state as backup")
     except subprocess.CalledProcessError as e:
         print(f"[WARNING] Failed to backup current nodes state: {e.stderr}")
     
@@ -187,14 +188,13 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     comfy_dir = os.getcwd()
     snapshots_dir = os.path.join(comfy_dir, "custom_nodes", "snapshots")
     os.makedirs(snapshots_dir, exist_ok=True)
-    snapshot_name = "restored_backup"
-    snapshot_dest = os.path.join(snapshots_dir, f"{snapshot_name}.yaml")
+    snapshot_dest = os.path.join(snapshots_dir, "restore_snapshot.yaml")
     shutil.copy2(snapshot_file, snapshot_dest)
     
     try:
         # Restore using comfy-cli
         subprocess.run(
-            ["comfy", "--here", "node", "restore-snapshot", snapshot_name],
+            ["comfy", "node", "restore-snapshot", "restore_snapshot"],
             check=True,
             capture_output=True,
             text=True
@@ -203,7 +203,7 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
         
         # Update all nodes to ensure latest versions
         subprocess.run(
-            ["comfy", "--here", "node", "update", "all"],
+            ["comfy", "node", "update", "all"],
             check=True,
             capture_output=True,
             text=True
@@ -212,7 +212,6 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
         
     except subprocess.CalledProcessError as e:
         print(f"[ERROR] Failed to restore nodes: {e.stderr}")
-        print(f"[INFO] Previous state was saved as '{backup_name}'")
         raise
 
 def backup_to_huggingface(repo_name_or_link, folders, on_backup_start=None, on_backup_progress=None, *args, **kwargs):
