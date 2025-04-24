@@ -269,23 +269,28 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     shutil.copy2(snapshot_file, snapshot_dest)
 
     try:
-        # Install nodes from the snapshot before restoring
-        print("[DEBUG] Installing nodes from snapshot...")
-        with open(snapshot_dest, 'r') as f:
+        # Install nodes from the snapshot one by one
+        print("[DEBUG] Installing nodes from cnr_custom_nodes...")
+        with open(snapshot_file, 'r') as f:
             snapshot_data = yaml.safe_load(f)
-        nodes_to_install = snapshot_data.get("git_custom_nodes", {}).keys()
-        if nodes_to_install:
-            install_result = subprocess.run(
-                ["comfy", "node", "install", *nodes_to_install],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=comfy_dir
-            )
-            print(f"[DEBUG] comfy-cli install output: {install_result.stdout}")
-            print(f"[DEBUG] comfy-cli install error (if any): {install_result.stderr}")
+        cnr_custom_nodes = snapshot_data.get("cnr_custom_nodes", {})
+        if cnr_custom_nodes:
+            for node_name, version in cnr_custom_nodes.items():
+                try:
+                    print(f"[DEBUG] Installing node: {node_name} (version: {version})")
+                    install_result = subprocess.run(
+                        ["comfy", "node", "install", node_name],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        cwd=comfy_dir
+                    )
+                    print(f"[DEBUG] comfy-cli install output for {node_name}: {install_result.stdout}")
+                    print(f"[DEBUG] comfy-cli install error (if any) for {node_name}: {install_result.stderr}")
+                except subprocess.CalledProcessError as e:
+                    print(f"[ERROR] Failed to install node {node_name}: {e.stderr}")
         else:
-            print("[WARNING] No nodes found to install from snapshot.")
+            print("[WARNING] No nodes found in cnr_custom_nodes to install.")
 
         # Restore using comfy-cli
         subprocess.run(
@@ -382,7 +387,7 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
             temp_dir = None
 
             # Handle special cases: user folder and custom_nodes
-            if is_user:
+            if (is_user):
                 temp_dir = tempfile.mkdtemp(prefix="comfyui_user_strip_")
                 upload_path = _copy_and_strip_token(folder, temp_dir)
                 temp_dirs.append(temp_dir)
@@ -537,6 +542,14 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                 filename="ComfyUI/custom_nodes_snapshot.yaml",
                 token=token
             )
+            # Print the content and location of the downloaded YAML file
+            print(f"[DEBUG] Downloaded snapshot file location: {snapshot_file}")
+            try:
+                with open(snapshot_file, 'r') as f:
+                    snapshot_content = f.read()
+                print(f"[DEBUG] Content of downloaded snapshot file:\n{snapshot_content}")
+            except Exception as e:
+                print(f"[ERROR] Failed to read downloaded snapshot file: {e}")
             _restore_custom_nodes_from_snapshot(snapshot_file)
             print("[INFO] Custom nodes restoration complete")
         
