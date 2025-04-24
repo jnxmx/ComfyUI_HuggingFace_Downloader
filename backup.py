@@ -171,28 +171,35 @@ def _backup_custom_nodes(target_dir: str) -> str:
 
         # Install nodes before saving snapshot
         print("[DEBUG] Installing nodes before saving snapshot...")
-        install_result = subprocess.run(
-            ["comfy", "node", "install"],
-            check=False,
-            capture_output=True,
-            text=True,
-            cwd=comfy_dir
-        )
-        print(f"[DEBUG] comfy-cli install output: {install_result.stdout}")
-        print(f"[DEBUG] comfy-cli install error (if any): {install_result.stderr}")
-        if install_result.returncode != 0:
-            print("[WARNING] Node installation failed. Proceeding with snapshot creation.")
+        try:
+            install_result = subprocess.run(
+                ["comfy", "node", "install"],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=comfy_dir
+            )
+            print(f"[DEBUG] comfy-cli install output: {install_result.stdout}")
+            print(f"[DEBUG] comfy-cli install error (if any): {install_result.stderr}")
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] comfy-cli install failed: {e.stderr}")
+            raise
 
         # Save snapshot using comfy-cli
-        result = subprocess.run(
-            ["comfy", "node", "save-snapshot"],
-            check=True,
-            capture_output=True,
-            text=True,
-            cwd=comfy_dir
-        )
-        print(f"[DEBUG] comfy-cli output: {result.stdout}")
-        print(f"[DEBUG] comfy-cli error (if any): {result.stderr}")
+        print("[DEBUG] Saving snapshot using comfy-cli...")
+        try:
+            result = subprocess.run(
+                ["comfy", "node", "save-snapshot"],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=comfy_dir
+            )
+            print(f"[DEBUG] comfy-cli save-snapshot output: {result.stdout}")
+            print(f"[DEBUG] comfy-cli save-snapshot error (if any): {result.stderr}")
+        except subprocess.CalledProcessError as e:
+            print(f"[ERROR] comfy-cli save-snapshot failed: {e.stderr}")
+            raise
 
         # Extract snapshot file name from comfy-cli output and copy to temp dir
         snapshot_file = None
@@ -468,11 +475,11 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                 raise ValueError(f"Repository {repo_name} not found or not accessible")
         except requests.exceptions.HTTPError as e:
             status_code = getattr(e.response, 'status_code', None)
-            if status_code == 401:
+            if (status_code == 401):
                 raise ValueError(f"Invalid token for repository '{repo_name}'. Please check your token in settings.")
-            elif status_code == 403:
+            elif (status_code == 403):
                 raise ValueError(f"Access denied to repository '{repo_name}'. Please verify permissions and token.")
-            elif status_code == 404:
+            elif (status_code == 404):
                 raise ValueError(f"Repository '{repo_name}' not found. Please verify the repository name/link.")
             else:
                 raise ValueError(f"Error accessing repository: {str(e)}")

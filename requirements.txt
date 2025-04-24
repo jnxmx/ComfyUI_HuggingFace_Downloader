@@ -1,7 +1,5 @@
-torch>=2.0.0
-torchvision
-numpy
-huggingface_hub>=0.19.4
-comfy-cli>=1.3.8
-PyYAML>=6.0.1
+
+huggingface_hub
+comfy-cli
+PyYAML
 hf_transfer
