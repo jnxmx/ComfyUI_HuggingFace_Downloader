@@ -292,24 +292,6 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
         else:
             print("[WARNING] No nodes found in cnr_custom_nodes to install.")
 
-        # Restore using comfy-cli
-        subprocess.run(
-            ["comfy", "node", "restore-snapshot", snapshot_dest],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        print("[INFO] Successfully restored custom nodes")
-
-        # Update all nodes to ensure latest versions
-        subprocess.run(
-            ["comfy", "node", "update", "all"],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        print("[INFO] Updated all custom nodes")
-
     except subprocess.CalledProcessError as e:
         print(f"[ERROR] Failed to restore nodes: {e.stderr}")
         raise
