@@ -247,36 +247,92 @@ def _backup_custom_nodes(target_dir: str) -> str:
 
 def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     """
-    Use comfy-cli to restore nodes from a snapshot.
+    Install nodes from snapshot one by one using comfy-cli.
     """
     comfy_dir = os.getcwd()
     custom_nodes_dir = os.path.join(comfy_dir, "custom_nodes")
     os.makedirs(custom_nodes_dir, exist_ok=True)
 
+    failed_nodes = []
+
     try:
-        print("\n[INFO] Restoring nodes from snapshot...")
-        # Pass N to the tracking consent prompt
-        process = subprocess.Popen(
-            ["comfy", "node", "restore-snapshot", snapshot_file],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=comfy_dir
-        )
-        
-        # Send 'N' to the tracking consent prompt and get output
-        stdout, stderr = process.communicate(input="N\n")
-        
-        if process.returncode != 0:
-            print(f"[ERROR] Failed to restore nodes from snapshot:")
-            print(f"stderr: {stderr}")
-            print(f"stdout: {stdout}")
-            raise RuntimeError("Failed to restore nodes from snapshot")
+        with open(snapshot_file, 'r') as f:
+            snapshot_data = yaml.safe_load(f)
+
+        # Install git nodes first
+        print("\n[INFO] Installing nodes from git repositories...")
+        git_custom_nodes = snapshot_data.get("git_custom_nodes", {})
+        if git_custom_nodes:
+            for repo_url, node_data in git_custom_nodes.items():
+                if node_data.get("disabled", False):
+                    print(f"[INFO] Skipping disabled node: {repo_url}")
+                    continue
+
+                try:
+                    print(f"\n[INFO] Installing node: {repo_url}")
+                    # Use comfy node install with N for tracking consent
+                    process = subprocess.Popen(
+                        ["comfy", "node", "install", repo_url],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        cwd=comfy_dir
+                    )
+                    stdout, stderr = process.communicate(input='N\n')
+                    
+                    if process.returncode != 0:
+                        print(f"[ERROR] Failed to install {repo_url}:")
+                        print(f"stderr: {stderr}")
+                        print(f"stdout: {stdout}")
+                        failed_nodes.append(repo_url)
+                    else:
+                        print(f"[SUCCESS] Installed {repo_url}")
+
+                except Exception as e:
+                    print(f"[ERROR] Failed to install {repo_url}: {str(e)}")
+                    failed_nodes.append(repo_url)
         else:
-            print("[SUCCESS] Successfully restored nodes from snapshot")
-            if stdout:
-                print(f"[DEBUG] Restore output:\n{stdout}")
+            print("[INFO] No git custom nodes found to install")
+
+        # Install CNR nodes
+        print("\n[INFO] Installing nodes from CNR registry...")
+        cnr_custom_nodes = snapshot_data.get("cnr_custom_nodes", {})
+        if cnr_custom_nodes:
+            for node_name, version in cnr_custom_nodes.items():
+                try:
+                    print(f"\n[INFO] Installing CNR node: {node_name}")
+                    # Use comfy node install with N for tracking consent
+                    process = subprocess.Popen(
+                        ["comfy", "node", "install", node_name],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        cwd=comfy_dir
+                    )
+                    stdout, stderr = process.communicate(input='N\n')
+                    
+                    if process.returncode != 0:
+                        print(f"[ERROR] Failed to install CNR node {node_name}:")
+                        print(f"stderr: {stderr}")
+                        print(f"stdout: {stdout}")
+                        failed_nodes.append(node_name)
+                    else:
+                        print(f"[SUCCESS] Installed CNR node {node_name}")
+
+                except Exception as e:
+                    print(f"[ERROR] Failed to install CNR node {node_name}: {str(e)}")
+                    failed_nodes.append(node_name)
+        else:
+            print("[INFO] No CNR nodes found to install")
+
+        if failed_nodes:
+            print("\n[WARNING] The following nodes failed to install:")
+            for node in failed_nodes:
+                print(f"- {node}")
+        else:
+            print("\n[SUCCESS] All nodes were installed successfully")
 
     except Exception as e:
         print(f"[ERROR] Failed to restore nodes: {str(e)}")
