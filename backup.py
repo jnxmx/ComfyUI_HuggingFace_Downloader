@@ -161,33 +161,44 @@ def _backup_custom_nodes(target_dir: str) -> str:
     temp_dir = tempfile.mkdtemp(prefix="comfyui_nodes_snapshot_")
     
     try:
-        comfy_dir = find_comfy_root()
+        # Find ComfyUI root directory
+        comfy_dir = os.getcwd()
+        while comfy_dir != os.path.dirname(comfy_dir):  # Stop at filesystem root
+            if os.path.isdir(os.path.join(comfy_dir, "custom_nodes")):
+                break
+            comfy_dir = os.path.dirname(comfy_dir)
+        
         if not os.path.isdir(os.path.join(comfy_dir, "custom_nodes")):
-            raise RuntimeError("Not in a ComfyUI directory (custom_nodes folder not found)")
+            raise RuntimeError("Could not locate ComfyUI root directory (custom_nodes folder not found)")
 
-        print(f"[DEBUG] Current working directory: {os.getcwd()}")
-        print(f"[DEBUG] Detected ComfyUI root directory: {comfy_dir}")
-        print(f"[DEBUG] Checking for 'custom_nodes' folder at: {os.path.join(comfy_dir, 'custom_nodes')}")
+        # Save snapshot using comfy-cli from ComfyUI root
+        print("[DEBUG] Current working directory:", os.getcwd())
+        print("[DEBUG] Using ComfyUI root directory:", comfy_dir)
 
-        # Save snapshot using comfy-cli
-        print("[DEBUG] Saving snapshot using comfy-cli...")
-        try:
-            result = subprocess.run(
-                ["comfy", "node", "save-snapshot"],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=comfy_dir
-            )
-            print(f"[DEBUG] comfy-cli save-snapshot output: {result.stdout}")
-            print(f"[DEBUG] comfy-cli save-snapshot error (if any): {result.stderr}")
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] comfy-cli save-snapshot failed: {e.stderr}")
-            raise
+        # Send N to the tracking consent prompt
+        process = subprocess.Popen(
+            ["comfy", "node", "save-snapshot"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=comfy_dir  # Run from ComfyUI root
+        )
+        stdout, stderr = process.communicate(input="N\n")
+        
+        if process.returncode != 0:
+            print("[ERROR] comfy-cli save-snapshot failed:")
+            print(f"stderr: {stderr}")
+            print(f"stdout: {stdout}")
+            raise RuntimeError("Failed to create nodes snapshot")
 
-        # Extract snapshot file name from comfy-cli output and copy to temp dir
+        print(f"[DEBUG] comfy-cli save-snapshot output:\n{stdout}")
+        if stderr:
+            print(f"[DEBUG] comfy-cli save-snapshot stderr:\n{stderr}")
+
+        # Extract snapshot file name and copy to temp dir
         snapshot_file = None
-        for line in result.stdout.splitlines():
+        for line in stdout.splitlines():
             if "Current snapshot is saved as" in line:
                 snapshot_file_name = line.split("`", 1)[-1].rsplit("`", 1)[0]
                 original_snapshot = os.path.join(comfy_dir, "user", "default", "ComfyUI-Manager", "snapshots", snapshot_file_name)
@@ -237,8 +248,12 @@ def _backup_custom_nodes(target_dir: str) -> str:
         return snapshot_dest, temp_dir
 
     except subprocess.CalledProcessError as e:
-        print(f"[WARNING] Failed to create nodes snapshot: {e.stderr}")
-        if "not found" in str(e.stderr):
+        print(f"[WARNING] Failed to create nodes snapshot: {e.stderr if hasattr(e, 'stderr') else str(e)}")
+        if isinstance(e.stderr, bytes):
+            stderr = e.stderr.decode('utf-8', errors='replace')
+        else:
+            stderr = str(e.stderr)
+        if "not found" in stderr:
             raise RuntimeError("comfy-cli command failed. Please ensure ComfyUI is properly installed.")
         raise
     except Exception as e:
@@ -654,47 +669,56 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                             # Create parent directory if needed
                             os.makedirs(os.path.dirname(dst_file), exist_ok=True)
                             
-                            # Handle special cases
-                            if rel_path == os.path.normpath("user/default/comfy.settings.json"):
-                                try:
-                                    existing_settings = {}
-                                    if os.path.exists(dst_file):
-                                        with open(dst_file, "r", encoding="utf-8") as f:
-                                            existing_settings = json.load(f)
-                                    
-                                    with open(src_file, "r", encoding="utf-8") as f:
-                                        new_settings = json.load(f)
-                                    
-                                    # Preserve token
-                                    if "downloader.hf_token" in existing_settings:
-                                        new_settings["downloader.hf_token"] = existing_settings["downloader.hf_token"]
-                                    else:
-                                        new_settings["downloader.hf_token"] = token
-                                    
-                                    with open(dst_file, "w", encoding="utf-8") as f:
-                                        json.dump(new_settings, f, indent=2)
-                                    print(f"[INFO] Updated settings file: {rel_path}")
-                                except Exception as e:
-                                    print(f"[WARNING] Error handling settings file: {e}")
-                            else:
-                                # Copy regular file
-                                if os.path.exists(dst_file):
-                                    print(f"[INFO] Updating file: {rel_path}")
+                            # Always copy file even if folder exists
+                            try:
+                                # Handle special cases
+                                if rel_path == os.path.normpath("user/default/comfy.settings.json"):
+                                    try:
+                                        existing_settings = {}
+                                        if os.path.exists(dst_file):
+                                            with open(dst_file, "r", encoding="utf-8") as f:
+                                                existing_settings = json.load(f)
+                                        
+                                        with open(src_file, "r", encoding="utf-8") as f:
+                                            new_settings = json.load(f)
+                                        
+                                        # Preserve token
+                                        if "downloader.hf_token" in existing_settings:
+                                            new_settings["downloader.hf_token"] = existing_settings["downloader.hf_token"]
+                                        else:
+                                            new_settings["downloader.hf_token"] = token
+                                        
+                                        with open(dst_file, "w", encoding="utf-8") as f:
+                                            json.dump(new_settings, f, indent=2)
+                                        print(f"[INFO] Updated settings file: {rel_path}")
+                                    except Exception as e:
+                                        print(f"[WARNING] Error handling settings file: {e}")
                                 else:
-                                    print(f"[INFO] Copying new file: {rel_path}")
-                                shutil.copy2(src_file, dst_file)
-                    
+                                    # Copy regular file
+                                    if os.path.exists(dst_file):
+                                        print(f"[INFO] Updating file: {rel_path}")
+                                    else:
+                                        print(f"[INFO] Copying new file: {rel_path}")
+                                    shutil.copy2(src_file, dst_file)
+                                    print(f"[DEBUG] Successfully copied {rel_path}")
+                            except Exception as e:
+                                print(f"[ERROR] Failed to copy file {rel_path}: {e}")
+
                     # Process subdirectories
                     for key, value in struct.items():
                         if key != "files":
                             new_path = os.path.join(current_path, key)
                             dir_path = os.path.join(target_dir, new_path)
-                                
+                            
                             if not os.path.exists(dir_path):
                                 os.makedirs(dir_path)
                                 print(f"[INFO] Created directory: {os.path.relpath(dir_path, target_dir)}")
+                            else:
+                                print(f"[DEBUG] Using existing directory: {os.path.relpath(dir_path, target_dir)}")
                             # Process its contents
                             process_structure(value, new_path)
+
+                process_structure(folder_structure)
 
             # Clean up
             clear_cache_for_path(downloaded_folder)
