@@ -270,9 +270,32 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
 
     try:
         # Install nodes from the snapshot one by one
-        print("[DEBUG] Installing nodes from cnr_custom_nodes...")
+        print("[DEBUG] Installing nodes from git_custom_nodes...")
         with open(snapshot_file, 'r') as f:
             snapshot_data = yaml.safe_load(f)
+        git_custom_nodes = snapshot_data.get("git_custom_nodes", {})
+        if git_custom_nodes:
+            for repo_url, node_data in git_custom_nodes.items():
+                if node_data.get("disabled", False):
+                    print(f"[INFO] Skipping disabled node: {repo_url}")
+                    continue
+                try:
+                    print(f"[DEBUG] Installing node from repo: {repo_url}")
+                    install_result = subprocess.run(
+                        ["comfy", "node", "install", repo_url],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        cwd=comfy_dir
+                    )
+                    print(f"[DEBUG] comfy-cli install output for {repo_url}: {install_result.stdout}")
+                    print(f"[DEBUG] comfy-cli install error (if any) for {repo_url}: {install_result.stderr}")
+                except subprocess.CalledProcessError as e:
+                    print(f"[ERROR] Failed to install node from {repo_url}: {e.stderr}")
+        else:
+            print("[WARNING] No git_custom_nodes found to install.")
+
+        print("[DEBUG] Installing nodes from cnr_custom_nodes...")
         cnr_custom_nodes = snapshot_data.get("cnr_custom_nodes", {})
         if cnr_custom_nodes:
             for node_name, version in cnr_custom_nodes.items():
