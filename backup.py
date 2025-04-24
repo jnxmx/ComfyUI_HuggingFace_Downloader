@@ -4,6 +4,7 @@ import tempfile
 import shutil
 import time
 import zipfile
+import subprocess
 from huggingface_hub import HfApi
 from .parse_link import parse_link
 
@@ -172,18 +173,19 @@ def backup_to_huggingface(repo_name_or_link, folders, on_backup_start=None, on_b
                 temp_dirs.append(temp_dir)
                 print(f"[INFO] Created sanitized copy of '{folder}' at '{upload_path}' for upload.")
             elif is_custom_nodes:
-                zip_path, temp_dir = _create_custom_nodes_archive(folder)
+                # Create nodes.txt with git repository information
+                nodes_file, temp_dir = _create_custom_nodes_info(folder)
                 temp_dirs.append(temp_dir)
-                path_in_repo = os.path.join("ComfyUI", os.path.basename(folder))
-                print(f"[INFO] Created archive of custom_nodes at '{zip_path}'")
+                path_in_repo = os.path.join("ComfyUI", "custom_nodes.txt")
+                print(f"[INFO] Created nodes.txt at '{nodes_file}'")
                 _retry_upload(
                     api=api,
-                    upload_path=zip_path,
+                    upload_path=nodes_file,
                     repo_name=repo_name,
                     token=token,
-                    path_in_repo=path_in_repo + ".zip"
+                    path_in_repo=path_in_repo
                 )
-                print(f"[INFO] Upload of '{zip_path}' complete.")
+                print(f"[INFO] Upload of '{nodes_file}' complete.")
                 continue
 
             path_in_repo = os.path.basename(folder) # Default to base name
@@ -259,7 +261,7 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     Restore the 'ComfyUI' folder from a Hugging Face repository.
     Uses snapshot_download for faster parallel downloads.
     """
-    from huggingface_hub import snapshot_download
+    from huggingface_hub import snapshot_download, hf_hub_download
     import hf_transfer
     import requests.exceptions
     from collections import defaultdict
@@ -311,7 +313,19 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
         if not comfy_files:
             raise ValueError("No ComfyUI folder found in backup")
 
-        # Rest of the restore function remains the same
+        # Check for custom_nodes.txt first
+        if "ComfyUI/custom_nodes.txt" in comfy_files:
+            # Download and process nodes.txt
+            print("[INFO] Found custom_nodes.txt, restoring git repositories...")
+            nodes_file = hf_hub_download(
+                repo_id=repo_name,
+                filename="ComfyUI/custom_nodes.txt",
+                token=token
+            )
+            _restore_custom_nodes_from_info(nodes_file, target_dir)
+            print("[INFO] Custom nodes restoration complete")
+        
+        # Download the rest of the files
         comfy_temp = os.path.join(os.getcwd(), "temp")
         os.makedirs(comfy_temp, exist_ok=True)
         temp_dir = tempfile.mkdtemp(prefix="hf_dl_", dir=comfy_temp)
@@ -323,6 +337,7 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                 token=token,
                 local_dir=temp_dir,
                 allow_patterns=["ComfyUI/*"],
+                ignore_patterns=["ComfyUI/custom_nodes.txt"],  # Skip nodes.txt since we handled it
                 local_dir_use_symlinks=False,
                 max_workers=4  # Adjust based on system capabilities
             )
@@ -342,15 +357,13 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                         rel_path = os.path.relpath(src_file, source_dir)
                         dst_file = os.path.join(target_dir, rel_path)
                         
-                        # Handle custom_nodes.zip specially
-                        if rel_path == "custom_nodes.zip":
-                            _extract_custom_nodes_archive(src_file, target_dir)
-                            # Skip copying the zip file itself
+                        # Skip custom_nodes.txt since we already handled it
+                        if rel_path == "custom_nodes.txt":
                             continue
                             
                         # Handle other files normally
-                        if not os.path.exists(dst_file) or os.path.getsize(src_file) != os.path.getsize(dst_file):
-                            _safe_move_or_copy(src_file, dst_file)
+                        os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                        _safe_move_or_copy(src_file, dst_file)
 
             # Clean up
             clear_cache_for_path(downloaded_folder)
@@ -382,3 +395,105 @@ def _create_custom_nodes_archive(folder_path):
     
     print(f"[INFO] Created custom_nodes archive at '{zip_path}'")
     return zip_path, temp_dir
+
+def _get_git_remote_url(repo_path: str) -> str:
+    """Get the remote origin URL of a git repository"""
+    try:
+        result = subprocess.run(
+            ['git', 'config', '--get', 'remote.origin.url'],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return ""
+
+def _get_git_commit_hash(repo_path: str) -> str:
+    """Get the current commit hash of a git repository"""
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError:
+        return ""
+
+def _is_git_repo(path: str) -> bool:
+    """Check if a directory is a git repository"""
+    return os.path.isdir(os.path.join(path, '.git'))
+
+def _create_custom_nodes_info(folder_path: str) -> str:
+    """
+    Create nodes.txt containing git URLs and commit hashes for each custom node.
+    Returns the path to the created file.
+    """
+    temp_dir = tempfile.mkdtemp(prefix="comfyui_custom_nodes_")
+    nodes_file = os.path.join(temp_dir, "nodes.txt")
+    
+    with open(nodes_file, 'w', encoding='utf-8') as f:
+        for item in os.listdir(folder_path):
+            item_path = os.path.join(folder_path, item)
+            if os.path.isdir(item_path) and _is_git_repo(item_path):
+                remote_url = _get_git_remote_url(item_path)
+                commit_hash = _get_git_commit_hash(item_path)
+                if remote_url:
+                    f.write(f"{item}|{remote_url}|{commit_hash}\n")
+    
+    print(f"[INFO] Created nodes.txt with git repository information at '{nodes_file}'")
+    return nodes_file, temp_dir
+
+def _install_requirements(folder_path: str):
+    """Install Python requirements.txt if it exists in the folder"""
+    req_file = os.path.join(folder_path, 'requirements.txt')
+    if os.path.exists(req_file):
+        try:
+            subprocess.run(
+                ['pip', 'install', '-r', req_file],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            print(f"[INFO] Installed requirements for {folder_path}")
+        except subprocess.CalledProcessError as e:
+            print(f"[WARNING] Failed to install requirements for {folder_path}: {e.stderr}")
+
+def _restore_custom_nodes_from_info(nodes_file: str, target_dir: str):
+    """
+    Restore custom nodes by cloning/pulling git repositories and installing their requirements.
+    """
+    custom_nodes_dir = os.path.join(target_dir, "custom_nodes")
+    os.makedirs(custom_nodes_dir, exist_ok=True)
+    
+    with open(nodes_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            
+            try:
+                folder_name, repo_url, commit_hash = line.split('|')
+                target_path = os.path.join(custom_nodes_dir, folder_name)
+                
+                if os.path.exists(target_path):
+                    # Repository exists, update it
+                    if _is_git_repo(target_path):
+                        print(f"[INFO] Updating existing repository {folder_name}")
+                        subprocess.run(['git', 'fetch'], cwd=target_path, check=True)
+                        subprocess.run(['git', 'reset', '--hard', commit_hash], cwd=target_path, check=True)
+                else:
+                    # Clone new repository
+                    print(f"[INFO] Cloning repository {folder_name}")
+                    subprocess.run(['git', 'clone', repo_url, target_path], check=True)
+                    subprocess.run(['git', 'reset', '--hard', commit_hash], cwd=target_path, check=True)
+                
+                _install_requirements(target_path)
+                
+            except (ValueError, subprocess.CalledProcessError) as e:
+                print(f"[WARNING] Failed to restore repository {folder_name}: {str(e)}")
+                continue
