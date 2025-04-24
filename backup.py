@@ -247,7 +247,7 @@ def _backup_custom_nodes(target_dir: str) -> str:
 
 def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     """
-    Install nodes from snapshot one by one using comfy-cli.
+    Use comfy-cli to restore nodes from a snapshot.
     """
     comfy_dir = os.getcwd()
     custom_nodes_dir = os.path.join(comfy_dir, "custom_nodes")
@@ -256,7 +256,7 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     failed_nodes = []
 
     try:
-        with open(snapshot_file, 'r') as f:
+        with open(snapshot_file, "r") as f:
             snapshot_data = yaml.safe_load(f)
 
         # Install git nodes first
@@ -269,25 +269,28 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
                     continue
 
                 try:
-                    print(f"\n[INFO] Installing node: {repo_url}")
-                    # Use comfy node install with N for tracking consent
-                    process = subprocess.Popen(
-                        ["comfy", "node", "install", repo_url],
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
+                    repo_name = os.path.splitext(os.path.basename(repo_url))[0]
+                    repo_dir = os.path.join(custom_nodes_dir, repo_name)
+
+                    if os.path.exists(repo_dir):
+                        print(f"[INFO] Node {repo_name} already exists, skipping")
+                        continue
+
+                    print(f"[INFO] Cloning: {repo_url}")
+                    clone_result = subprocess.run(
+                        ["git", "clone", repo_url],
+                        capture_output=True,
                         text=True,
-                        cwd=comfy_dir
+                        cwd=custom_nodes_dir
                     )
-                    stdout, stderr = process.communicate(input='N\n')
                     
-                    if process.returncode != 0:
-                        print(f"[ERROR] Failed to install {repo_url}:")
-                        print(f"stderr: {stderr}")
-                        print(f"stdout: {stdout}")
+                    if clone_result.returncode != 0:
+                        print(f"[ERROR] Failed to clone {repo_url}:")
+                        print(f"stderr: {clone_result.stderr}")
+                        print(f"stdout: {clone_result.stdout}")
                         failed_nodes.append(repo_url)
                     else:
-                        print(f"[SUCCESS] Installed {repo_url}")
+                        print(f"[SUCCESS] Cloned {repo_url}")
 
                 except Exception as e:
                     print(f"[ERROR] Failed to install {repo_url}: {str(e)}")
@@ -295,14 +298,14 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
         else:
             print("[INFO] No git custom nodes found to install")
 
-        # Install CNR nodes
+        # Install CNR nodes using comfy-cli
         print("\n[INFO] Installing nodes from CNR registry...")
         cnr_custom_nodes = snapshot_data.get("cnr_custom_nodes", {})
         if cnr_custom_nodes:
             for node_name, version in cnr_custom_nodes.items():
                 try:
-                    print(f"\n[INFO] Installing CNR node: {node_name}")
-                    # Use comfy node install with N for tracking consent
+                    print(f"[INFO] Installing CNR node: {node_name}")
+                    # Answer N to tracking prompt for each node installation
                     process = subprocess.Popen(
                         ["comfy", "node", "install", node_name],
                         stdin=subprocess.PIPE,
@@ -311,7 +314,8 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
                         text=True,
                         cwd=comfy_dir
                     )
-                    stdout, stderr = process.communicate(input='N\n')
+                    
+                    stdout, stderr = process.communicate(input="N\n")
                     
                     if process.returncode != 0:
                         print(f"[ERROR] Failed to install CNR node {node_name}:")
@@ -320,6 +324,8 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
                         failed_nodes.append(node_name)
                     else:
                         print(f"[SUCCESS] Installed CNR node {node_name}")
+                        if stdout:
+                            print(f"[DEBUG] Install output:\n{stdout}")
 
                 except Exception as e:
                     print(f"[ERROR] Failed to install CNR node {node_name}: {str(e)}")
@@ -631,7 +637,7 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
 
             # Move files from snapshot to target directory
             source_dir = os.path.join(downloaded_folder, "ComfyUI")
-            if os.path.exists(source_dir):
+            if (os.path.exists(source_dir)):
                 print("\n[INFO] Moving downloaded files to target directory...")
                 
                 def process_structure(struct, current_path=""):
