@@ -72,7 +72,9 @@ app.registerExtension({
 			ta.value = `custom_nodes/ #Custom nodes folder
 user/ #User settings and workflows folder
 models/loras 
-models/checkpoints/ #Below the size limit`; // Default content
+models/upscale_models
+models/controlnet
+models/checkpoints #Below the size limit`; // Default content
 			Object.assign(ta.style, {
 				width: "100%",
 				resize: "vertical",

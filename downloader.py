@@ -5,11 +5,13 @@ import tempfile
 import threading
 import time
 import json
+import zipfile
 
 from huggingface_hub import (
     hf_hub_download,
     snapshot_download,
-    scan_cache_dir
+    scan_cache_dir,
+    list_repo_files
 )
 
 token_override = os.getenv("HF_TOKEN")
@@ -224,3 +226,119 @@ def run_download_folder(parsed_data: dict,
     clear_cache_for_path(downloaded_folder)
 
     return (final_message, dest_path) if sync else ("", "")
+
+
+def scan_repo_root(repo_id: str, token: str = None) -> tuple[list[str], list[str]]:
+    """
+    Scan a repository's root folder for subfolders and files.
+    Returns (folders, files) where each is a list of names found at root level.
+    """
+    try:
+        all_files = list_repo_files(repo_id, token=token)
+        folders = set()
+        root_files = set()
+        
+        for path in all_files:
+            parts = path.split('/')
+            if len(parts) > 1:
+                folders.add(parts[0])
+            else:
+                root_files.add(path)
+                
+        return sorted(list(folders)), sorted(list(root_files))
+    except Exception as e:
+        print(f"[ERROR] Failed to scan repository root: {e}")
+        raise
+
+def extract_custom_nodes(zip_path: str, comfy_root: str) -> str:
+    """
+    Extract custom_nodes.zip to the custom_nodes folder in ComfyUI root.
+    Returns the path to the extracted folder.
+    """
+    custom_nodes_dir = os.path.join(comfy_root, "custom_nodes")
+    os.makedirs(custom_nodes_dir, exist_ok=True)
+    
+    print(f"[INFO] Extracting custom_nodes.zip to {custom_nodes_dir}")
+    with zipfile.ZipFile(zip_path, 'r') as zipf:
+        zipf.extractall(custom_nodes_dir)
+    
+    return custom_nodes_dir
+
+def download_repo_contents(parsed_data: dict, comfy_root: str, sync: bool = True) -> tuple[str, list[str]]:
+    """
+    Download all contents from a repository's root level:
+    1. Scan for subfolders and files
+    2. Download each folder to ComfyUI root
+    3. Handle custom_nodes.zip specially if it exists
+    
+    Returns (message, list of downloaded paths)
+    """
+    token = get_token()
+    downloaded_paths = []
+    
+    try:
+        folders, files = scan_repo_root(parsed_data["repo"], token)
+        print(f"[INFO] Found {len(folders)} folders and {len(files)} files at root level")
+        
+        # First handle folders
+        for folder in folders:
+            if folder == ".git":  # Skip git metadata
+                continue
+                
+            folder_parsed = parsed_data.copy()
+            folder_parsed["subfolder"] = folder
+            
+            message, folder_path = run_download_folder(
+                folder_parsed,
+                folder,  # Use the folder name as the final folder
+                remote_subfolder_path=folder,
+                sync=True  # Always sync for better control
+            )
+            
+            if folder_path:
+                downloaded_paths.append(folder_path)
+                print(f"[INFO] Downloaded folder: {message}")
+        
+        # Then handle root files
+        for file in files:
+            if file == "custom_nodes.zip":
+                # Special handling for custom_nodes.zip
+                file_parsed = parsed_data.copy()
+                file_parsed["file"] = file
+                
+                message, zip_path = run_download(
+                    file_parsed,
+                    "temp",  # Temporary location
+                    sync=True
+                )
+                
+                if zip_path:
+                    custom_nodes_dir = extract_custom_nodes(zip_path, comfy_root)
+                    downloaded_paths.append(custom_nodes_dir)
+                    print(f"[INFO] Extracted custom_nodes.zip")
+                    # Clean up the temporary zip file
+                    try:
+                        os.remove(zip_path)
+                    except:
+                        pass
+            else:
+                # Regular file download to root
+                file_parsed = parsed_data.copy()
+                file_parsed["file"] = file
+                
+                message, file_path = run_download(
+                    file_parsed,
+                    "",  # Empty for root
+                    sync=True
+                )
+                
+                if file_path:
+                    downloaded_paths.append(file_path)
+                    print(f"[INFO] Downloaded file: {message}")
+        
+        final_message = f"Downloaded {len(downloaded_paths)} items from repository root"
+        return (final_message, downloaded_paths) if sync else ("", [])
+    except Exception as e:
+        error_msg = f"Failed to download repository contents: {e}"
+        print("[ERROR]", error_msg)
+        raise RuntimeError(error_msg)

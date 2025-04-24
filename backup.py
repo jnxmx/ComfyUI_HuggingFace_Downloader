@@ -3,6 +3,7 @@ import json
 import tempfile
 import shutil
 import time
+import zipfile
 from huggingface_hub import HfApi
 from .parse_link import parse_link
 
@@ -150,13 +151,31 @@ def backup_to_huggingface(repo_name_or_link, folders, on_backup_start=None, on_b
             folder = os.path.normpath(folder)
             rel_path = os.path.basename(folder)
             is_user = rel_path == "user" or rel_path.startswith("user" + os.sep)
+            is_custom_nodes = rel_path == "custom_nodes" or rel_path.startswith("custom_nodes" + os.sep)
             upload_path = folder
             temp_dir = None
+
+            # Handle special cases: user folder and custom_nodes
             if is_user:
                 temp_dir = tempfile.mkdtemp(prefix="comfyui_user_strip_")
                 upload_path = _copy_and_strip_token(folder, temp_dir)
                 temp_dirs.append(temp_dir)
                 print(f"[INFO] Created sanitized copy of '{folder}' at '{upload_path}' for upload.")
+            elif is_custom_nodes:
+                zip_path, temp_dir = _create_custom_nodes_archive(folder)
+                temp_dirs.append(temp_dir)
+                upload_path = os.path.dirname(zip_path)
+                path_in_repo = os.path.join("ComfyUI", os.path.basename(folder))
+                print(f"[INFO] Created archive of custom_nodes at '{zip_path}'")
+                _retry_upload(
+                    api=api,
+                    upload_path=zip_path,
+                    repo_name=repo_name,
+                    token=token,
+                    path_in_repo=path_in_repo + ".zip"
+                )
+                print(f"[INFO] Upload of '{zip_path}' complete.")
+                continue
 
             path_in_repo = os.path.basename(folder) # Default to base name
             if os.path.isabs(folder):
@@ -213,13 +232,27 @@ def _safe_move_or_copy(src, dst):
         else:
             shutil.copy2(src, dst)
 
+def _extract_custom_nodes_archive(src_file, target_dir):
+    """
+    Extract custom_nodes.zip to the target directory.
+    """
+    custom_nodes_dir = os.path.join(target_dir, "custom_nodes")
+    print(f"[INFO] Extracting custom_nodes archive to '{custom_nodes_dir}'")
+    
+    with zipfile.ZipFile(src_file, 'r') as zipf:
+        zipf.extractall(custom_nodes_dir)
+    
+    print(f"[INFO] Successfully extracted custom_nodes archive")
+    return custom_nodes_dir
+
 def restore_from_huggingface(repo_name_or_link, target_dir=None):
     """
     Restore the 'ComfyUI' folder from a Hugging Face repository.
     Uses snapshot_download for faster parallel downloads.
     """
-    from huggingface_hub import snapshot_download, HfHubHTTPError
+    from huggingface_hub import snapshot_download
     import hf_transfer
+    import requests.exceptions
     from collections import defaultdict
     from .downloader import clear_cache_for_path, folder_size
 
@@ -244,17 +277,18 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
             repo_info = api.repo_info(repo_id=repo_name, token=token)
             if not repo_info:
                 raise ValueError(f"Repository {repo_name} not found or not accessible")
-        except HfHubHTTPError as e:
-            if e.response.status_code == 401:
+        except requests.exceptions.HTTPError as e:
+            status_code = getattr(e.response, 'status_code', None)
+            if status_code == 401:
                 raise ValueError(f"Invalid token for repository '{repo_name}'. Please check your token in settings.")
-            elif e.response.status_code == 403:
+            elif status_code == 403:
                 raise ValueError(f"Access denied to repository '{repo_name}'. Please verify permissions and token.")
-            elif e.response.status_code == 404:
+            elif status_code == 404:
                 raise ValueError(f"Repository '{repo_name}' not found. Please verify the repository name/link.")
             else:
                 raise ValueError(f"Error accessing repository: {str(e)}")
         except Exception as e:
-            if "<!DOCTYPE" in str(e):
+            if isinstance(e, (ValueError, RuntimeError)) and "<!DOCTYPE" in str(e):
                 raise ValueError("Network error or invalid response from Hugging Face. Please check your internet connection.")
             raise
 
@@ -298,6 +332,14 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                         src_file = os.path.join(root, f)
                         rel_path = os.path.relpath(src_file, source_dir)
                         dst_file = os.path.join(target_dir, rel_path)
+                        
+                        # Handle custom_nodes.zip specially
+                        if rel_path == "custom_nodes.zip":
+                            _extract_custom_nodes_archive(src_file, target_dir)
+                            # Skip copying the zip file itself
+                            continue
+                            
+                        # Handle other files normally
                         if not os.path.exists(dst_file) or os.path.getsize(src_file) != os.path.getsize(dst_file):
                             _safe_move_or_copy(src_file, dst_file)
 
@@ -313,3 +355,21 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     except Exception as e:
         print(f"[ERROR] Failed to restore: {e}")
         raise
+
+def _create_custom_nodes_archive(folder_path):
+    """
+    Create a ZIP archive of the custom_nodes folder.
+    Returns the path to the created archive.
+    """
+    temp_dir = tempfile.mkdtemp(prefix="comfyui_custom_nodes_")
+    zip_path = os.path.join(temp_dir, "custom_nodes.zip")
+    
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk(folder_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, folder_path)
+                zipf.write(file_path, arcname)
+    
+    print(f"[INFO] Created custom_nodes archive at '{zip_path}'")
+    return zip_path, temp_dir
