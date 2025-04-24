@@ -344,62 +344,82 @@ def download_repo_contents(parsed_data: dict, comfy_root: str, sync: bool = True
         print("[ERROR]", error_msg)
         raise RuntimeError(error_msg)
 
-def merge_and_update_yaml(repo_id: str, token: str, local_snapshot: dict, yaml_filename: str = "backup.yaml"):
+def merge_and_update_yaml(repo_id: str, token: str, local_snapshot: dict, yaml_filename: str = "custom_nodes_snapshot.yaml"):
     """
     Merge the `cnr_custom_nodes` list from the existing YAML file in the repo with the local snapshot.
     Clean the `pips` section and upload the updated YAML file back to the repository.
     """
     try:
+        # Import HfApi here to avoid circular imports
+        from huggingface_hub import HfApi
+
+        print("[DEBUG] Starting YAML merge process...")
+
         # Check if the YAML file exists in the repository
-        folders, files = scan_repo_root(repo_id, token)
+        files = list_repo_files(repo_id, token=token)
         if yaml_filename in files:
-            print(f"[INFO] Found existing YAML file: {yaml_filename}")
+            print(f"[DEBUG] Found existing YAML file: {yaml_filename}")
             # Download the existing YAML file
             yaml_path = hf_hub_download(repo_id=repo_id, filename=yaml_filename, token=token)
             with open(yaml_path, "r") as f:
                 existing_data = yaml.safe_load(f)
+                print(f"[DEBUG] Loaded existing data from {yaml_filename}")
         else:
-            print(f"[INFO] No existing YAML file found. Creating a new one.")
+            print(f"[DEBUG] No existing YAML file found. Creating new one.")
             existing_data = {}
 
         # Merge `cnr_custom_nodes` with priority to local versions
         existing_nodes = existing_data.get("cnr_custom_nodes", {})
         local_nodes = local_snapshot.get("cnr_custom_nodes", {})
+        print(f"[DEBUG] Merging cnr_custom_nodes (existing: {len(existing_nodes)}, local: {len(local_nodes)})")
         merged_nodes = {**existing_nodes, **local_nodes}  # Local nodes take priority
 
         # Merge `git_custom_nodes` with priority to local versions
         existing_git_nodes = existing_data.get("git_custom_nodes", {})
         local_git_nodes = local_snapshot.get("git_custom_nodes", {})
+        print(f"[DEBUG] Merging git_custom_nodes (existing: {len(existing_git_nodes)}, local: {len(local_git_nodes)})")
         merged_git_nodes = {**existing_git_nodes, **local_git_nodes}  # Local git nodes take priority
 
-        # Update the YAML data
+        # Create new data structure with empty pips
         updated_data = {
             "comfyui": local_snapshot.get("comfyui", ""),
             "git_custom_nodes": merged_git_nodes,
             "cnr_custom_nodes": merged_nodes,
             "file_custom_nodes": local_snapshot.get("file_custom_nodes", []),
-            "pips": {}  # Clean the `pips` section
+            "pips": {}  # Explicitly empty dictionary
         }
 
-        # Ensure the `pips` section is explicitly set to an empty dictionary
-        updated_data["pips"] = {}
+        print("[DEBUG] Final structure:")
+        print(f"- git_custom_nodes: {len(updated_data['git_custom_nodes'])} entries")
+        print(f"- cnr_custom_nodes: {len(updated_data['cnr_custom_nodes'])} entries")
+        print(f"- file_custom_nodes: {len(updated_data['file_custom_nodes'])} entries")
+        print("- pips: empty dictionary")
 
-        # Save the updated YAML file locally
-        updated_yaml_path = os.path.join(tempfile.gettempdir(), yaml_filename)
-        with open(updated_yaml_path, "w") as f:
-            yaml.safe_dump(updated_data, f)
+        # Save to temp file
+        temp_dir = tempfile.mkdtemp(prefix="comfyui_snapshot_")
+        temp_path = os.path.join(temp_dir, yaml_filename)
+        
+        with open(temp_path, "w") as f:
+            yaml.safe_dump(updated_data, f, sort_keys=False)
+        
+        print(f"[DEBUG] Saved updated YAML to: {temp_path}")
 
-        print(f"[INFO] Updated YAML file saved locally: {updated_yaml_path}")
-
-        # Upload the updated YAML file back to the repository
+        # Upload back to repo
         api = HfApi()
         api.upload_file(
-            path_or_fileobj=updated_yaml_path,
+            path_or_fileobj=temp_path,
             path_in_repo=yaml_filename,
             repo_id=repo_id,
             token=token
         )
-        print(f"[INFO] Updated YAML file uploaded to repository: {yaml_filename}")
+        print(f"[INFO] Successfully uploaded updated {yaml_filename} to repository")
+
+        # Cleanup
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as e:
+            print(f"[WARNING] Failed to cleanup temp directory: {e}")
 
     except Exception as e:
-        print(f"[ERROR] Failed to merge and update YAML file: {e}")
+        print(f"[ERROR] Failed to merge and update YAML: {e}")
+        raise
