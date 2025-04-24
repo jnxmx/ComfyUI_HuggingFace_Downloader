@@ -100,13 +100,23 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, max_retries=
     
     for attempt in range(max_retries):
         try:
-            return api.upload_folder(
-                folder_path=upload_path,
-                repo_id=repo_name,
-                token=token,
-                path_in_repo=path_in_repo,
-                ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
-            )
+            # Handle single file vs directory upload differently
+            if os.path.isfile(upload_path):
+                api.upload_file(
+                    path_or_fileobj=upload_path,
+                    path_in_repo=path_in_repo,
+                    repo_id=repo_name,
+                    token=token
+                )
+            else:
+                api.upload_folder(
+                    folder_path=upload_path,
+                    repo_id=repo_name,
+                    token=token,
+                    path_in_repo=path_in_repo,
+                    ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
+                )
+            return True
         except Exception as e:
             last_error = e
             if attempt < max_retries - 1:
@@ -164,7 +174,6 @@ def backup_to_huggingface(repo_name_or_link, folders, on_backup_start=None, on_b
             elif is_custom_nodes:
                 zip_path, temp_dir = _create_custom_nodes_archive(folder)
                 temp_dirs.append(temp_dir)
-                upload_path = os.path.dirname(zip_path)
                 path_in_repo = os.path.join("ComfyUI", os.path.basename(folder))
                 print(f"[INFO] Created archive of custom_nodes at '{zip_path}'")
                 _retry_upload(
