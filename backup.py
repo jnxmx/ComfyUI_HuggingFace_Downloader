@@ -184,19 +184,17 @@ def _backup_custom_nodes(target_dir: str) -> str:
         print(f"[DEBUG] comfy-cli output: {result.stdout}")
         print(f"[DEBUG] comfy-cli error (if any): {result.stderr}")
 
-        # Find the most recently created snapshot file (supporting both .yaml and .json)
+        # Extract snapshot file name and path directly from comfy-cli output
         snapshot_file = None
-        if os.path.exists(snapshots_dir):
-            snapshot_files = [(f, os.path.getmtime(os.path.join(snapshots_dir, f))) 
-                            for f in os.listdir(snapshots_dir)
-                            if f.endswith('.yaml') or f.endswith('.json')]
-            if snapshot_files:
-                snapshot_files.sort(key=lambda x: x[1], reverse=True)
-                snapshot_file = os.path.join(snapshots_dir, snapshot_files[0][0])
+        for line in result.stdout.splitlines():
+            if "Current snapshot is saved as" in line:
+                snapshot_file_name = line.split("`", 1)[-1].rsplit("`", 1)[0]
+                snapshot_file = os.path.abspath(os.path.join(comfy_dir, "user", "default", "ComfyUI-Manager", "snapshots", snapshot_file_name))
+                break
 
-        print(f"[DEBUG] Most recent snapshot file: {snapshot_file}")
+        print(f"[DEBUG] Extracted snapshot file path: {snapshot_file}")
 
-        if not snapshot_file:
+        if not snapshot_file or not os.path.exists(snapshot_file):
             raise RuntimeError("Could not find generated snapshot file")
             
         snapshot_dest = os.path.join(temp_dir, "custom_nodes_snapshot.yaml")
