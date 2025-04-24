@@ -637,7 +637,7 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
 
             # Move files from snapshot to target directory
             source_dir = os.path.join(downloaded_folder, "ComfyUI")
-            if (os.path.exists(source_dir)):
+            if os.path.exists(source_dir):
                 print("\n[INFO] Moving downloaded files to target directory...")
                 
                 def process_structure(struct, current_path=""):
@@ -688,16 +688,13 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                     for key, value in struct.items():
                         if key != "files":
                             new_path = os.path.join(current_path, key)
-                            # Create directory
                             dir_path = os.path.join(target_dir, new_path)
+                                
                             if not os.path.exists(dir_path):
                                 os.makedirs(dir_path)
-                                print(f"[INFO] Created directory: {new_path}")
+                                print(f"[INFO] Created directory: {os.path.relpath(dir_path, target_dir)}")
                             # Process its contents
                             process_structure(value, new_path)
-                
-                # Process the entire structure
-                process_structure(folder_structure)
 
             # Clean up
             clear_cache_for_path(downloaded_folder)
