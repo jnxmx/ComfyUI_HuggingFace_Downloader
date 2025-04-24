@@ -169,22 +169,6 @@ def _backup_custom_nodes(target_dir: str) -> str:
         print(f"[DEBUG] Detected ComfyUI root directory: {comfy_dir}")
         print(f"[DEBUG] Checking for 'custom_nodes' folder at: {os.path.join(comfy_dir, 'custom_nodes')}")
 
-        # Install nodes before saving snapshot
-        print("[DEBUG] Installing nodes before saving snapshot...")
-        try:
-            install_result = subprocess.run(
-                ["comfy", "node", "install"],
-                check=True,
-                capture_output=True,
-                text=True,
-                cwd=comfy_dir
-            )
-            print(f"[DEBUG] comfy-cli install output: {install_result.stdout}")
-            print(f"[DEBUG] comfy-cli install error (if any): {install_result.stderr}")
-        except subprocess.CalledProcessError as e:
-            print(f"[ERROR] comfy-cli install failed: {e.stderr}")
-            raise
-
         # Save snapshot using comfy-cli
         print("[DEBUG] Saving snapshot using comfy-cli...")
         try:
@@ -285,6 +269,24 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     shutil.copy2(snapshot_file, snapshot_dest)
 
     try:
+        # Install nodes from the snapshot before restoring
+        print("[DEBUG] Installing nodes from snapshot...")
+        with open(snapshot_dest, 'r') as f:
+            snapshot_data = yaml.safe_load(f)
+        nodes_to_install = snapshot_data.get("git_custom_nodes", {}).keys()
+        if nodes_to_install:
+            install_result = subprocess.run(
+                ["comfy", "node", "install", *nodes_to_install],
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=comfy_dir
+            )
+            print(f"[DEBUG] comfy-cli install output: {install_result.stdout}")
+            print(f"[DEBUG] comfy-cli install error (if any): {install_result.stderr}")
+        else:
+            print("[WARNING] No nodes found to install from snapshot.")
+
         # Restore using comfy-cli
         subprocess.run(
             ["comfy", "node", "restore-snapshot", snapshot_dest],
