@@ -307,10 +307,21 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
             for node_name, version in cnr_custom_nodes.items():
                 try:
                     print(f"\n[INFO] Installing CNR node: {node_name}")
-                    # Use git clone for CNR nodes too
+                    # Convert node name to GitHub URL correctly
                     if not node_name.startswith("http"):
-                        # Convert node name to GitHub URL
-                        repo_url = f"https://github.com/{node_name}.git"
+                        if '/' in node_name:
+                            # If it's already in owner/repo format, use it directly
+                            repo_url = f"https://github.com/{node_name}.git"
+                        else:
+                            # Known node mappings
+                            node_mappings = {
+                                "comfyui-animatediff-evolved": "Kosinkadink/ComfyUI-AnimateDiff-Evolved",
+                                "comfyui-hunyuanvideowrapper": "YanWenKun/ComfyUI-HunyuanVideoWrapper",
+                                "comfyui_ipadapter_plus": "cubiq/ComfyUI_IPAdapter_Plus"
+                            }
+                            # Try to get from known mappings, otherwise just use as-is
+                            mapped_name = node_mappings.get(node_name, node_name)
+                            repo_url = f"https://github.com/{mapped_name}.git"
                     else:
                         repo_url = node_name
 
@@ -321,6 +332,7 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
                         print(f"[INFO] Node {repo_name} already exists, skipping: {repo_url}")
                         continue
 
+                    print(f"[INFO] Cloning from: {repo_url}")
                     clone_result = subprocess.run(
                         ["git", "clone", repo_url],
                         capture_output=True,
