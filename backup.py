@@ -169,6 +169,20 @@ def _backup_custom_nodes(target_dir: str) -> str:
         print(f"[DEBUG] Detected ComfyUI root directory: {comfy_dir}")
         print(f"[DEBUG] Checking for 'custom_nodes' folder at: {os.path.join(comfy_dir, 'custom_nodes')}")
 
+        # Install nodes before saving snapshot
+        print("[DEBUG] Installing nodes before saving snapshot...")
+        install_result = subprocess.run(
+            ["comfy", "node", "install"],
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=comfy_dir
+        )
+        print(f"[DEBUG] comfy-cli install output: {install_result.stdout}")
+        print(f"[DEBUG] comfy-cli install error (if any): {install_result.stderr}")
+        if install_result.returncode != 0:
+            print("[WARNING] Node installation failed. Proceeding with snapshot creation.")
+
         # Save snapshot using comfy-cli
         result = subprocess.run(
             ["comfy", "node", "save-snapshot"],
