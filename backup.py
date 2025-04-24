@@ -591,7 +591,15 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                             
                         # Handle other files normally
                         os.makedirs(os.path.dirname(dst_file), exist_ok=True)
-                        _safe_move_or_copy(src_file, dst_file)
+                        if rel_path == "user/default/comfy.settings.json":
+                            # Preserve HF_TOKEN in the new settings file
+                            with open(src_file, "r", encoding="utf-8") as f:
+                                new_settings = json.load(f)
+                            new_settings["downloader.hf_token"] = token
+                            with open(dst_file, "w", encoding="utf-8") as f:
+                                json.dump(new_settings, f, indent=2)
+                        else:
+                            shutil.copy2(src_file, dst_file)
 
             # Clean up
             clear_cache_for_path(downloaded_folder)
