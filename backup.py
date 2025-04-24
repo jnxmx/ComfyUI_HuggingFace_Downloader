@@ -249,30 +249,20 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     """
     Use comfy-cli to restore custom nodes from a snapshot.
     """
-    # First save current state as backup
-    try:
-        subprocess.run(
-            ["comfy", "node", "save-snapshot"],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-        print("[INFO] Saved current nodes state as backup")
-    except subprocess.CalledProcessError as e:
-        print(f"[WARNING] Failed to backup current nodes state: {e.stderr}")
-
-    # Create a temporary folder inside ComfyUI for the snapshot
     comfy_dir = os.getcwd()
     temp_dir = os.path.join(comfy_dir, "temp_snapshots")
     os.makedirs(temp_dir, exist_ok=True)
     snapshot_dest = os.path.join(temp_dir, "restore_snapshot.yaml")
     shutil.copy2(snapshot_file, snapshot_dest)
 
+    failed_nodes = []
+
     try:
-        # Install nodes from the snapshot one by one
-        print("[DEBUG] Installing nodes from git_custom_nodes...")
         with open(snapshot_file, 'r') as f:
             snapshot_data = yaml.safe_load(f)
+
+        # Install git nodes first
+        print("\n[INFO] Installing nodes from git repositories...")
         git_custom_nodes = snapshot_data.get("git_custom_nodes", {})
         if git_custom_nodes:
             for repo_url, node_data in git_custom_nodes.items():
@@ -280,47 +270,60 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
                     print(f"[INFO] Skipping disabled node: {repo_url}")
                     continue
                 try:
-                    print(f"[DEBUG] Installing node from repo: {repo_url}")
+                    print(f"\n[INFO] Installing node from: {repo_url}")
                     install_result = subprocess.run(
                         ["comfy", "node", "install", repo_url],
-                        check=True,
                         capture_output=True,
                         text=True,
                         cwd=comfy_dir
                     )
-                    print(f"[DEBUG] comfy-cli install output for {repo_url}: {install_result.stdout}")
-                    print(f"[DEBUG] comfy-cli install error (if any) for {repo_url}: {install_result.stderr}")
-                except subprocess.CalledProcessError as e:
-                    print(f"[ERROR] Failed to install node from {repo_url}: {e.stderr}")
+                    if install_result.returncode != 0:
+                        print(f"[ERROR] Failed to install {repo_url}:")
+                        print(f"stderr: {install_result.stderr}")
+                        print(f"stdout: {install_result.stdout}")
+                        failed_nodes.append(repo_url)
+                    else:
+                        print(f"[SUCCESS] Installed {repo_url}")
+                except Exception as e:
+                    print(f"[ERROR] Failed to install {repo_url}: {str(e)}")
+                    failed_nodes.append(repo_url)
         else:
-            print("[WARNING] No git_custom_nodes found to install.")
+            print("[INFO] No git custom nodes found to install")
 
-        print("[DEBUG] Installing nodes from cnr_custom_nodes...")
+        # Install other custom nodes
+        print("\n[INFO] Installing other custom nodes...")
         cnr_custom_nodes = snapshot_data.get("cnr_custom_nodes", {})
         if cnr_custom_nodes:
             for node_name, version in cnr_custom_nodes.items():
                 try:
-                    print(f"[DEBUG] Installing node: {node_name} (version: {version})")
+                    print(f"\n[INFO] Installing node: {node_name}")
                     install_result = subprocess.run(
                         ["comfy", "node", "install", node_name],
-                        check=True,
                         capture_output=True,
                         text=True,
                         cwd=comfy_dir
                     )
-                    print(f"[DEBUG] comfy-cli install output for {node_name}: {install_result.stdout}")
-                    print(f"[DEBUG] comfy-cli install error (if any) for {node_name}: {install_result.stderr}")
-                except subprocess.CalledProcessError as e:
-                    print(f"[ERROR] Failed to install node {node_name}: {e.stderr}")
+                    if install_result.returncode != 0:
+                        print(f"[ERROR] Failed to install {node_name}:")
+                        print(f"stderr: {install_result.stderr}")
+                        print(f"stdout: {install_result.stdout}")
+                        failed_nodes.append(node_name)
+                    else:
+                        print(f"[SUCCESS] Installed {node_name}")
+                except Exception as e:
+                    print(f"[ERROR] Failed to install {node_name}: {str(e)}")
+                    failed_nodes.append(node_name)
         else:
-            print("[WARNING] No nodes found in cnr_custom_nodes to install.")
+            print("[INFO] No custom nodes found to install")
 
-    except subprocess.CalledProcessError as e:
-        print(f"[ERROR] Failed to restore nodes: {e.stderr}")
-        raise
+        if failed_nodes:
+            print("\n[WARNING] The following nodes failed to install:")
+            for node in failed_nodes:
+                print(f"- {node}")
+        else:
+            print("\n[SUCCESS] All nodes were installed successfully")
 
     finally:
-        # Clean up temporary snapshot folder
         shutil.rmtree(temp_dir, ignore_errors=True)
         print(f"[INFO] Cleaned up temporary snapshot folder: {temp_dir}")
 
