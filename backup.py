@@ -247,119 +247,36 @@ def _backup_custom_nodes(target_dir: str) -> str:
 
 def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     """
-    Use direct git clone to restore nodes from a snapshot.
+    Use comfy-cli to restore nodes from a snapshot.
     """
     comfy_dir = os.getcwd()
     custom_nodes_dir = os.path.join(comfy_dir, "custom_nodes")
     os.makedirs(custom_nodes_dir, exist_ok=True)
 
-    failed_nodes = []
-
     try:
-        with open(snapshot_file, 'r') as f:
-            snapshot_data = yaml.safe_load(f)
-
-        # Install git nodes first
-        print("\n[INFO] Installing nodes from git repositories...")
-        git_custom_nodes = snapshot_data.get("git_custom_nodes", {})
-        if git_custom_nodes:
-            for repo_url, node_data in git_custom_nodes.items():
-                if node_data.get("disabled", False):
-                    print(f"[INFO] Skipping disabled node: {repo_url}")
-                    continue
-
-                try:
-                    repo_name = os.path.splitext(os.path.basename(repo_url))[0]
-                    repo_dir = os.path.join(custom_nodes_dir, repo_name)
-                    
-                    if os.path.exists(repo_dir):
-                        print(f"[INFO] Node {repo_name} already exists, skipping: {repo_url}")
-                        continue
-
-                    print(f"\n[INFO] Cloning repo: {repo_url}")
-                    # Clone the repository
-                    clone_result = subprocess.run(
-                        ["git", "clone", repo_url],
-                        capture_output=True,
-                        text=True,
-                        cwd=custom_nodes_dir
-                    )
-                    
-                    if clone_result.returncode != 0:
-                        print(f"[ERROR] Failed to clone {repo_url}:")
-                        print(f"stderr: {clone_result.stderr}")
-                        print(f"stdout: {clone_result.stdout}")
-                        failed_nodes.append(repo_url)
-                        continue
-
-                    print(f"[SUCCESS] Cloned {repo_url}")
-
-                except Exception as e:
-                    print(f"[ERROR] Failed to install {repo_url}: {str(e)}")
-                    failed_nodes.append(repo_url)
+        print("\n[INFO] Restoring nodes from snapshot...")
+        # Pass N to the tracking consent prompt
+        process = subprocess.Popen(
+            ["comfy", "node", "restore-snapshot", snapshot_file],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=comfy_dir
+        )
+        
+        # Send 'N' to the tracking consent prompt and get output
+        stdout, stderr = process.communicate(input="N\n")
+        
+        if process.returncode != 0:
+            print(f"[ERROR] Failed to restore nodes from snapshot:")
+            print(f"stderr: {stderr}")
+            print(f"stdout: {stdout}")
+            raise RuntimeError("Failed to restore nodes from snapshot")
         else:
-            print("[INFO] No git custom nodes found to install")
-
-        # Install CNR nodes
-        print("\n[INFO] Installing nodes from CNR registry...")
-        cnr_custom_nodes = snapshot_data.get("cnr_custom_nodes", {})
-        if cnr_custom_nodes:
-            for node_name, version in cnr_custom_nodes.items():
-                try:
-                    print(f"\n[INFO] Installing CNR node: {node_name}")
-                    # Convert node name to GitHub URL correctly
-                    if not node_name.startswith("http"):
-                        if '/' in node_name:
-                            # If it's already in owner/repo format, use it directly
-                            repo_url = f"https://github.com/{node_name}.git"
-                        else:
-                            # Known node mappings
-                            node_mappings = {
-                                "comfyui-animatediff-evolved": "Kosinkadink/ComfyUI-AnimateDiff-Evolved",
-                                "comfyui-hunyuanvideowrapper": "YanWenKun/ComfyUI-HunyuanVideoWrapper",
-                                "comfyui_ipadapter_plus": "cubiq/ComfyUI_IPAdapter_Plus"
-                            }
-                            # Try to get from known mappings, otherwise just use as-is
-                            mapped_name = node_mappings.get(node_name, node_name)
-                            repo_url = f"https://github.com/{mapped_name}.git"
-                    else:
-                        repo_url = node_name
-
-                    repo_name = os.path.splitext(os.path.basename(repo_url))[0]
-                    repo_dir = os.path.join(custom_nodes_dir, repo_name)
-
-                    if os.path.exists(repo_dir):
-                        print(f"[INFO] Node {repo_name} already exists, skipping: {repo_url}")
-                        continue
-
-                    print(f"[INFO] Cloning from: {repo_url}")
-                    clone_result = subprocess.run(
-                        ["git", "clone", repo_url],
-                        capture_output=True,
-                        text=True,
-                        cwd=custom_nodes_dir
-                    )
-                    
-                    if clone_result.returncode != 0:
-                        print(f"[ERROR] Failed to clone CNR node {node_name}:")
-                        print(f"stderr: {clone_result.stderr}")
-                        print(f"stdout: {clone_result.stdout}")
-                        failed_nodes.append(node_name)
-                    else:
-                        print(f"[SUCCESS] Installed CNR node {node_name}")
-
-                except Exception as e:
-                    print(f"[ERROR] Failed to install CNR node {node_name}: {str(e)}")
-                    failed_nodes.append(node_name)
-        else:
-            print("[INFO] No CNR nodes found to install")
-
-        if failed_nodes:
-            print("\n[WARNING] The following nodes failed to install:")
-            for node in failed_nodes:
-                print(f"- {node}")
-        else:
-            print("\n[SUCCESS] All nodes were installed successfully")
+            print("[SUCCESS] Successfully restored nodes from snapshot")
+            if stdout:
+                print(f"[DEBUG] Restore output:\n{stdout}")
 
     except Exception as e:
         print(f"[ERROR] Failed to restore nodes: {str(e)}")
