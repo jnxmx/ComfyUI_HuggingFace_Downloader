@@ -128,19 +128,26 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, max_retries=
             
     raise RuntimeError(f"Upload failed after {max_retries} attempts. Last error: {str(last_error)}")
 
-def backup_to_huggingface(repo_name_or_link, folders, on_backup_start=None, on_backup_progress=None, *args, **kwargs):
+def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_backup_start=None, on_backup_progress=None, *args, **kwargs):
     """
     Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root.
     Uses retry logic for better reliability.
     
-    Callbacks:
-    - on_backup_start(): Called when backup starts 
-    - on_backup_progress(folder, progress_pct): Called during backup with current folder and progress
+    Args:
+        repo_name_or_link: Repository name or link to backup to
+        folders: List of folders to backup
+        size_limit_gb: Size limit for individual files in GB (overrides settings)
+        on_backup_start: Callback when backup starts
+        on_backup_progress: Callback for backup progress (folder, progress_pct)
     """
     api = HfApi()
-    token, size_limit_gb = get_token_and_size_limit()
+    token, default_size_limit = get_token_and_size_limit()
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
+
+    # Use provided size limit or fall back to default from settings
+    if size_limit_gb is None:
+        size_limit_gb = default_size_limit
 
     if on_backup_start:
         try:

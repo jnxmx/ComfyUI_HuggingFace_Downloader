@@ -17,10 +17,14 @@ async def backup_to_hf(request):
     if not repo_name:
         return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
     try:
-        backup_to_huggingface(repo_name, folders, size_limit_gb)
+        # Fix: Pass size_limit_gb as a keyword argument
+        backup_to_huggingface(repo_name=repo_name, folders=folders, size_limit_gb=size_limit_gb)
         return web.json_response({"status": "ok"})
     except Exception as e:
-        return web.json_response({"status": "error", "message": str(e)}, status=500)
+        # Ensure we capture the full error message in the response
+        error_msg = str(e)
+        print(f"[ERROR] Backup failed: {error_msg}")
+        return web.json_response({"status": "error", "message": error_msg}, status=500)
 
 async def restore_from_hf(request):
     # Read repo name from comfy.settings.json
