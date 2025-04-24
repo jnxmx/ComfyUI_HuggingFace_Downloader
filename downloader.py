@@ -381,6 +381,9 @@ def merge_and_update_yaml(repo_id: str, token: str, local_snapshot: dict, yaml_f
             "pips": {}  # Clean the `pips` section
         }
 
+        # Ensure the `pips` section is explicitly set to an empty dictionary
+        updated_data["pips"] = {}
+
         # Save the updated YAML file locally
         updated_yaml_path = os.path.join(tempfile.gettempdir(), yaml_filename)
         with open(updated_yaml_path, "w") as f:
