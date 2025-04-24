@@ -1,5 +1,6 @@
 import os
 import json
+import yaml
 import tempfile
 import shutil
 import time
@@ -164,14 +165,9 @@ def _backup_custom_nodes(target_dir: str) -> str:
         if not os.path.isdir(os.path.join(comfy_dir, "custom_nodes")):
             raise RuntimeError("Not in a ComfyUI directory (custom_nodes folder not found)")
 
-        # Create snapshots directory if it doesn't exist
-        snapshots_dir = os.path.join(comfy_dir, "custom_nodes", "snapshots")
-        os.makedirs(snapshots_dir, exist_ok=True)
-
         print(f"[DEBUG] Current working directory: {os.getcwd()}")
         print(f"[DEBUG] Detected ComfyUI root directory: {comfy_dir}")
         print(f"[DEBUG] Checking for 'custom_nodes' folder at: {os.path.join(comfy_dir, 'custom_nodes')}")
-        print(f"[DEBUG] Snapshots directory: {snapshots_dir}")
 
         # Save snapshot using comfy-cli
         result = subprocess.run(
@@ -179,28 +175,62 @@ def _backup_custom_nodes(target_dir: str) -> str:
             check=True,
             capture_output=True,
             text=True,
-            cwd=comfy_dir  # Explicitly set working directory
+            cwd=comfy_dir
         )
         print(f"[DEBUG] comfy-cli output: {result.stdout}")
         print(f"[DEBUG] comfy-cli error (if any): {result.stderr}")
 
-        # Extract snapshot file name and path directly from comfy-cli output
+        # Extract snapshot file name from comfy-cli output and copy to temp dir
         snapshot_file = None
         for line in result.stdout.splitlines():
             if "Current snapshot is saved as" in line:
                 snapshot_file_name = line.split("`", 1)[-1].rsplit("`", 1)[0]
-                snapshot_file = os.path.abspath(os.path.join(comfy_dir, "user", "default", "ComfyUI-Manager", "snapshots", snapshot_file_name))
+                original_snapshot = os.path.join(comfy_dir, "user", "default", "ComfyUI-Manager", "snapshots", snapshot_file_name)
+                if os.path.exists(original_snapshot):
+                    # Copy to temp dir for modification
+                    snapshot_file = os.path.join(temp_dir, "original_snapshot.json")
+                    shutil.copy2(original_snapshot, snapshot_file)
                 break
 
-        print(f"[DEBUG] Extracted snapshot file path: {snapshot_file}")
+        print(f"[DEBUG] Original snapshot file: {original_snapshot}")
+        print(f"[DEBUG] Working copy in temp dir: {snapshot_file}")
 
         if not snapshot_file or not os.path.exists(snapshot_file):
-            raise RuntimeError("Could not find generated snapshot file")
-            
+            raise RuntimeError("Could not find or copy generated snapshot file")
+
+        # Read and modify the snapshot
+        with open(snapshot_file, 'r') as f:
+            snapshot_data = json.load(f)
+        
+        # Explicitly create new data structure with empty pips
+        cleaned_data = {
+            "comfyui": snapshot_data.get("comfyui", ""),
+            "git_custom_nodes": snapshot_data.get("git_custom_nodes", {}),
+            "cnr_custom_nodes": snapshot_data.get("cnr_custom_nodes", {}),
+            "file_custom_nodes": snapshot_data.get("file_custom_nodes", []),
+            "pips": {}  # Explicitly empty dictionary
+        }
+        
+        # Save cleaned snapshot in YAML format
         snapshot_dest = os.path.join(temp_dir, "custom_nodes_snapshot.yaml")
-        shutil.copy2(snapshot_file, snapshot_dest)
+        with open(snapshot_dest, 'w') as f:
+            yaml.safe_dump(cleaned_data, f, sort_keys=False, allow_unicode=True, default_flow_style=False)
+        
+        # Verify the saved file
+        with open(snapshot_dest, 'r') as f:
+            verify_data = yaml.safe_load(f)
+            if verify_data.get('pips', None) != {}:
+                raise RuntimeError("Failed to clean pips section in the snapshot file")
+        
+        print(f"[INFO] Created and verified cleaned nodes snapshot at '{snapshot_dest}'")
+        print(f"[DEBUG] Snapshot structure:")
+        print(f"- git_custom_nodes: {len(cleaned_data['git_custom_nodes'])} entries")
+        print(f"- cnr_custom_nodes: {len(cleaned_data['cnr_custom_nodes'])} entries")
+        print(f"- file_custom_nodes: {len(cleaned_data['file_custom_nodes'])} entries")
+        print("- pips: verified empty dictionary")
         
         return snapshot_dest, temp_dir
+
     except subprocess.CalledProcessError as e:
         print(f"[WARNING] Failed to create nodes snapshot: {e.stderr}")
         if "not found" in str(e.stderr):
