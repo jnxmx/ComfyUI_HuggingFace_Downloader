@@ -184,12 +184,12 @@ def _backup_custom_nodes(target_dir: str) -> str:
         print(f"[DEBUG] comfy-cli output: {result.stdout}")
         print(f"[DEBUG] comfy-cli error (if any): {result.stderr}")
 
-        # Find the most recently created snapshot file
+        # Find the most recently created snapshot file (supporting both .yaml and .json)
         snapshot_file = None
         if os.path.exists(snapshots_dir):
             snapshot_files = [(f, os.path.getmtime(os.path.join(snapshots_dir, f))) 
                             for f in os.listdir(snapshots_dir)
-                            if f.endswith('.yaml')]
+                            if f.endswith('.yaml') or f.endswith('.json')]
             if snapshot_files:
                 snapshot_files.sort(key=lambda x: x[1], reverse=True)
                 snapshot_file = os.path.join(snapshots_dir, snapshot_files[0][0])
