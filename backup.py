@@ -127,6 +127,18 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, max_retries=
             
     raise RuntimeError(f"Upload failed after {max_retries} attempts. Last error: {str(last_error)}")
 
+def find_comfy_root() -> str:
+    """
+    Dynamically locate the ComfyUI root directory by searching for the 'custom_nodes' folder.
+    Returns the path to the ComfyUI root directory.
+    """
+    current_dir = os.getcwd()
+    while current_dir != os.path.dirname(current_dir):  # Stop at the root of the filesystem
+        if os.path.isdir(os.path.join(current_dir, "custom_nodes")):
+            return current_dir
+        current_dir = os.path.dirname(current_dir)
+    raise RuntimeError("Could not locate the ComfyUI root directory (custom_nodes folder not found).")
+
 def _backup_custom_nodes(target_dir: str) -> str:
     """
     Use comfy-cli to save a snapshot of custom nodes.
@@ -148,8 +160,7 @@ def _backup_custom_nodes(target_dir: str) -> str:
     temp_dir = tempfile.mkdtemp(prefix="comfyui_nodes_snapshot_")
     
     try:
-        # Ensure we're in a ComfyUI directory by checking for key folders
-        comfy_dir = os.getcwd()
+        comfy_dir = find_comfy_root()
         if not os.path.isdir(os.path.join(comfy_dir, "custom_nodes")):
             raise RuntimeError("Not in a ComfyUI directory (custom_nodes folder not found)")
 
