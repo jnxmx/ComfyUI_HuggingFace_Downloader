@@ -276,24 +276,24 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
         print("[INFO] Saved current nodes state as backup")
     except subprocess.CalledProcessError as e:
         print(f"[WARNING] Failed to backup current nodes state: {e.stderr}")
-    
-    # Copy snapshot file to custom_nodes/snapshots directory
+
+    # Create a temporary folder inside ComfyUI for the snapshot
     comfy_dir = os.getcwd()
-    snapshots_dir = os.path.join(comfy_dir, "custom_nodes", "snapshots")
-    os.makedirs(snapshots_dir, exist_ok=True)
-    snapshot_dest = os.path.join(snapshots_dir, "restore_snapshot.yaml")
+    temp_dir = os.path.join(comfy_dir, "temp_snapshots")
+    os.makedirs(temp_dir, exist_ok=True)
+    snapshot_dest = os.path.join(temp_dir, "restore_snapshot.yaml")
     shutil.copy2(snapshot_file, snapshot_dest)
-    
+
     try:
         # Restore using comfy-cli
         subprocess.run(
-            ["comfy", "node", "restore-snapshot", "restore_snapshot"],
+            ["comfy", "node", "restore-snapshot", snapshot_dest],
             check=True,
             capture_output=True,
             text=True
         )
         print("[INFO] Successfully restored custom nodes")
-        
+
         # Update all nodes to ensure latest versions
         subprocess.run(
             ["comfy", "node", "update", "all"],
@@ -302,10 +302,38 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
             text=True
         )
         print("[INFO] Updated all custom nodes")
-        
+
     except subprocess.CalledProcessError as e:
         print(f"[ERROR] Failed to restore nodes: {e.stderr}")
         raise
+
+    finally:
+        # Clean up temporary snapshot folder
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        print(f"[INFO] Cleaned up temporary snapshot folder: {temp_dir}")
+
+def _copy_and_restore_token(src_folder, temp_dir):
+    """
+    Copy src_folder to temp_dir, ensuring 'downloader.hf_token' in comfy.settings.json is preserved.
+    Returns the path to the copied folder.
+    """
+    dst_folder = os.path.join(temp_dir, os.path.basename(src_folder))
+    shutil.copytree(src_folder, dst_folder)
+    for root, _, files in os.walk(dst_folder):
+        for fname in files:
+            if fname == "comfy.settings.json":
+                fpath = os.path.join(root, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    original_token = data.get("downloader.hf_token")
+                    if original_token:
+                        print(f"[INFO] Preserving downloader.hf_token in {fpath}")
+                    else:
+                        print(f"[INFO] No downloader.hf_token found in {fpath}")
+                except Exception as e:
+                    print(f"[WARNING] Could not process token in {fpath}: {e}")
+    return dst_folder
 
 def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_backup_start=None, on_backup_progress=None, *args, **kwargs):
     """
