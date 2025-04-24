@@ -419,10 +419,10 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
             folder = folder.strip()
             if not folder or not os.path.exists(folder):
                 continue
+            
             folder = os.path.normpath(folder)
-            rel_path = os.path.basename(folder)
-            is_user = rel_path == "user" or rel_path.startswith("user" + os.sep)
-            is_custom_nodes = rel_path == "custom_nodes" or rel_path.startswith("custom_nodes" + os.sep)
+            is_user = folder == "user" or folder.startswith("user" + os.sep)
+            is_custom_nodes = folder == "custom_nodes" or folder.startswith("custom_nodes" + os.sep)
             upload_path = folder
             temp_dir = None
 
@@ -448,12 +448,22 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
                 print(f"[INFO] Upload of nodes snapshot complete.")
                 continue
 
-            path_in_repo = os.path.basename(folder) # Default to base name
+            # Preserve the full path structure, especially for models/
             if os.path.isabs(folder):
                 try:
+                    # Get relative path from ComfyUI root
                     path_in_repo = os.path.relpath(folder, os.getcwd())
                 except ValueError:
-                    path_in_repo = os.path.basename(folder)
+                    # If not under ComfyUI root, use the full path structure
+                    path_parts = folder.strip(os.sep).split(os.sep)
+                    if "models" in path_parts:
+                        # Keep everything from models/ onwards
+                        models_idx = path_parts.index("models")
+                        path_in_repo = os.path.join(*path_parts[models_idx:])
+                    else:
+                        path_in_repo = os.path.basename(folder)
+            else:
+                path_in_repo = folder  # Use the relative path as is
 
             print(f"[INFO] Uploading '{upload_path}' to repo '{repo_name}' with path '{path_in_repo}'...")
             print(f"[INFO] Upload started. File size limit: {size_limit_gb} GB. Check the console for status updates.")
@@ -471,7 +481,7 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
                     upload_path=upload_path,
                     repo_name=repo_name,
                     token=token,
-                    path_in_repo="ComfyUI/" + path_in_repo
+                    path_in_repo=os.path.join("ComfyUI", path_in_repo)
                 )
                 print(f"[INFO] Upload of '{upload_path}' complete.")
             except Exception as e:
