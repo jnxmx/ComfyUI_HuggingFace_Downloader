@@ -3,7 +3,6 @@ import json
 import tempfile
 import shutil
 import time
-import zipfile
 import subprocess
 from huggingface_hub import HfApi
 from .parse_link import parse_link
@@ -128,26 +127,107 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, max_retries=
             
     raise RuntimeError(f"Upload failed after {max_retries} attempts. Last error: {str(last_error)}")
 
-def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_backup_start=None, on_backup_progress=None, *args, **kwargs):
+def _backup_custom_nodes(target_dir: str) -> str:
+    """
+    Use comfy-cli to save a snapshot of custom nodes.
+    Returns the path to the snapshot file.
+    """
+    temp_dir = tempfile.mkdtemp(prefix="comfyui_nodes_snapshot_")
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    snapshot_name = f"backup_{timestamp}"
+    
+    try:
+        # Save snapshot using comfy-cli
+        subprocess.run(
+            ["comfy", "--here", "node", "save-snapshot", snapshot_name],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        
+        # Find and copy the snapshot file
+        comfy_dir = os.getcwd()
+        snapshot_file = None
+        snapshots_dir = os.path.join(comfy_dir, "custom_nodes", "snapshots")
+        if os.path.exists(snapshots_dir):
+            for f in os.listdir(snapshots_dir):
+                if f.startswith(snapshot_name):
+                    snapshot_file = os.path.join(snapshots_dir, f)
+                    break
+        
+        if not snapshot_file:
+            raise RuntimeError("Could not find generated snapshot file")
+            
+        snapshot_dest = os.path.join(temp_dir, "custom_nodes_snapshot.yaml")
+        shutil.copy2(snapshot_file, snapshot_dest)
+        
+        return snapshot_dest, temp_dir
+    except subprocess.CalledProcessError as e:
+        print(f"[WARNING] Failed to create nodes snapshot: {e.stderr}")
+        raise
+
+def _restore_custom_nodes_from_snapshot(snapshot_file: str):
+    """
+    Use comfy-cli to restore custom nodes from a snapshot.
+    """
+    # First save current state as backup
+    backup_name = f"pre_restore_{time.strftime('%Y%m%d_%H%M%S')}"
+    try:
+        subprocess.run(
+            ["comfy", "--here", "node", "save-snapshot", backup_name],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        print(f"[INFO] Saved current nodes state as '{backup_name}'")
+    except subprocess.CalledProcessError as e:
+        print(f"[WARNING] Failed to backup current nodes state: {e.stderr}")
+    
+    # Copy snapshot file to custom_nodes/snapshots directory
+    comfy_dir = os.getcwd()
+    snapshots_dir = os.path.join(comfy_dir, "custom_nodes", "snapshots")
+    os.makedirs(snapshots_dir, exist_ok=True)
+    snapshot_name = "restored_backup"
+    snapshot_dest = os.path.join(snapshots_dir, f"{snapshot_name}.yaml")
+    shutil.copy2(snapshot_file, snapshot_dest)
+    
+    try:
+        # Restore using comfy-cli
+        subprocess.run(
+            ["comfy", "--here", "node", "restore-snapshot", snapshot_name],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        print("[INFO] Successfully restored custom nodes")
+        
+        # Update all nodes to ensure latest versions
+        subprocess.run(
+            ["comfy", "--here", "node", "update", "all"],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        print("[INFO] Updated all custom nodes")
+        
+    except subprocess.CalledProcessError as e:
+        print(f"[ERROR] Failed to restore nodes: {e.stderr}")
+        print(f"[INFO] Previous state was saved as '{backup_name}'")
+        raise
+
+def backup_to_huggingface(repo_name_or_link, folders, on_backup_start=None, on_backup_progress=None, *args, **kwargs):
     """
     Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root.
     Uses retry logic for better reliability.
     
-    Args:
-        repo_name_or_link: Repository name or link to backup to
-        folders: List of folders to backup
-        size_limit_gb: Size limit for individual files in GB (overrides settings)
-        on_backup_start: Callback when backup starts
-        on_backup_progress: Callback for backup progress (folder, progress_pct)
+    Callbacks:
+    - on_backup_start(): Called when backup starts 
+    - on_backup_progress(folder, progress_pct): Called during backup with current folder and progress
     """
     api = HfApi()
-    token, default_size_limit = get_token_and_size_limit()
+    token, size_limit_gb = get_token_and_size_limit()
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
-
-    # Use provided size limit or fall back to default from settings
-    if size_limit_gb is None:
-        size_limit_gb = default_size_limit
 
     if on_backup_start:
         try:
@@ -180,19 +260,19 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
                 temp_dirs.append(temp_dir)
                 print(f"[INFO] Created sanitized copy of '{folder}' at '{upload_path}' for upload.")
             elif is_custom_nodes:
-                # Create nodes.txt with git repository information
-                nodes_file, temp_dir = _create_custom_nodes_info(folder)
+                # Create snapshot using comfy-cli
+                snapshot_file, temp_dir = _backup_custom_nodes(folder)
                 temp_dirs.append(temp_dir)
-                path_in_repo = os.path.join("ComfyUI", "custom_nodes.txt")
-                print(f"[INFO] Created nodes.txt at '{nodes_file}'")
+                path_in_repo = os.path.join("ComfyUI", "custom_nodes_snapshot.yaml")
+                print(f"[INFO] Created nodes snapshot at '{snapshot_file}'")
                 _retry_upload(
                     api=api,
-                    upload_path=nodes_file,
+                    upload_path=snapshot_file,
                     repo_name=repo_name,
                     token=token,
                     path_in_repo=path_in_repo
                 )
-                print(f"[INFO] Upload of '{nodes_file}' complete.")
+                print(f"[INFO] Upload of nodes snapshot complete.")
                 continue
 
             path_in_repo = os.path.basename(folder) # Default to base name
@@ -320,16 +400,16 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
         if not comfy_files:
             raise ValueError("No ComfyUI folder found in backup")
 
-        # Check for custom_nodes.txt first
-        if "ComfyUI/custom_nodes.txt" in comfy_files:
-            # Download and process nodes.txt
-            print("[INFO] Found custom_nodes.txt, restoring git repositories...")
-            nodes_file = hf_hub_download(
+        # Check for nodes snapshot first
+        if "ComfyUI/custom_nodes_snapshot.yaml" in comfy_files:
+            # Download and process nodes snapshot
+            print("[INFO] Found nodes snapshot, restoring custom nodes...")
+            snapshot_file = hf_hub_download(
                 repo_id=repo_name,
-                filename="ComfyUI/custom_nodes.txt",
+                filename="ComfyUI/custom_nodes_snapshot.yaml",
                 token=token
             )
-            _restore_custom_nodes_from_info(nodes_file, target_dir)
+            _restore_custom_nodes_from_snapshot(snapshot_file)
             print("[INFO] Custom nodes restoration complete")
         
         # Download the rest of the files
@@ -344,7 +424,7 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                 token=token,
                 local_dir=temp_dir,
                 allow_patterns=["ComfyUI/*"],
-                ignore_patterns=["ComfyUI/custom_nodes.txt"],  # Skip nodes.txt since we handled it
+                ignore_patterns=["ComfyUI/custom_nodes_snapshot.yaml"],  # Skip snapshot since we handled it
                 local_dir_use_symlinks=False,
                 max_workers=4  # Adjust based on system capabilities
             )
@@ -364,8 +444,8 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                         rel_path = os.path.relpath(src_file, source_dir)
                         dst_file = os.path.join(target_dir, rel_path)
                         
-                        # Skip custom_nodes.txt since we already handled it
-                        if rel_path == "custom_nodes.txt":
+                        # Skip custom_nodes_snapshot.yaml since we already handled it
+                        if rel_path == "custom_nodes_snapshot.yaml":
                             continue
                             
                         # Handle other files normally
@@ -384,123 +464,3 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     except Exception as e:
         print(f"[ERROR] Failed to restore: {e}")
         raise
-
-def _create_custom_nodes_archive(folder_path):
-    """
-    Create a ZIP archive of the custom_nodes folder.
-    Returns the path to the created archive.
-    """
-    temp_dir = tempfile.mkdtemp(prefix="comfyui_custom_nodes_")
-    zip_path = os.path.join(temp_dir, "custom_nodes.zip")
-    
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for root, _, files in os.walk(folder_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.relpath(file_path, folder_path)
-                zipf.write(file_path, arcname)
-    
-    print(f"[INFO] Created custom_nodes archive at '{zip_path}'")
-    return zip_path, temp_dir
-
-def _get_git_remote_url(repo_path: str) -> str:
-    """Get the remote origin URL of a git repository"""
-    try:
-        result = subprocess.run(
-            ['git', 'config', '--get', 'remote.origin.url'],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return result.stdout.strip()
-    except subprocess.CalledProcessError:
-        return ""
-
-def _get_git_commit_hash(repo_path: str) -> str:
-    """Get the current commit hash of a git repository"""
-    try:
-        result = subprocess.run(
-            ['git', 'rev-parse', 'HEAD'],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return result.stdout.strip()
-    except subprocess.CalledProcessError:
-        return ""
-
-def _is_git_repo(path: str) -> bool:
-    """Check if a directory is a git repository"""
-    return os.path.isdir(os.path.join(path, '.git'))
-
-def _create_custom_nodes_info(folder_path: str) -> str:
-    """
-    Create nodes.txt containing git URLs and commit hashes for each custom node.
-    Returns the path to the created file.
-    """
-    temp_dir = tempfile.mkdtemp(prefix="comfyui_custom_nodes_")
-    nodes_file = os.path.join(temp_dir, "nodes.txt")
-    
-    with open(nodes_file, 'w', encoding='utf-8') as f:
-        for item in os.listdir(folder_path):
-            item_path = os.path.join(folder_path, item)
-            if os.path.isdir(item_path) and _is_git_repo(item_path):
-                remote_url = _get_git_remote_url(item_path)
-                commit_hash = _get_git_commit_hash(item_path)
-                if remote_url:
-                    f.write(f"{item}|{remote_url}|{commit_hash}\n")
-    
-    print(f"[INFO] Created nodes.txt with git repository information at '{nodes_file}'")
-    return nodes_file, temp_dir
-
-def _install_requirements(folder_path: str):
-    """Install Python requirements.txt if it exists in the folder"""
-    req_file = os.path.join(folder_path, 'requirements.txt')
-    if os.path.exists(req_file):
-        try:
-            subprocess.run(
-                ['pip', 'install', '-r', req_file],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            print(f"[INFO] Installed requirements for {folder_path}")
-        except subprocess.CalledProcessError as e:
-            print(f"[WARNING] Failed to install requirements for {folder_path}: {e.stderr}")
-
-def _restore_custom_nodes_from_info(nodes_file: str, target_dir: str):
-    """
-    Restore custom nodes by cloning/pulling git repositories and installing their requirements.
-    """
-    custom_nodes_dir = os.path.join(target_dir, "custom_nodes")
-    os.makedirs(custom_nodes_dir, exist_ok=True)
-    
-    with open(nodes_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            
-            try:
-                folder_name, repo_url, commit_hash = line.split('|')
-                target_path = os.path.join(custom_nodes_dir, folder_name)
-                
-                if os.path.exists(target_path):
-                    # Repository exists, update it
-                    if _is_git_repo(target_path):
-                        print(f"[INFO] Updating existing repository {folder_name}")
-                        subprocess.run(['git', 'fetch'], cwd=target_path, check=True)
-                        subprocess.run(['git', 'reset', '--hard', commit_hash], cwd=target_path, check=True)
-                else:
-                    # Clone new repository
-                    print(f"[INFO] Cloning repository {folder_name}")
-                    subprocess.run(['git', 'clone', repo_url, target_path], check=True)
-                    subprocess.run(['git', 'reset', '--hard', commit_hash], cwd=target_path, check=True)
-                
-                _install_requirements(target_path)
-                
-            except (ValueError, subprocess.CalledProcessError) as e:
-                print(f"[WARNING] Failed to restore repository {folder_name}: {str(e)}")
-                continue
