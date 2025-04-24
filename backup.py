@@ -269,14 +269,14 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
                     continue
 
                 try:
-                    print(f"\n[INFO] Cloning repo: {repo_url}")
                     repo_name = os.path.splitext(os.path.basename(repo_url))[0]
                     repo_dir = os.path.join(custom_nodes_dir, repo_name)
                     
-                    # Remove directory if it exists to ensure clean clone
                     if os.path.exists(repo_dir):
-                        shutil.rmtree(repo_dir)
-                    
+                        print(f"[INFO] Node {repo_name} already exists, skipping: {repo_url}")
+                        continue
+
+                    print(f"\n[INFO] Cloning repo: {repo_url}")
                     # Clone the repository
                     clone_result = subprocess.run(
                         ["git", "clone", repo_url],
@@ -293,30 +293,54 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
                         continue
 
                     print(f"[SUCCESS] Cloned {repo_url}")
-                    
-                    # If hash is specified, checkout that specific version
-                    if "hash" in node_data:
-                        hash_value = node_data["hash"]
-                        print(f"[INFO] Checking out version {hash_value}")
-                        
-                        checkout_result = subprocess.run(
-                            ["git", "checkout", hash_value],
-                            capture_output=True,
-                            text=True,
-                            cwd=repo_dir
-                        )
-                        
-                        if checkout_result.returncode == 0:
-                            print(f"[SUCCESS] Checked out version {hash_value}")
-                        else:
-                            print(f"[WARNING] Failed to checkout version {hash_value}:")
-                            print(f"stderr: {checkout_result.stderr}")
 
                 except Exception as e:
                     print(f"[ERROR] Failed to install {repo_url}: {str(e)}")
                     failed_nodes.append(repo_url)
         else:
             print("[INFO] No git custom nodes found to install")
+
+        # Install CNR nodes
+        print("\n[INFO] Installing nodes from CNR registry...")
+        cnr_custom_nodes = snapshot_data.get("cnr_custom_nodes", {})
+        if cnr_custom_nodes:
+            for node_name, version in cnr_custom_nodes.items():
+                try:
+                    print(f"\n[INFO] Installing CNR node: {node_name}")
+                    # Use git clone for CNR nodes too
+                    if not node_name.startswith("http"):
+                        # Convert node name to GitHub URL
+                        repo_url = f"https://github.com/{node_name}.git"
+                    else:
+                        repo_url = node_name
+
+                    repo_name = os.path.splitext(os.path.basename(repo_url))[0]
+                    repo_dir = os.path.join(custom_nodes_dir, repo_name)
+
+                    if os.path.exists(repo_dir):
+                        print(f"[INFO] Node {repo_name} already exists, skipping: {repo_url}")
+                        continue
+
+                    clone_result = subprocess.run(
+                        ["git", "clone", repo_url],
+                        capture_output=True,
+                        text=True,
+                        cwd=custom_nodes_dir
+                    )
+                    
+                    if clone_result.returncode != 0:
+                        print(f"[ERROR] Failed to clone CNR node {node_name}:")
+                        print(f"stderr: {clone_result.stderr}")
+                        print(f"stdout: {clone_result.stdout}")
+                        failed_nodes.append(node_name)
+                    else:
+                        print(f"[SUCCESS] Installed CNR node {node_name}")
+
+                except Exception as e:
+                    print(f"[ERROR] Failed to install CNR node {node_name}: {str(e)}")
+                    failed_nodes.append(node_name)
+        else:
+            print("[INFO] No CNR nodes found to install")
 
         if failed_nodes:
             print("\n[WARNING] The following nodes failed to install:")
@@ -495,7 +519,7 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     import hf_transfer
     import requests.exceptions
     from collections import defaultdict
-    from .downloader import clear_cache_for_path, folder_size
+    from .downloader import clear_cache_for_path
 
     # Enable hf_transfer
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
@@ -536,23 +560,60 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
         # Get list of files to download
         try:
             repo_files = api.list_repo_files(repo_id=repo_name, token=token)
+            print(f"[INFO] Found {len(repo_files)} files in the repository")
         except Exception as e:
             raise ValueError(f"Failed to list repository files: {str(e)}")
 
         comfy_files = [f for f in repo_files if f.startswith("ComfyUI/")]
+        print(f"[INFO] Found {len(comfy_files)} files in ComfyUI folder")
+        
         if not comfy_files:
             raise ValueError("No ComfyUI folder found in backup")
 
+        # Map ComfyUI folders
+        folder_structure = {}
+        for f in comfy_files:
+            # Split the path after "ComfyUI/" prefix
+            rel_path = f.split("ComfyUI/", 1)[1]
+            parts = rel_path.split("/")
+            current = folder_structure
+            for i, part in enumerate(parts):
+                if i == len(parts) - 1:  # This is a file
+                    if "files" not in current:
+                        current["files"] = []
+                    current["files"].append(f)  # Store full path for download
+                else:  # This is a directory
+                    if part not in current:
+                        current[part] = {}
+                    current = current[part]
+        
+        # Print folder structure
+        def print_structure(struct, level=0, prefix=""):
+            for key, value in struct.items():
+                if key != "files":
+                    file_count = sum(1 for _ in walk_files(value))
+                    print(f"{'  ' * level}[INFO] {prefix}{key}/: {file_count} files")
+                    print_structure(value, level + 1)
+
+        def walk_files(struct):
+            if "files" in struct:
+                yield from struct["files"]
+            for key, value in struct.items():
+                if key != "files":
+                    yield from walk_files(value)
+
+        print("\n[INFO] Found the following structure in backup:")
+        print_structure(folder_structure)
+
         # Check for nodes snapshot first
-        if "ComfyUI/custom_nodes_snapshot.yaml" in comfy_files:
+        if any(f.endswith("custom_nodes_snapshot.yaml") for f in comfy_files):
             # Download and process nodes snapshot
-            print("[INFO] Found nodes snapshot, restoring custom nodes...")
+            print("\n[INFO] Found nodes snapshot, restoring custom nodes...")
             snapshot_file = hf_hub_download(
                 repo_id=repo_name,
                 filename="ComfyUI/custom_nodes_snapshot.yaml",
                 token=token
             )
-            # Print the content and location of the downloaded YAML file
             print(f"[DEBUG] Downloaded snapshot file location: {snapshot_file}")
             try:
                 with open(snapshot_file, 'r') as f:
@@ -564,12 +625,14 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
             print("[INFO] Custom nodes restoration complete")
         
         # Download the rest of the files
+        print("\n[INFO] Downloading model folders and other files...")
         comfy_temp = os.path.join(os.getcwd(), "temp")
         os.makedirs(comfy_temp, exist_ok=True)
         temp_dir = tempfile.mkdtemp(prefix="hf_dl_", dir=comfy_temp)
 
         try:
             # Download all files in parallel using snapshot_download
+            print(f"[INFO] Starting parallel download to {temp_dir}")
             downloaded_folder = snapshot_download(
                 repo_id=repo_name,
                 token=token,
@@ -579,41 +642,75 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                 local_dir_use_symlinks=False,
                 max_workers=4  # Adjust based on system capabilities
             )
+            print(f"[INFO] Download completed to {downloaded_folder}")
 
             # Move files from snapshot to target directory
             source_dir = os.path.join(downloaded_folder, "ComfyUI")
             if os.path.exists(source_dir):
-                for root, dirs, files in os.walk(source_dir):
-                    for d in dirs:
-                        src_dir = os.path.join(root, d)
-                        rel_path = os.path.relpath(src_dir, source_dir)
-                        dst_dir = os.path.join(target_dir, rel_path)
-                        os.makedirs(dst_dir, exist_ok=True)
-                    
-                    for f in files:
-                        src_file = os.path.join(root, f)
-                        rel_path = os.path.relpath(src_file, source_dir)
-                        dst_file = os.path.join(target_dir, rel_path)
-                        
-                        # Skip custom_nodes_snapshot.yaml since we already handled it
-                        if rel_path == "custom_nodes_snapshot.yaml":
-                            continue
+                print("\n[INFO] Moving downloaded files to target directory...")
+                
+                def process_structure(struct, current_path=""):
+                    # Process files in current directory
+                    if "files" in struct:
+                        for f in struct["files"]:
+                            rel_path = f.split("ComfyUI/", 1)[1]
+                            src_file = os.path.join(source_dir, rel_path)
+                            dst_file = os.path.join(target_dir, rel_path)
                             
-                        # Handle other files normally
-                        os.makedirs(os.path.dirname(dst_file), exist_ok=True)
-                        if rel_path == "user/default/comfy.settings.json":
-                            # Preserve HF_TOKEN in the new settings file
-                            with open(src_file, "r", encoding="utf-8") as f:
-                                new_settings = json.load(f)
-                            new_settings["downloader.hf_token"] = token
-                            with open(dst_file, "w", encoding="utf-8") as f:
-                                json.dump(new_settings, f, indent=2)
-                        else:
-                            shutil.copy2(src_file, dst_file)
+                            if rel_path == "custom_nodes_snapshot.yaml":
+                                continue
+                                
+                            # Create parent directory if needed
+                            os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                            
+                            # Handle special cases
+                            if rel_path == os.path.normpath("user/default/comfy.settings.json"):
+                                try:
+                                    existing_settings = {}
+                                    if os.path.exists(dst_file):
+                                        with open(dst_file, "r", encoding="utf-8") as f:
+                                            existing_settings = json.load(f)
+                                    
+                                    with open(src_file, "r", encoding="utf-8") as f:
+                                        new_settings = json.load(f)
+                                    
+                                    # Preserve token
+                                    if "downloader.hf_token" in existing_settings:
+                                        new_settings["downloader.hf_token"] = existing_settings["downloader.hf_token"]
+                                    else:
+                                        new_settings["downloader.hf_token"] = token
+                                    
+                                    with open(dst_file, "w", encoding="utf-8") as f:
+                                        json.dump(new_settings, f, indent=2)
+                                    print(f"[INFO] Updated settings file: {rel_path}")
+                                except Exception as e:
+                                    print(f"[WARNING] Error handling settings file: {e}")
+                            else:
+                                # Copy regular file
+                                if os.path.exists(dst_file):
+                                    print(f"[INFO] Updating file: {rel_path}")
+                                else:
+                                    print(f"[INFO] Copying new file: {rel_path}")
+                                shutil.copy2(src_file, dst_file)
+                    
+                    # Process subdirectories
+                    for key, value in struct.items():
+                        if key != "files":
+                            new_path = os.path.join(current_path, key)
+                            # Create directory
+                            dir_path = os.path.join(target_dir, new_path)
+                            if not os.path.exists(dir_path):
+                                os.makedirs(dir_path)
+                                print(f"[INFO] Created directory: {new_path}")
+                            # Process its contents
+                            process_structure(value, new_path)
+                
+                # Process the entire structure
+                process_structure(folder_structure)
 
             # Clean up
             clear_cache_for_path(downloaded_folder)
-            print(f"[INFO] Successfully restored backup to {target_dir}")
+            print(f"\n[SUCCESS] Successfully restored backup to {target_dir}")
             return target_dir
 
         finally:
