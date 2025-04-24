@@ -6,6 +6,7 @@ import threading
 import time
 import json
 import zipfile
+import yaml
 
 from huggingface_hub import (
     hf_hub_download,
@@ -342,3 +343,60 @@ def download_repo_contents(parsed_data: dict, comfy_root: str, sync: bool = True
         error_msg = f"Failed to download repository contents: {e}"
         print("[ERROR]", error_msg)
         raise RuntimeError(error_msg)
+
+def merge_and_update_yaml(repo_id: str, token: str, local_snapshot: dict, yaml_filename: str = "backup.yaml"):
+    """
+    Merge the `cnr_custom_nodes` list from the existing YAML file in the repo with the local snapshot.
+    Clean the `pips` section and upload the updated YAML file back to the repository.
+    """
+    try:
+        # Check if the YAML file exists in the repository
+        folders, files = scan_repo_root(repo_id, token)
+        if yaml_filename in files:
+            print(f"[INFO] Found existing YAML file: {yaml_filename}")
+            # Download the existing YAML file
+            yaml_path = hf_hub_download(repo_id=repo_id, filename=yaml_filename, token=token)
+            with open(yaml_path, "r") as f:
+                existing_data = yaml.safe_load(f)
+        else:
+            print(f"[INFO] No existing YAML file found. Creating a new one.")
+            existing_data = {}
+
+        # Merge `cnr_custom_nodes` with priority to local versions
+        existing_nodes = existing_data.get("cnr_custom_nodes", {})
+        local_nodes = local_snapshot.get("cnr_custom_nodes", {})
+        merged_nodes = {**existing_nodes, **local_nodes}  # Local nodes take priority
+
+        # Merge `git_custom_nodes` with priority to local versions
+        existing_git_nodes = existing_data.get("git_custom_nodes", {})
+        local_git_nodes = local_snapshot.get("git_custom_nodes", {})
+        merged_git_nodes = {**existing_git_nodes, **local_git_nodes}  # Local git nodes take priority
+
+        # Update the YAML data
+        updated_data = {
+            "comfyui": local_snapshot.get("comfyui", ""),
+            "git_custom_nodes": merged_git_nodes,
+            "cnr_custom_nodes": merged_nodes,
+            "file_custom_nodes": local_snapshot.get("file_custom_nodes", []),
+            "pips": {}  # Clean the `pips` section
+        }
+
+        # Save the updated YAML file locally
+        updated_yaml_path = os.path.join(tempfile.gettempdir(), yaml_filename)
+        with open(updated_yaml_path, "w") as f:
+            yaml.safe_dump(updated_data, f)
+
+        print(f"[INFO] Updated YAML file saved locally: {updated_yaml_path}")
+
+        # Upload the updated YAML file back to the repository
+        api = HfApi()
+        api.upload_file(
+            path_or_fileobj=updated_yaml_path,
+            path_in_repo=yaml_filename,
+            repo_id=repo_id,
+            token=token
+        )
+        print(f"[INFO] Updated YAML file uploaded to repository: {yaml_filename}")
+
+    except Exception as e:
+        print(f"[ERROR] Failed to merge and update YAML file: {e}")
