@@ -168,6 +168,11 @@ def _backup_custom_nodes(target_dir: str) -> str:
         snapshots_dir = os.path.join(comfy_dir, "custom_nodes", "snapshots")
         os.makedirs(snapshots_dir, exist_ok=True)
 
+        print(f"[DEBUG] Current working directory: {os.getcwd()}")
+        print(f"[DEBUG] Detected ComfyUI root directory: {comfy_dir}")
+        print(f"[DEBUG] Checking for 'custom_nodes' folder at: {os.path.join(comfy_dir, 'custom_nodes')}")
+        print(f"[DEBUG] Snapshots directory: {snapshots_dir}")
+
         # Save snapshot using comfy-cli
         result = subprocess.run(
             ["comfy", "node", "save-snapshot"],
@@ -176,7 +181,9 @@ def _backup_custom_nodes(target_dir: str) -> str:
             text=True,
             cwd=comfy_dir  # Explicitly set working directory
         )
-        
+        print(f"[DEBUG] comfy-cli output: {result.stdout}")
+        print(f"[DEBUG] comfy-cli error (if any): {result.stderr}")
+
         # Find the most recently created snapshot file
         snapshot_file = None
         if os.path.exists(snapshots_dir):
@@ -186,7 +193,9 @@ def _backup_custom_nodes(target_dir: str) -> str:
             if snapshot_files:
                 snapshot_files.sort(key=lambda x: x[1], reverse=True)
                 snapshot_file = os.path.join(snapshots_dir, snapshot_files[0][0])
-        
+
+        print(f"[DEBUG] Most recent snapshot file: {snapshot_file}")
+
         if not snapshot_file:
             raise RuntimeError("Could not find generated snapshot file")
             
