@@ -247,13 +247,11 @@ def _backup_custom_nodes(target_dir: str) -> str:
 
 def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     """
-    Use comfy-cli to restore custom nodes from a snapshot.
+    Use direct git clone to restore nodes from a snapshot.
     """
     comfy_dir = os.getcwd()
-    temp_dir = os.path.join(comfy_dir, "temp_snapshots")
-    os.makedirs(temp_dir, exist_ok=True)
-    snapshot_dest = os.path.join(temp_dir, "restore_snapshot.yaml")
-    shutil.copy2(snapshot_file, snapshot_dest)
+    custom_nodes_dir = os.path.join(comfy_dir, "custom_nodes")
+    os.makedirs(custom_nodes_dir, exist_ok=True)
 
     failed_nodes = []
 
@@ -269,52 +267,56 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
                 if node_data.get("disabled", False):
                     print(f"[INFO] Skipping disabled node: {repo_url}")
                     continue
+
                 try:
-                    print(f"\n[INFO] Installing node from: {repo_url}")
-                    install_result = subprocess.run(
-                        ["comfy", "node", "install", repo_url],
+                    print(f"\n[INFO] Cloning repo: {repo_url}")
+                    repo_name = os.path.splitext(os.path.basename(repo_url))[0]
+                    repo_dir = os.path.join(custom_nodes_dir, repo_name)
+                    
+                    # Remove directory if it exists to ensure clean clone
+                    if os.path.exists(repo_dir):
+                        shutil.rmtree(repo_dir)
+                    
+                    # Clone the repository
+                    clone_result = subprocess.run(
+                        ["git", "clone", repo_url],
                         capture_output=True,
                         text=True,
-                        cwd=comfy_dir
+                        cwd=custom_nodes_dir
                     )
-                    if install_result.returncode != 0:
-                        print(f"[ERROR] Failed to install {repo_url}:")
-                        print(f"stderr: {install_result.stderr}")
-                        print(f"stdout: {install_result.stdout}")
+                    
+                    if clone_result.returncode != 0:
+                        print(f"[ERROR] Failed to clone {repo_url}:")
+                        print(f"stderr: {clone_result.stderr}")
+                        print(f"stdout: {clone_result.stdout}")
                         failed_nodes.append(repo_url)
-                    else:
-                        print(f"[SUCCESS] Installed {repo_url}")
+                        continue
+
+                    print(f"[SUCCESS] Cloned {repo_url}")
+                    
+                    # If hash is specified, checkout that specific version
+                    if "hash" in node_data:
+                        hash_value = node_data["hash"]
+                        print(f"[INFO] Checking out version {hash_value}")
+                        
+                        checkout_result = subprocess.run(
+                            ["git", "checkout", hash_value],
+                            capture_output=True,
+                            text=True,
+                            cwd=repo_dir
+                        )
+                        
+                        if checkout_result.returncode == 0:
+                            print(f"[SUCCESS] Checked out version {hash_value}")
+                        else:
+                            print(f"[WARNING] Failed to checkout version {hash_value}:")
+                            print(f"stderr: {checkout_result.stderr}")
+
                 except Exception as e:
                     print(f"[ERROR] Failed to install {repo_url}: {str(e)}")
                     failed_nodes.append(repo_url)
         else:
             print("[INFO] No git custom nodes found to install")
-
-        # Install other custom nodes
-        print("\n[INFO] Installing other custom nodes...")
-        cnr_custom_nodes = snapshot_data.get("cnr_custom_nodes", {})
-        if cnr_custom_nodes:
-            for node_name, version in cnr_custom_nodes.items():
-                try:
-                    print(f"\n[INFO] Installing node: {node_name}")
-                    install_result = subprocess.run(
-                        ["comfy", "node", "install", node_name],
-                        capture_output=True,
-                        text=True,
-                        cwd=comfy_dir
-                    )
-                    if install_result.returncode != 0:
-                        print(f"[ERROR] Failed to install {node_name}:")
-                        print(f"stderr: {install_result.stderr}")
-                        print(f"stdout: {install_result.stdout}")
-                        failed_nodes.append(node_name)
-                    else:
-                        print(f"[SUCCESS] Installed {node_name}")
-                except Exception as e:
-                    print(f"[ERROR] Failed to install {node_name}: {str(e)}")
-                    failed_nodes.append(node_name)
-        else:
-            print("[INFO] No custom nodes found to install")
 
         if failed_nodes:
             print("\n[WARNING] The following nodes failed to install:")
@@ -323,9 +325,9 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
         else:
             print("\n[SUCCESS] All nodes were installed successfully")
 
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        print(f"[INFO] Cleaned up temporary snapshot folder: {temp_dir}")
+    except Exception as e:
+        print(f"[ERROR] Failed to restore nodes: {str(e)}")
+        raise
 
 def _copy_and_restore_token(src_folder, temp_dir):
     """
