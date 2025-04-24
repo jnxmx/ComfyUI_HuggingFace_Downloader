@@ -132,27 +132,46 @@ def _backup_custom_nodes(target_dir: str) -> str:
     Use comfy-cli to save a snapshot of custom nodes.
     Returns the path to the snapshot file and temp dir.
     """
+    # First check if comfy-cli is installed
+    try:
+        subprocess.run(
+            ["comfy", "--version"],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+    except subprocess.CalledProcessError:
+        raise RuntimeError("comfy-cli not found. Please install it with 'pip install comfy-cli'")
+    except FileNotFoundError:
+        raise RuntimeError("comfy-cli not found. Please install it with 'pip install comfy-cli'")
+
     temp_dir = tempfile.mkdtemp(prefix="comfyui_nodes_snapshot_")
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
     
     try:
-        # Save snapshot using comfy-cli - must be in a ComfyUI directory
-        subprocess.run(
+        # Ensure we're in a ComfyUI directory by checking for key folders
+        comfy_dir = os.getcwd()
+        if not os.path.isdir(os.path.join(comfy_dir, "custom_nodes")):
+            raise RuntimeError("Not in a ComfyUI directory (custom_nodes folder not found)")
+
+        # Create snapshots directory if it doesn't exist
+        snapshots_dir = os.path.join(comfy_dir, "custom_nodes", "snapshots")
+        os.makedirs(snapshots_dir, exist_ok=True)
+
+        # Save snapshot using comfy-cli
+        result = subprocess.run(
             ["comfy", "node", "save-snapshot"],
             check=True,
             capture_output=True,
             text=True,
-            cwd=os.getcwd()  # Must be in ComfyUI directory
+            cwd=comfy_dir  # Explicitly set working directory
         )
         
-        # Find and copy the snapshot file 
-        comfy_dir = os.getcwd()
+        # Find the most recently created snapshot file
         snapshot_file = None
-        snapshots_dir = os.path.join(comfy_dir, "custom_nodes", "snapshots")
         if os.path.exists(snapshots_dir):
-            # Get most recent snapshot file
             snapshot_files = [(f, os.path.getmtime(os.path.join(snapshots_dir, f))) 
-                            for f in os.listdir(snapshots_dir)]
+                            for f in os.listdir(snapshots_dir)
+                            if f.endswith('.yaml')]
             if snapshot_files:
                 snapshot_files.sort(key=lambda x: x[1], reverse=True)
                 snapshot_file = os.path.join(snapshots_dir, snapshot_files[0][0])
@@ -166,6 +185,11 @@ def _backup_custom_nodes(target_dir: str) -> str:
         return snapshot_dest, temp_dir
     except subprocess.CalledProcessError as e:
         print(f"[WARNING] Failed to create nodes snapshot: {e.stderr}")
+        if "not found" in str(e.stderr):
+            raise RuntimeError("comfy-cli command failed. Please ensure ComfyUI is properly installed.")
+        raise
+    except Exception as e:
+        print(f"[WARNING] Failed to create nodes snapshot: {str(e)}")
         raise
 
 def _restore_custom_nodes_from_snapshot(snapshot_file: str):
@@ -214,19 +238,25 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
         print(f"[ERROR] Failed to restore nodes: {e.stderr}")
         raise
 
-def backup_to_huggingface(repo_name_or_link, folders, on_backup_start=None, on_backup_progress=None, *args, **kwargs):
+def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_backup_start=None, on_backup_progress=None, *args, **kwargs):
     """
     Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root.
     Uses retry logic for better reliability.
     
-    Callbacks:
-    - on_backup_start(): Called when backup starts 
-    - on_backup_progress(folder, progress_pct): Called during backup with current folder and progress
+    Args:
+        repo_name_or_link: Repository name or link
+        folders: List of folders to backup
+        size_limit_gb: Maximum size in GB for individual files to backup (overrides settings)
+        on_backup_start(): Called when backup starts 
+        on_backup_progress(folder, progress_pct): Called during backup with current folder and progress
     """
     api = HfApi()
-    token, size_limit_gb = get_token_and_size_limit()
+    token, default_size_limit = get_token_and_size_limit()
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
+
+    # Use provided size_limit_gb if set, otherwise use the one from settings
+    size_limit_gb = size_limit_gb if size_limit_gb is not None else default_size_limit
 
     if on_backup_start:
         try:

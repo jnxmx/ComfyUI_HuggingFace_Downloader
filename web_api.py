@@ -17,7 +17,8 @@ async def backup_to_hf(request):
     if not repo_name:
         return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
     try:
-        backup_to_huggingface(repo_name, folders, size_limit_gb)
+        # Pass size_limit_gb as a keyword argument, not a positional argument
+        backup_to_huggingface(repo_name, folders, size_limit_gb=size_limit_gb)
         return web.json_response({"status": "ok"})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
