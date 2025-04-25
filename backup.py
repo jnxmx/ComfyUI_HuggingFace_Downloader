@@ -115,7 +115,7 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, max_retries=
                     repo_id=repo_name,
                     token=token,
                     path_in_repo=path_in_repo,
-                    ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*"],
+                    ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*", "**/.skipbigtmp/**", "**/.skipbigtmp"],
                 )
             return True
         except Exception as e:
