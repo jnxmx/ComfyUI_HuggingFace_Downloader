@@ -125,7 +125,76 @@ models/checkpoints #Below the size limit`; // Default content
 					});
 					const result = await resp.json();
 					if (result.status === "ok") {
-						alert("Restore completed successfully!");
+						const restartDlg = document.createElement("div");
+						Object.assign(restartDlg.style, {
+							position: "fixed",
+							top: 0,
+							left: 0,
+							width: "100vw",
+							height: "100vh",
+							display: "flex",
+							alignItems: "center",
+							justifyContent: "center",
+							background: "rgba(0,0,0,0.5)",
+							zIndex: 10000,
+						});
+
+						const restartPanel = document.createElement("div");
+						Object.assign(restartPanel.style, {
+							background: "#17191f",
+							color: "#fff",
+							padding: "40px",
+							borderRadius: "12px",
+							minWidth: "400px",
+							display: "flex",
+							flexDirection: "column",
+							gap: "20px",
+							boxShadow: "0 0 20px rgba(0,0,0,0.7)",
+							border: "1px solid #3c3c3c",
+						});
+
+						const message = document.createElement("div");
+						message.textContent = "Restore completed successfully! You need to restart ComfyUI for the custom nodes changes to take effect.";
+						Object.assign(message.style, {
+							marginBottom: "20px",
+							textAlign: "center"
+						});
+						restartPanel.appendChild(message);
+
+						const btnContainer = document.createElement("div");
+						Object.assign(btnContainer.style, {
+							display: "flex",
+							justifyContent: "center",
+							gap: "10px"
+						});
+
+						const restartBtn = document.createElement("button");
+						restartBtn.textContent = "Restart Now";
+						restartBtn.className = "p-button p-component p-button-success";
+						restartBtn.onclick = async () => {
+							// Call restart endpoint - you'll need to implement this in your server
+							try {
+								await fetch("/restart", { method: "POST" });
+							} catch (e) {
+								console.error("Failed to restart:", e);
+								// Even if the fetch fails, we'll reload as a fallback
+							}
+							// Force reload the page after a short delay
+							setTimeout(() => window.location.reload(), 1000);
+						};
+						btnContainer.appendChild(restartBtn);
+
+						const laterBtn = document.createElement("button");
+						laterBtn.textContent = "Restart Later";
+						laterBtn.className = "p-button p-component p-button-secondary";
+						laterBtn.onclick = () => {
+							restartDlg.remove();
+						};
+						btnContainer.appendChild(laterBtn);
+
+						restartPanel.appendChild(btnContainer);
+						restartDlg.appendChild(restartPanel);
+						document.body.appendChild(restartDlg);
 					} else {
 						alert("Restore failed: " + result.message);
 					}
@@ -178,7 +247,7 @@ models/checkpoints #Below the size limit`; // Default content
 					});
 					const result = await resp.json();
 					if (result.status === "ok") {
-						// Success, dialog will close automatically
+						alert("Backup completed successfully!");
 					} else {
 						alert("Backup failed: " + result.message);
 					}

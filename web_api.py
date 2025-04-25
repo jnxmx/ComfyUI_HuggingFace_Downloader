@@ -42,3 +42,18 @@ async def restore_from_hf(request):
 def setup(app):
     app.router.add_post("/backup_to_hf", backup_to_hf)
     app.router.add_post("/restore_from_hf", restore_from_hf)
+    
+    async def restart(request):
+        """Restart ComfyUI server"""
+        import sys
+        import os
+        
+        # Schedule the restart after sending response
+        def restart_server():
+            python = sys.executable
+            os.execl(python, python, *sys.argv)
+            
+        app.loop.call_later(1, restart_server)
+        return web.json_response({"status": "ok"})
+        
+    app.router.add_post("/restart", restart)
