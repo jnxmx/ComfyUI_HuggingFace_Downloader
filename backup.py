@@ -474,14 +474,17 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
                 except Exception as e:
                     print(f"[WARNING] Progress callback failed: {e}")
 
+            # Move big files to .skipbigtmp folders
             moved_big_files.extend(_move_big_files(upload_path, size_limit_gb))
+
             try:
                 _retry_upload(
                     api=api,
                     upload_path=upload_path,
                     repo_name=repo_name,
                     token=token,
-                    path_in_repo=os.path.join("ComfyUI", path_in_repo)
+                    path_in_repo=os.path.join("ComfyUI", path_in_repo),
+                    ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*", "**/.skipbigtmp/**", ".skipbigtmp/"]
                 )
                 print(f"[INFO] Upload of '{upload_path}' complete.")
             except Exception as e:
@@ -496,6 +499,7 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
         print(f"[ERROR] Backup failed: {e}")
         raise
     finally:
+        # Restore moved files even if upload failed
         _restore_big_files(moved_big_files)
         for temp_dir in temp_dirs:
             shutil.rmtree(temp_dir, ignore_errors=True)
