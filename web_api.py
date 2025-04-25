@@ -2,6 +2,15 @@ import os
 import json
 from aiohttp import web
 from .backup import backup_to_huggingface, restore_from_huggingface
+from .file_manager import get_model_subfolders
+
+async def folder_structure(request):
+    """Return the list of model subfolders"""
+    try:
+        folders = get_model_subfolders()
+        return web.json_response(folders)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
 
 async def backup_to_hf(request):
     data = await request.json()
@@ -40,6 +49,7 @@ async def restore_from_hf(request):
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
 def setup(app):
+    app.router.add_get("/folder_structure", folder_structure)
     app.router.add_post("/backup_to_hf", backup_to_hf)
     app.router.add_post("/restore_from_hf", restore_from_hf)
     

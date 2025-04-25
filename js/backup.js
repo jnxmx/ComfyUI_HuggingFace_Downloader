@@ -1,16 +1,49 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
-/**
- * Minimal scaffold + “Backup ComfyUI to Hugging Face” dialog.
- * Flesh the guts out later: actual backup logic, HF auth, etc.
- */
 app.registerExtension({
-	name: "backupToHuggingFace", // Renamed extension
+	name: "backupToHuggingFace",
 	setup() {
+		/* ──────────────── Helper Functions ──────────────── */
+		const getFolderStructure = async () => {
+			// Get model folders list
+			const resp = await fetch("/folder_structure", {
+				method: "GET"
+			});
+			if (!resp.ok) return [];
+			const data = await resp.json();
+			return data;
+		};
+
+		const createCheckbox = (id, label, checked = false) => {
+			const container = document.createElement("div");
+			Object.assign(container.style, {
+				display: "flex",
+				alignItems: "center",
+				gap: "8px",
+				padding: "4px 0"
+			});
+
+			const checkbox = document.createElement("input");
+			checkbox.type = "checkbox";
+			checkbox.id = id;
+			checkbox.checked = checked;
+
+			const labelEl = document.createElement("label");
+			labelEl.htmlFor = id;
+			labelEl.textContent = label;
+			Object.assign(labelEl.style, {
+				color: "#fff",
+				fontSize: "14px"
+			});
+
+			container.appendChild(checkbox);
+			container.appendChild(labelEl);
+			return container;
+		};
 
 		/* ──────────────── D I A L O G ──────────────── */
-		const showBackupDialog = () => {
+		const showBackupDialog = async () => {
 			// Keep just one instance alive
 			let dlg = document.getElementById("backup-hf-dialog");
 			if (dlg) {
@@ -33,7 +66,6 @@ app.registerExtension({
 				background: "rgba(0,0,0,0.5)",
 				zIndex: 9999,
 			});
-			// Click outside panel to close
 			dlg.addEventListener("click", (e) => {
 				if (e.target === dlg) dlg.style.display = "none";
 			});
@@ -52,11 +84,11 @@ app.registerExtension({
 				gap: "20px",
 				boxShadow: "0 0 20px rgba(0,0,0,0.7)",
 				border: "1px solid #3c3c3c",
-			});
+				});
 
-			 // Heading text
+			// Heading text
 			const heading = document.createElement("div");
-			heading.textContent = "Enter list of folders to upload to Hugging Face.\nNewer versions will overwrite older ones.";
+			heading.textContent = "Select folders to backup to Hugging Face.\nNewer versions will overwrite older ones.";
 			Object.assign(heading.style, {
 				marginBottom: "10px",
 				color: "#fff",
@@ -65,57 +97,129 @@ app.registerExtension({
 			});
 			panel.appendChild(heading);
 
-			// Multiline input
-			const ta = document.createElement("textarea");
-			ta.rows = 8;
-			ta.placeholder = "Enter folders to backup, one per line...";
-			ta.value = `custom_nodes/ #Custom nodes folder
-user/ #User settings and workflows folder
-models/loras 
-models/upscale_models
-models/controlnet
-models/checkpoints #Below the size limit`; // Default content
-			Object.assign(ta.style, {
-				width: "100%",
-				resize: "vertical",
+			 // Checkbox container with sections
+			const checkboxContainer = document.createElement("div");
+			Object.assign(checkboxContainer.style, {
+				display: "flex",
+				flexDirection: "column",
+				gap: "16px",
 				padding: "12px",
-				borderRadius: "8px",
 				background: "#1f2128",
 				border: "1px solid #3c3c3c",
-				color: "#fff",
-				fontSize: "14px",
-				fontFamily: "monospace",
-				minHeight: "180px",
+				borderRadius: "8px",
+				maxHeight: "400px",
+				overflowY: "auto"
 			});
 
-			// Buttons
+			// System folders section
+			const systemSection = document.createElement("div");
+			Object.assign(systemSection.style, {
+				display: "flex",
+				flexDirection: "column",
+				gap: "8px",
+				borderBottom: "1px solid #3c3c3c",
+				paddingBottom: "16px"
+			});
+
+			const systemTitle = document.createElement("div");
+			systemTitle.textContent = "System Folders";
+			Object.assign(systemTitle.style, {
+				color: "#8c8c8c",
+				fontSize: "12px",
+				textTransform: "uppercase",
+				marginBottom: "4px"
+			});
+			systemSection.appendChild(systemTitle);
+
+			// Add system checkboxes
+			systemSection.appendChild(createCheckbox("user", "User Settings and Workflows", true));
+			systemSection.appendChild(createCheckbox("custom_nodes", "Custom Nodes", true));
+
+			// In/Out folders section (initially unchecked)
+			const ioSection = document.createElement("div");
+			Object.assign(ioSection.style, {
+				display: "flex",
+				flexDirection: "column",
+				gap: "8px",
+				borderBottom: "1px solid #3c3c3c",
+				paddingBottom: "16px"
+			});
+
+			const ioTitle = document.createElement("div");
+			ioTitle.textContent = "Data Folders";
+			Object.assign(ioTitle.style, {
+				color: "#8c8c8c",
+				fontSize: "12px",
+				textTransform: "uppercase",
+				marginBottom: "4px"
+			});
+			ioSection.appendChild(ioTitle);
+
+			ioSection.appendChild(createCheckbox("input", "Input Folder"));
+			ioSection.appendChild(createCheckbox("output", "Output Folder"));
+
+			// Models section
+			const modelsSection = document.createElement("div");
+			Object.assign(modelsSection.style, {
+				display: "flex",
+				flexDirection: "column",
+				gap: "8px"
+			});
+
+			const modelsTitle = document.createElement("div");
+			modelsTitle.textContent = "Model Folders";
+			Object.assign(modelsTitle.style, {
+				color: "#8c8c8c",
+				fontSize: "12px",
+				textTransform: "uppercase",
+				marginBottom: "4px"
+			});
+			modelsSection.appendChild(modelsTitle);
+
+			// Get model folders and add checkboxes
+			const modelFolders = await getFolderStructure();
+			for (const folder of modelFolders) {
+				modelsSection.appendChild(createCheckbox(
+					`models/${folder}`,
+					folder,
+					// Default checked for common model folders
+					["loras", "controlnet", "checkpoints"].includes(folder)
+				));
+			}
+
+			checkboxContainer.appendChild(systemSection);
+			checkboxContainer.appendChild(ioSection);
+			checkboxContainer.appendChild(modelsSection);
+
+			// Buttons row
 			const btnRow = document.createElement("div");
 			Object.assign(btnRow.style, {
 				display: "flex",
-				justifyContent: "space-between", // Adjusted for grouped buttons
+				justifyContent: "space-between",
 				gap: "8px",
 			});
 
 			// Cancel button
 			const cancelButton = document.createElement("button");
 			cancelButton.textContent = "Cancel";
-			cancelButton.className = "p-button p-component p-button-secondary"; // PrimeVue styling
+			cancelButton.className = "p-button p-component p-button-secondary";
 			cancelButton.onclick = () => {
 				dlg.style.display = "none";
 			};
 			btnRow.appendChild(cancelButton);
 
-			// Grouped buttons (Upload and Restore)
+			// Action buttons group
 			const actionGroup = document.createElement("div");
 			Object.assign(actionGroup.style, {
 				display: "flex",
 				gap: "8px",
 			});
 
-			 // Restore button (moved up)
+			// Restore button 
 			const restoreButton = document.createElement("button");
 			restoreButton.textContent = "Download";
-			restoreButton.className = "p-button p-component"; // Removed p-button-info
+			restoreButton.className = "p-button p-component";
+
 			restoreButton.onclick = async () => {
 				try {
 					setBackupState(true);
@@ -207,14 +311,14 @@ models/checkpoints #Below the size limit`; // Default content
 			};
 			actionGroup.appendChild(restoreButton);
 
-			// Upload button (moved down)
+			// Upload button
 			const uploadButton = document.createElement("button");
 			uploadButton.textContent = "Backup";
 			uploadButton.className = "p-button p-component p-button-success";
 			
 			const setBackupState = (isBackingUp) => {
 				panel.style.opacity = isBackingUp ? "0.7" : "1";
-				ta.disabled = isBackingUp;
+				checkboxContainer.querySelectorAll("input").forEach(cb => cb.disabled = isBackingUp);
 				uploadButton.textContent = isBackingUp ? "Cancel" : "Backup";
 				uploadButton.className = isBackingUp 
 					? "p-button p-component p-button-danger"
@@ -229,10 +333,11 @@ models/checkpoints #Below the size limit`; // Default content
 					return;
 				}
 
-				const folders = ta.value
-					.split("\n")
-					.map(line => line.split("#")[0].trim())
-					.filter(line => !!line);
+				// Get checked folders
+				const folders = Array.from(checkboxContainer.querySelectorAll("input[type=checkbox]"))
+					.filter(cb => cb.checked)
+					.map(cb => cb.id);
+
 				const sizeLimit = 5;
 
 				try {
@@ -263,7 +368,7 @@ models/checkpoints #Below the size limit`; // Default content
 
 			btnRow.appendChild(actionGroup);
 
-			panel.appendChild(ta);
+			panel.appendChild(checkboxContainer);
 			panel.appendChild(btnRow);
 			dlg.appendChild(panel);
 			document.body.appendChild(dlg);
