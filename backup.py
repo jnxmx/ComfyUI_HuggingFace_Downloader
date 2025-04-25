@@ -99,6 +99,9 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, ignore_patte
     delay = initial_delay
     last_error = None
     
+    # Define default ignore patterns
+    default_ignore_patterns = ["**/.cache/**", "**/.cache*", ".cache", ".cache*", "**/.skipbigtmp/**", ".skipbigtmp/", "**/comfy_course/**", "comfy_course"]
+    
     for attempt in range(max_retries):
         try:
             # Handle single file vs directory upload differently
@@ -107,7 +110,8 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, ignore_patte
                     path_or_fileobj=upload_path,
                     path_in_repo=path_in_repo,
                     repo_id=repo_name,
-                    token=token
+                    token=token,
+                    ignore_patterns=default_ignore_patterns
                 )
             else:
                 kwargs = {
@@ -116,8 +120,8 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, ignore_patte
                     "token": token,
                     "path_in_repo": path_in_repo
                 }
-                if ignore_patterns:
-                    kwargs["ignore_patterns"] = ignore_patterns
+                # Use provided ignore_patterns if specified, otherwise use defaults
+                kwargs["ignore_patterns"] = ignore_patterns if ignore_patterns is not None else default_ignore_patterns
                 api.upload_folder(**kwargs)
             return True
         except Exception as e:
@@ -486,7 +490,7 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
                     repo_name=repo_name,
                     token=token,
                     path_in_repo=os.path.join("ComfyUI", path_in_repo),
-                    ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*", "**/.skipbigtmp/**", ".skipbigtmp/"]
+                    ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*", "**/.skipbigtmp/**", ".skipbigtmp/", "**/comfy_course/**", "comfy_course"]
                 )
                 print(f"[INFO] Upload of '{upload_path}' complete.")
             except Exception as e:
