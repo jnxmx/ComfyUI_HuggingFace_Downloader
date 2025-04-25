@@ -94,7 +94,7 @@ def _restore_big_files(moved):
         except Exception:
             pass
 
-def _retry_upload(api, upload_path, repo_name, token, path_in_repo, max_retries=3, initial_delay=1):
+def _retry_upload(api, upload_path, repo_name, token, path_in_repo, ignore_patterns=None, max_retries=3, initial_delay=1):
     """Helper function to retry uploads with exponential backoff"""
     delay = initial_delay
     last_error = None
@@ -110,13 +110,15 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, max_retries=
                     token=token
                 )
             else:
-                api.upload_folder(
-                    folder_path=upload_path,
-                    repo_id=repo_name,
-                    token=token,
-                    path_in_repo=path_in_repo,
-                    ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*", "**/.skipbigtmp/**", "**/.skipbigtmp"],
-                )
+                kwargs = {
+                    "folder_path": upload_path,
+                    "repo_id": repo_name,
+                    "token": token,
+                    "path_in_repo": path_in_repo
+                }
+                if ignore_patterns:
+                    kwargs["ignore_patterns"] = ignore_patterns
+                api.upload_folder(**kwargs)
             return True
         except Exception as e:
             last_error = e
