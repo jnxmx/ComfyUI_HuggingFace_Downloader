@@ -78,7 +78,7 @@ class HuggingFaceDownloadFolder:
 
         remote_subfolder_path = parsed.get("subfolder", "").strip("/")
         if not remote_subfolder_path:
-            # if empty => last_segment= second half of repo => e.g. "openai/clip-vit-large-patch14" => "clip-vit-large-patch14"
+            # if empty => last_segment = second half of repo => e.g. "openai/clip-vit-large-patch14" => "clip-vit-large-patch14"
             splitted = parsed["repo"].split("/",1)
             if len(splitted)>1:
                 last_segment = splitted[1]
@@ -92,10 +92,17 @@ class HuggingFaceDownloadFolder:
             threading.Thread(
                 target=run_download_folder,
                 args=(parsed, final_folder),
+                kwargs={"remote_subfolder_path": remote_subfolder_path, "last_segment": last_segment},
                 daemon=True
             ).start()
         else:
-            run_download_folder(parsed, final_folder, sync=True)
+            run_download_folder(
+                parsed, 
+                final_folder,
+                remote_subfolder_path=remote_subfolder_path,
+                last_segment=last_segment,
+                sync=True
+            )
 
         # node output => leftover + last_segment if custom
         if target_folder=="custom":
