@@ -142,14 +142,22 @@ def run_download_folder(parsed_data: dict,
                         sync: bool = False) -> tuple[str, str]:
     """
     Downloads a folder or subfolder from Hugging Face Hub using snapshot_download.
-    The result is placed in models/<final_folder>/<last_segment> if provided.
+    The result is placed in models/<final_folder>/<repo_name>/<last_segment> if provided,
+    preserving the repository folder structure.
     """
     token = get_token()
     print("[DEBUG] run_download_folder started")
 
+    # Get repository name from the parsed data
+    repo_name = parsed_data["repo"].split("/")[-1] if "/" in parsed_data["repo"] else parsed_data["repo"]
+
+    # Create path that preserves repo structure
     base_dir = os.path.join(os.getcwd(), "models", final_folder)
     os.makedirs(base_dir, exist_ok=True)
-    dest_path = os.path.join(base_dir, last_segment) if last_segment else base_dir
+    
+    # Create path with repository name preserved
+    repo_dir = os.path.join(base_dir, repo_name)
+    dest_path = os.path.join(repo_dir, last_segment) if last_segment else repo_dir
 
     if os.path.exists(dest_path) and os.listdir(dest_path):
         fz = folder_size(dest_path)
