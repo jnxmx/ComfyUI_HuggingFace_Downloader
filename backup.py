@@ -34,10 +34,31 @@ def get_token_and_size_limit():
 def _copy_and_strip_token(src_folder, temp_dir):
     """
     Copy src_folder to temp_dir, removing 'downloader.hf_token' from any comfy.settings.json found.
+    Also migrates ComfyUI-Manager legacy paths to the new structure.
     Returns the path to the copied folder.
     """
     dst_folder = os.path.join(temp_dir, os.path.basename(src_folder))
     shutil.copytree(src_folder, dst_folder)
+
+    # Migrate legacy ComfyUI-Manager path if it exists:
+    # user/default/ComfyUI-Manager -> user/__manager
+    legacy_mgr = os.path.join(dst_folder, "default", "ComfyUI-Manager")
+    new_mgr = os.path.join(dst_folder, "__manager")
+    
+    if os.path.exists(legacy_mgr):
+        print(f"[INFO] Migrating legacy ComfyUI-Manager path in backup: {legacy_mgr} -> {new_mgr}")
+        if os.path.exists(new_mgr):
+             # If both exist, merge legacy into new (new takes precedence for conflicts)
+             _safe_move_or_copy(legacy_mgr, new_mgr)
+             shutil.rmtree(legacy_mgr)
+        else:
+             shutil.move(legacy_mgr, new_mgr)
+
+        # Cleanup empty default folder if it was only holding ComfyUI-Manager
+        default_dir = os.path.join(dst_folder, "default")
+        if os.path.exists(default_dir) and not os.listdir(default_dir):
+            os.rmdir(default_dir)
+
     for root, _, files in os.walk(dst_folder):
         for fname in files:
             if fname == "comfy.settings.json":
@@ -203,7 +224,12 @@ def _backup_custom_nodes(target_dir: str) -> str:
         for line in stdout.splitlines():
             if "Current snapshot is saved as" in line:
                 snapshot_file_name = line.split("`", 1)[-1].rsplit("`", 1)[0]
-                original_snapshot = os.path.join(comfy_dir, "user", "default", "ComfyUI-Manager", "snapshots", snapshot_file_name)
+                # Check new path first (v3.38+)
+                original_snapshot = os.path.join(comfy_dir, "user", "__manager", "snapshots", snapshot_file_name)
+                if not os.path.exists(original_snapshot):
+                    # Check legacy path
+                    original_snapshot = os.path.join(comfy_dir, "user", "default", "ComfyUI-Manager", "snapshots", snapshot_file_name)
+
                 if os.path.exists(original_snapshot):
                     # Copy to temp dir for modification
                     snapshot_file = os.path.join(temp_dir, "original_snapshot.json")
@@ -676,7 +702,15 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                     if "files" in struct:
                         for f in struct["files"]:
                             rel_path = f.split("ComfyUI/", 1)[1]
-                            src_file = os.path.join(source_dir, rel_path)
+                            
+                            # Remap legacy ComfyUI-Manager path to new path
+                            # user/default/ComfyUI-Manager/... -> user/__manager/...
+                            if "user/default/ComfyUI-Manager/" in rel_path:
+                                new_rel_path = rel_path.replace("user/default/ComfyUI-Manager/", "user/__manager/")
+                                print(f"[INFO] in-flight migration: {rel_path} -> {new_rel_path}")
+                                rel_path = new_rel_path
+
+                            src_file = os.path.join(source_dir, f.split("ComfyUI/", 1)[1]) # src is still the downloaded path
                             dst_file = os.path.join(target_dir, rel_path)
                             
                             if rel_path == "custom_nodes_snapshot.yaml":
@@ -724,14 +758,8 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                     for key, value in struct.items():
                         if key != "files":
                             new_path = os.path.join(current_path, key)
-                            dir_path = os.path.join(target_dir, new_path)
-                            
-                            if not os.path.exists(dir_path):
-                                os.makedirs(dir_path)
-                                print(f"[INFO] Created directory: {os.path.relpath(dir_path, target_dir)}")
-                            else:
-                                print(f"[DEBUG] Using existing directory: {os.path.relpath(dir_path, target_dir)}")
-                            # Process its contents
+                            # process_structure will handle individual files, so we don't strictly need to create dirs here
+                            # but keeping the recursion structure
                             process_structure(value, new_path)
 
                 process_structure(folder_structure)
