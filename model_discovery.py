@@ -88,10 +88,28 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
                         "suggested_folder": model_info.get("directory")
                     })
 
+    # Create a map of links: link_id -> (start_node_id, start_slot_index)
+    # The 'links' array in ComfyUI workflow format usually looks like: [id, start_node_id, start_slot, end_node_id, end_slot, type]
+    links_map = {}
+    raw_links = workflow.get("links", [])
+    for link in raw_links:
+        if isinstance(link, list) and len(link) >= 4:
+            link_id = link[0]
+            start_node_id = link[1]
+            start_slot = link[2]
+            links_map[link_id] = (start_node_id, start_slot) # type: ignore
+
     nodes = workflow.get("nodes", [])
+    # Create a quick ID lookup for nodes
+    nodes_by_id = {n.get("id"): n for n in nodes}
+
     for node in nodes:
         # Skip disabled/muted nodes
-        if node.get("mode") == 2:
+        # 0 = Enabled, 2 = Muted, 4 = Bypass/Disabled?
+        # Let's treat anything != 0 and != None as potentially disabled, 
+        # or at least explicitly 2 and 4 as knowndisabled states.
+        mode = node.get("mode", 0)
+        if mode == 2 or mode == 4:
             continue
             
         node_id = node.get("id")
@@ -171,6 +189,7 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
                             # Try to map folder
                             suggested_folder = NODE_TYPE_MAPPING.get(node_type)
                             
+                            
                             found_models.append({
                                 "filename": val,
                                 "url": None,
@@ -179,7 +198,50 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
                                 "suggested_folder": suggested_folder
                             })
 
+        # 4. Check inputs for upstream URLs (Model Injection)
+        if "inputs" in node:
+            for input_item in node["inputs"]:
+                link_id = input_item.get("link")
+                if link_id and link_id in links_map:
+                    upstream_id, _ = links_map[link_id]
+                    upstream_node = nodes_by_id.get(upstream_id)
+                    
+                    if upstream_node:
+                        # Check upstream node for URLs
+                        if "widgets_values" in upstream_node:
+                            # Skip if upstream is disabled
+                            if upstream_node.get("mode", 0) in [2, 4]:
+                                continue
+
+                            u_widgets = upstream_node["widgets_values"]
+                            if isinstance(u_widgets, list):
+                                for u_val in u_widgets:
+                                    if isinstance(u_val, str) and (u_val.startswith("http://") or u_val.startswith("https://")):
+                                        # It's a URL in the upstream node
+                                        # Check if we should attribute it to this node?
+                                        # Or just ensure it's captured (which it likely is by the main loop)
+                                        
+                                        # The requirement is: "auto-download node should count this as a link for this loader's model"
+                                        # We need to find the model entry for THIS node and attach the URL.
+                                        
+                                        # Find the model for this node corresponding to this input?
+                                        # Or just find ANY model required by this node and if missing URL, try this one.
+                                        # Simplification: If this node requires a model (found above), and has no URL, and upstream has a URL, use it.
+                                        
+                                        # Let's iterate over found_models for this node and enrich them
+                                        for m in found_models:
+                                            if m["node_id"] == node_id and not m["url"]:
+                                                # Check if the URL filename matches? 
+                                                # Or just blindly assign if it's the only one?
+                                                # "count this as a link for this loader's model" implies loose coupling or direct assignment.
+                                                
+                                                # Let's verify if URL looks like a model
+                                                if any(u_val.endswith(ext) for ext in MODEL_EXTENSIONS) or "blob" in u_val or "resolve" in u_val:
+                                                    m["url"] = u_val
+                                                    m["note"] = f"Resolved from upstream node {upstream_node.get('title', upstream_id)}"
+    
     return found_models
+
 
 def search_huggingface_model(filename: str, token: str = None) -> str:
     """
@@ -205,8 +267,33 @@ def search_huggingface_model(filename: str, token: str = None) -> str:
             if len(stem) > 3: # Avoid searching for "model" or short terms
                 print(f"[DEBUG] No results for {filename}, trying stem: {stem}")
                 models = list(api.list_models(search=stem, limit=20, sort="downloads", direction=-1))
+
+        # Deep Search Fallback: Check top repos of priority authors if still nothing
+        # This helps when the file is inside a repo like "flux-fp8" but we search for "flux-vae-bf16"
+        if not models:
+            print(f"[DEBUG] Still no results, checking priority authors directly...")
+            path_keywords = []
+            stem = os.path.splitext(filename)[0].lower()
+            # simple heuristics to filter repos? No, just check top repos.
+            
+            for author in PRIORITY_AUTHORS:
+                try:
+                    # Get top 5 repos by popularity/recent
+                    author_models = list(api.list_models(author=author, limit=5, sort="downloads", direction=-1))
+                    models.extend(author_models)
+                except Exception:
+                    continue
         
         best_match = None
+        
+        # Deduplicate models list
+        seen_ids = set()
+        unique_models = []
+        for m in models:
+            if m.modelId not in seen_ids:
+                unique_models.append(m)
+                seen_ids.add(m.modelId)
+        models = unique_models
         
         for model in models:
             model_id = model.modelId
