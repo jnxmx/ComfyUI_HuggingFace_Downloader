@@ -50,12 +50,49 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
     """
     found_models = []
     
+    # 1. Check definitions (subgraphs) if present to find hidden URLs in templates
+    definitions = workflow.get("definitions", {})
+    subgraphs = definitions.get("subgraphs", [])
+    for subgraph in subgraphs:
+        sub_nodes = subgraph.get("nodes", [])
+        for node in sub_nodes:
+            # Recursively check properties in subgraph nodes
+            if "properties" in node and "models" in node["properties"]:
+                 for model_info in node["properties"]["models"]:
+                    found_models.append({
+                        "filename": model_info.get("name"),
+                        "url": model_info.get("url"),
+                        "node_id": node.get("id"), # Inner ID
+                        "node_title": "Subgraph Node",
+                        "suggested_folder": model_info.get("directory")
+                    })
+
     nodes = workflow.get("nodes", [])
     for node in nodes:
         node_id = node.get("id")
         node_title = node.get("title") or node.get("type", "Unknown Node")
+        node_type = node.get("type", "")
         
-        # 1. Check properties -> models (Standard ComfyUI template format)
+        # Check for Markdown/Notes with links
+        if "Note" in node_type or "PrimitiveString" in node_type:
+            # Extract links from widgets_values if present
+            if "widgets_values" in node:
+                for val in node["widgets_values"]:
+                    if isinstance(val, str):
+                        # Regex to find markdown links: [filename](url)
+                        # We specifically look for lines that might look like models
+                        # Pattern: [filename.ext](url)
+                        links = re.findall(r'\[([^\]]+\.(?:safetensors|ckpt|pt|bin|pth|gguf))\]\((https?://[^)]+)\)', val, re.IGNORECASE)
+                        for fname, url in links:
+                             found_models.append({
+                                "filename": fname,
+                                "url": url,
+                                "node_id": node_id,
+                                "node_title": f"Note: {node_title}",
+                                "suggested_folder": None # Hard to guess from note, unless context
+                            })
+
+        # 2. Check properties -> models (Standard ComfyUI template format)
         if "properties" in node and "models" in node["properties"]:
             for model_info in node["properties"]["models"]:
                 found_models.append({
@@ -66,13 +103,15 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
                     "suggested_folder": model_info.get("directory")
                 })
                 
-        # 2. Check widgets_values for filenames
+        # 3. Check widgets_values for filenames
         if "widgets_values" in node:
             widgets = node["widgets_values"]
             if isinstance(widgets, list):
                 for val in widgets:
                     if isinstance(val, str) and any(val.endswith(ext) for ext in MODEL_EXTENSIONS):
                         # Avoid duplicates if already found via properties
+                        # Note: we don't check against subgraph findings here yet, 
+                        # duplicate filtering happens in process_workflow
                         if not any(m["filename"] == val and m["node_id"] == node_id for m in found_models):
                             found_models.append({
                                 "filename": val,
