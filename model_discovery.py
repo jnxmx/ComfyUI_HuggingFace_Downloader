@@ -151,6 +151,10 @@ NODE_TYPE_MAPPING = {
     "PulidModelLoader": "pulid",
     "Florence2ModelLoader": "LLM",
     "DownloadAndLoadFlorence2Model": "LLM",
+    
+    # ControlNet Aux Preprocessors (comfyui_controlnet_aux)
+    "DepthAnythingV2Preprocessor": "custom_nodes/comfyui_controlnet_aux/ckpts/depth-anything",
+    "AIO_Preprocessor": None,  # Uses different models depending on type parameter
 }
 
 def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -215,6 +219,43 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
             
         node_title = node.get("title") or node.get("type", "Unknown Node")
         node_type = node.get("type", "")
+        
+        # Special handling for "Hugging Face Download Model" node
+        # This node has widgets: [folder, url, custom_path]
+        # We need to extract the custom_path (widgets[2]) to determine the target folder
+        if node_type == "Hugging Face Download Model" and "widgets_values" in node:
+            widgets = node["widgets_values"]
+            if isinstance(widgets, list) and len(widgets) >= 3:
+                folder = widgets[0]  # Base folder type (e.g., "checkpoints", "custom")
+                url = widgets[1]  # URL
+                custom_path = widgets[2]  # Custom subfolder path
+                
+                # Extract filename from URL
+                filename = None
+                if url and isinstance(url, str):
+                    # Try to extract filename from URL
+                    if "/" in url:
+                        filename = url.split("/")[-1].split("?")[0]  # Remove query params
+                    
+                if filename:
+                    # Determine suggested folder
+                    if custom_path and isinstance(custom_path, str) and custom_path.strip():
+                        # User specified custom path
+                        suggested_folder = custom_path.strip()
+                    elif folder and folder != "custom":
+                        # Use base folder
+                        suggested_folder = folder
+                    else:
+                        suggested_folder = None
+                    
+                    found_models.append({
+                        "filename": filename,
+                        "url": url,
+                        "node_id": node_id,
+                        "node_title": node_title,
+                        "suggested_folder": suggested_folder
+                    })
+                    continue  # Skip generic widget scan for this node
         
         # Check for Markdown/Notes with links
         if "Note" in node_type or "PrimitiveString" in node_type:

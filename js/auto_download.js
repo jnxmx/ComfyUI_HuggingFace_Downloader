@@ -30,6 +30,43 @@ app.registerExtension({
             return inp;
         };
 
+        /* Show loading dialog immediately */
+        const showLoadingDialog = () => {
+            const existing = document.getElementById("auto-download-dialog");
+            if (existing) existing.remove();
+
+            const dlg = document.createElement("div");
+            dlg.id = "auto-download-dialog";
+            Object.assign(dlg.style, {
+                position: "fixed",
+                top: 0,
+                left: 0,
+                width: "100vw",
+                height: "100vh",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.6)",
+                zIndex: 9000
+            });
+
+            const panel = document.createElement("div");
+            Object.assign(panel.style, {
+                background: "#17191f",
+                color: "#fff",
+                padding: "40px",
+                borderRadius: "12px",
+                textAlign: "center",
+                fontSize: "18px",
+                border: "1px solid #3c3c3c"
+            });
+            panel.innerHTML = "<div>🔍 Looking for links...</div>";
+
+            dlg.appendChild(panel);
+            document.body.appendChild(dlg);
+            return dlg;
+        };
+
         /* ──────────────── UI Components ──────────────── */
         const showResultsDialog = (data) => {
             // Remove existing dialog if any
@@ -98,8 +135,8 @@ app.registerExtension({
                 opt.value = f;
                 datalist.appendChild(opt);
             });
-            // Append datalist to content so it gets cleaned up with dialog
-            content.appendChild(datalist);
+            // IMPORTANT: Append to document.body so it's globally accessible
+            document.body.appendChild(datalist);
 
             // Use non-blocking fetch to update datalist
             fetch("/folder_structure")
@@ -430,7 +467,11 @@ app.registerExtension({
             menu.push(null, {
                 content: "Auto-download models",
                 callback: async () => {
+                    let loadingDlg = null;
                     try {
+                        // Show loading dialog immediately
+                        loadingDlg = showLoadingDialog();
+
                         const workflow = app.graph.serialize();
                         console.log("[AutoDownload] Scanning workflow:", workflow);
 
@@ -441,15 +482,21 @@ app.registerExtension({
                             body: JSON.stringify(workflow)
                         });
 
+                        // Remove loading dialog
+                        if (loadingDlg) loadingDlg.remove();
+
                         if (resp.status !== 200) {
                             throw new Error("Failed to scan models: " + resp.statusText + " (" + resp.status + ")");
                         }
                         const data = await resp.json();
                         console.log("[AutoDownload] Scan results:", data);
 
+                        // Show results
                         showResultsDialog(data);
 
                     } catch (e) {
+                        // Remove loading dialog on error
+                        if (loadingDlg) loadingDlg.remove();
                         console.error("[AutoDownload] Error:", e);
                         alert("Error: " + e);
                     }
