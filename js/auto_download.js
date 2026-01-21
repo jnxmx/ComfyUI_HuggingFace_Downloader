@@ -125,6 +125,83 @@ app.registerExtension({
                     cursor: "pointer",
                     borderRadius: "4px"
                 });
+                /* Fetch folder structure for autocomplete */
+                let availableFolders = ["checkpoints", "loras", "vae", "controlnet", "upscale_models", "text_encoders", "clip_vision"];
+
+                // Use non-blocking fetch
+                fetch("/folder_structure")
+                    .then(r => r.json())
+                    .then(fData => {
+                        if (Array.isArray(fData)) {
+                            // Update datalist if already created, or just update the variable if not
+                            const dl = document.getElementById(datalistId);
+                            if (dl) {
+                                dl.innerHTML = "";
+                                fData.forEach(f => {
+                                    const opt = document.createElement("option");
+                                    opt.value = f;
+                                    dl.appendChild(opt);
+                                });
+                            }
+                        }
+                    })
+                    .catch(e => console.warn("[AutoDownload] Failed to fetch folder structure:", e));
+
+                /* Create Datalist for folders */
+                const datalistId = "folder-options-" + Date.now();
+                const datalist = document.createElement("datalist");
+                datalist.id = datalistId;
+                availableFolders.forEach(f => {
+                    const opt = document.createElement("option");
+                    opt.value = f;
+                    datalist.appendChild(opt);
+                });
+                // Append datalist to content so it gets cleaned up with dialog? 
+                // Datalist needs to be in document to work. Panel is in document.
+                content.appendChild(datalist);
+
+                /* Helper to create styled inputs */
+                function createInput(value, placeholder, listId = null) {
+                    const input = document.createElement("input");
+                    input.type = "text";
+                    input.value = value || "";
+                    input.placeholder = placeholder || "";
+                    if (listId) input.setAttribute("list", listId);
+
+                    Object.assign(input.style, {
+                        width: "100%",
+                        background: "#333",
+                        color: "#fff",
+                        border: "1px solid #555",
+                        padding: "4px",
+                        borderRadius: "4px"
+                    });
+
+                    // Highlight if empty URL
+                    if (!value && placeholder.includes("URL")) {
+                        input.style.borderColor = "#ff4444";
+                        input.style.background = "#3a2a2a";
+
+                        input.addEventListener("input", () => {
+                            if (input.value.trim()) {
+                                input.style.borderColor = "#555";
+                                input.style.background = "#333";
+                            } else {
+                                input.style.borderColor = "#ff4444";
+                                input.style.background = "#3a2a2a";
+                            }
+                        });
+                    }
+                    return input;
+                }
+
+                /* Content Area */
+                Object.assign(content.style, {
+                    marginTop: "15px",
+                    maxHeight: "400px",
+                    overflowY: "auto"
+                });
+
                 summary.appendChild(fixBtn);
 
                 foundSection.appendChild(summary);
@@ -145,9 +222,11 @@ app.registerExtension({
             const missingModels = data.missing || [];
             // Container for rows
             const rowsContainer = document.createElement("div");
-            rowsContainer.style.display = "flex";
-            rowsContainer.style.flexDirection = "column";
-            rowsContainer.style.gap = "8px";
+            Object.assign(rowsContainer.style, {
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px"
+            });
 
             const rowInputs = []; // To store references to data for downloading
 
@@ -176,6 +255,9 @@ app.registerExtension({
                     cb.type = "checkbox";
                     cb.checked = true; // Default selected
 
+                    // Should be unchecked if no URL?
+                    if (!m.url) cb.checked = false;
+
                     // Info
                     const infoDiv = document.createElement("div");
                     infoDiv.innerHTML = `<div style="font-weight:bold; word-break:break-all">${m.filename}</div><div style="font-size:10px;color:#888">${m.node_title || "Unknown Node"}</div>`;
@@ -184,7 +266,7 @@ app.registerExtension({
                     const urlInput = createInput(m.url, "HuggingFace URL...");
 
                     // Folder (can be editable)
-                    const folderInput = createInput(m.suggested_folder || "checkpoints", "Folder (e.g. checkpoints)");
+                    const folderInput = createInput(m.suggested_folder || "checkpoints", "Folder", datalistId);
 
                     row.appendChild(cb);
                     row.appendChild(infoDiv);

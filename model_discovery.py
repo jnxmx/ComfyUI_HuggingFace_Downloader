@@ -15,6 +15,46 @@ PRIORITY_AUTHORS = [
     "city96"
 ]
 
+def load_comfyui_manager_cache(comfy_root: str) -> Dict[str, str]:
+    """
+    Scans for ComfyUI-Manager model-list.json and returns {filename: url} mapping.
+    Locations to check:
+    - ComfyUI/user/default/ComfyUI-Manager/cache/*.json
+    - ComfyUI/custom_nodes/ComfyUI-Manager/cache/*.json
+    """
+    cache_map = {}
+    
+    # Potential paths
+    paths_to_check = [
+        os.path.join(comfy_root, "user", "default", "ComfyUI-Manager", "cache"),
+        os.path.join(comfy_root, "custom_nodes", "ComfyUI-Manager", "cache"),
+        os.path.join(comfy_root, "user", "__manager", "cache") # Mentioned by user
+    ]
+    
+    for path in paths_to_check:
+        if not os.path.exists(path):
+            continue
+            
+        for file in os.listdir(path):
+            if file.endswith("model-list.json"):
+                try:
+                    full_path = os.path.join(path, file)
+                    print(f"[DEBUG] Loading Manager cache: {full_path}")
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        models = data.get("models", [])
+                        for m in models:
+                            # ComfyUI Manager model list format:
+                            # {"filename": "...", "url": "...", "save_path": "..."}
+                            filename = m.get("filename")
+                            url = m.get("url")
+                            if filename and url:
+                                cache_map[filename] = url
+                except Exception as e:
+                    print(f"[ERROR] Failed to load manager cache {file}: {e}")
+                    
+    return cache_map
+
 def get_all_local_models(comfy_root: str) -> Dict[str, str]:
     """
     Scans the 'models' directory and returns a dictionary:
@@ -350,7 +390,9 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[s
     comfy_root = os.getcwd() # Assuming running from ComfyUI root
     # Adjust if we are in a text env, but in ComfyUI environment os.getcwd() is root.
     
+    
     local_models = get_all_local_models(comfy_root)
+    manager_cache = load_comfyui_manager_cache(comfy_root)
     required_models = extract_models_from_workflow(workflow_json)
     
     token = get_token()
@@ -409,9 +451,16 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[s
         # If not found, it is missing
         url = req.get("url")
         
-        # If no URL in workflow, try to search HF
+        
+        # If no URL in workflow, try to search:
+        # 1. ComfyUI Manager Cache
+        # 2. Hugging Face
         if not url:
-            url = search_huggingface_model(basename, token)
+            if filename in manager_cache:
+                url = manager_cache[filename]
+                print(f"[DEBUG] Found in Manager cache: {filename} -> {url}")
+            else:
+                 url = search_huggingface_model(basename, token)
             
         missing_models.append({
             "filename": filename,
