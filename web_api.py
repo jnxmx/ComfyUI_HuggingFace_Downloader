@@ -21,6 +21,7 @@ async def check_missing_models(request):
     Returns: { "missing": [...], "found": [...] }
     """
     try:
+        print("[DEBUG] check_missing_models called")
         data = await request.json()
         result = process_workflow_for_missing_models(data)
         return web.json_response(result)
@@ -34,6 +35,7 @@ async def install_models(request):
     Expects JSON: { "models": [ { "url": "...", "filename": "...", "folder": "..." }, ... ] }
     """
     try:
+        print("[DEBUG] install_models called")
         data = await request.json()
         models_to_install = data.get("models", [])
         

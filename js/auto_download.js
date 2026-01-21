@@ -268,11 +268,19 @@ app.registerExtension({
                     addLog(`>> Downloading ${item.filename} from ${item.url}...`);
 
                     try {
-                        const resp = await api.fetchApi("/install_models", {
+                        const resp = await fetch("/install_models", {
                             method: "POST",
+                            headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ models: [item] })
                         });
+                        console.log("[AutoDownload] Install response status:", resp.status);
+
+                        if (resp.status !== 200) {
+                            throw new Error("Server returned " + resp.status + " " + resp.statusText);
+                        }
+
                         const res = await resp.json();
+                        console.log("[AutoDownload] Install result:", res);
 
                         if (res.results && res.results.length > 0) {
                             const r = res.results[0];
@@ -321,22 +329,25 @@ app.registerExtension({
                 callback: async () => {
                     try {
                         const workflow = app.graph.serialize();
-                        // Show a "Scanning..." toast or simple loading indicator?
-                        // For now just alert or quick API call
+                        console.log("[AutoDownload] Scanning workflow:", workflow);
 
                         // Call backend
-                        const resp = await api.fetchApi("/check_missing_models", {
+                        const resp = await fetch("/check_missing_models", {
                             method: "POST",
+                            headers: { "Content-Type": "application/json" },
                             body: JSON.stringify(workflow)
                         });
+
                         if (resp.status !== 200) {
-                            throw new Error("Failed to scan models: " + resp.statusText);
+                            throw new Error("Failed to scan models: " + resp.statusText + " (" + resp.status + ")");
                         }
                         const data = await resp.json();
+                        console.log("[AutoDownload] Scan results:", data);
 
                         showResultsDialog(data);
 
                     } catch (e) {
+                        console.error("[AutoDownload] Error:", e);
                         alert("Error: " + e);
                     }
                 }
