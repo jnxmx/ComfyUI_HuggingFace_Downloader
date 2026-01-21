@@ -386,6 +386,7 @@ app.registerExtension({
                 // Switch UI to downloading state
                 downloadBtn.disabled = true;
                 downloadBtn.textContent = "Downloading...";
+                closeBtn.style.display = "none"; // Hide close button during download
                 content.style.display = "none"; // Hide list to show logs better? Or just keep it.
                 logPanel.style.display = "block";
 
@@ -439,7 +440,12 @@ app.registerExtension({
                 }
 
                 addLog("All tasks finished.");
-                downloadBtn.textContent = "Finished";
+
+                // Replace Download button with Finish button
+                downloadBtn.style.display = "none";
+                closeBtn.textContent = "Finish";
+                closeBtn.className = "p-button p-component p-button-success";
+                closeBtn.style.display = "inline-block";
 
                 // Suggest refresh (Press R?)
                 const refreshHint = document.createElement("div");

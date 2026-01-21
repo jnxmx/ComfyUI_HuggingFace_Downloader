@@ -202,6 +202,10 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
     nodes = workflow.get("nodes", [])
     # Create a quick ID lookup for nodes
     nodes_by_id = {n.get("id"): n for n in nodes}
+    
+    # Track Note links separately - they should NOT create download entries
+    # They should only be used to enrich loader nodes that are missing URLs
+    note_links = {}  # {filename: url}
 
     for node in nodes:
         # Skip disabled/muted nodes
@@ -257,24 +261,18 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
                     })
                     continue  # Skip generic widget scan for this node
         
-        # Check for Markdown/Notes with links
+        # Extract links from Notes - but DON'T add them to found_models
+        # They should only be used to enrich loader nodes
         if "Note" in node_type or "PrimitiveString" in node_type:
-            # Extract links from widgets_values if present
             if "widgets_values" in node:
                 for val in node["widgets_values"]:
                     if isinstance(val, str):
                         # Regex to find markdown links: [filename](url)
-                        # We specifically look for lines that might look like models
-                        # Pattern: [filename.ext](url)
                         links = re.findall(r'\[([^\]]+\.(?:safetensors|ckpt|pt|bin|pth|gguf))\]\((https?://[^)]+)\)', val, re.IGNORECASE)
                         for fname, url in links:
-                             found_models.append({
-                                "filename": fname,
-                                "url": url,
-                                "node_id": node_id,
-                                "node_title": f"Note: {node_title}",
-                                "suggested_folder": None # Hard to guess from note, unless context
-                            })
+                            # Store in note_links dict for later enrichment
+                            note_links[fname] = url
+            continue  # Don't process Notes as loader nodes
 
         # 2. Check properties -> models (Standard ComfyUI template format)
         if "properties" in node and "models" in node["properties"]:
