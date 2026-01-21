@@ -90,7 +90,15 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
 
     nodes = workflow.get("nodes", [])
     for node in nodes:
+        # Skip disabled/muted nodes
+        if node.get("mode") == 2:
+            continue
+            
         node_id = node.get("id")
+        # Skip disabled/muted nodes
+        if node.get("mode") == 2:
+            continue
+            
         node_title = node.get("title") or node.get("type", "Unknown Node")
         node_type = node.get("type", "")
         
@@ -130,7 +138,32 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
             widgets = node["widgets_values"]
             if isinstance(widgets, list):
                 for val in widgets:
-                    if isinstance(val, str) and any(val.endswith(ext) for ext in MODEL_EXTENSIONS):
+                    if not isinstance(val, str):
+                        continue
+
+                    # CASE A: Value is a URL
+                    if val.startswith("http://") or val.startswith("https://"):
+                        # Check if it points to a model file
+                        if any(val.endswith(ext) for ext in MODEL_EXTENSIONS) or "blob" in val or "resolve" in val:
+                            # Try to extract filename from URL
+                            # Typical specific link: https://.../resolve/main/filename.safetensors
+                            # Or query params? 
+                            parsed_filename = val.split("?")[0].split("/")[-1]
+                            # If it looks like a model filename
+                            if any(parsed_filename.endswith(ext) for ext in MODEL_EXTENSIONS):
+                                if not any(m["filename"] == parsed_filename and m["node_id"] == node_id for m in found_models):
+                                    suggested_folder = NODE_TYPE_MAPPING.get(node_type)
+                                    found_models.append({
+                                        "filename": parsed_filename,
+                                        "url": val,
+                                        "node_id": node_id,
+                                        "node_title": node_title,
+                                        "suggested_folder": suggested_folder
+                                    })
+                                continue
+
+                    # CASE B: Value is a filename
+                    if any(val.endswith(ext) for ext in MODEL_EXTENSIONS):
                         # Avoid duplicates if already found via properties
                         # Note: we don't check against subgraph findings here yet, 
                         # duplicate filtering happens in process_workflow
@@ -164,7 +197,14 @@ def search_huggingface_model(filename: str, token: str = None) -> str:
     try:
         # Search for models containing the filename
         # We can use the 'models' endpoint with a search query
-        models = api.list_models(search=filename, limit=20, sort="downloads", direction=-1)
+        models = list(api.list_models(search=filename, limit=20, sort="downloads", direction=-1))
+        
+        # Fallback: strict search might fail if ext is included, try stem
+        if not models:
+            stem = os.path.splitext(filename)[0]
+            if len(stem) > 3: # Avoid searching for "model" or short terms
+                print(f"[DEBUG] No results for {filename}, trying stem: {stem}")
+                models = list(api.list_models(search=stem, limit=20, sort="downloads", direction=-1))
         
         best_match = None
         
