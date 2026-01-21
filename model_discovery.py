@@ -17,20 +17,25 @@ PRIORITY_AUTHORS = [
     "city96"
 ]
 
-def load_comfyui_manager_cache(comfy_root: str) -> Dict[str, str]:
+def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Scans for ComfyUI-Manager model-list.json and returns {filename: url} mapping.
+    Checks ComfyUI-Manager cache for missing model URLs and enriches the missing_models list.
     Locations to check:
+    - ComfyUI/user/__manager/cache/*.json
     - ComfyUI/user/default/ComfyUI-Manager/cache/*.json
     - ComfyUI/custom_nodes/ComfyUI-Manager/cache/*.json
     """
+    # Build filename -> url map from cache
     cache_map = {}
     
-    # Potential paths
+    # Get ComfyUI root - folder_paths.base_path should give us the root
+    comfy_root = folder_paths.base_path if hasattr(folder_paths, 'base_path') else os.getcwd()
+    
+    # Potential cache paths
     paths_to_check = [
+        os.path.join(comfy_root, "user", "__manager", "cache"), # User mentioned this path
         os.path.join(comfy_root, "user", "default", "ComfyUI-Manager", "cache"),
         os.path.join(comfy_root, "custom_nodes", "ComfyUI-Manager", "cache"),
-        os.path.join(comfy_root, "user", "__manager", "cache") # Mentioned by user
     ]
     
     for path in paths_to_check:
@@ -54,8 +59,16 @@ def load_comfyui_manager_cache(comfy_root: str) -> Dict[str, str]:
                                 cache_map[filename] = url
                 except Exception as e:
                     print(f"[ERROR] Failed to load manager cache {file}: {e}")
-                    
-    return cache_map
+    
+    # Enrich missing_models with URLs from cache
+    for model in missing_models:
+        if not model.get("url"):
+            filename = model["filename"]
+            if filename in cache_map:
+                model["url"] = cache_map[filename]
+                print(f"[DEBUG] Found URL in Manager cache for {filename}: {cache_map[filename]}")
+    
+    return missing_models
 
 def get_all_local_models(comfy_root: str) -> Dict[str, str]:
     """
