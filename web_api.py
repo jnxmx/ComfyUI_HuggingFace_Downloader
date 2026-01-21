@@ -3,6 +3,9 @@ import json
 from aiohttp import web
 from .backup import backup_to_huggingface, restore_from_huggingface
 from .file_manager import get_model_subfolders
+from .model_discovery import process_workflow_for_missing_models
+from .downloader import run_download
+from .parse_link import parse_link
 
 async def folder_structure(request):
     """Return the list of model subfolders"""
@@ -11,6 +14,59 @@ async def folder_structure(request):
         return web.json_response(folders)
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
+
+async def check_missing_models(request):
+    """
+    Analyzes the workflow JSON to find missing models.
+    Returns: { "missing": [...], "found": [...] }
+    """
+    try:
+        data = await request.json()
+        result = process_workflow_for_missing_models(data)
+        return web.json_response(result)
+    except Exception as e:
+        print(f"[ERROR] check_missing_models failed: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+async def install_models(request):
+    """
+    Downloads a list of models.
+    Expects JSON: { "models": [ { "url": "...", "filename": "...", "folder": "..." }, ... ] }
+    """
+    try:
+        data = await request.json()
+        models_to_install = data.get("models", [])
+        
+        results = []
+        for model in models_to_install:
+            url = model.get("url")
+            filename = model.get("filename")
+            folder = model.get("folder", "checkpoints") # Default to checkpoints
+            
+            if not url:
+                results.append({"filename": filename, "status": "failed", "error": "No URL provided"})
+                continue
+                
+            try:
+                # Parse the URL to get repo info
+                parsed = parse_link(url)
+                
+                # If parsed doesn't have 'file' (repo root link?), try to use filename
+                # parse_link usually extracts file if it's a resolve/blob link.
+                if "file" not in parsed and filename:
+                     parsed["file"] = filename
+                
+                msg, path = run_download(parsed, folder, sync=True)
+                results.append({"filename": filename, "status": "success", "path": path, "message": msg})
+                
+            except Exception as e:
+                print(f"[ERROR] Failed to download {filename}: {e}")
+                results.append({"filename": filename, "status": "failed", "error": str(e)})
+        
+        return web.json_response({"results": results})
+        
+    except Exception as e:
+         return web.json_response({"error": str(e)}, status=500)
 
 async def backup_to_hf(request):
     data = await request.json()
@@ -52,6 +108,8 @@ def setup(app):
     app.router.add_get("/folder_structure", folder_structure)
     app.router.add_post("/backup_to_hf", backup_to_hf)
     app.router.add_post("/restore_from_hf", restore_from_hf)
+    app.router.add_post("/check_missing_models", check_missing_models)
+    app.router.add_post("/install_models", install_models)
     
     async def restart(request):
         """Restart ComfyUI server"""
