@@ -94,7 +94,48 @@ NODE_TYPE_MAPPING = {
     "ESAModelLoader": "upscale_models",
     "StyleModelLoader": "style_models",
     "GligenLoader": "gligen",
-    "DiffusersLoader": "diffusion_models" 
+    "DiffusersLoader": "diffusion_models",
+    "GLIGENLoader": "gligen",
+    "CLIPVisionLoader": "clip_vision",
+    "StyleModelLoader": "style_models",
+    "DiffControlNetLoader": "controlnet",
+    
+    # External Repos / Custom Nodes
+    
+    # ComfyUI-WanVideoWrapper
+    "WanVideoLoraSelect": "loras",
+    "WanVideoLoraSelectByName": "loras",
+    "WanVideoLoraSelectMulti": "loras",
+    "WanVideoVACEModelSelect": "diffusion_models", # Fallback, could be unet_gguf
+    "WanVideoExtraModelSelect": "diffusion_models",
+    
+    # GGUF
+    "LoaderGGUF": "unet",
+    "LoaderGGUFAdvanced": "unet",
+    "UnetLoaderGGUF": "unet", # MultiGPU variant
+    "ClipLoaderGGUF": "clip",
+    "DualClipLoaderGGUF": "clip",
+    "TripleClipLoaderGGUF": "clip",
+    "QuadrupleClipLoaderGGUF": "clip",
+    
+    # Nunchaku
+    "NunchakuFluxDiTLoader": "diffusion_models",
+    
+    # IPAdapter
+    "IPAdapterPlus": "ipadapter",
+    "IPAdapterUnifiedLoader": "ipadapter",
+    
+    # AnimateDiff
+    "ADE_AnimateDiffLoaderGen1": "animatediff_models",
+    "ADE_AnimateDiffLoaderWithContext": "animatediff_models",
+    
+    # ComfyUI-MultiGPU
+    "CheckpointLoaderNF4": "checkpoints",
+    "LoadFluxControlNet": "xlabs_controlnets",
+    "MMAudioModelLoader": "mmaudio",
+    "PulidModelLoader": "pulid",
+    "Florence2ModelLoader": "LLM",
+    "DownloadAndLoadFlorence2Model": "LLM",
 }
 
 def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -282,6 +323,90 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
     
     return found_models
 
+def recursive_find_file(filename: str, root_dir: str) -> str | None:
+    """Recursively searches for a file within a directory."""
+    for dirpath, _, filenames in os.walk(root_dir):
+        if filename in filenames:
+            return os.path.join(dirpath, filename)
+    return None
+
+def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Checks if models exist locally.
+    Returns:
+        missing_models: list of models not found
+        existing_models: list of models found (filename, actual_path, etc.)
+        path_mismatches: list of models found but with different paths than requested
+    """
+    missing = []
+    existing = []
+    path_mismatches = []
+    
+    # ComfyUI's folder_paths.base_path is usually the ComfyUI root
+    # If not, os.getcwd() might be more reliable if this script is run from custom_nodes
+    # For now, assuming folder_paths is correctly configured.
+    
+    for model in found_models:
+        filename = model["filename"]
+        folder_type = model.get("suggested_folder", "checkpoints")
+        
+        # Use ComfyUI's folder_paths to get valid paths for this type
+        search_paths = folder_paths.get_folder_paths(folder_type)
+        if not search_paths:
+             # Fallback to standard models/ structure if type unknown
+            # This might not be ideal as folder_paths.get_folder_paths is the canonical way
+            # but provides a safety net.
+            comfy_root = os.getcwd() # Assuming this is ComfyUI root
+            search_paths = [os.path.join(comfy_root, "models", folder_type)]
+
+        found_path = None
+        found_root = None
+        
+        for root_path in search_paths:
+             if not os.path.exists(root_path):
+                 continue
+                 
+             # 1. Exact match check (e.g., "model.safetensors" in "models/checkpoints/model.safetensors")
+             exact_path = os.path.join(root_path, filename)
+             if os.path.exists(exact_path):
+                 found_path = exact_path
+                 found_root = root_path
+                 break
+                 
+             # 2. Recursive search (e.g., "model.safetensors" in "models/checkpoints/subfolder/model.safetensors")
+             found_file = recursive_find_file(filename, root_path)
+             if found_file:
+                 found_path = found_file
+                 found_root = root_path
+                 break
+        
+        if found_path:
+            # Calculate relative path to see if it matches the widget value
+            try:
+                # Get path relative to the *specific* root_path where it was found
+                rel_path = os.path.relpath(found_path, found_root)
+            except ValueError: # If paths are on different drives, relpath can fail
+                rel_path = os.path.basename(found_path) # Fallback to just filename
+                
+            # Normalize for comparison (e.g., "subfolder\file.safetensors" vs "subfolder/file.safetensors")
+            req_norm = filename.replace("\\", "/")
+            found_norm = rel_path.replace("\\", "/")
+            
+            model_entry = model.copy()
+            model_entry["found_path"] = found_path
+            model_entry["clean_path"] = rel_path # Path relative to the model type root
+            
+            existing.append(model_entry)
+            
+            # If the requested filename doesn't match the found relative path, it's a mismatch
+            # strict check: "foo.safetensors" vs "subfolder/foo.safetensors"
+            if req_norm != found_norm:
+                 path_mismatches.append(model_entry)
+                 
+        else:
+            missing.append(model)
+
+    return missing, existing, path_mismatches
 
 def search_huggingface_model(filename: str, token: str = None) -> str:
     """
@@ -387,89 +512,40 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[s
     2. Check local models.
     3. If missing, search HF.
     """
-    comfy_root = os.getcwd() # Assuming running from ComfyUI root
-    # Adjust if we are in a text env, but in ComfyUI environment os.getcwd() is root.
     
-    
-    local_models = get_all_local_models(comfy_root)
-    manager_cache = load_comfyui_manager_cache(comfy_root)
     required_models = extract_models_from_workflow(workflow_json)
     
+    # Remove duplicates based on filename and node_id to avoid redundant checks for the same model in the same node
+    # However, if a model is referenced by multiple nodes, we want to keep those distinct entries
+    unique_required_models = []
+    seen_model_node_pairs = set()
+    for model in required_models:
+        key = (model["filename"], model["node_id"])
+        if key not in seen_model_node_pairs:
+            unique_required_models.append(model)
+            seen_model_node_pairs.add(key)
+    
+    # 1. Check local existence using ComfyUI's folder_paths
+    missing_models, existing_models, path_mismatches = check_model_files(unique_required_models)
+    
+    # 2. Check ComfyUI Manager Cache for missing models
+    # This helps find URLs for models that are missing locally
+    if missing_models:
+        missing_models = load_comfyui_manager_cache(missing_models)
+
+    # 3. Search HF for remaining missing models (that didn't have URL from Manager cache)
     token = get_token()
-    
-    missing_models = []
-    found_models = []
-    
-    processed_files = set()
-    
-    for req in required_models:
-        filename = req["filename"]
-        # Skip if we already processed this filename (multiple nodes causing same model)
-        if filename in processed_files:
-            continue
-            
-        processed_files.add(filename)
-        
-        # Check if local
-        if filename in local_models:
-            found_path = local_models[filename]
-            # Try to clean path if we have a suggested folder
-            suggested = req.get("suggested_folder")
-            if suggested:
-                prefix = f"models/{suggested}/"
-                if found_path.startswith(prefix):
-                    found_path = found_path[len(prefix):]
-            
-            found_models.append({
-                "filename": filename,
-                "path": found_path,
-                "node_id": req["node_id"],
-                "original_path": local_models[filename]
-            })
-            continue
-            
-        # Also check just the basename in case of path differences in widgets
-        basename = os.path.basename(filename)
-        if basename in local_models:
-             found_path = local_models[basename]
-             # Try to clean path if we have a suggested folder
-             suggested = req.get("suggested_folder")
-             if suggested:
-                 prefix = f"models/{suggested}/"
-                 if found_path.startswith(prefix):
-                     found_path = found_path[len(prefix):]
-                     
-             found_models.append({
-                "filename": filename, # Keep original required name
-                "path": found_path,
-                "node_id": req["node_id"],
-                "note": "Found with different path/name",
-                "original_path": local_models[basename]
-            })
-             continue
-             
-        # If not found, it is missing
-        url = req.get("url")
-        
-        
-        # If no URL in workflow, try to search:
-        # 1. ComfyUI Manager Cache
-        # 2. Hugging Face
-        if not url:
-            if filename in manager_cache:
-                url = manager_cache[filename]
-                print(f"[DEBUG] Found in Manager cache: {filename} -> {url}")
-            else:
-                 url = search_huggingface_model(basename, token)
-            
-        missing_models.append({
-            "filename": filename,
-            "url": url,
-            "suggested_folder": req.get("suggested_folder", "checkpoints"), # Default fallback
-            "node_title": req["node_title"]
-        })
-        
+    final_missing = []
+    for m in missing_models:
+        if not m.get("url"):
+             # Try HF search
+             url = search_huggingface_model(m["filename"], token)
+             if url:
+                 m["url"] = url
+        final_missing.append(m)
+
     return {
-        "missing": missing_models,
-        "found": found_models
+        "missing": final_missing,
+        "found": existing_models,
+        "mismatches": path_mismatches
     }

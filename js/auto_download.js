@@ -177,6 +177,7 @@ app.registerExtension({
                         borderRadius: "4px"
                     });
 
+
                     // Highlight if empty URL
                     if (!value && placeholder.includes("URL")) {
                         input.style.borderColor = "#ff4444";
@@ -202,239 +203,299 @@ app.registerExtension({
                     overflowY: "auto"
                 });
 
-                summary.appendChild(fixBtn);
-
-                foundSection.appendChild(summary);
-
-                const ul = document.createElement("ul");
-                ul.style.fontSize = "12px";
-                ul.style.color = "#ccc";
-                data.found.forEach(m => {
-                    const li = document.createElement("li");
-                    li.textContent = `${m.filename} -> ${m.path} ${m.note ? "(" + m.note + ")" : ""}`;
-                    ul.appendChild(li);
-                });
-                foundSection.appendChild(ul);
-                content.appendChild(foundSection);
-            }
-
-            // 2. Missing Models Table
-            const missingModels = data.missing || [];
-            // Container for rows
-            const rowsContainer = document.createElement("div");
-            Object.assign(rowsContainer.style, {
-                display: "flex",
-                flexDirection: "column",
-                gap: "8px"
-            });
-
-            const rowInputs = []; // To store references to data for downloading
-
-            if (missingModels.length === 0) {
-                const noMissing = document.createElement("div");
-                noMissing.textContent = "No missing models detected!";
-                noMissing.style.padding = "20px";
-                noMissing.style.textAlign = "center";
-                noMissing.style.color = "#4caf50";
-                content.appendChild(noMissing);
-            } else {
-                missingModels.forEach((m, idx) => {
-                    const row = document.createElement("div");
-                    Object.assign(row.style, {
-                        display: "grid",
-                        gridTemplateColumns: "30px 1fr 2fr 1fr",
-                        gap: "10px",
-                        alignItems: "center",
-                        background: "#1f2128",
-                        padding: "10px",
-                        borderRadius: "6px"
+                // 2. Found Models sections
+                // A. Exact Matches (Information Only)
+                if (data.found && data.found.length > 0) {
+                    const foundSection = document.createElement("div");
+                    foundSection.innerHTML = "<h4 style='margin:10px 0 5px'>Found Local Models</h4>";
+                    const ul = document.createElement("ul");
+                    ul.style.fontSize = "12px";
+                    ul.style.color = "#ccc";
+                    data.found.forEach(m => {
+                        const li = document.createElement("li");
+                        li.textContent = `${m.filename} -> ${m.found_path} (Exact Match)`;
+                        ul.appendChild(li);
                     });
-
-                    // Checkbox
-                    const cb = document.createElement("input");
-                    cb.type = "checkbox";
-                    cb.checked = true; // Default selected
-
-                    // Should be unchecked if no URL?
-                    if (!m.url) cb.checked = false;
-
-                    // Info
-                    const infoDiv = document.createElement("div");
-                    infoDiv.innerHTML = `<div style="font-weight:bold; word-break:break-all">${m.filename}</div><div style="font-size:10px;color:#888">${m.node_title || "Unknown Node"}</div>`;
-
-                    // URL Input
-                    const urlInput = createInput(m.url, "HuggingFace URL...");
-
-                    // Folder (can be editable)
-                    const folderInput = createInput(m.suggested_folder || "checkpoints", "Folder", datalistId);
-
-                    row.appendChild(cb);
-                    row.appendChild(infoDiv);
-                    row.appendChild(urlInput);
-                    row.appendChild(folderInput);
-
-                    rowsContainer.appendChild(row);
-
-                    rowInputs.push({
-                        checkbox: cb,
-                        filename: m.filename,
-                        urlInput: urlInput,
-                        folderInput: folderInput
-                    });
-                });
-                content.appendChild(rowsContainer);
-            }
-
-            panel.appendChild(content);
-
-            /* Logs Panel (Initially Hidden) */
-            const logPanel = document.createElement("div");
-            Object.assign(logPanel.style, {
-                height: "150px",
-                background: "#000",
-                borderRadius: "6px",
-                padding: "10px",
-                fontSize: "12px",
-                fontFamily: "monospace",
-                overflowY: "auto",
-                display: "none",
-                color: "#0f0"
-            });
-            panel.appendChild(logPanel);
-
-            /* Buttons */
-            const footer = document.createElement("div");
-            Object.assign(footer.style, {
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: "10px",
-                marginTop: "10px"
-            });
-
-            const closeBtn = createButton("Close", "p-button p-component p-button-secondary", () => dlg.remove());
-
-            const downloadBtn = createButton("Download Selected", "p-button p-component p-button-success", async () => {
-                const toDownload = rowInputs.filter(r => r.checkbox.checked).map(r => ({
-                    filename: r.filename,
-                    url: r.urlInput.value.trim(),
-                    folder: r.folderInput.value.trim()
-                }));
-
-                if (toDownload.length === 0) {
-                    alert("No models selected.");
-                    return;
+                    foundSection.appendChild(ul);
+                    content.appendChild(foundSection);
                 }
 
-                // Switch UI to downloading state
-                downloadBtn.disabled = true;
-                downloadBtn.textContent = "Downloading...";
-                content.style.display = "none"; // Hide list to show logs better? Or just keep it.
-                logPanel.style.display = "block";
+                // B. Mismatches (Actionable)
+                if (data.mismatches && data.mismatches.length > 0) {
+                    const mismatchSection = document.createElement("div");
+                    mismatchSection.innerHTML = "<h4 style='margin:10px 0 5px; color: #ff9800'>Path Mismatches (Action Required)</h4>";
 
-                const addLog = (msg) => {
-                    const line = document.createElement("div");
-                    line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-                    logPanel.appendChild(line);
-                    logPanel.scrollTop = logPanel.scrollHeight;
-                };
+                    const ul = document.createElement("ul");
+                    ul.style.listStyle = "none";
+                    ul.style.padding = "0";
 
-                addLog(`Starting download of ${toDownload.length} models...`);
+                    data.mismatches.forEach(m => {
+                        const li = document.createElement("li");
+                        li.style.background = "#2a2d35";
+                        li.style.marginBottom = "5px";
+                        li.style.padding = "8px";
+                        li.style.borderRadius = "4px";
+                        li.style.display = "flex";
+                        li.style.justifyContent = "space-between";
+                        li.style.alignItems = "center";
 
-                // Process sequentially
-                for (const item of toDownload) {
-                    if (!item.url) {
-                        addLog(`[SKIP] No URL for ${item.filename}`);
-                        continue;
-                    }
+                        const left = document.createElement("div");
+                        left.innerHTML = `<div style="color:#aaa; font-size:11px">Current: ${m.filename}</div><div style="color:#4caf50; font-weight:bold; font-size:12px">Found: ${m.clean_path}</div>`;
 
-                    addLog(`>> Downloading ${item.filename} from ${item.url}...`);
+                        const fixBtn = document.createElement("button");
+                        fixBtn.textContent = "Fix Path";
+                        fixBtn.style.padding = "4px 8px";
+                        fixBtn.style.background = "#2196F3";
+                        fixBtn.style.color = "white";
+                        fixBtn.style.border = "none";
+                        fixBtn.style.borderRadius = "4px";
+                        fixBtn.style.cursor = "pointer";
 
-                    try {
-                        const resp = await fetch("/install_models", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ models: [item] })
-                        });
-                        console.log("[AutoDownload] Install response status:", resp.status);
-
-                        if (resp.status !== 200) {
-                            throw new Error("Server returned " + resp.status + " " + resp.statusText);
-                        }
-
-                        const res = await resp.json();
-                        console.log("[AutoDownload] Install result:", res);
-
-                        if (res.results && res.results.length > 0) {
-                            const r = res.results[0];
-                            if (r.status === "success") {
-                                addLog(`[OK] ${r.message || "Downloaded successfully"}`);
+                        fixBtn.onclick = () => {
+                            const node = app.graph.getNodeById(m.node_id);
+                            if (node) {
+                                // Find widget with the old value
+                                const widget = node.widgets.find(w => w.value === m.filename);
+                                if (widget) {
+                                    widget.value = m.clean_path;
+                                    node.setDirtyCanvas(true);
+                                    fixBtn.textContent = "Fixed!";
+                                    fixBtn.style.background = "#4caf50";
+                                    fixBtn.disabled = true;
+                                } else {
+                                    alert("Could not find matching widget value on node.");
+                                }
                             } else {
-                                addLog(`[ERR] ${r.error}`);
+                                alert("Node not found.");
                             }
-                        } else {
-                            addLog(`[ERR] Unknown response for ${item.filename}`);
-                        }
+                        };
 
-                    } catch (e) {
-                        addLog(`[ERR] Network/Server Error: ${e}`);
-                    }
+                        li.appendChild(left);
+                        li.appendChild(fixBtn);
+                        ul.appendChild(li);
+                    });
+
+                    mismatchSection.appendChild(ul);
+                    content.appendChild(mismatchSection);
                 }
 
-                addLog("All tasks finished.");
-                downloadBtn.textContent = "Finished";
+                // 3. Missing Models Table
+                const missingModels = data.missing || [];
+                // Container for rows
+                const rowsContainer = document.createElement("div");
+                Object.assign(rowsContainer.style, {
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px"
+                });
 
-                // Suggest refresh (Press R?)
-                const refreshHint = document.createElement("div");
-                refreshHint.style.color = "yellow";
-                refreshHint.style.marginTop = "10px";
-                refreshHint.textContent = "Please refresh ComfyUI (Press 'R' or F5) to load new models.";
-                logPanel.appendChild(refreshHint);
-            });
+                const rowInputs = []; // To store references to data for downloading
 
-            // If no models to download, disable download button
-            if (missingModels.length === 0) downloadBtn.disabled = true;
-
-            footer.appendChild(closeBtn);
-            footer.appendChild(downloadBtn);
-            panel.appendChild(footer);
-
-            dlg.appendChild(panel);
-            document.body.appendChild(dlg);
-        };
-
-        /* ──────────────── Menu Integration ──────────────── */
-        const origMenu = LGraphCanvas.prototype.getCanvasMenuOptions;
-        LGraphCanvas.prototype.getCanvasMenuOptions = function () {
-            const menu = origMenu.apply(this, arguments);
-            menu.push(null, {
-                content: "Auto-download models",
-                callback: async () => {
-                    try {
-                        const workflow = app.graph.serialize();
-                        console.log("[AutoDownload] Scanning workflow:", workflow);
-
-                        // Call backend
-                        const resp = await fetch("/check_missing_models", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify(workflow)
+                if (missingModels.length === 0) {
+                    const noMissing = document.createElement("div");
+                    noMissing.textContent = "No missing models detected!";
+                    noMissing.style.padding = "20px";
+                    noMissing.style.textAlign = "center";
+                    noMissing.style.color = "#4caf50";
+                    content.appendChild(noMissing);
+                } else {
+                    missingModels.forEach((m, idx) => {
+                        const row = document.createElement("div");
+                        Object.assign(row.style, {
+                            display: "grid",
+                            gridTemplateColumns: "30px 1fr 2fr 1fr",
+                            gap: "10px",
+                            alignItems: "center",
+                            background: "#1f2128",
+                            padding: "10px",
+                            borderRadius: "6px"
                         });
 
-                        if (resp.status !== 200) {
-                            throw new Error("Failed to scan models: " + resp.statusText + " (" + resp.status + ")");
-                        }
-                        const data = await resp.json();
-                        console.log("[AutoDownload] Scan results:", data);
+                        // Checkbox
+                        const cb = document.createElement("input");
+                        cb.type = "checkbox";
+                        cb.checked = true; // Default selected
 
-                        showResultsDialog(data);
+                        // Should be unchecked if no URL?
+                        if (!m.url) cb.checked = false;
 
-                    } catch (e) {
-                        console.error("[AutoDownload] Error:", e);
-                        alert("Error: " + e);
-                    }
+                        // Info
+                        const infoDiv = document.createElement("div");
+                        infoDiv.innerHTML = `<div style="font-weight:bold; word-break:break-all">${m.filename}</div><div style="font-size:10px;color:#888">${m.node_title || "Unknown Node"}</div>`;
+
+                        // URL Input
+                        const urlInput = createInput(m.url, "HuggingFace URL...");
+
+                        // Folder (can be editable)
+                        const folderInput = createInput(m.suggested_folder || "checkpoints", "Folder", datalistId);
+
+                        row.appendChild(cb);
+                        row.appendChild(infoDiv);
+                        row.appendChild(urlInput);
+                        row.appendChild(folderInput);
+
+                        rowsContainer.appendChild(row);
+
+                        rowInputs.push({
+                            checkbox: cb,
+                            filename: m.filename,
+                            urlInput: urlInput,
+                            folderInput: folderInput
+                        });
+                    });
+                    content.appendChild(rowsContainer);
                 }
-            });
-            return menu;
-        };
-    }
-});
+
+                panel.appendChild(content);
+
+                /* Logs Panel (Initially Hidden) */
+                const logPanel = document.createElement("div");
+                Object.assign(logPanel.style, {
+                    height: "150px",
+                    background: "#000",
+                    borderRadius: "6px",
+                    padding: "10px",
+                    fontSize: "12px",
+                    fontFamily: "monospace",
+                    overflowY: "auto",
+                    display: "none",
+                    color: "#0f0"
+                });
+                panel.appendChild(logPanel);
+
+                /* Buttons */
+                const footer = document.createElement("div");
+                Object.assign(footer.style, {
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: "10px",
+                    marginTop: "10px"
+                });
+
+                const closeBtn = createButton("Close", "p-button p-component p-button-secondary", () => dlg.remove());
+
+                const downloadBtn = createButton("Download Selected", "p-button p-component p-button-success", async () => {
+                    const toDownload = rowInputs.filter(r => r.checkbox.checked).map(r => ({
+                        filename: r.filename,
+                        url: r.urlInput.value.trim(),
+                        folder: r.folderInput.value.trim()
+                    }));
+
+                    if (toDownload.length === 0) {
+                        alert("No models selected.");
+                        return;
+                    }
+
+                    // Switch UI to downloading state
+                    downloadBtn.disabled = true;
+                    downloadBtn.textContent = "Downloading...";
+                    content.style.display = "none"; // Hide list to show logs better? Or just keep it.
+                    logPanel.style.display = "block";
+
+                    const addLog = (msg) => {
+                        const line = document.createElement("div");
+                        line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+                        logPanel.appendChild(line);
+                        logPanel.scrollTop = logPanel.scrollHeight;
+                    };
+
+                    addLog(`Starting download of ${toDownload.length} models...`);
+
+                    // Process sequentially
+                    for (const item of toDownload) {
+                        if (!item.url) {
+                            addLog(`[SKIP] No URL for ${item.filename}`);
+                            continue;
+                        }
+
+                        addLog(`>> Downloading ${item.filename} from ${item.url}...`);
+
+                        try {
+                            const resp = await fetch("/install_models", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ models: [item] })
+                            });
+                            console.log("[AutoDownload] Install response status:", resp.status);
+
+                            if (resp.status !== 200) {
+                                throw new Error("Server returned " + resp.status + " " + resp.statusText);
+                            }
+
+                            const res = await resp.json();
+                            console.log("[AutoDownload] Install result:", res);
+
+                            if (res.results && res.results.length > 0) {
+                                const r = res.results[0];
+                                if (r.status === "success") {
+                                    addLog(`[OK] ${r.message || "Downloaded successfully"}`);
+                                } else {
+                                    addLog(`[ERR] ${r.error}`);
+                                }
+                            } else {
+                                addLog(`[ERR] Unknown response for ${item.filename}`);
+                            }
+
+                        } catch (e) {
+                            addLog(`[ERR] Network/Server Error: ${e}`);
+                        }
+                    }
+
+                    addLog("All tasks finished.");
+                    downloadBtn.textContent = "Finished";
+
+                    // Suggest refresh (Press R?)
+                    const refreshHint = document.createElement("div");
+                    refreshHint.style.color = "yellow";
+                    refreshHint.style.marginTop = "10px";
+                    refreshHint.textContent = "Please refresh ComfyUI (Press 'R' or F5) to load new models.";
+                    logPanel.appendChild(refreshHint);
+                });
+
+                // If no models to download, disable download button
+                if (missingModels.length === 0) downloadBtn.disabled = true;
+
+                footer.appendChild(closeBtn);
+                footer.appendChild(downloadBtn);
+                panel.appendChild(footer);
+
+                dlg.appendChild(panel);
+                document.body.appendChild(dlg);
+            };
+
+            /* ──────────────── Menu Integration ──────────────── */
+            const origMenu = LGraphCanvas.prototype.getCanvasMenuOptions;
+            LGraphCanvas.prototype.getCanvasMenuOptions = function () {
+                const menu = origMenu.apply(this, arguments);
+                menu.push(null, {
+                    content: "Auto-download models",
+                    callback: async () => {
+                        try {
+                            const workflow = app.graph.serialize();
+                            console.log("[AutoDownload] Scanning workflow:", workflow);
+
+                            // Call backend
+                            const resp = await fetch("/check_missing_models", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(workflow)
+                            });
+
+                            if (resp.status !== 200) {
+                                throw new Error("Failed to scan models: " + resp.statusText + " (" + resp.status + ")");
+                            }
+                            const data = await resp.json();
+                            console.log("[AutoDownload] Scan results:", data);
+
+                            showResultsDialog(data);
+
+                        } catch (e) {
+                            console.error("[AutoDownload] Error:", e);
+                            alert("Error: " + e);
+                        }
+                    }
+                });
+                return menu;
+            };
+        }
+    });
