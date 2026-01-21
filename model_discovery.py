@@ -363,7 +363,16 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
     
     for model in found_models:
         filename = model["filename"]
+        
+        # Skip models with None/null filenames (from disabled nodes or empty widgets)
+        if filename is None or filename == "null" or not filename:
+            continue
+            
         folder_type = model.get("suggested_folder", "checkpoints")
+        
+        # Safety check: if folder_type is None, default to checkpoints
+        if folder_type is None:
+            folder_type = "checkpoints"
         
         # Use ComfyUI's folder_paths to get valid paths for this type
         search_paths = folder_paths.get_folder_paths(folder_type)
