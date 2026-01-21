@@ -86,15 +86,28 @@ app.registerExtension({
             });
 
 
+
+            /* Create Datalist for folders */
+            const datalistId = "folder-options-" + Date.now();
+            const datalist = document.createElement("datalist");
+            datalist.id = datalistId;
+            availableFolders.forEach(f => {
+                const opt = document.createElement("option");
+                opt.value = f;
+                datalist.appendChild(opt);
+            });
+            // Append datalist to content so it gets cleaned up with dialog
+            content.appendChild(datalist);
+
             /* Fetch folder structure for autocomplete */
             let availableFolders = ["checkpoints", "loras", "vae", "controlnet", "upscale_models", "text_encoders", "clip_vision"];
 
-            // Use non-blocking fetch
+            // Use non-blocking fetch to update datalist
             fetch("/folder_structure")
                 .then(r => r.json())
                 .then(fData => {
                     if (Array.isArray(fData)) {
-                        // Update datalist if already created, or just update the variable if not
+                        // Update datalist with server data
                         const dl = document.getElementById(datalistId);
                         if (dl) {
                             dl.innerHTML = "";
@@ -107,19 +120,6 @@ app.registerExtension({
                     }
                 })
                 .catch(e => console.warn("[AutoDownload] Failed to fetch folder structure:", e));
-
-            /* Create Datalist for folders */
-            const datalistId = "folder-options-" + Date.now();
-            const datalist = document.createElement("datalist");
-            datalist.id = datalistId;
-            availableFolders.forEach(f => {
-                const opt = document.createElement("option");
-                opt.value = f;
-                datalist.appendChild(opt);
-            });
-            // Append datalist to content so it gets cleaned up with dialog? 
-            // Datalist needs to be in document to work. Panel is in document.
-            content.appendChild(datalist);
 
             /* Helper to create styled inputs */
             function createInput(value, placeholder, listId = null) {

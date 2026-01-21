@@ -1,8 +1,10 @@
 import os
 import re
+import json
 from typing import List, Dict, Any, Tuple
 from huggingface_hub import HfApi
 from .downloader import get_token
+import folder_paths
 
 # Known extensions for model files
 MODEL_EXTENSIONS = {'.safetensors', '.ckpt', '.pt', '.bin', '.pth', '.gguf'}
