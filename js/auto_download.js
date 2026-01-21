@@ -86,6 +86,8 @@ app.registerExtension({
             });
 
 
+            /* Fetch folder structure for autocomplete */
+            let availableFolders = ["checkpoints", "loras", "vae", "controlnet", "upscale_models", "text_encoders", "clip_vision"];
 
             /* Create Datalist for folders */
             const datalistId = "folder-options-" + Date.now();
@@ -98,9 +100,6 @@ app.registerExtension({
             });
             // Append datalist to content so it gets cleaned up with dialog
             content.appendChild(datalist);
-
-            /* Fetch folder structure for autocomplete */
-            let availableFolders = ["checkpoints", "loras", "vae", "controlnet", "upscale_models", "text_encoders", "clip_vision"];
 
             // Use non-blocking fetch to update datalist
             fetch("/folder_structure")
