@@ -36,6 +36,27 @@ def get_all_local_models(comfy_root: str) -> Dict[str, str]:
                 
     return model_map
 
+# Mapping of node types to default model subfolders
+NODE_TYPE_MAPPING = {
+    "UNETLoader": "diffusion_models",
+    "UnetLoaderGGUF": "diffusion_models",
+    "LoraLoader": "loras",
+    "LoraLoaderModelOnly": "loras",
+    "VAELoader": "vae",
+    "CLIPLoader": "text_encoders",
+    "ControlNetLoader": "controlnet",
+    "DiffControlNetLoader": "controlnet",
+    "CheckpointLoaderSimple": "checkpoints",
+    "CheckpointLoader": "checkpoints",
+    "DualCLIPLoader": "text_encoders",
+    "CLIPVisionLoader": "clip_vision",
+    "UpscaleModelLoader": "upscale_models",
+    "ESAModelLoader": "upscale_models",
+    "StyleModelLoader": "style_models",
+    "GligenLoader": "gligen",
+    "DiffusersLoader": "diffusion_models" 
+}
+
 def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Parses the workflow JSON to find potential model files.
@@ -104,7 +125,8 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
                 })
                 
         # 3. Check widgets_values for filenames
-        if "widgets_values" in node:
+        # SKIP for Notes/PrimitiveStrings as we handled them specifically above
+        if "widgets_values" in node and not ("Note" in node_type or "PrimitiveString" in node_type):
             widgets = node["widgets_values"]
             if isinstance(widgets, list):
                 for val in widgets:
@@ -113,12 +135,15 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
                         # Note: we don't check against subgraph findings here yet, 
                         # duplicate filtering happens in process_workflow
                         if not any(m["filename"] == val and m["node_id"] == node_id for m in found_models):
+                            # Try to map folder
+                            suggested_folder = NODE_TYPE_MAPPING.get(node_type)
+                            
                             found_models.append({
                                 "filename": val,
                                 "url": None,
                                 "node_id": node_id,
                                 "node_title": node_title,
-                                "suggested_folder": None # We'll try to guess later or leave empty
+                                "suggested_folder": suggested_folder
                             })
 
     return found_models
