@@ -1,5 +1,6 @@
 import os
 import json
+import traceback
 from aiohttp import web
 from .backup import backup_to_huggingface, restore_from_huggingface
 from .file_manager import get_model_subfolders
@@ -27,7 +28,8 @@ async def check_missing_models(request):
         return web.json_response(result)
     except Exception as e:
         print(f"[ERROR] check_missing_models failed: {e}")
-        return web.json_response({"error": str(e)}, status=500)
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
+        return web.json_response({"error": str(e) if str(e) else repr(e)}, status=500)
 
 async def install_models(request):
     """
