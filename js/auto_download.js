@@ -141,21 +141,25 @@ app.registerExtension({
             // Use non-blocking fetch to update datalist
             fetch("/folder_structure")
                 .then(r => r.json())
-                .then(fData => {
-                    if (Array.isArray(fData)) {
-                        // Update datalist with server data
-                        const dl = document.getElementById(datalistId);
-                        if (dl) {
-                            dl.innerHTML = "";
-                            fData.forEach(f => {
-                                const opt = document.createElement("option");
-                                opt.value = f;
-                                dl.appendChild(opt);
-                            });
-                        }
+                .then(folders => {
+                    // The API returns an array directly, not an object
+                    if (Array.isArray(folders) && folders.length > 0) {
+                        // Clear existing options
+                        datalist.innerHTML = "";
+                        // Add all folders from the server
+                        folders.forEach(f => {
+                            const opt = document.createElement("option");
+                            opt.value = f;
+                            datalist.appendChild(opt);
+                        });
+                        console.log("[AutoDownload] Loaded folder list:", folders);
+                    } else {
+                        console.warn("[AutoDownload] No folders returned from /folder_structure");
                     }
                 })
-                .catch(e => console.warn("[AutoDownload] Failed to fetch folder structure:", e));
+                .catch(err => {
+                    console.error("[AutoDownload] Failed to fetch folder structure:", err);
+                });
 
             /* Helper to create styled inputs */
             function createInput(value, placeholder, listId = null) {

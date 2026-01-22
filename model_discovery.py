@@ -224,6 +224,11 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
         node_title = node.get("title") or node.get("type", "Unknown Node")
         node_type = node.get("type", "")
         
+        # Skip subgraph wrapper nodes (UUID-type nodes are subgraphs)
+        # The actual loaders are inside the subgraph definition, not the wrapper
+        if is_subgraph_node(node_type):
+            continue
+        
         # Special handling for "Hugging Face Download Model" node
         # This node has widgets: [folder, url, custom_path]
         # We need to extract the custom_path (widgets[2]) to determine the target folder
@@ -375,7 +380,19 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
                                                     m["url"] = u_val
                                                     m["note"] = f"Resolved from upstream node {upstream_node.get('title', upstream_id)}"
     
+    # Enrich found_models with URLs from note_links for models without URLs
+    for model in found_models:
+        if not model.get("url") and model["filename"] in note_links:
+            model["url"] = note_links[model["filename"]]
+            model["note"] = "URL from Note"
+     
     return found_models
+
+def is_subgraph_node(node_type: str) -> bool:
+    """Check if node_type is a UUID (indicates subgraph wrapper node)"""
+    import re
+    uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    return bool(re.match(uuid_pattern, node_type, re.IGNORECASE))
 
 def recursive_find_file(filename: str, root_dir: str) -> str | None:
     """Recursively searches for a file within a directory."""
