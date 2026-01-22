@@ -69,6 +69,14 @@ app.registerExtension({
 
         /* ──────────────── UI Components ──────────────── */
         const showResultsDialog = (data) => {
+            let pollTimer = null;
+            const stopPolling = () => {
+                if (pollTimer) {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                }
+            };
+
             // Remove existing dialog if any
             const existing = document.getElementById("auto-download-dialog");
             if (existing) existing.remove();
@@ -301,6 +309,13 @@ app.registerExtension({
                 content.appendChild(noMissing);
             } else {
                 missingModels.forEach((m, idx) => {
+                    const rowWrapper = document.createElement("div");
+                    Object.assign(rowWrapper.style, {
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "6px"
+                    });
+
                     const row = document.createElement("div");
                     Object.assign(row.style, {
                         display: "grid",
@@ -322,7 +337,18 @@ app.registerExtension({
 
                     // Info
                     const infoDiv = document.createElement("div");
-                    infoDiv.innerHTML = `<div style="font-weight:bold; word-break:break-all">${m.filename}</div><div style="font-size:10px;color:#888">${m.node_title || "Unknown Node"}</div>`;
+                    const nameEl = document.createElement("div");
+                    nameEl.style.fontWeight = "bold";
+                    nameEl.style.wordBreak = "break-all";
+                    nameEl.textContent = m.filename;
+
+                    const metaEl = document.createElement("div");
+                    metaEl.style.fontSize = "10px";
+                    metaEl.style.color = "#888";
+                    metaEl.textContent = `${m.node_title || "Unknown Node"}${m.source ? " • " + m.source : ""}`;
+
+                    infoDiv.appendChild(nameEl);
+                    infoDiv.appendChild(metaEl);
 
                     // URL Input
                     const urlInput = createInput(m.url, "HuggingFace URL...");
@@ -335,14 +361,97 @@ app.registerExtension({
                     row.appendChild(urlInput);
                     row.appendChild(folderInput);
 
-                    rowsContainer.appendChild(row);
+                    rowWrapper.appendChild(row);
 
-                    rowInputs.push({
+                    const rowData = {
                         checkbox: cb,
                         filename: m.filename,
                         urlInput: urlInput,
-                        folderInput: folderInput
-                    });
+                        folderInput: folderInput,
+                        nameEl: nameEl,
+                        metaEl: metaEl,
+                        nodeTitle: m.node_title || "Unknown Node"
+                    };
+                    rowInputs.push(rowData);
+
+                    if (Array.isArray(m.alternatives) && m.alternatives.length > 0) {
+                        const altToggle = document.createElement("button");
+                        altToggle.textContent = `Alternatives (${m.alternatives.length})`;
+                        Object.assign(altToggle.style, {
+                            marginTop: "6px",
+                            fontSize: "11px",
+                            padding: "4px 6px",
+                            background: "#2b2f3a",
+                            color: "#ddd",
+                            border: "1px solid #444",
+                            borderRadius: "4px",
+                            cursor: "pointer"
+                        });
+                        infoDiv.appendChild(altToggle);
+
+                        const altList = document.createElement("div");
+                        Object.assign(altList.style, {
+                            display: "none",
+                            background: "#17191f",
+                            border: "1px solid #333",
+                            padding: "8px",
+                            borderRadius: "6px"
+                        });
+
+                        m.alternatives.forEach((alt) => {
+                            const altRow = document.createElement("div");
+                            Object.assign(altRow.style, {
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                gap: "10px",
+                                padding: "4px 0",
+                                borderBottom: "1px solid #222"
+                            });
+
+                            const altLabel = document.createElement("div");
+                            altLabel.style.fontSize = "11px";
+                            altLabel.style.color = "#bbb";
+                            altLabel.textContent = `${alt.filename}${alt.source ? " • " + alt.source : ""}`;
+
+                            const useBtn = document.createElement("button");
+                            useBtn.textContent = "Use";
+                            Object.assign(useBtn.style, {
+                                padding: "4px 8px",
+                                background: "#3a3f4b",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                                fontSize: "11px"
+                            });
+
+                            useBtn.onclick = () => {
+                                rowData.filename = alt.filename || rowData.filename;
+                                if (alt.url) {
+                                    rowData.urlInput.value = alt.url;
+                                    cb.checked = true;
+                                }
+                                if (alt.suggested_folder) {
+                                    rowData.folderInput.value = alt.suggested_folder;
+                                }
+                                rowData.nameEl.textContent = rowData.filename;
+                                rowData.metaEl.textContent = `${rowData.nodeTitle}${alt.source ? " • alt:" + alt.source : ""}`;
+                            };
+
+                            altRow.appendChild(altLabel);
+                            altRow.appendChild(useBtn);
+                            altList.appendChild(altRow);
+                        });
+
+                        altToggle.onclick = () => {
+                            altList.style.display = altList.style.display === "none" ? "block" : "none";
+                        };
+
+                        rowWrapper.appendChild(altList);
+                    }
+
+                    rowsContainer.appendChild(rowWrapper);
                 });
                 content.appendChild(rowsContainer);
             }
@@ -373,7 +482,10 @@ app.registerExtension({
                 marginTop: "10px"
             });
 
-            const closeBtn = createButton("Close", "p-button p-component p-button-secondary", () => dlg.remove());
+            const closeBtn = createButton("Close", "p-button p-component p-button-secondary", () => {
+                stopPolling();
+                dlg.remove();
+            });
 
             const downloadBtn = createButton("Download Selected", "p-button p-component p-button-success", async () => {
                 const toDownload = rowInputs.filter(r => r.checkbox.checked).map(r => ({
@@ -389,9 +501,8 @@ app.registerExtension({
 
                 // Switch UI to downloading state
                 downloadBtn.disabled = true;
-                downloadBtn.textContent = "Downloading...";
-                closeBtn.style.display = "none"; // Hide close button during download
-                content.style.display = "none"; // Hide list to show logs better? Or just keep it.
+                downloadBtn.textContent = "Queued";
+                content.style.display = "none";
                 logPanel.style.display = "block";
 
                 const addLog = (msg) => {
@@ -401,62 +512,98 @@ app.registerExtension({
                     logPanel.scrollTop = logPanel.scrollHeight;
                 };
 
-                addLog(`Starting download of ${toDownload.length} models...`);
-
-                // Process sequentially
+                const queueable = [];
                 for (const item of toDownload) {
                     if (!item.url) {
                         addLog(`[SKIP] No URL for ${item.filename}`);
                         continue;
                     }
-
-                    addLog(`>> Downloading ${item.filename} from ${item.url}...`);
-
-                    try {
-                        const resp = await fetch("/install_models", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ models: [item] })
-                        });
-                        console.log("[AutoDownload] Install response status:", resp.status);
-
-                        if (resp.status !== 200) {
-                            throw new Error("Server returned " + resp.status + " " + resp.statusText);
-                        }
-
-                        const res = await resp.json();
-                        console.log("[AutoDownload] Install result:", res);
-
-                        if (res.results && res.results.length > 0) {
-                            const r = res.results[0];
-                            if (r.status === "success") {
-                                addLog(`[OK] ${r.message || "Downloaded successfully"}`);
-                            } else {
-                                addLog(`[ERR] ${r.error}`);
-                            }
-                        } else {
-                            addLog(`[ERR] Unknown response for ${item.filename}`);
-                        }
-
-                    } catch (e) {
-                        addLog(`[ERR] Network/Server Error: ${e}`);
-                    }
+                    queueable.push(item);
+                }
+                if (queueable.length === 0) {
+                    addLog("No valid URLs to queue.");
+                    downloadBtn.disabled = false;
+                    downloadBtn.textContent = "Download Selected";
+                    return;
                 }
 
-                addLog("All tasks finished.");
+                addLog(`Queuing ${queueable.length} models for background download...`);
 
-                // Replace Download button with Finish button
-                downloadBtn.style.display = "none";
-                closeBtn.textContent = "Finish";
-                closeBtn.className = "p-button p-component p-button-success";
-                closeBtn.style.display = "inline-block";
+                try {
+                    const resp = await fetch("/queue_download", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ models: queueable })
+                    });
+                    if (resp.status !== 200) {
+                        throw new Error("Server returned " + resp.status + " " + resp.statusText);
+                    }
+                    const res = await resp.json();
+                    const queued = res.queued || [];
+                    const downloadIds = queued.map(q => q.download_id);
 
-                // Suggest refresh (Press R?)
-                const refreshHint = document.createElement("div");
-                refreshHint.style.color = "yellow";
-                refreshHint.style.marginTop = "10px";
-                refreshHint.textContent = "Please refresh ComfyUI (Press 'R' or F5) to load new models.";
-                logPanel.appendChild(refreshHint);
+                    addLog(`Queued ${queued.length} downloads. You can close this window while they run.`);
+
+                    const statusMap = {};
+                    const pending = new Set(downloadIds);
+
+                    const poll = async () => {
+                        if (downloadIds.length === 0) return;
+                        try {
+                            const statusResp = await fetch(`/download_status?ids=${encodeURIComponent(downloadIds.join(","))}`);
+                            if (statusResp.status !== 200) return;
+                            const statusData = await statusResp.json();
+                            const downloads = statusData.downloads || {};
+
+                            for (const id of downloadIds) {
+                                const info = downloads[id];
+                                if (!info) continue;
+                                const last = statusMap[id];
+                                if (last !== info.status) {
+                                    statusMap[id] = info.status;
+                                    const name = info.filename || id;
+                                    if (info.status === "completed") {
+                                        addLog(`[OK] ${name} completed`);
+                                    } else if (info.status === "failed") {
+                                        addLog(`[ERR] ${name} failed: ${info.error || "unknown error"}`);
+                                    } else if (info.status === "downloading") {
+                                        addLog(`>> Downloading ${name}...`);
+                                    } else if (info.status === "queued") {
+                                        addLog(`Queued ${name}`);
+                                    }
+                                }
+                                if (info.status === "completed" || info.status === "failed") {
+                                    pending.delete(id);
+                                }
+                            }
+
+                            if (pending.size === 0) {
+                                stopPolling();
+                                addLog("All tasks finished.");
+
+                                downloadBtn.style.display = "none";
+                                closeBtn.textContent = "Finish";
+                                closeBtn.className = "p-button p-component p-button-success";
+                                closeBtn.style.display = "inline-block";
+
+                                const refreshHint = document.createElement("div");
+                                refreshHint.style.color = "yellow";
+                                refreshHint.style.marginTop = "10px";
+                                refreshHint.textContent = "Please refresh ComfyUI (Press 'R' or F5) to load new models.";
+                                logPanel.appendChild(refreshHint);
+                            }
+                        } catch (e) {
+                            addLog(`[ERR] Status polling error: ${e}`);
+                        }
+                    };
+
+                    pollTimer = setInterval(poll, 1000);
+                    poll();
+                } catch (e) {
+                    addLog(`[ERR] Queue error: ${e}`);
+                    downloadBtn.disabled = false;
+                    downloadBtn.textContent = "Download Selected";
+                }
             });
 
             // If no models to download, disable download button

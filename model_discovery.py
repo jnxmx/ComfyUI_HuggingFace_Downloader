@@ -17,6 +17,186 @@ PRIORITY_AUTHORS = [
     "city96"
 ]
 
+POPULAR_MODELS_FILE = os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json")
+_popular_models_cache = None
+_manager_model_list_cache = None
+
+def extract_huggingface_info(url: str) -> tuple[str | None, str | None]:
+    """Extract HuggingFace repo and file path from a resolve/blob URL."""
+    if not url or "huggingface.co" not in url:
+        return None, None
+
+    # Pattern: https://huggingface.co/{repo}/resolve/{rev}/{path}
+    pattern = r'huggingface\.co/([^/]+/[^/]+)/(?:resolve|blob)/[^/]+/(.+?)(?:\?|$)'
+    match = re.search(pattern, url)
+    if not match:
+        return None, None
+    return match.group(1), match.group(2)
+
+def normalize_save_path(save_path: str | None) -> str | None:
+    if not save_path:
+        return None
+    normalized = save_path.replace("\\", "/")
+    if normalized.startswith("models/"):
+        normalized = normalized.split("/", 1)[1]
+    return normalized or None
+
+def load_popular_models_registry() -> dict:
+    """Load curated popular-models.json registry."""
+    global _popular_models_cache
+    if _popular_models_cache is not None:
+        return _popular_models_cache
+
+    if not os.path.exists(POPULAR_MODELS_FILE):
+        _popular_models_cache = {}
+        return _popular_models_cache
+
+    try:
+        with open(POPULAR_MODELS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        models = data.get("models", {})
+    except Exception as e:
+        print(f"[ERROR] Failed to load popular models registry: {e}")
+        _popular_models_cache = {}
+        return _popular_models_cache
+
+    registry = {}
+    for name, info in models.items():
+        url = info.get("url", "")
+        if "huggingface.co" not in url:
+            continue
+        entry = dict(info)
+        entry["filename"] = name
+        registry[name.lower()] = entry
+
+    _popular_models_cache = registry
+    return _popular_models_cache
+
+def load_comfyui_manager_model_list() -> dict:
+    """Load ComfyUI Manager model-list.json from known locations."""
+    global _manager_model_list_cache
+    if _manager_model_list_cache is not None:
+        return _manager_model_list_cache
+
+    model_map = {}
+    comfy_root = folder_paths.base_path if hasattr(folder_paths, "base_path") else os.getcwd()
+    cache_dirs = [
+        os.path.join(comfy_root, "user", "__manager", "cache"),
+        os.path.join(comfy_root, "user", "default", "ComfyUI-Manager", "cache"),
+        os.path.join(comfy_root, "custom_nodes", "ComfyUI-Manager", "cache"),
+    ]
+    candidate_files = [
+        os.path.join(comfy_root, "custom_nodes", "ComfyUI-Manager", "model-list.json"),
+        os.path.join(comfy_root, "user", "__manager", "model-list.json"),
+        os.path.join(comfy_root, "user", "default", "ComfyUI-Manager", "model-list.json"),
+    ]
+
+    for cache_dir in cache_dirs:
+        if not os.path.exists(cache_dir):
+            continue
+        for file in os.listdir(cache_dir):
+            if file.endswith("model-list.json"):
+                candidate_files.append(os.path.join(cache_dir, file))
+
+    for path in candidate_files:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for model in data.get("models", []):
+                filename = model.get("filename")
+                url = model.get("url", "")
+                if not filename or "huggingface.co" not in url:
+                    continue
+                filename_lower = filename.lower()
+                if filename_lower in model_map:
+                    continue
+                entry = {
+                    "filename": filename,
+                    "url": url,
+                    "directory": normalize_save_path(model.get("save_path")),
+                    "save_path": model.get("save_path"),
+                }
+                model_map[filename_lower] = entry
+        except Exception as e:
+            print(f"[ERROR] Failed to load manager model list {path}: {e}")
+
+    _manager_model_list_cache = model_map
+    return _manager_model_list_cache
+
+def enrich_model_with_url(model: Dict[str, Any], url: str, source: str, directory: str | None = None):
+    model["url"] = url
+    model["source"] = source
+    if directory and not model.get("suggested_folder"):
+        model["suggested_folder"] = directory
+    hf_repo, hf_path = extract_huggingface_info(url)
+    if hf_repo:
+        model["hf_repo"] = hf_repo
+        model["hf_path"] = hf_path
+
+def is_quant_variant_filename(filename: str) -> bool:
+    name = os.path.splitext(filename.lower())[0]
+    quant_patterns = [
+        r'(^|[-_])fp8[-_]?e4m3fn($|[-_])',
+        r'(^|[-_])fp(16|32|8|4)($|[-_])',
+        r'(^|[-_])bf16($|[-_])',
+        r'(^|[-_])nf4($|[-_])',
+        r'(^|[-_])int(8|4)($|[-_])',
+    ]
+    return any(re.search(p, name) for p in quant_patterns)
+
+def canonicalize_model_base(filename: str) -> str:
+    base = os.path.splitext(filename.lower())[0]
+    base = re.sub(r'[-_]?fp8[-_]?e4m3fn$', '', base)
+    base = re.sub(r'[-_]?fp(16|32|8|4)$', '', base)
+    base = re.sub(r'[-_]?bf16$', '', base)
+    base = re.sub(r'[-_]?nf4$', '', base)
+    base = re.sub(r'[-_]?int(8|4)$', '', base)
+    return base
+
+def find_quantized_alternatives(filename: str, registries: list[tuple[str, dict]]) -> list[Dict[str, Any]]:
+    filename_lower = filename.lower()
+    if filename_lower.endswith(".gguf") or "svdq" in filename_lower:
+        return []
+
+    base = canonicalize_model_base(filename)
+    if not base:
+        return []
+
+    alternatives = []
+    seen = set()
+
+    for source, model_map in registries:
+        for entry in model_map.values():
+            entry_name = entry.get("filename")
+            if not entry_name:
+                continue
+            entry_lower = entry_name.lower()
+            if entry_lower in seen or entry_lower == filename_lower:
+                continue
+            if entry_lower.endswith(".gguf") or "svdq" in entry_lower:
+                continue
+            if canonicalize_model_base(entry_name) != base:
+                continue
+            if not is_quant_variant_filename(entry_name):
+                continue
+
+            alt = {
+                "filename": entry_name,
+                "url": entry.get("url"),
+                "source": source,
+                "suggested_folder": entry.get("directory"),
+            }
+            hf_repo, hf_path = extract_huggingface_info(entry.get("url", ""))
+            if hf_repo:
+                alt["hf_repo"] = hf_repo
+                alt["hf_path"] = hf_path
+            alternatives.append(alt)
+            seen.add(entry_lower)
+
+    return alternatives
+
 def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Checks ComfyUI-Manager cache for missing model URLs and enriches the missing_models list.
@@ -25,49 +205,24 @@ def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]]) -> List[Dic
     - ComfyUI/user/default/ComfyUI-Manager/cache/*.json
     - ComfyUI/custom_nodes/ComfyUI-Manager/cache/*.json
     """
-    # Build filename -> url map from cache
-    cache_map = {}
-    
-    # Get ComfyUI root - folder_paths.base_path should give us the root
-    comfy_root = folder_paths.base_path if hasattr(folder_paths, 'base_path') else os.getcwd()
-    
-    # Potential cache paths
-    paths_to_check = [
-        os.path.join(comfy_root, "user", "__manager", "cache"), # User mentioned this path
-        os.path.join(comfy_root, "user", "default", "ComfyUI-Manager", "cache"),
-        os.path.join(comfy_root, "custom_nodes", "ComfyUI-Manager", "cache"),
-    ]
-    
-    for path in paths_to_check:
-        if not os.path.exists(path):
-            continue
-            
-        for file in os.listdir(path):
-            if file.endswith("model-list.json"):
-                try:
-                    full_path = os.path.join(path, file)
-                    print(f"[DEBUG] Loading Manager cache: {full_path}")
-                    with open(full_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        models = data.get("models", [])
-                        for m in models:
-                            # ComfyUI Manager model list format:
-                            # {"filename": "...", "url": "...", "save_path": "..."}
-                            filename = m.get("filename")
-                            url = m.get("url")
-                            if filename and url:
-                                cache_map[filename] = url
-                except Exception as e:
-                    print(f"[ERROR] Failed to load manager cache {file}: {e}")
-    
-    # Enrich missing_models with URLs from cache
+    manager_map = load_comfyui_manager_model_list()
+
+    # Enrich missing_models with URLs from cache/model-list
     for model in missing_models:
-        if not model.get("url"):
-            filename = model["filename"]
-            if filename in cache_map:
-                model["url"] = cache_map[filename]
-                print(f"[DEBUG] Found URL in Manager cache for {filename}: {cache_map[filename]}")
-    
+        if model.get("url"):
+            continue
+        filename = model["filename"]
+        filename_key = filename.lower()
+        entry = manager_map.get(filename_key) or manager_map.get(os.path.basename(filename_key))
+        if entry and entry.get("url"):
+            enrich_model_with_url(
+                model,
+                entry["url"],
+                "manager_model_list",
+                directory=entry.get("directory")
+            )
+            print(f"[DEBUG] Found URL in Manager cache for {filename}: {entry['url']}")
+
     return missing_models
 
 def get_all_local_models(comfy_root: str) -> Dict[str, str]:
@@ -488,10 +643,10 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
 
     return missing, existing, path_mismatches
 
-def search_huggingface_model(filename: str, token: str = None) -> str:
+def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any] | None:
     """
     Searches Hugging Face for the filename, prioritizing specific authors.
-    Returns the best matching URL or None.
+    Returns metadata dict with url/hf_repo/hf_path or None.
     """
     api = HfApi(token=token)
     
@@ -540,9 +695,16 @@ def search_huggingface_model(filename: str, token: str = None) -> str:
                 seen_ids.add(m.modelId)
         models = unique_models
         
+        def build_result(model_id: str, file_path: str) -> Dict[str, Any]:
+            return {
+                "url": f"https://huggingface.co/{model_id}/resolve/main/{file_path}",
+                "hf_repo": model_id,
+                "hf_path": file_path
+            }
+
         for model in models:
             model_id = model.modelId
-            
+
             # check if file exists in this repo (expensive? let's hope list_repo_files is fast or we assume)
             # Actually, `list_models` primarily matches repo names, but `search` parameter matches content too roughly.
             # A better way is to check if the repo structure likely contains the file.
@@ -555,15 +717,11 @@ def search_huggingface_model(filename: str, token: str = None) -> str:
                  # Check if this repo actually has the file
                  try:
                      files = api.list_repo_files(repo_id=model_id, token=token)
-                     if filename in files or any(f.endswith(filename) for f in files):
-                         # Construct resolve URL
-                         # If it's a direct match
-                         if filename in files:
-                             return f"https://huggingface.co/{model_id}/resolve/main/{filename}"
-                         # If it's in a subfolder
-                         for f in files:
-                             if f.endswith(filename):
-                                 return f"https://huggingface.co/{model_id}/resolve/main/{f}"
+                     if filename in files:
+                         return build_result(model_id, filename)
+                     for f in files:
+                         if f.endswith(filename):
+                             return build_result(model_id, f)
                  except Exception:
                      continue
 
@@ -573,10 +731,10 @@ def search_huggingface_model(filename: str, token: str = None) -> str:
             try:
                  files = api.list_repo_files(repo_id=model_id, token=token)
                  if filename in files:
-                     return f"https://huggingface.co/{model_id}/resolve/main/{filename}"
+                     return build_result(model_id, filename)
                  for f in files:
                      if f.endswith(filename):
-                         return f"https://huggingface.co/{model_id}/resolve/main/{f}"
+                         return build_result(model_id, f)
             except Exception:
                  continue
                  
@@ -607,22 +765,67 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[s
     
     # 1. Check local existence using ComfyUI's folder_paths
     missing_models, existing_models, path_mismatches = check_model_files(unique_required_models)
-    
-    # 2. Check ComfyUI Manager Cache for missing models
-    # This helps find URLs for models that are missing locally
+
+    # 2. Enrich any workflow-provided URLs with source + HF metadata
+    for model in missing_models:
+        if model.get("url") and not model.get("source"):
+            model["source"] = "workflow_metadata"
+        if model.get("url") and not model.get("hf_repo"):
+            hf_repo, hf_path = extract_huggingface_info(model.get("url", ""))
+            if hf_repo:
+                model["hf_repo"] = hf_repo
+                model["hf_path"] = hf_path
+
+    # 3. Check curated popular models registry
+    if missing_models:
+        popular_models = load_popular_models_registry()
+        for model in missing_models:
+            if model.get("url"):
+                continue
+            filename_key = model["filename"].lower()
+            entry = popular_models.get(filename_key) or popular_models.get(os.path.basename(filename_key))
+            if entry and entry.get("url"):
+                enrich_model_with_url(
+                    model,
+                    entry["url"],
+                    "popular_models",
+                    directory=entry.get("directory")
+                )
+
+    # 4. Check ComfyUI Manager model list/cache for missing models
     if missing_models:
         missing_models = load_comfyui_manager_cache(missing_models)
 
-    # 3. Search HF for remaining missing models (that didn't have URL from Manager cache)
+    # 5. Search HF for remaining missing models (that didn't have URL from registry/manager)
     token = get_token()
     final_missing = []
     for m in missing_models:
         if not m.get("url"):
-             # Try HF search
-             url = search_huggingface_model(m["filename"], token)
-             if url:
-                 m["url"] = url
+            # Try HF search
+            result = search_huggingface_model(m["filename"], token)
+            if result:
+                m["url"] = result.get("url")
+                m["hf_repo"] = result.get("hf_repo")
+                m["hf_path"] = result.get("hf_path")
+                m["source"] = "huggingface_search"
         final_missing.append(m)
+
+    # 6. Quantized variant detection for unresolved models (no URL)
+    if final_missing:
+        popular_models = load_popular_models_registry()
+        manager_models = load_comfyui_manager_model_list()
+        for model in final_missing:
+            if model.get("url"):
+                continue
+            alternatives = find_quantized_alternatives(
+                model["filename"],
+                [
+                    ("popular_models", popular_models),
+                    ("manager_model_list", manager_models),
+                ],
+            )
+            if alternatives:
+                model["alternatives"] = alternatives
 
     return {
         "missing": final_missing,
