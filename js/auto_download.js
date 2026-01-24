@@ -102,6 +102,11 @@ app.registerExtension({
             if (clearGroup) {
                 clearGroup(PROGRESS_TOAST_GROUP);
             }
+            const stale = document.querySelectorAll(".hf-downloader-progress-toast");
+            stale.forEach((node) => {
+                const toast = node.closest(".p-toast-message") || node;
+                toast.remove();
+            });
         };
 
         const showProgressToast = (name) => {
@@ -114,7 +119,8 @@ app.registerExtension({
                     detail: name,
                     group: PROGRESS_TOAST_GROUP,
                     sticky: true,
-                    closable: false
+                    closable: false,
+                    styleClass: "hf-downloader-progress-toast"
                 });
                 return;
             }
@@ -122,7 +128,8 @@ app.registerExtension({
                 severity: "info",
                 summary: "Download in progress",
                 detail: name,
-                life: PROGRESS_TOAST_LIFE_MS
+                life: PROGRESS_TOAST_LIFE_MS,
+                styleClass: "hf-downloader-progress-toast"
             });
         };
 
@@ -717,6 +724,7 @@ app.registerExtension({
                     const statusMap = {};
                     const pending = new Set(downloadIds);
                     const failed = new Set();
+                    let lastProgressId = null;
 
                     const poll = async () => {
                         if (downloadIds.length === 0) return;
@@ -739,7 +747,6 @@ app.registerExtension({
                                         addLog(`[ERR] ${name} failed: ${info.error || "unknown error"}`);
                                     } else if (info.status === "downloading") {
                                         addLog(`>> Downloading ${name}...`);
-                                        showProgressToast(name);
                                     } else if (info.status === "queued") {
                                         addLog(`Queued ${name}`);
                                     }
@@ -750,6 +757,22 @@ app.registerExtension({
                                         failed.add(id);
                                     }
                                 }
+                            }
+
+                            let activeId = null;
+                            for (const id of downloadIds) {
+                                if (downloads[id]?.status === "downloading") {
+                                    activeId = id;
+                                    break;
+                                }
+                            }
+                            if (activeId && activeId !== lastProgressId) {
+                                const name = downloads[activeId]?.filename || activeId;
+                                showProgressToast(name);
+                                lastProgressId = activeId;
+                            } else if (!activeId && lastProgressId) {
+                                clearProgressToast();
+                                lastProgressId = null;
                             }
 
                             if (pending.size === 0) {
@@ -923,6 +946,7 @@ app.registerExtension({
                     const statusMap = {};
                     const pending = new Set(downloadIds);
                     const failed = new Set();
+                    let lastProgressId = null;
 
                     const poll = async () => {
                         try {
@@ -938,15 +962,29 @@ app.registerExtension({
                                 if (last !== info.status) {
                                     statusMap[id] = info.status;
                                     const name = info.filename || id;
-                                    if (info.status === "downloading") {
-                                        showProgressToast(name);
-                                    } else if (info.status === "failed") {
+                                    if (info.status === "failed") {
                                         failed.add(id);
                                     }
                                 }
                                 if (info.status === "completed" || info.status === "failed") {
                                     pending.delete(id);
                                 }
+                            }
+
+                            let activeId = null;
+                            for (const id of downloadIds) {
+                                if (downloads[id]?.status === "downloading") {
+                                    activeId = id;
+                                    break;
+                                }
+                            }
+                            if (activeId && activeId !== lastProgressId) {
+                                const name = downloads[activeId]?.filename || activeId;
+                                showProgressToast(name);
+                                lastProgressId = activeId;
+                            } else if (!activeId && lastProgressId) {
+                                clearProgressToast();
+                                lastProgressId = null;
                             }
 
                             if (pending.size === 0) {
