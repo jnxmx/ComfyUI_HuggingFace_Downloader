@@ -381,10 +381,12 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
 
         linked_widget_indices = set()
         widget_pos = 0
+        has_linked_widget_input = False
         for input_item in node.get("inputs", []):
             if "widget" in input_item:
                 if input_item.get("link") is not None:
                     linked_widget_indices.add(widget_pos)
+                    has_linked_widget_input = True
                 widget_pos += 1
         
         # Skip subgraph wrapper nodes (UUID-type nodes are subgraphs)
@@ -444,14 +446,15 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
 
         # 2. Check properties -> models (Standard ComfyUI template format)
         if "properties" in node and "models" in node["properties"]:
-            for model_info in node["properties"]["models"]:
-                found_models.append({
-                    "filename": model_info.get("name"),
-                    "url": model_info.get("url"),
-                    "node_id": node_id,
-                    "node_title": node_title,
-                    "suggested_folder": model_info.get("directory")
-                })
+            if not has_linked_widget_input:
+                for model_info in node["properties"]["models"]:
+                    found_models.append({
+                        "filename": model_info.get("name"),
+                        "url": model_info.get("url"),
+                        "node_id": node_id,
+                        "node_title": node_title,
+                        "suggested_folder": model_info.get("directory")
+                    })
                 
         # 3. Check widgets_values for filenames
         # SKIP for Notes/PrimitiveStrings as we handled them specifically above
