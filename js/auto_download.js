@@ -19,14 +19,30 @@ app.registerExtension({
             inp.value = value || "";
             inp.placeholder = placeholder || "";
             Object.assign(inp.style, {
-                background: "#2a2d35",
-                border: "1px solid #3c3c3c",
+                background: "#333",
+                border: "1px solid #555",
                 color: "#fff",
-                padding: "4px 8px",
+                padding: "4px",
                 borderRadius: "4px",
                 width: "100%",
                 boxSizing: "border-box"
             });
+
+            if (!value && placeholder && placeholder.includes("URL")) {
+                inp.style.borderColor = "#ff4444";
+                inp.style.background = "#3a2a2a";
+
+                inp.addEventListener("input", () => {
+                    if (inp.value.trim()) {
+                        inp.style.borderColor = "#555";
+                        inp.style.background = "#333";
+                    } else {
+                        inp.style.borderColor = "#ff4444";
+                        inp.style.background = "#3a2a2a";
+                    }
+                });
+            }
+
             return inp;
         };
 
@@ -59,6 +75,127 @@ app.registerExtension({
                 const summary = payload.summary ? `${payload.summary}: ` : "";
                 console.log(`[AutoDownload] ${summary}${payload.detail || "Notification"}`);
             }
+        };
+
+        let availableFolders = [
+            "checkpoints",
+            "loras",
+            "vae",
+            "controlnet",
+            "upscale_models",
+            "text_encoders",
+            "clip_vision"
+        ];
+        const folderPickers = new Set();
+
+        const loadFolderList = () => {
+            fetch("/folder_structure")
+                .then(r => r.json())
+                .then(folders => {
+                    if (Array.isArray(folders) && folders.length > 0) {
+                        availableFolders = folders;
+                        folderPickers.forEach(picker => picker.refresh());
+                        console.log("[AutoDownload] Loaded folder list:", folders);
+                    } else {
+                        console.warn("[AutoDownload] No folders returned from /folder_structure");
+                    }
+                })
+                .catch(err => {
+                    console.error("[AutoDownload] Failed to fetch folder structure:", err);
+                });
+        };
+
+        const createFolderPicker = (value, placeholder) => {
+            const wrapper = document.createElement("div");
+            Object.assign(wrapper.style, {
+                position: "relative",
+                width: "100%"
+            });
+
+            const input = createInput(value, placeholder);
+            input.autocomplete = "off";
+
+            const dropdown = document.createElement("div");
+            Object.assign(dropdown.style, {
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                right: 0,
+                background: "#1f2128",
+                border: "1px solid #444",
+                borderTop: "none",
+                maxHeight: "180px",
+                overflowY: "auto",
+                zIndex: 10,
+                display: "none"
+            });
+
+            const buildList = () => {
+                dropdown.innerHTML = "";
+                if (!availableFolders.length) {
+                    const empty = document.createElement("div");
+                    empty.textContent = "No folders available";
+                    empty.style.padding = "6px 8px";
+                    empty.style.color = "#888";
+                    dropdown.appendChild(empty);
+                    return;
+                }
+                availableFolders.forEach(folder => {
+                    const item = document.createElement("div");
+                    item.textContent = folder;
+                    Object.assign(item.style, {
+                        padding: "6px 8px",
+                        cursor: "pointer",
+                        color: "#ddd"
+                    });
+                    item.addEventListener("mouseenter", () => {
+                        item.style.background = "#2b2f3a";
+                    });
+                    item.addEventListener("mouseleave", () => {
+                        item.style.background = "transparent";
+                    });
+                    item.addEventListener("mousedown", (e) => {
+                        e.preventDefault();
+                        input.value = folder;
+                        dropdown.style.display = "none";
+                    });
+                    dropdown.appendChild(item);
+                });
+            };
+
+            const showList = () => {
+                buildList();
+                dropdown.style.display = "block";
+            };
+
+            input.addEventListener("focus", showList);
+            input.addEventListener("input", showList);
+            input.addEventListener("blur", () => {
+                setTimeout(() => {
+                    dropdown.style.display = "none";
+                }, 150);
+            });
+
+            wrapper.appendChild(input);
+            wrapper.appendChild(dropdown);
+
+            const picker = {
+                refresh: () => {
+                    if (dropdown.style.display === "block") {
+                        buildList();
+                    }
+                }
+            };
+            folderPickers.add(picker);
+
+            return { wrapper, input };
+        };
+
+        const parseFilenameFromUrl = (url) => {
+            if (!url || typeof url !== "string") return null;
+            const clean = url.split("?")[0].split("#")[0];
+            const parts = clean.split("/").filter(Boolean);
+            return parts.length ? parts[parts.length - 1] : null;
         };
 
         /* Show loading dialog immediately */
@@ -160,81 +297,7 @@ app.registerExtension({
                 gap: "10px",
                 paddingRight: "5px"
             });
-
-
-            /* Fetch folder structure for autocomplete */
-            let availableFolders = ["checkpoints", "loras", "vae", "controlnet", "upscale_models", "text_encoders", "clip_vision"];
-
-            /* Create Datalist for folders */
-            const datalistId = "folder-options-" + Date.now();
-            const datalist = document.createElement("datalist");
-            datalist.id = datalistId;
-            availableFolders.forEach(f => {
-                const opt = document.createElement("option");
-                opt.value = f;
-                datalist.appendChild(opt);
-            });
-            // IMPORTANT: Append to document.body so it's globally accessible
-            document.body.appendChild(datalist);
-
-            // Use non-blocking fetch to update datalist
-            fetch("/folder_structure")
-                .then(r => r.json())
-                .then(folders => {
-                    // The API returns an array directly, not an object
-                    if (Array.isArray(folders) && folders.length > 0) {
-                        // Clear existing options
-                        datalist.innerHTML = "";
-                        // Add all folders from the server
-                        folders.forEach(f => {
-                            const opt = document.createElement("option");
-                            opt.value = f;
-                            datalist.appendChild(opt);
-                        });
-                        console.log("[AutoDownload] Loaded folder list:", folders);
-                    } else {
-                        console.warn("[AutoDownload] No folders returned from /folder_structure");
-                    }
-                })
-                .catch(err => {
-                    console.error("[AutoDownload] Failed to fetch folder structure:", err);
-                });
-
-            /* Helper to create styled inputs */
-            function createInput(value, placeholder, listId = null) {
-                const input = document.createElement("input");
-                input.type = "text";
-                input.value = value || "";
-                input.placeholder = placeholder || "";
-                if (listId) input.setAttribute("list", listId);
-
-                Object.assign(input.style, {
-                    width: "100%",
-                    background: "#333",
-                    color: "#fff",
-                    border: "1px solid #555",
-                    padding: "4px",
-                    borderRadius: "4px"
-                });
-
-
-                // Highlight if empty URL
-                if (!value && placeholder.includes("URL")) {
-                    input.style.borderColor = "#ff4444";
-                    input.style.background = "#3a2a2a";
-
-                    input.addEventListener("input", () => {
-                        if (input.value.trim()) {
-                            input.style.borderColor = "#555";
-                            input.style.background = "#333";
-                        } else {
-                            input.style.borderColor = "#ff4444";
-                            input.style.background = "#3a2a2a";
-                        }
-                    });
-                }
-                return input;
-            }
+            loadFolderList();
 
             /* Content Area */
             Object.assign(content.style, {
@@ -385,12 +448,12 @@ app.registerExtension({
                     const urlInput = createInput(m.url, "HuggingFace URL...");
 
                     // Folder (can be editable)
-                    const folderInput = createInput(m.suggested_folder || "checkpoints", "Folder", datalistId);
+                    const folderPicker = createFolderPicker(m.suggested_folder || "checkpoints", "Folder");
 
                     row.appendChild(cb);
                     row.appendChild(infoDiv);
                     row.appendChild(urlInput);
-                    row.appendChild(folderInput);
+                    row.appendChild(folderPicker.wrapper);
 
                     rowWrapper.appendChild(row);
 
@@ -398,7 +461,7 @@ app.registerExtension({
                         checkbox: cb,
                         filename: m.filename,
                         urlInput: urlInput,
-                        folderInput: folderInput,
+                        folderInput: folderPicker.input,
                         nameEl: nameEl,
                         metaEl: metaEl,
                         nodeTitle: m.node_title || "Unknown Node"
@@ -675,48 +738,263 @@ app.registerExtension({
             document.body.appendChild(dlg);
         };
 
+        const showManualDownloadDialog = () => {
+            let pollTimer = null;
+            const stopPolling = () => {
+                if (pollTimer) {
+                    clearInterval(pollTimer);
+                    pollTimer = null;
+                }
+            };
+
+            const existing = document.getElementById("manual-download-dialog");
+            if (existing) existing.remove();
+
+            const dlg = document.createElement("div");
+            dlg.id = "manual-download-dialog";
+            Object.assign(dlg.style, {
+                position: "fixed",
+                top: 0,
+                left: 0,
+                width: "100vw",
+                height: "100vh",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.6)",
+                zIndex: 9000
+            });
+
+            const panel = document.createElement("div");
+            Object.assign(panel.style, {
+                background: "#17191f",
+                color: "#fff",
+                padding: "20px",
+                borderRadius: "12px",
+                width: "520px",
+                maxWidth: "90vw",
+                display: "flex",
+                flexDirection: "column",
+                gap: "16px",
+                boxShadow: "0 0 20px rgba(0,0,0,0.8)",
+                border: "1px solid #3c3c3c"
+            });
+
+            const header = document.createElement("div");
+            header.innerHTML = `<h3>Download New Model</h3><p style="font-size:12px;color:#aaa">Paste a direct Hugging Face file URL and choose a folder.</p>`;
+            panel.appendChild(header);
+
+            const content = document.createElement("div");
+            Object.assign(content.style, {
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px"
+            });
+
+            const urlLabel = document.createElement("div");
+            urlLabel.textContent = "HuggingFace URL";
+            urlLabel.style.fontSize = "12px";
+            urlLabel.style.color = "#aaa";
+            const urlInput = createInput("", "HuggingFace URL...");
+
+            const folderLabel = document.createElement("div");
+            folderLabel.textContent = "Folder";
+            folderLabel.style.fontSize = "12px";
+            folderLabel.style.color = "#aaa";
+            const folderPicker = createFolderPicker("loras", "Folder");
+
+            content.appendChild(urlLabel);
+            content.appendChild(urlInput);
+            content.appendChild(folderLabel);
+            content.appendChild(folderPicker.wrapper);
+            panel.appendChild(content);
+
+            const footer = document.createElement("div");
+            Object.assign(footer.style, {
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "10px"
+            });
+
+            const closeBtn = createButton("Close", "p-button p-component p-button-secondary", () => {
+                stopPolling();
+                dlg.remove();
+            });
+
+            const downloadBtn = createButton("Download", "p-button p-component p-button-success", async () => {
+                const url = urlInput.value.trim();
+                const folder = folderPicker.input.value.trim() || "loras";
+                const filename = parseFilenameFromUrl(url);
+
+                if (!url) {
+                    showToast({ severity: "warn", summary: "Missing URL", detail: "Enter a Hugging Face file URL." });
+                    return;
+                }
+                if (!filename) {
+                    showToast({ severity: "error", summary: "Invalid URL", detail: "Could not extract filename from URL." });
+                    return;
+                }
+
+                downloadBtn.disabled = true;
+                downloadBtn.textContent = "Queued";
+
+                try {
+                    const resp = await fetch("/queue_download", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            models: [
+                                {
+                                    filename,
+                                    url,
+                                    folder
+                                }
+                            ]
+                        })
+                    });
+                    if (resp.status !== 200) {
+                        throw new Error("Server returned " + resp.status + " " + resp.statusText);
+                    }
+                    const res = await resp.json();
+                    const queued = res.queued || [];
+                    const downloadIds = queued.map(q => q.download_id);
+                    if (!downloadIds.length) {
+                        showToast({ severity: "warn", summary: "Queue empty", detail: "No download was queued." });
+                        downloadBtn.disabled = false;
+                        downloadBtn.textContent = "Download";
+                        return;
+                    }
+
+                    const statusMap = {};
+                    const pending = new Set(downloadIds);
+                    const failed = new Set();
+
+                    const poll = async () => {
+                        try {
+                            const statusResp = await fetch(`/download_status?ids=${encodeURIComponent(downloadIds.join(","))}`);
+                            if (statusResp.status !== 200) return;
+                            const statusData = await statusResp.json();
+                            const downloads = statusData.downloads || {};
+
+                            for (const id of downloadIds) {
+                                const info = downloads[id];
+                                if (!info) continue;
+                                const last = statusMap[id];
+                                if (last !== info.status) {
+                                    statusMap[id] = info.status;
+                                    const name = info.filename || id;
+                                    if (info.status === "downloading") {
+                                        showToast({
+                                            severity: "info",
+                                            summary: "Download in progress",
+                                            detail: name,
+                                            life: 6000
+                                        });
+                                    } else if (info.status === "failed") {
+                                        failed.add(id);
+                                    }
+                                }
+                                if (info.status === "completed" || info.status === "failed") {
+                                    pending.delete(id);
+                                }
+                            }
+
+                            if (pending.size === 0) {
+                                stopPolling();
+                                const failures = failed.size;
+                                const total = downloadIds.length;
+                                const finishedDetail = failures
+                                    ? `${total - failures} succeeded, ${failures} failed.`
+                                    : `${total} model(s) downloaded.`;
+                                const finishedSeverity = failures
+                                    ? (failures === total ? "error" : "warn")
+                                    : "success";
+                                const finishedSummary = failures
+                                    ? (failures === total ? "Downloads failed" : "Downloads finished with errors")
+                                    : "Downloads finished";
+                                showToast({
+                                    severity: finishedSeverity,
+                                    summary: finishedSummary,
+                                    detail: finishedDetail,
+                                    life: 8000
+                                });
+                                downloadBtn.disabled = false;
+                                downloadBtn.textContent = "Download";
+                            }
+                        } catch (e) {
+                            showToast({ severity: "error", summary: "Status error", detail: String(e) });
+                        }
+                    };
+
+                    pollTimer = setInterval(poll, 1000);
+                    poll();
+                } catch (e) {
+                    showToast({ severity: "error", summary: "Queue error", detail: String(e) });
+                    downloadBtn.disabled = false;
+                    downloadBtn.textContent = "Download";
+                }
+            });
+
+            footer.appendChild(closeBtn);
+            footer.appendChild(downloadBtn);
+            panel.appendChild(footer);
+
+            dlg.appendChild(panel);
+            document.body.appendChild(dlg);
+            loadFolderList();
+        };
+
         /* ──────────────── Menu Integration ──────────────── */
         const origMenu = LGraphCanvas.prototype.getCanvasMenuOptions;
         LGraphCanvas.prototype.getCanvasMenuOptions = function () {
             const menu = origMenu.apply(this, arguments);
-            menu.push(null, {
-                content: "Auto-download models",
-                callback: async () => {
-                    let loadingDlg = null;
-                    try {
-                        // Show loading dialog immediately
-                        loadingDlg = showLoadingDialog();
+            menu.push(
+                null,
+                {
+                    content: "Auto-download models",
+                    callback: async () => {
+                        let loadingDlg = null;
+                        try {
+                            // Show loading dialog immediately
+                            loadingDlg = showLoadingDialog();
 
-                        const workflow = app.graph.serialize();
-                        console.log("[AutoDownload] Scanning workflow:", workflow);
+                            const workflow = app.graph.serialize();
+                            console.log("[AutoDownload] Scanning workflow:", workflow);
 
-                        // Call backend
-                        const resp = await fetch("/check_missing_models", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify(workflow)
-                        });
+                            // Call backend
+                            const resp = await fetch("/check_missing_models", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(workflow)
+                            });
 
-                        // Remove loading dialog
-                        if (loadingDlg) loadingDlg.remove();
+                            // Remove loading dialog
+                            if (loadingDlg) loadingDlg.remove();
 
-                        if (resp.status !== 200) {
-                            throw new Error("Failed to scan models: " + resp.statusText + " (" + resp.status + ")");
+                            if (resp.status !== 200) {
+                                throw new Error("Failed to scan models: " + resp.statusText + " (" + resp.status + ")");
+                            }
+                            const data = await resp.json();
+                            console.log("[AutoDownload] Scan results:", data);
+
+                            // Show results
+                            showResultsDialog(data);
+
+                        } catch (e) {
+                            // Remove loading dialog on error
+                            if (loadingDlg) loadingDlg.remove();
+                            console.error("[AutoDownload] Error:", e);
+                            alert("Error: " + e);
                         }
-                        const data = await resp.json();
-                        console.log("[AutoDownload] Scan results:", data);
-
-                        // Show results
-                        showResultsDialog(data);
-
-                    } catch (e) {
-                        // Remove loading dialog on error
-                        if (loadingDlg) loadingDlg.remove();
-                        console.error("[AutoDownload] Error:", e);
-                        alert("Error: " + e);
+                    }
+                },
+                {
+                    content: "Download new model",
+                    callback: () => {
+                        showManualDownloadDialog();
                     }
                 }
-            });
+            );
             return menu;
         };
     }
