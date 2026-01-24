@@ -163,13 +163,17 @@ const createTopMenuButton = () => {
         padding: "0",
         display: "flex",
         alignItems: "center",
-        justifyContent: "center"
+        justifyContent: "center",
+        fontStyle: "normal"
     });
 
     if (button.iconElement) {
         button.iconElement.textContent = "🤗";
         button.iconElement.style.fontSize = "18px";
         button.iconElement.style.lineHeight = "1";
+        button.iconElement.style.fontStyle = "normal";
+        button.iconElement.style.transform = "none";
+        button.iconElement.style.fontFamily = "Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif";
     } else {
         button.element.textContent = "🤗";
     }

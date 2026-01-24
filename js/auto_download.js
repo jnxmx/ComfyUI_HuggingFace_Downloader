@@ -57,6 +57,7 @@ app.registerExtension({
                 detail: toastOptions.detail,
                 closable: toastOptions.closable,
                 life: toastOptions.life,
+                sticky: toastOptions.sticky,
                 group: toastOptions.group,
                 styleClass: toastOptions.styleClass,
                 contentStyleClass: toastOptions.contentStyleClass
@@ -74,6 +75,74 @@ app.registerExtension({
                 const summary = payload.summary ? `${payload.summary}: ` : "";
                 console.log(`[AutoDownload] ${summary}${payload.detail || "Notification"}`);
             }
+        };
+
+        const PROGRESS_TOAST_GROUP = "hf-download-progress";
+        const PROGRESS_TOAST_LIFE_MS = 60000;
+
+        const getToastGroupClear = () => {
+            const toast = app?.extensionManager?.toast;
+            if (!toast) {
+                return null;
+            }
+            if (typeof toast.clearGroup === "function") {
+                return (group) => toast.clearGroup(group);
+            }
+            if (typeof toast.removeGroup === "function") {
+                return (group) => toast.removeGroup(group);
+            }
+            if (typeof toast.clear === "function" && toast.clear.length >= 1) {
+                return (group) => toast.clear(group);
+            }
+            return null;
+        };
+
+        const clearProgressToast = () => {
+            const clearGroup = getToastGroupClear();
+            if (clearGroup) {
+                clearGroup(PROGRESS_TOAST_GROUP);
+            }
+        };
+
+        const showProgressToast = (name) => {
+            const clearGroup = getToastGroupClear();
+            if (clearGroup) {
+                clearGroup(PROGRESS_TOAST_GROUP);
+                showToast({
+                    severity: "info",
+                    summary: "Download in progress",
+                    detail: name,
+                    group: PROGRESS_TOAST_GROUP,
+                    sticky: true,
+                    closable: false
+                });
+                return;
+            }
+            showToast({
+                severity: "info",
+                summary: "Download in progress",
+                detail: name,
+                life: PROGRESS_TOAST_LIFE_MS
+            });
+        };
+
+        const showFinalToast = (failures, total) => {
+            clearProgressToast();
+            const finishedDetail = failures
+                ? `${total - failures} succeeded, ${failures} failed.`
+                : `${total} model(s) downloaded.`;
+            const finishedSeverity = failures
+                ? (failures === total ? "error" : "warn")
+                : "success";
+            const finishedSummary = failures
+                ? (failures === total ? "Downloads failed" : "Downloads finished with errors")
+                : "Downloads finished";
+            showToast({
+                severity: finishedSeverity,
+                summary: finishedSummary,
+                detail: finishedDetail,
+                life: 8000
+            });
         };
 
         const registerGlobalAction = (name, action) => {
@@ -670,12 +739,7 @@ app.registerExtension({
                                         addLog(`[ERR] ${name} failed: ${info.error || "unknown error"}`);
                                     } else if (info.status === "downloading") {
                                         addLog(`>> Downloading ${name}...`);
-                                        showToast({
-                                            severity: "info",
-                                            summary: "Download in progress",
-                                            detail: name,
-                                            life: 6000
-                                        });
+                                        showProgressToast(name);
                                     } else if (info.status === "queued") {
                                         addLog(`Queued ${name}`);
                                     }
@@ -691,23 +755,7 @@ app.registerExtension({
                             if (pending.size === 0) {
                                 stopPolling();
                                 addLog("All tasks finished.");
-                                const failures = failed.size;
-                                const total = downloadIds.length;
-                                const finishedDetail = failures
-                                    ? `${total - failures} succeeded, ${failures} failed.`
-                                    : `${total} model(s) downloaded.`;
-                                const finishedSeverity = failures
-                                    ? (failures === total ? "error" : "warn")
-                                    : "success";
-                                const finishedSummary = failures
-                                    ? (failures === total ? "Downloads failed" : "Downloads finished with errors")
-                                    : "Downloads finished";
-                                showToast({
-                                    severity: finishedSeverity,
-                                    summary: finishedSummary,
-                                    detail: finishedDetail,
-                                    life: 8000
-                                });
+                                showFinalToast(failed.size, downloadIds.length);
 
                                 downloadBtn.style.display = "none";
                                 closeBtn.textContent = "Finish";
@@ -891,12 +939,7 @@ app.registerExtension({
                                     statusMap[id] = info.status;
                                     const name = info.filename || id;
                                     if (info.status === "downloading") {
-                                        showToast({
-                                            severity: "info",
-                                            summary: "Download in progress",
-                                            detail: name,
-                                            life: 6000
-                                        });
+                                        showProgressToast(name);
                                     } else if (info.status === "failed") {
                                         failed.add(id);
                                     }
@@ -908,23 +951,7 @@ app.registerExtension({
 
                             if (pending.size === 0) {
                                 stopPolling();
-                                const failures = failed.size;
-                                const total = downloadIds.length;
-                                const finishedDetail = failures
-                                    ? `${total - failures} succeeded, ${failures} failed.`
-                                    : `${total} model(s) downloaded.`;
-                                const finishedSeverity = failures
-                                    ? (failures === total ? "error" : "warn")
-                                    : "success";
-                                const finishedSummary = failures
-                                    ? (failures === total ? "Downloads failed" : "Downloads finished with errors")
-                                    : "Downloads finished";
-                                showToast({
-                                    severity: finishedSeverity,
-                                    summary: finishedSummary,
-                                    detail: finishedDetail,
-                                    life: 8000
-                                });
+                                showFinalToast(failed.size, downloadIds.length);
                                 downloadBtn.disabled = false;
                                 downloadBtn.textContent = "Download";
                             }
