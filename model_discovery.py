@@ -378,6 +378,14 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
             
         node_title = node.get("title") or node.get("type", "Unknown Node")
         node_type = node.get("type", "")
+
+        linked_widget_indices = set()
+        widget_pos = 0
+        for input_item in node.get("inputs", []):
+            if "widget" in input_item:
+                if input_item.get("link") is not None:
+                    linked_widget_indices.add(widget_pos)
+                widget_pos += 1
         
         # Skip subgraph wrapper nodes (UUID-type nodes are subgraphs)
         # The actual loaders are inside the subgraph definition, not the wrapper
@@ -450,7 +458,9 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
         if "widgets_values" in node and not ("Note" in node_type or "PrimitiveString" in node_type):
             widgets = node["widgets_values"]
             if isinstance(widgets, list):
-                for val in widgets:
+                for idx, val in enumerate(widgets):
+                    if idx in linked_widget_indices:
+                        continue
                     if not isinstance(val, str):
                         continue
 
