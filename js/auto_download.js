@@ -30,6 +30,37 @@ app.registerExtension({
             return inp;
         };
 
+        const showToast = (options, type = "info") => {
+            let toastOptions = options;
+            if (typeof options === "string") {
+                toastOptions = { detail: options, severity: type };
+            }
+
+            const payload = {
+                severity: toastOptions.severity || type,
+                summary: toastOptions.summary,
+                detail: toastOptions.detail,
+                closable: toastOptions.closable,
+                life: toastOptions.life,
+                group: toastOptions.group,
+                styleClass: toastOptions.styleClass,
+                contentStyleClass: toastOptions.contentStyleClass
+            };
+
+            Object.keys(payload).forEach((key) => {
+                if (payload[key] === undefined) {
+                    delete payload[key];
+                }
+            });
+
+            if (app && app.extensionManager && app.extensionManager.toast && app.extensionManager.toast.add) {
+                app.extensionManager.toast.add(payload);
+            } else {
+                const summary = payload.summary ? `${payload.summary}: ` : "";
+                console.log(`[AutoDownload] ${summary}${payload.detail || "Notification"}`);
+            }
+        };
+
         /* Show loading dialog immediately */
         const showLoadingDialog = () => {
             const existing = document.getElementById("auto-download-dialog");
@@ -546,6 +577,7 @@ app.registerExtension({
 
                     const statusMap = {};
                     const pending = new Set(downloadIds);
+                    const failed = new Set();
 
                     const poll = async () => {
                         if (downloadIds.length === 0) return;
@@ -568,18 +600,44 @@ app.registerExtension({
                                         addLog(`[ERR] ${name} failed: ${info.error || "unknown error"}`);
                                     } else if (info.status === "downloading") {
                                         addLog(`>> Downloading ${name}...`);
+                                        showToast({
+                                            severity: "info",
+                                            summary: "Download in progress",
+                                            detail: name,
+                                            life: 6000
+                                        });
                                     } else if (info.status === "queued") {
                                         addLog(`Queued ${name}`);
                                     }
                                 }
                                 if (info.status === "completed" || info.status === "failed") {
                                     pending.delete(id);
+                                    if (info.status === "failed") {
+                                        failed.add(id);
+                                    }
                                 }
                             }
 
                             if (pending.size === 0) {
                                 stopPolling();
                                 addLog("All tasks finished.");
+                                const failures = failed.size;
+                                const total = downloadIds.length;
+                                const finishedDetail = failures
+                                    ? `${total - failures} succeeded, ${failures} failed.`
+                                    : `${total} model(s) downloaded.`;
+                                const finishedSeverity = failures
+                                    ? (failures === total ? "error" : "warn")
+                                    : "success";
+                                const finishedSummary = failures
+                                    ? (failures === total ? "Downloads failed" : "Downloads finished with errors")
+                                    : "Downloads finished";
+                                showToast({
+                                    severity: finishedSeverity,
+                                    summary: finishedSummary,
+                                    detail: finishedDetail,
+                                    life: 8000
+                                });
 
                                 downloadBtn.style.display = "none";
                                 closeBtn.textContent = "Finish";
