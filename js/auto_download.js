@@ -1,5 +1,4 @@
 import { app } from "../../../scripts/app.js";
-import { api } from "../../../scripts/api.js";
 
 app.registerExtension({
     name: "autoDownloadModels",
@@ -75,6 +74,14 @@ app.registerExtension({
                 const summary = payload.summary ? `${payload.summary}: ` : "";
                 console.log(`[AutoDownload] ${summary}${payload.detail || "Notification"}`);
             }
+        };
+
+        const registerGlobalAction = (name, action) => {
+            if (typeof window === "undefined") return;
+            if (!window.hfDownloader) {
+                window.hfDownloader = {};
+            }
+            window.hfDownloader[name] = action;
         };
 
         let availableFolders = [
@@ -944,58 +951,43 @@ app.registerExtension({
             loadFolderList();
         };
 
-        /* ──────────────── Menu Integration ──────────────── */
-        const origMenu = LGraphCanvas.prototype.getCanvasMenuOptions;
-        LGraphCanvas.prototype.getCanvasMenuOptions = function () {
-            const menu = origMenu.apply(this, arguments);
-            menu.push(
-                null,
-                {
-                    content: "Auto-download models",
-                    callback: async () => {
-                        let loadingDlg = null;
-                        try {
-                            // Show loading dialog immediately
-                            loadingDlg = showLoadingDialog();
+        const runAutoDownload = async () => {
+            let loadingDlg = null;
+            try {
+                // Show loading dialog immediately
+                loadingDlg = showLoadingDialog();
 
-                            const workflow = app.graph.serialize();
-                            console.log("[AutoDownload] Scanning workflow:", workflow);
+                const workflow = app.graph.serialize();
+                console.log("[AutoDownload] Scanning workflow:", workflow);
 
-                            // Call backend
-                            const resp = await fetch("/check_missing_models", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify(workflow)
-                            });
+                // Call backend
+                const resp = await fetch("/check_missing_models", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(workflow)
+                });
 
-                            // Remove loading dialog
-                            if (loadingDlg) loadingDlg.remove();
+                // Remove loading dialog
+                if (loadingDlg) loadingDlg.remove();
 
-                            if (resp.status !== 200) {
-                                throw new Error("Failed to scan models: " + resp.statusText + " (" + resp.status + ")");
-                            }
-                            const data = await resp.json();
-                            console.log("[AutoDownload] Scan results:", data);
-
-                            // Show results
-                            showResultsDialog(data);
-
-                        } catch (e) {
-                            // Remove loading dialog on error
-                            if (loadingDlg) loadingDlg.remove();
-                            console.error("[AutoDownload] Error:", e);
-                            alert("Error: " + e);
-                        }
-                    }
-                },
-                {
-                    content: "Download new model",
-                    callback: () => {
-                        showManualDownloadDialog();
-                    }
+                if (resp.status !== 200) {
+                    throw new Error("Failed to scan models: " + resp.statusText + " (" + resp.status + ")");
                 }
-            );
-            return menu;
+                const data = await resp.json();
+                console.log("[AutoDownload] Scan results:", data);
+
+                // Show results
+                showResultsDialog(data);
+
+            } catch (e) {
+                // Remove loading dialog on error
+                if (loadingDlg) loadingDlg.remove();
+                console.error("[AutoDownload] Error:", e);
+                alert("Error: " + e);
+            }
         };
+
+        registerGlobalAction("runAutoDownload", runAutoDownload);
+        registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
     }
 });

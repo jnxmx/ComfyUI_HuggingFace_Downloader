@@ -1,5 +1,4 @@
 import { app } from "../../../scripts/app.js";
-import { api } from "../../../scripts/api.js";
 
 app.registerExtension({
 	name: "backupToHuggingFace",
@@ -40,6 +39,14 @@ app.registerExtension({
 			container.appendChild(checkbox);
 			container.appendChild(labelEl);
 			return container;
+		};
+
+		const registerGlobalAction = (name, action) => {
+			if (typeof window === "undefined") return;
+			if (!window.hfDownloader) {
+				window.hfDownloader = {};
+			}
+			window.hfDownloader[name] = action;
 		};
 
 		/* ──────────────── D I A L O G ──────────────── */
@@ -374,18 +381,7 @@ app.registerExtension({
 			document.body.appendChild(dlg);
 		};
 
-		/* ─────────── Canvas-menu injection ─────────── */
-		const origMenu = LGraphCanvas.prototype.getCanvasMenuOptions;
-		LGraphCanvas.prototype.getCanvasMenuOptions = function () {
-			const menu = origMenu.apply(this, arguments);
-
-			menu.push(null, {
-				content: "Backup ComfyUI to Hugging Face",
-				callback: showBackupDialog,
-			});
-
-			return menu;
-		};
+		registerGlobalAction("showBackupDialog", showBackupDialog);
 
 		/* (Any other graph events you need) */
 		// api.addEventListener("executing", ({ detail }) => { ... });
