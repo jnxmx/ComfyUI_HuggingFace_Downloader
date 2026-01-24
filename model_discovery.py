@@ -312,56 +312,30 @@ NODE_TYPE_MAPPING = {
     "AIO_Preprocessor": None,  # Uses different models depending on type parameter
 }
 
-def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Parses the workflow JSON to find potential model files.
-    Returns a list of dicts: 
-    {
-        "filename": "model.safetensors",
-        "url": "https://...", (optional)
-        "node_id": 123,
-        "node_title": "Load Checkpoint",
-        "suggested_path": "checkpoints" (optional category)
-    }
-    """
-    found_models = []
-    
-    # 1. Check definitions (subgraphs) if present to find hidden URLs in templates
-    definitions = workflow.get("definitions", {})
-    subgraphs = definitions.get("subgraphs", [])
-    for subgraph in subgraphs:
-        sub_nodes = subgraph.get("nodes", [])
-        for node in sub_nodes:
-            # Recursively check properties in subgraph nodes
-            if "properties" in node and "models" in node["properties"]:
-                 for model_info in node["properties"]["models"]:
-                    found_models.append({
-                        "filename": model_info.get("name"),
-                        "url": model_info.get("url"),
-                        "node_id": node.get("id"), # Inner ID
-                        "node_title": "Subgraph Node",
-                        "suggested_folder": model_info.get("directory")
-                    })
-
-    # Create a map of links: link_id -> (start_node_id, start_slot_index)
-    # The 'links' array in ComfyUI workflow format usually looks like: [id, start_node_id, start_slot, end_node_id, end_slot, type]
+def _build_links_map(raw_links: list[Any]) -> dict:
     links_map = {}
-    raw_links = workflow.get("links", [])
     for link in raw_links:
         if isinstance(link, list) and len(link) >= 4:
             link_id = link[0]
             start_node_id = link[1]
             start_slot = link[2]
-            links_map[link_id] = (start_node_id, start_slot) # type: ignore
+            links_map[link_id] = (start_node_id, start_slot)
+        elif isinstance(link, dict):
+            link_id = link.get("id")
+            start_node_id = link.get("origin_id")
+            start_slot = link.get("origin_slot")
+            if link_id is not None and start_node_id is not None:
+                links_map[link_id] = (start_node_id, start_slot)
+    return links_map
 
-    nodes = workflow.get("nodes", [])
-    # Create a quick ID lookup for nodes
-    nodes_by_id = {n.get("id"): n for n in nodes}
-    
-    # Track Note links separately - they should NOT create download entries
-    # They should only be used to enrich loader nodes that are missing URLs
-    note_links = {}  # {filename: url}
-
+def _collect_models_from_nodes(
+    nodes: list[dict],
+    links_map: dict,
+    nodes_by_id: dict,
+    found_models: list[dict],
+    note_links: dict,
+    node_title_fallback: str
+) -> None:
     for node in nodes:
         # Skip disabled/muted nodes
         # 0 = Enabled, 2 = Muted, 4 = Bypass/Disabled?
@@ -376,7 +350,7 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
         if node.get("mode") == 2:
             continue
             
-        node_title = node.get("title") or node.get("type", "Unknown Node")
+        node_title = node.get("title") or node.get("type", node_title_fallback)
         node_type = node.get("type", "")
 
         linked_widget_indices = set()
@@ -548,12 +522,59 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
                                                     m["url"] = u_val
                                                     m["note"] = f"Resolved from upstream node {upstream_node.get('title', upstream_id)}"
     
+def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Parses the workflow JSON to find potential model files.
+    Returns a list of dicts: 
+    {
+        "filename": "model.safetensors",
+        "url": "https://...", (optional)
+        "node_id": 123,
+        "node_title": "Load Checkpoint",
+        "suggested_path": "checkpoints" (optional category)
+    }
+    """
+    found_models = []
+
+    # Track Note links separately - they should NOT create download entries
+    # They should only be used to enrich loader nodes that are missing URLs
+    note_links = {}  # {filename: url}
+
+    definitions = workflow.get("definitions", {})
+    subgraphs = definitions.get("subgraphs", [])
+    for subgraph in subgraphs:
+        sub_nodes = subgraph.get("nodes", [])
+        sub_links = subgraph.get("links", [])
+        sub_links_map = _build_links_map(sub_links)
+        sub_nodes_by_id = {n.get("id"): n for n in sub_nodes}
+        subgraph_name = subgraph.get("name", "Subgraph")
+        _collect_models_from_nodes(
+            sub_nodes,
+            sub_links_map,
+            sub_nodes_by_id,
+            found_models,
+            note_links,
+            f"Subgraph Node ({subgraph_name})"
+        )
+
+    links_map = _build_links_map(workflow.get("links", []))
+    nodes = workflow.get("nodes", [])
+    nodes_by_id = {n.get("id"): n for n in nodes}
+    _collect_models_from_nodes(
+        nodes,
+        links_map,
+        nodes_by_id,
+        found_models,
+        note_links,
+        "Unknown Node"
+    )
+
     # Enrich found_models with URLs from note_links for models without URLs
     for model in found_models:
         if not model.get("url") and model["filename"] in note_links:
             model["url"] = note_links[model["filename"]]
             model["note"] = "URL from Note"
-     
+
     return found_models
 
 def is_subgraph_node(node_type: str) -> bool:
