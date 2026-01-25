@@ -426,7 +426,8 @@ app.registerExtension({
                     li.style.alignItems = "center";
 
                     const left = document.createElement("div");
-                    left.innerHTML = `<div style="color:#aaa; font-size:11px">Current: ${m.filename}</div><div style="color:#4caf50; font-weight:bold; font-size:12px">Found: ${m.clean_path}</div>`;
+                    const currentLabel = m.requested_path || m.filename;
+                    left.innerHTML = `<div style="color:#aaa; font-size:11px">Current: ${currentLabel}</div><div style="color:#4caf50; font-weight:bold; font-size:12px">Found: ${m.clean_path}</div>`;
 
                     const fixBtn = document.createElement("button");
                     fixBtn.textContent = "Fix Path";
@@ -441,7 +442,8 @@ app.registerExtension({
                         const node = app.graph.getNodeById(m.node_id);
                         if (node) {
                             // Find widget with the old value
-                            const widget = node.widgets.find(w => w.value === m.filename);
+                            const targetValue = m.requested_path || m.filename;
+                            const widget = node.widgets.find(w => w.value === targetValue || w.value === m.filename);
                             if (widget) {
                                 widget.value = m.clean_path;
                                 node.setDirtyCanvas(true);

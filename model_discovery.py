@@ -639,16 +639,15 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
         "Unknown Node"
     )
 
-    # Enrich found_models with URLs from note_links for models without URLs
+    # Enrich found_models with URLs from note_links (highest priority)
     for model in found_models:
-        if model.get("url"):
-            continue
         note_key = normalize_filename_key(model["filename"])
         url = note_links.get(note_key)
         if not url:
             url = note_links_normalized.get(normalize_filename_compact(model["filename"]))
         if url:
             model["url"] = url
+            model["source"] = "note"
             model["note"] = "URL from Note"
 
     return found_models
@@ -886,6 +885,21 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[s
             if hf_repo:
                 model["hf_repo"] = hf_repo
                 model["hf_path"] = hf_path
+
+    # 2b. If a requested path includes subfolders, use that for download destination
+    for model in missing_models:
+        requested_path = model.get("requested_path")
+        if not requested_path:
+            continue
+        normalized = requested_path.replace("\\", "/").strip("/")
+        if "/" not in normalized:
+            continue
+        subfolder = "/".join(normalized.split("/")[:-1])
+        if not subfolder:
+            continue
+        base_folder = model.get("suggested_folder") or "checkpoints"
+        if not base_folder.replace("\\", "/").endswith(subfolder):
+            model["suggested_folder"] = f"{base_folder}/{subfolder}"
 
     # 3. Check curated popular models registry
     if missing_models:
