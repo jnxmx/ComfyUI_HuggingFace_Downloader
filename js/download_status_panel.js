@@ -6,7 +6,7 @@ app.registerExtension({
         const PANEL_ID = "hf-downloader-panel";
         const STYLE_ID = "hf-downloader-panel-styles";
         const POLL_INTERVAL_MS = 1000;
-        const COMPLETED_TTL_MS = 20000;
+        const FINISHED_TTL_MS = 10000;
         const MAX_ATTACH_ATTEMPTS = 120;
         const QUEUE_ANCHOR_SELECTORS = [
             "#queue-panel",
@@ -175,6 +175,7 @@ app.registerExtension({
 
             panel.appendChild(header);
             panel.appendChild(listBody);
+            panel.style.display = "none";
             document.body.appendChild(panel);
 
             positionPanel();
@@ -224,19 +225,28 @@ app.registerExtension({
 
         const shouldDisplay = (info, now) => {
             if (!info) return false;
-            if (info.status === "completed" && info.finished_at) {
-                return (now - info.finished_at * 1000) <= COMPLETED_TTL_MS;
+            if ((info.status === "completed" || info.status === "failed") && info.finished_at) {
+                return (now - info.finished_at * 1000) <= FINISHED_TTL_MS;
             }
             return true;
         };
 
         const renderList = (downloads) => {
-            ensurePanel();
             const now = Date.now();
 
             const entries = Object.entries(downloads)
                 .map(([id, info]) => ({ id, ...info }))
                 .filter((entry) => shouldDisplay(entry, now));
+
+            if (!entries.length) {
+                if (panel) {
+                    panel.style.display = "none";
+                }
+                return;
+            }
+
+            ensurePanel();
+            panel.style.display = "flex";
 
             const activeCount = entries.filter((entry) =>
                 entry.status === "queued" || entry.status === "downloading"
@@ -244,14 +254,6 @@ app.registerExtension({
             countBadge.textContent = String(activeCount);
 
             listBody.innerHTML = "";
-
-            if (!entries.length) {
-                const empty = document.createElement("div");
-                empty.className = "hf-downloader-empty";
-                empty.textContent = "No active downloads.";
-                listBody.appendChild(empty);
-                return;
-            }
 
             const order = {
                 downloading: 0,
@@ -374,7 +376,6 @@ app.registerExtension({
             positionPanel();
         }, 500);
 
-        ensurePanel();
         pollStatus();
         startPolling();
     }
