@@ -12,9 +12,11 @@ MODEL_EXTENSIONS = {'.safetensors', '.ckpt', '.pt', '.bin', '.pth', '.gguf'}
 # Priority authors for HF search as requested
 PRIORITY_AUTHORS = [
     "Kijai",
-    "comfyanonymous", 
-    "Comfy-Org", 
-    "city96"
+    "comfyanonymous",
+    "Comfy-Org",
+    "city96",
+    "QuantStack",
+    "alibaba-pai",
 ]
 
 POPULAR_MODELS_FILE = os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json")
@@ -40,6 +42,20 @@ def normalize_save_path(save_path: str | None) -> str | None:
     if normalized.startswith("models/"):
         normalized = normalized.split("/", 1)[1]
     return normalized or None
+
+def normalize_filename_key(name: str) -> str:
+    base = os.path.basename(name.replace("\\", "/")).strip()
+    return base.lower()
+
+def normalize_filename_compact(name: str) -> str:
+    base = normalize_filename_key(name)
+    return re.sub(r'[-_]+', '', base)
+
+def split_model_identifier(value: str) -> Tuple[str, str | None]:
+    normalized = value.replace("\\", "/").strip()
+    if "/" in normalized:
+        return os.path.basename(normalized), normalized
+    return normalized, None
 
 def load_popular_models_registry() -> dict:
     """Load curated popular-models.json registry."""
@@ -212,6 +228,7 @@ def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]]) -> List[Dic
         if model.get("url"):
             continue
         filename = model["filename"]
+        requested_path = model.get("requested_path") or filename
         filename_key = filename.lower()
         entry = manager_map.get(filename_key) or manager_map.get(os.path.basename(filename_key))
         if entry and entry.get("url"):
@@ -280,13 +297,21 @@ NODE_TYPE_MAPPING = {
     "WanVideoExtraModelSelect": "diffusion_models",
     
     # GGUF
-    "LoaderGGUF": "unet",
-    "LoaderGGUFAdvanced": "unet",
-    "UnetLoaderGGUF": "unet", # MultiGPU variant
-    "ClipLoaderGGUF": "clip",
-    "DualClipLoaderGGUF": "clip",
-    "TripleClipLoaderGGUF": "clip",
-    "QuadrupleClipLoaderGGUF": "clip",
+    "LoaderGGUF": "diffusion_models",
+    "LoaderGGUFAdvanced": "diffusion_models",
+    "UnetLoaderGGUF": "diffusion_models", # MultiGPU variant
+    "ClipLoaderGGUF": "text_encoders",
+    "DualClipLoaderGGUF": "text_encoders",
+    "TripleClipLoaderGGUF": "text_encoders",
+    "QuadrupleClipLoaderGGUF": "text_encoders",
+    "VAELoaderGGUF": "vae",
+
+    # KJNodes
+    "VAELoaderKJ": "vae",
+    "CLIPLoaderKJ": "text_encoders",
+    "DualCLIPLoaderKJ": "text_encoders",
+    "UnetLoaderKJ": "diffusion_models",
+    "LoraLoaderKJ": "loras",
     
     # Nunchaku
     "NunchakuFluxDiTLoader": "diffusion_models",
@@ -328,12 +353,43 @@ def _build_links_map(raw_links: list[Any]) -> dict:
                 links_map[link_id] = (start_node_id, start_slot)
     return links_map
 
+def resolve_node_folder(node: dict) -> str | None:
+    node_type = node.get("type", "")
+    if node_type in NODE_TYPE_MAPPING:
+        return NODE_TYPE_MAPPING[node_type]
+
+    properties = node.get("properties") or {}
+    cnr_id = (properties.get("cnr_id") or "").lower()
+    node_type_lower = node_type.lower()
+
+    if "gguf" in node_type_lower or "gguf" in cnr_id:
+        if "clip" in node_type_lower:
+            return "text_encoders"
+        if "vae" in node_type_lower:
+            return "vae"
+        if "lora" in node_type_lower:
+            return "loras"
+        return "diffusion_models"
+
+    if "kjnodes" in cnr_id:
+        if "clip" in node_type_lower:
+            return "text_encoders"
+        if "vae" in node_type_lower:
+            return "vae"
+        if "lora" in node_type_lower:
+            return "loras"
+        if "unet" in node_type_lower or "model" in node_type_lower:
+            return "diffusion_models"
+
+    return None
+
 def _collect_models_from_nodes(
     nodes: list[dict],
     links_map: dict,
     nodes_by_id: dict,
     found_models: list[dict],
     note_links: dict,
+    note_links_normalized: dict,
     node_title_fallback: str
 ) -> None:
     for node in nodes:
@@ -414,16 +470,20 @@ def _collect_models_from_nodes(
                         # Regex to find markdown links: [filename](url)
                         links = re.findall(r'\[([^\]]+\.(?:safetensors|ckpt|pt|bin|pth|gguf))\]\((https?://[^)]+)\)', val, re.IGNORECASE)
                         for fname, url in links:
-                            # Store in note_links dict for later enrichment
-                            note_links[fname] = url
+                            note_key = normalize_filename_key(fname)
+                            note_links.setdefault(note_key, url)
+                            note_links_normalized.setdefault(normalize_filename_compact(fname), url)
             continue  # Don't process Notes as loader nodes
 
         # 2. Check properties -> models (Standard ComfyUI template format)
         if "properties" in node and "models" in node["properties"]:
             if not has_linked_widget_input:
                 for model_info in node["properties"]["models"]:
+                    name = model_info.get("name")
+                    filename, requested_path = split_model_identifier(name) if name else (name, None)
                     found_models.append({
-                        "filename": model_info.get("name"),
+                        "filename": filename,
+                        "requested_path": requested_path,
                         "url": model_info.get("url"),
                         "node_id": node_id,
                         "node_title": node_title,
@@ -452,7 +512,7 @@ def _collect_models_from_nodes(
                             # If it looks like a model filename
                             if any(parsed_filename.endswith(ext) for ext in MODEL_EXTENSIONS):
                                 if not any(m["filename"] == parsed_filename and m["node_id"] == node_id for m in found_models):
-                                    suggested_folder = NODE_TYPE_MAPPING.get(node_type)
+                                    suggested_folder = resolve_node_folder(node)
                                     found_models.append({
                                         "filename": parsed_filename,
                                         "url": val,
@@ -467,13 +527,13 @@ def _collect_models_from_nodes(
                         # Avoid duplicates if already found via properties
                         # Note: we don't check against subgraph findings here yet, 
                         # duplicate filtering happens in process_workflow
-                        if not any(m["filename"] == val and m["node_id"] == node_id for m in found_models):
+                        filename, requested_path = split_model_identifier(val)
+                        if not any(m["filename"] == filename and m["node_id"] == node_id for m in found_models):
                             # Try to map folder
-                            suggested_folder = NODE_TYPE_MAPPING.get(node_type)
-                            
-                            
+                            suggested_folder = resolve_node_folder(node)
                             found_models.append({
-                                "filename": val,
+                                "filename": filename,
+                                "requested_path": requested_path,
                                 "url": None,
                                 "node_id": node_id,
                                 "node_title": node_title,
@@ -538,7 +598,8 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
 
     # Track Note links separately - they should NOT create download entries
     # They should only be used to enrich loader nodes that are missing URLs
-    note_links = {}  # {filename: url}
+    note_links = {}  # {normalized_filename: url}
+    note_links_normalized = {}  # {compact_filename: url}
 
     definitions = workflow.get("definitions", {})
     subgraphs = definitions.get("subgraphs", [])
@@ -554,6 +615,7 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
             sub_nodes_by_id,
             found_models,
             note_links,
+            note_links_normalized,
             f"Subgraph Node ({subgraph_name})"
         )
 
@@ -566,13 +628,20 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
         nodes_by_id,
         found_models,
         note_links,
+        note_links_normalized,
         "Unknown Node"
     )
 
     # Enrich found_models with URLs from note_links for models without URLs
     for model in found_models:
-        if not model.get("url") and model["filename"] in note_links:
-            model["url"] = note_links[model["filename"]]
+        if model.get("url"):
+            continue
+        note_key = normalize_filename_key(model["filename"])
+        url = note_links.get(note_key)
+        if not url:
+            url = note_links_normalized.get(normalize_filename_compact(model["filename"]))
+        if url:
+            model["url"] = url
             model["note"] = "URL from Note"
 
     return found_models
@@ -658,7 +727,7 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
                 rel_path = os.path.basename(found_path) # Fallback to just filename
                 
             # Normalize for comparison (e.g., "subfolder\file.safetensors" vs "subfolder/file.safetensors")
-            req_norm = filename.replace("\\", "/")
+            req_norm = requested_path.replace("\\", "/")
             found_norm = rel_path.replace("\\", "/")
             
             model_entry = model.copy()
