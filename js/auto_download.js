@@ -723,8 +723,6 @@ app.registerExtension({
 
                     const statusMap = {};
                     const pending = new Set(downloadIds);
-                    const failed = new Set();
-                    let lastProgressId = null;
 
                     const poll = async () => {
                         if (downloadIds.length === 0) return;
@@ -753,32 +751,12 @@ app.registerExtension({
                                 }
                                 if (info.status === "completed" || info.status === "failed") {
                                     pending.delete(id);
-                                    if (info.status === "failed") {
-                                        failed.add(id);
-                                    }
                                 }
-                            }
-
-                            let activeId = null;
-                            for (const id of downloadIds) {
-                                if (downloads[id]?.status === "downloading") {
-                                    activeId = id;
-                                    break;
-                                }
-                            }
-                            if (activeId && activeId !== lastProgressId) {
-                                const name = downloads[activeId]?.filename || activeId;
-                                showProgressToast(name);
-                                lastProgressId = activeId;
-                            } else if (!activeId && lastProgressId) {
-                                clearProgressToast();
-                                lastProgressId = null;
                             }
 
                             if (pending.size === 0) {
                                 stopPolling();
                                 addLog("All tasks finished.");
-                                showFinalToast(failed.size, downloadIds.length);
 
                                 downloadBtn.style.display = "none";
                                 closeBtn.textContent = "Finish";
@@ -945,8 +923,6 @@ app.registerExtension({
 
                     const statusMap = {};
                     const pending = new Set(downloadIds);
-                    const failed = new Set();
-                    let lastProgressId = null;
 
                     const poll = async () => {
                         try {
@@ -962,34 +938,14 @@ app.registerExtension({
                                 if (last !== info.status) {
                                     statusMap[id] = info.status;
                                     const name = info.filename || id;
-                                    if (info.status === "failed") {
-                                        failed.add(id);
-                                    }
                                 }
                                 if (info.status === "completed" || info.status === "failed") {
                                     pending.delete(id);
                                 }
                             }
 
-                            let activeId = null;
-                            for (const id of downloadIds) {
-                                if (downloads[id]?.status === "downloading") {
-                                    activeId = id;
-                                    break;
-                                }
-                            }
-                            if (activeId && activeId !== lastProgressId) {
-                                const name = downloads[activeId]?.filename || activeId;
-                                showProgressToast(name);
-                                lastProgressId = activeId;
-                            } else if (!activeId && lastProgressId) {
-                                clearProgressToast();
-                                lastProgressId = null;
-                            }
-
                             if (pending.size === 0) {
                                 stopPolling();
-                                showFinalToast(failed.size, downloadIds.length);
                                 downloadBtn.disabled = false;
                                 downloadBtn.textContent = "Download";
                             }

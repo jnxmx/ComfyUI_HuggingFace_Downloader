@@ -3,7 +3,7 @@ name = "ComfyUI_HuggingFace_Downloader"
 description = "Nodes for auto download models from Hugging Face using their filenames as part of workflows"
 version = "0.9-beta"
 
-dependencies = ["hf_transfer"]
+dependencies = ["huggingface_hub>=0.32.0"]
 
 [project.urls]
 Repository = "https://github.com/jnxmx/ComfyUI_HuggingFace_Downloader"

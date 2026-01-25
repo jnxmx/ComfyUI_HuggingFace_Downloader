@@ -61,7 +61,7 @@ class HuggingFaceDownloadModel:
         """
         1) If user picks 'custom' in the combo, we interpret custom_path as final_folder, else just target_folder.
         2) parse link => subfolder/file for single file
-        3) call run_download(...) which uses hf_hub_download so hf_transfer can be used
+        3) call run_download(...) which uses hf_hub_download so hf_xet can be used
         4) node's return:
            - if target_folder != 'custom', we do just the filename
            - if 'custom', remove the first segment of custom_path (if any), then leftover + "/" + filename

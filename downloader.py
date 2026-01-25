@@ -6,14 +6,19 @@ import threading
 import time
 import json
 import zipfile
+import hashlib
 import yaml
+from typing import Optional, Tuple
 
 from huggingface_hub import (
+    HfApi,
     hf_hub_download,
     snapshot_download,
     scan_cache_dir,
     list_repo_files
 )
+
+os.environ.setdefault("HF_HUB_ENABLE_HF_XET", "1")
 
 token_override = os.getenv("HF_TOKEN")
 
@@ -72,6 +77,87 @@ def get_token():
     return token
 
 
+def _safe_remove(path: str):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return
+    except Exception as e:
+        print(f"[DEBUG] Failed to remove {path}: {e}")
+
+
+def _extract_lfs_value(lfs, key: str):
+    if not lfs:
+        return None
+    if isinstance(lfs, dict):
+        return lfs.get(key)
+    return getattr(lfs, key, None)
+
+
+def get_remote_file_metadata(repo_id: str,
+                             remote_filename: str,
+                             revision: str = None,
+                             token: str = None) -> Tuple[Optional[int], Optional[str], Optional[str]]:
+    try:
+        api = HfApi()
+        info = api.model_info(repo_id, revision=revision, token=token, files_metadata=True)
+        siblings = getattr(info, "siblings", []) or []
+        for sibling in siblings:
+            if getattr(sibling, "rfilename", None) != remote_filename:
+                continue
+            size = getattr(sibling, "size", None)
+            blob_id = getattr(sibling, "blob_id", None)
+            etag = getattr(sibling, "etag", None)
+            lfs = getattr(sibling, "lfs", None)
+            if lfs:
+                sha = _extract_lfs_value(lfs, "sha256") or _extract_lfs_value(lfs, "oid")
+                size = _extract_lfs_value(lfs, "size") or size
+                etag = sha or blob_id or etag
+            else:
+                sha = None
+                etag = blob_id or etag
+            return size, sha, etag
+    except Exception as e:
+        print(f"[DEBUG] Failed to fetch metadata for {repo_id}/{remote_filename}: {e}")
+    return None, None, None
+
+
+def _get_hf_cache_dir() -> str:
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+        return HF_HUB_CACHE
+    except Exception:
+        return os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+
+
+def get_blob_paths(repo_id: str, etag: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    if not etag:
+        return None, None
+    repo_folder = f"models--{repo_id.replace('/', '--')}"
+    blob_dir = os.path.join(_get_hf_cache_dir(), repo_folder, "blobs")
+    blob_path = os.path.join(blob_dir, etag)
+    return blob_path, blob_path + ".incomplete"
+
+
+def _verify_file_integrity(dest_path: str,
+                           expected_size: Optional[int],
+                           expected_sha: Optional[str]):
+    if expected_size is not None:
+        actual_size = os.path.getsize(dest_path)
+        if actual_size != expected_size:
+            raise RuntimeError(
+                f"Size mismatch (expected {expected_size} bytes, got {actual_size} bytes)"
+            )
+    if expected_sha:
+        sha256 = hashlib.sha256()
+        with open(dest_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                sha256.update(chunk)
+        actual_sha = sha256.hexdigest().lower()
+        if actual_sha != expected_sha.lower():
+            raise RuntimeError("SHA256 mismatch")
+
+
 def run_download(parsed_data: dict,
                  final_folder: str,
                  sync: bool = False) -> tuple[str, str]:
@@ -86,16 +172,28 @@ def run_download(parsed_data: dict,
     sub = parsed_data.get("subfolder", "").strip("/")
     remote_filename = os.path.join(sub, file_name) if sub else file_name
 
+    expected_size, expected_sha, _ = get_remote_file_metadata(
+        parsed_data["repo"],
+        remote_filename,
+        revision=parsed_data.get("revision"),
+        token=token or None
+    )
+
     try:
         target_dir = os.path.join(os.getcwd(), "models", final_folder)
         os.makedirs(target_dir, exist_ok=True)
         dest_path = os.path.join(target_dir, os.path.basename(remote_filename))
 
         if os.path.exists(dest_path):
-            size_gb = os.path.getsize(dest_path) / (1024 ** 3)
-            message = f"{file_name} already exists | {size_gb:.3f} GB"
-            print("[DEBUG]", message)
-            return (message, dest_path) if sync else ("", "")
+            try:
+                _verify_file_integrity(dest_path, expected_size, expected_sha)
+                size_gb = os.path.getsize(dest_path) / (1024 ** 3)
+                message = f"{file_name} already exists | {size_gb:.3f} GB"
+                print("[DEBUG]", message)
+                return (message, dest_path) if sync else ("", "")
+            except Exception as e:
+                print(f"[DEBUG] Existing file failed verification, re-downloading: {e}")
+                _safe_remove(dest_path)
 
         file_path_in_cache = hf_hub_download(
             repo_id=parsed_data["repo"],
@@ -107,6 +205,12 @@ def run_download(parsed_data: dict,
 
         shutil.copyfile(file_path_in_cache, dest_path)
         print("[DEBUG] File copied to:", dest_path)
+
+        try:
+            _verify_file_integrity(dest_path, expected_size, expected_sha)
+        except Exception as e:
+            _safe_remove(dest_path)
+            raise RuntimeError(f"Download verification failed: {e}") from e
 
         clear_cache_for_path(file_path_in_cache)
 

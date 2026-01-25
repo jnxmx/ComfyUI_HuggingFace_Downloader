@@ -167,15 +167,21 @@ const createTopMenuButton = () => {
         fontStyle: "normal"
     });
 
+    const iconUrl = new URL("./assets/hf-favicon.ico", import.meta.url).toString();
+    const iconImg = document.createElement("img");
+    iconImg.src = iconUrl;
+    iconImg.alt = "Hugging Face";
+    iconImg.width = 18;
+    iconImg.height = 18;
+    iconImg.style.display = "block";
+
     if (button.iconElement) {
-        button.iconElement.textContent = "🤗";
-        button.iconElement.style.fontSize = "18px";
+        button.iconElement.textContent = "";
         button.iconElement.style.lineHeight = "1";
-        button.iconElement.style.fontStyle = "normal";
         button.iconElement.style.transform = "none";
-        button.iconElement.style.fontFamily = "Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif";
+        button.iconElement.appendChild(iconImg);
     } else {
-        button.element.textContent = "🤗";
+        button.element.appendChild(iconImg);
     }
 
     button.element.addEventListener("click", (event) => {

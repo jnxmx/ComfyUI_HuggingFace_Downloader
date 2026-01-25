@@ -8,7 +8,7 @@ from aiohttp import web
 from .backup import backup_to_huggingface, restore_from_huggingface
 from .file_manager import get_model_subfolders
 from .model_discovery import process_workflow_for_missing_models
-from .downloader import run_download
+from .downloader import run_download, get_remote_file_metadata, get_blob_paths, get_token
 from .parse_link import parse_link
 
 download_queue = []
@@ -59,14 +59,83 @@ def _download_worker():
             continue
 
         download_id = item["download_id"]
-        _set_download_status(download_id, {"status": "downloading"})
+        _set_download_status(download_id, {"status": "downloading", "started_at": time.time()})
 
+        stop_event = None
         try:
             parsed = _build_parsed_download_info(item)
+            token = get_token()
+            expected_size, _, etag = get_remote_file_metadata(
+                parsed["repo"],
+                parsed.get("subfolder", "").strip("/") + "/" + parsed["file"]
+                if parsed.get("subfolder") else parsed["file"],
+                revision=parsed.get("revision"),
+                token=token or None
+            )
+            _set_download_status(download_id, {
+                "status": "downloading",
+                "downloaded_bytes": 0,
+                "total_bytes": expected_size,
+                "updated_at": time.time()
+            })
+
+            stop_event = threading.Event()
+
+            def monitor_progress():
+                blob_path, incomplete_path = get_blob_paths(parsed["repo"], etag)
+                last_bytes = None
+                last_time = time.time()
+                ema_speed = None
+                while not stop_event.is_set():
+                    bytes_now = None
+                    if incomplete_path and os.path.exists(incomplete_path):
+                        bytes_now = os.path.getsize(incomplete_path)
+                    elif blob_path and os.path.exists(blob_path):
+                        bytes_now = os.path.getsize(blob_path)
+
+                    if bytes_now is not None:
+                        now = time.time()
+                        if last_bytes is None:
+                            inst_speed = 0
+                        else:
+                            delta = bytes_now - last_bytes
+                            dt = now - last_time
+                            inst_speed = (delta / dt) if dt > 0 else 0
+                        ema_speed = inst_speed if ema_speed is None else (0.2 * inst_speed + 0.8 * ema_speed)
+                        eta_seconds = None
+                        if expected_size and ema_speed and ema_speed > 0:
+                            eta_seconds = max(0, (expected_size - bytes_now) / ema_speed)
+                        _set_download_status(download_id, {
+                            "status": "downloading",
+                            "downloaded_bytes": bytes_now,
+                            "total_bytes": expected_size,
+                            "speed_bps": ema_speed,
+                            "eta_seconds": eta_seconds,
+                            "updated_at": now
+                        })
+                        last_bytes = bytes_now
+                        last_time = now
+                    time.sleep(0.5)
+
+            if etag:
+                threading.Thread(target=monitor_progress, daemon=True).start()
+
             msg, path = run_download(parsed, item["folder"], sync=True)
-            _set_download_status(download_id, {"status": "completed", "message": msg, "path": path})
+            stop_event.set()
+            _set_download_status(download_id, {
+                "status": "completed",
+                "message": msg,
+                "path": path,
+                "finished_at": time.time()
+            })
         except Exception as e:
-            _set_download_status(download_id, {"status": "failed", "error": str(e)})
+            if stop_event:
+                stop_event.set()
+            _set_download_status(download_id, {
+                "status": "failed",
+                "error": str(e),
+                "finished_at": time.time()
+            })
 
 def _start_download_worker():
     global download_worker_running
@@ -195,7 +264,8 @@ def setup(app):
                 _set_download_status(download_id, {
                     "status": "queued",
                     "filename": filename,
-                    "folder": folder
+                    "folder": folder,
+                    "queued_at": time.time()
                 })
                 queued.append({"download_id": download_id, "filename": filename})
 

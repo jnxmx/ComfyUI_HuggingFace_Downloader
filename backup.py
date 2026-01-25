@@ -564,13 +564,11 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     Uses snapshot_download for faster parallel downloads.
     """
     from huggingface_hub import snapshot_download, hf_hub_download
-    import hf_transfer
     import requests.exceptions
     from collections import defaultdict
     from .downloader import clear_cache_for_path
 
-    # Enable hf_transfer
-    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+    os.environ.setdefault("HF_HUB_ENABLE_HF_XET", "1")
     
     api = HfApi()
     token, _ = get_token_and_size_limit()

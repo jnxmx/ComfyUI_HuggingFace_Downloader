@@ -1,5 +1,4 @@
 
-huggingface_hub
+huggingface_hub>=0.32.0
 comfy-cli
 PyYAML
-hf_transfer
