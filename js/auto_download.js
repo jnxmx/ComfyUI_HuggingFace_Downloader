@@ -516,6 +516,7 @@ app.registerExtension({
                     const infoDiv = document.createElement("div");
                     const nameEl = document.createElement("div");
                     nameEl.style.fontWeight = "bold";
+                    nameEl.style.fontSize = "12px";
                     nameEl.style.wordBreak = "break-all";
                     nameEl.textContent = m.filename;
 
@@ -635,20 +636,21 @@ app.registerExtension({
 
             panel.appendChild(content);
 
-            /* Logs Panel (Initially Hidden) */
-            const logPanel = document.createElement("div");
-            Object.assign(logPanel.style, {
-                height: "150px",
-                background: "#000",
-                borderRadius: "6px",
-                padding: "10px",
+            const statusLine = document.createElement("div");
+            Object.assign(statusLine.style, {
                 fontSize: "12px",
-                fontFamily: "monospace",
-                overflowY: "auto",
-                display: "none",
-                color: "#0f0"
+                color: "#aaa",
+                minHeight: "16px"
             });
-            panel.appendChild(logPanel);
+            panel.appendChild(statusLine);
+
+            const refreshHint = document.createElement("div");
+            Object.assign(refreshHint.style, {
+                color: "yellow",
+                marginTop: "6px",
+                display: "none"
+            });
+            panel.appendChild(refreshHint);
 
             /* Buttons */
             const footer = document.createElement("div");
@@ -676,35 +678,33 @@ app.registerExtension({
                     return;
                 }
 
+                const setStatus = (msg, color = "#aaa") => {
+                    statusLine.textContent = msg || "";
+                    statusLine.style.color = color;
+                };
+
+                refreshHint.style.display = "none";
+                setStatus("Queuing downloads...");
+
                 // Switch UI to downloading state
                 downloadBtn.disabled = true;
                 downloadBtn.textContent = "Queued";
-                content.style.display = "none";
-                logPanel.style.display = "block";
-
-                const addLog = (msg) => {
-                    const line = document.createElement("div");
-                    line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-                    logPanel.appendChild(line);
-                    logPanel.scrollTop = logPanel.scrollHeight;
-                };
 
                 const queueable = [];
                 for (const item of toDownload) {
                     if (!item.url) {
-                        addLog(`[SKIP] No URL for ${item.filename}`);
+                        setStatus(`Skipped ${item.filename} (missing URL).`, "#f5b14c");
                         continue;
                     }
                     queueable.push(item);
                 }
                 if (queueable.length === 0) {
-                    addLog("No valid URLs to queue.");
+                    setStatus("No valid URLs to queue.", "#f5b14c");
                     downloadBtn.disabled = false;
                     downloadBtn.textContent = "Download Selected";
                     return;
                 }
-
-                addLog(`Queuing ${queueable.length} models for background download...`);
+                setStatus(`Queued ${queueable.length} model(s). Track progress in the Downloads panel.`, "#9ad6ff");
 
                 try {
                     const resp = await fetch("/queue_download", {
@@ -719,7 +719,7 @@ app.registerExtension({
                     const queued = res.queued || [];
                     const downloadIds = queued.map(q => q.download_id);
 
-                    addLog(`Queued ${queued.length} downloads. You can close this window while they run.`);
+                    setStatus(`Queued ${queued.length} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
 
                     const statusMap = {};
                     const pending = new Set(downloadIds);
@@ -739,14 +739,8 @@ app.registerExtension({
                                 if (last !== info.status) {
                                     statusMap[id] = info.status;
                                     const name = info.filename || id;
-                                    if (info.status === "completed") {
-                                        addLog(`[OK] ${name} completed`);
-                                    } else if (info.status === "failed") {
-                                        addLog(`[ERR] ${name} failed: ${info.error || "unknown error"}`);
-                                    } else if (info.status === "downloading") {
-                                        addLog(`>> Downloading ${name}...`);
-                                    } else if (info.status === "queued") {
-                                        addLog(`Queued ${name}`);
+                                    if (info.status === "failed") {
+                                        setStatus(`Failed: ${name}`, "#ff6b6b");
                                     }
                                 }
                                 if (info.status === "completed" || info.status === "failed") {
@@ -756,28 +750,29 @@ app.registerExtension({
 
                             if (pending.size === 0) {
                                 stopPolling();
-                                addLog("All tasks finished.");
-
+                                const failures = downloadIds.filter((id) => downloads[id]?.status === "failed").length;
+                                if (failures) {
+                                    setStatus(`Finished with ${failures} error(s). See Downloads panel for details.`, "#ff6b6b");
+                                } else {
+                                    setStatus("All downloads finished.", "#5bd98c");
+                                }
                                 downloadBtn.style.display = "none";
                                 closeBtn.textContent = "Finish";
                                 closeBtn.className = "p-button p-component p-button-success";
                                 closeBtn.style.display = "inline-block";
 
-                                const refreshHint = document.createElement("div");
-                                refreshHint.style.color = "yellow";
-                                refreshHint.style.marginTop = "10px";
                                 refreshHint.textContent = "Please refresh ComfyUI (Press 'R' or F5) to load new models.";
-                                logPanel.appendChild(refreshHint);
+                                refreshHint.style.display = "block";
                             }
                         } catch (e) {
-                            addLog(`[ERR] Status polling error: ${e}`);
+                            setStatus(`Status polling error: ${e}`, "#ff6b6b");
                         }
                     };
 
                     pollTimer = setInterval(poll, 1000);
                     poll();
                 } catch (e) {
-                    addLog(`[ERR] Queue error: ${e}`);
+                    setStatus(`Queue error: ${e}`, "#ff6b6b");
                     downloadBtn.disabled = false;
                     downloadBtn.textContent = "Download Selected";
                 }

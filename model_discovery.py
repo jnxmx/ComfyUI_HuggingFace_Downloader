@@ -684,6 +684,7 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
     
     for model in found_models:
         filename = model["filename"]
+        requested_path = model.get("requested_path") or filename
         
         # Skip models with None/null filenames (from disabled nodes or empty widgets)
         if filename is None or filename == "null" or not filename:
