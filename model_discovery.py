@@ -467,12 +467,19 @@ def _collect_models_from_nodes(
             if "widgets_values" in node:
                 for val in node["widgets_values"]:
                     if isinstance(val, str):
-                        # Regex to find markdown links: [filename](url)
-                        links = re.findall(r'\[([^\]]+\.(?:safetensors|ckpt|pt|bin|pth|gguf))\]\((https?://[^)]+)\)', val, re.IGNORECASE)
-                        for fname, url in links:
-                            note_key = normalize_filename_key(fname)
+                        # Regex to find markdown links: [text](url)
+                        links = re.findall(r'\[([^\]]+)\]\((https?://[^)]+)\)', val, re.IGNORECASE)
+                        for label, url in links:
+                            url_filename = url.split("?")[0].split("/")[-1]
+                            if any(url_filename.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
+                                filename = url_filename
+                            elif any(label.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
+                                filename = label
+                            else:
+                                continue
+                            note_key = normalize_filename_key(filename)
                             note_links.setdefault(note_key, url)
-                            note_links_normalized.setdefault(normalize_filename_compact(fname), url)
+                            note_links_normalized.setdefault(normalize_filename_compact(filename), url)
             continue  # Don't process Notes as loader nodes
 
         # 2. Check properties -> models (Standard ComfyUI template format)
