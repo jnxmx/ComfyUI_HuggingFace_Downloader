@@ -17,6 +17,7 @@ PRIORITY_AUTHORS = [
     "city96",
     "QuantStack",
     "alibaba-pai",
+    "unsloth",
 ]
 
 POPULAR_MODELS_FILE = os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json")
@@ -471,15 +472,15 @@ def _collect_models_from_nodes(
                         links = re.findall(r'\[([^\]]+)\]\((https?://[^)]+)\)', val, re.IGNORECASE)
                         for label, url in links:
                             url_filename = url.split("?")[0].split("/")[-1]
+                            candidates = []
                             if any(url_filename.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
-                                filename = url_filename
-                            elif any(label.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
-                                filename = label
-                            else:
-                                continue
-                            note_key = normalize_filename_key(filename)
-                            note_links.setdefault(note_key, url)
-                            note_links_normalized.setdefault(normalize_filename_compact(filename), url)
+                                candidates.append(url_filename)
+                            if any(label.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
+                                candidates.append(label)
+                            for filename in candidates:
+                                note_key = normalize_filename_key(filename)
+                                note_links.setdefault(note_key, url)
+                                note_links_normalized.setdefault(normalize_filename_compact(filename), url)
             continue  # Don't process Notes as loader nodes
 
         # 2. Check properties -> models (Standard ComfyUI template format)
