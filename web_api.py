@@ -95,6 +95,16 @@ def _download_worker():
 
                         if bytes_now is not None:
                             now = time.time()
+                            if expected_size and bytes_now >= expected_size:
+                                _set_download_status(download_id, {
+                                    "status": "verifying",
+                                    "downloaded_bytes": bytes_now,
+                                    "total_bytes": expected_size,
+                                    "speed_bps": 0,
+                                    "eta_seconds": None,
+                                    "updated_at": now
+                                })
+                                return
                             if last_bytes is None:
                                 inst_speed = 0
                             else:
@@ -128,15 +138,6 @@ def _download_worker():
                     daemon=True
                 ).start()
 
-            if stop_event:
-                _set_download_status(download_id, {
-                    "status": "verifying",
-                    "downloaded_bytes": expected_size,
-                    "total_bytes": expected_size,
-                    "speed_bps": 0,
-                    "eta_seconds": None,
-                    "updated_at": time.time()
-                })
             msg, path = run_download(parsed, item["folder"], sync=True)
             _set_download_status(download_id, {
                 "status": "completed",
