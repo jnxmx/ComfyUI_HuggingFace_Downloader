@@ -87,6 +87,7 @@ def _download_worker():
                 ema_speed = None
                 last_report = time.time()
                 last_change = time.time()
+                last_stall_log = time.time()
                 try:
                     while not stop_event.is_set():
                         bytes_now = None
@@ -136,6 +137,11 @@ def _download_worker():
                                 dt = now - last_time
                                 inst_speed = (delta / dt) if dt > 0 else 0
                             ema_speed = inst_speed if ema_speed is None else (0.2 * inst_speed + 0.8 * ema_speed)
+                            if bytes_now == last_bytes and (now - last_change) >= 10 and (now - last_stall_log) >= 10:
+                                stall_for = now - last_change
+                                total_label = expected_size if expected_size is not None else "unknown"
+                                print(f"[DEBUG] monitor_progress {filename}: stalled at {bytes_now}/{total_label} for {stall_for:.0f}s")
+                                last_stall_log = now
                             eta_seconds = None
                             if expected_size and ema_speed and ema_speed > 0:
                                 eta_seconds = max(0, (expected_size - bytes_now) / ema_speed)

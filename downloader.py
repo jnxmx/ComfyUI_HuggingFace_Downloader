@@ -200,12 +200,16 @@ def run_download(parsed_data: dict,
                 print(f"[DEBUG] Existing file failed verification, re-downloading: {e}")
                 _safe_remove(dest_path)
 
+        download_start = time.time()
+        print(f"[DEBUG] hf_hub_download start: {parsed_data['repo']}/{remote_filename}")
         file_path_in_cache = hf_hub_download(
             repo_id=parsed_data["repo"],
             filename=remote_filename,
             revision=parsed_data.get("revision"),
             token=token or None
         )
+        elapsed = time.time() - download_start
+        print(f"[DEBUG] hf_hub_download finished in {elapsed:.1f}s")
         print("[DEBUG] File downloaded to cache:", file_path_in_cache)
 
         shutil.copyfile(file_path_in_cache, dest_path)
