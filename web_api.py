@@ -81,10 +81,11 @@ def _download_worker():
                 "updated_at": time.time()
             })
 
-            def monitor_progress(stop_event, download_id, expected_size, blob_path, incomplete_path):
+            def monitor_progress(stop_event, download_id, expected_size, blob_path, incomplete_path, filename):
                 last_bytes = None
                 last_time = time.time()
                 ema_speed = None
+                last_report = time.time()
                 try:
                     while not stop_event.is_set():
                         bytes_now = None
@@ -95,6 +96,12 @@ def _download_worker():
 
                         if bytes_now is not None:
                             now = time.time()
+                            if now - last_report >= 5:
+                                blob_label = "incomplete" if (incomplete_path and os.path.exists(incomplete_path)) else "blob"
+                                size_label = bytes_now
+                                total_label = expected_size if expected_size is not None else "unknown"
+                                print(f"[DEBUG] monitor_progress {filename}: {size_label}/{total_label} bytes ({blob_label})")
+                                last_report = now
                             if expected_size and bytes_now >= expected_size:
                                 _set_download_status(download_id, {
                                     "status": "verifying",
@@ -134,7 +141,7 @@ def _download_worker():
                 blob_path, incomplete_path = get_blob_paths(parsed["repo"], etag)
                 threading.Thread(
                     target=monitor_progress,
-                    args=(stop_event, download_id, expected_size, blob_path, incomplete_path),
+                    args=(stop_event, download_id, expected_size, blob_path, incomplete_path, remote_filename),
                     daemon=True
                 ).start()
 
