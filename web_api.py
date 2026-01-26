@@ -128,6 +128,15 @@ def _download_worker():
                     daemon=True
                 ).start()
 
+            if stop_event:
+                _set_download_status(download_id, {
+                    "status": "verifying",
+                    "downloaded_bytes": expected_size,
+                    "total_bytes": expected_size,
+                    "speed_bps": 0,
+                    "eta_seconds": None,
+                    "updated_at": time.time()
+                })
             msg, path = run_download(parsed, item["folder"], sync=True)
             _set_download_status(download_id, {
                 "status": "completed",

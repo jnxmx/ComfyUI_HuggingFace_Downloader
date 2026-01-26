@@ -6,7 +6,7 @@ app.registerExtension({
         const PANEL_ID = "hf-downloader-panel";
         const STYLE_ID = "hf-downloader-panel-styles";
         const POLL_INTERVAL_MS = 1000;
-        const FINISHED_TTL_MS = 10000;
+        const FINISHED_TTL_MS = 3000;
         const MAX_ATTACH_ATTEMPTS = 120;
         const QUEUE_ANCHOR_SELECTORS = [
             "#queue-panel",
@@ -202,18 +202,12 @@ app.registerExtension({
             return `${formatBytes(bps)}/s`;
         };
 
-        const formatEta = (seconds) => {
-            if (!seconds || !Number.isFinite(seconds)) return "--";
-            const rounded = Math.max(0, Math.round(seconds));
-            const mins = Math.floor(rounded / 60);
-            const secs = rounded % 60;
-            return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-        };
-
         const statusColor = (status) => {
             switch (status) {
                 case "downloading":
                     return "#4aa3ff";
+                case "verifying":
+                    return "#ffd166";
                 case "completed":
                     return "#5bd98c";
                 case "failed":
@@ -257,9 +251,10 @@ app.registerExtension({
 
             const order = {
                 downloading: 0,
-                queued: 1,
-                failed: 2,
-                completed: 3
+                verifying: 1,
+                queued: 2,
+                failed: 3,
+                completed: 4
             };
 
             entries.sort((a, b) => {
@@ -322,15 +317,12 @@ app.registerExtension({
                 const speedText = info.status === "downloading"
                     ? formatSpeed(info.speed_bps)
                     : "--";
-                const etaText = info.status === "downloading"
-                    ? formatEta(info.eta_seconds)
-                    : "--";
 
                 const leftMeta = document.createElement("div");
                 leftMeta.textContent = sizeText;
 
                 const rightMeta = document.createElement("div");
-                rightMeta.textContent = `${speedText} | ETA ${etaText}`;
+                rightMeta.textContent = speedText;
 
                 meta.appendChild(leftMeta);
                 meta.appendChild(rightMeta);
