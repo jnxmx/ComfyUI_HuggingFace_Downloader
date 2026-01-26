@@ -384,6 +384,63 @@ def resolve_node_folder(node: dict) -> str | None:
 
     return None
 
+def resolve_proxy_widget_folder(widget_name: str | None) -> str | None:
+    if not widget_name:
+        return None
+    name = widget_name.lower()
+    if "unet" in name:
+        return "diffusion_models"
+    if "clip" in name:
+        return "text_encoders"
+    if "vae" in name:
+        return "vae"
+    if "lora" in name:
+        return "loras"
+    if "checkpoint" in name or "ckpt" in name:
+        return "checkpoints"
+    return None
+
+def collect_proxy_widget_models(node: dict) -> list[dict]:
+    props = node.get("properties") or {}
+    proxy = props.get("proxyWidgets")
+    widgets = node.get("widgets_values")
+    if not isinstance(proxy, list) or not isinstance(widgets, list):
+        return []
+
+    limit = min(len(proxy), len(widgets))
+    results = []
+    for idx in range(limit):
+        proxy_item = proxy[idx]
+        widget_name = None
+        if isinstance(proxy_item, (list, tuple)) and len(proxy_item) >= 2:
+            widget_name = proxy_item[1]
+        value = widgets[idx]
+        if not isinstance(value, str):
+            continue
+        if value.startswith("http://") or value.startswith("https://"):
+            parsed_filename = value.split("?")[0].split("/")[-1]
+            if not any(parsed_filename.endswith(ext) for ext in MODEL_EXTENSIONS):
+                continue
+            suggested_folder = resolve_proxy_widget_folder(widget_name)
+            results.append({
+                "filename": parsed_filename,
+                "requested_path": None,
+                "url": value,
+                "suggested_folder": suggested_folder
+            })
+            continue
+        if not any(value.endswith(ext) for ext in MODEL_EXTENSIONS):
+            continue
+        filename, requested_path = split_model_identifier(value)
+        suggested_folder = resolve_proxy_widget_folder(widget_name)
+        results.append({
+            "filename": filename,
+            "requested_path": requested_path,
+            "url": None,
+            "suggested_folder": suggested_folder
+        })
+    return results
+
 def _collect_models_from_nodes(
     nodes: list[dict],
     links_map: dict,
@@ -420,9 +477,24 @@ def _collect_models_from_nodes(
                     has_linked_widget_input = True
                 widget_pos += 1
         
-        # Skip subgraph wrapper nodes (UUID-type nodes are subgraphs)
-        # The actual loaders are inside the subgraph definition, not the wrapper
+        # Subgraph wrapper nodes (UUID-type) proxy model widgets from inside the subgraph.
+        # Capture those proxy widgets here so models are still discovered.
         if is_subgraph_node(node_type):
+            proxy_models = collect_proxy_widget_models(node)
+            for proxy_model in proxy_models:
+                filename = proxy_model.get("filename")
+                if not filename:
+                    continue
+                if any(m["filename"] == filename and m.get("node_id") == node_id for m in found_models):
+                    continue
+                found_models.append({
+                    "filename": filename,
+                    "requested_path": proxy_model.get("requested_path"),
+                    "url": proxy_model.get("url"),
+                    "node_id": node_id,
+                    "node_title": node_title,
+                    "suggested_folder": proxy_model.get("suggested_folder")
+                })
             continue
         
         # Special handling for "Hugging Face Download Model" node

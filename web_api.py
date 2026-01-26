@@ -86,6 +86,7 @@ def _download_worker():
                 last_time = time.time()
                 ema_speed = None
                 last_report = time.time()
+                last_change = time.time()
                 try:
                     while not stop_event.is_set():
                         bytes_now = None
@@ -102,6 +103,8 @@ def _download_worker():
                                 total_label = expected_size if expected_size is not None else "unknown"
                                 print(f"[DEBUG] monitor_progress {filename}: {size_label}/{total_label} bytes ({blob_label})")
                                 last_report = now
+                            if last_bytes is None or bytes_now != last_bytes:
+                                last_change = now
                             if expected_size and bytes_now >= expected_size:
                                 _set_download_status(download_id, {
                                     "status": "verifying",
@@ -112,6 +115,20 @@ def _download_worker():
                                     "updated_at": now
                                 })
                                 return
+                            if expected_size:
+                                near_done = expected_size - bytes_now <= max(8 * 1024 * 1024, int(expected_size * 0.0005))
+                                stalled = (now - last_change) >= 15
+                                if near_done and stalled:
+                                    print(f"[DEBUG] monitor_progress {filename}: stalled near completion, switching to verifying")
+                                    _set_download_status(download_id, {
+                                        "status": "verifying",
+                                        "downloaded_bytes": bytes_now,
+                                        "total_bytes": expected_size,
+                                        "speed_bps": 0,
+                                        "eta_seconds": None,
+                                        "updated_at": now
+                                    })
+                                    return
                             if last_bytes is None:
                                 inst_speed = 0
                             else:

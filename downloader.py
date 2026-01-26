@@ -21,6 +21,7 @@ from huggingface_hub import (
 os.environ.setdefault("HF_HUB_ENABLE_HF_XET", "1")
 
 token_override = os.getenv("HF_TOKEN")
+SHA_VERIFY_MAX_BYTES = int(os.getenv("HF_DOWNLOADER_SHA_MAX_BYTES", str(1024 ** 3)))
 
 def folder_size(directory: str) -> int:
     total = 0
@@ -149,6 +150,10 @@ def _verify_file_integrity(dest_path: str,
                 f"Size mismatch (expected {expected_size} bytes, got {actual_size} bytes)"
             )
     if expected_sha:
+        size_for_sha = expected_size if expected_size is not None else os.path.getsize(dest_path)
+        if size_for_sha > SHA_VERIFY_MAX_BYTES:
+            print(f"[DEBUG] Skipping SHA256 for large file ({size_for_sha} bytes).")
+            return
         sha256 = hashlib.sha256()
         with open(dest_path, "rb") as f:
             for chunk in iter(lambda: f.read(1024 * 1024), b""):
