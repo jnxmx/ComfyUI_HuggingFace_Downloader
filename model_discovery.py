@@ -800,7 +800,7 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
                     print(f"[DEBUG] No results for {filename}, trying search term: {term}")
                 break
 
-        # Deep Search Fallback: Check top repos of priority authors if still nothing
+        # Deep Search Fallback: Check priority authors if still nothing
         # This helps when the file is inside a repo like "flux-fp8" but we search for "flux-vae-bf16"
         if not models:
             print(f"[DEBUG] Still no results, checking priority authors directly...")
@@ -819,7 +819,7 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
                             found.extend(author_models)
                             break
                     if not found:
-                        found = list(api.list_models(author=author, limit=10, sort="downloads", direction=-1))
+                        found = list(api.list_models(author=author, limit=50, sort="downloads", direction=-1))
                     models.extend(found)
                 except Exception:
                     continue
@@ -841,6 +841,15 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
                 "hf_repo": model_id,
                 "hf_path": file_path
             }
+
+        tokens = []
+        for t in re.split(r"[-_]", os.path.splitext(filename)[0]):
+            t = t.lower()
+            if len(t) >= 3:
+                tokens.append(t)
+            alpha = re.sub(r"\d+", "", t)
+            if len(alpha) >= 3:
+                tokens.append(alpha)
 
         for model in models:
             model_id = model.modelId
@@ -869,6 +878,8 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
         for model in models:
             model_id = model.modelId
             try:
+                 if tokens and not any(t in model_id.lower() for t in tokens):
+                     continue
                  files = api.list_repo_files(repo_id=model_id, token=token)
                  if filename in files:
                      return build_result(model_id, filename)
@@ -877,6 +888,26 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
                          return build_result(model_id, f)
             except Exception:
                  continue
+
+        # Final fallback: scan priority authors more broadly if nothing matched
+        for author in PRIORITY_AUTHORS:
+            try:
+                author_models = list(api.list_models(author=author, limit=50, sort="downloads", direction=-1))
+            except Exception:
+                continue
+            for model in author_models:
+                model_id = model.modelId
+                try:
+                    if tokens and not any(t in model_id.lower() for t in tokens):
+                        continue
+                    files = api.list_repo_files(repo_id=model_id, token=token)
+                    if filename in files:
+                        return build_result(model_id, filename)
+                    for f in files:
+                        if f.endswith(filename):
+                            return build_result(model_id, f)
+                except Exception:
+                    continue
                  
     except Exception as e:
         print(f"[ERROR] check_huggingface failed: {e}")
