@@ -762,36 +762,65 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
     api = HfApi(token=token)
     
     print(f"[DEBUG] Searching HF for: {filename}")
+
+    def add_term(terms: list[str], term: str | None):
+        if not term:
+            return
+        term = term.strip()
+        if len(term) < 4 or term in terms:
+            return
+        terms.append(term)
+
+    def build_search_terms(name: str) -> list[str]:
+        stem = os.path.splitext(name)[0]
+        terms: list[str] = []
+        add_term(terms, name)
+        add_term(terms, stem)
+        add_term(terms, stem.replace("_", "-"))
+        add_term(terms, stem.replace("-", "_"))
+        tokens = [t for t in re.split(r"[-_]", stem) if t]
+        if len(tokens) >= 2:
+            add_term(terms, "-".join(tokens[:2]))
+        if len(tokens) >= 3:
+            add_term(terms, "-".join(tokens[:3]))
+        return terms
     
     # 1. Try to search specifically in priority authors' repos first?
     # Actually, listing models by author and filtering is expensive. 
     # Better to use the global search and filter results.
     
     try:
-        # Search for models containing the filename
-        # We can use the 'models' endpoint with a search query
-        models = list(api.list_models(search=filename, limit=20, sort="downloads", direction=-1))
-        
-        # Fallback: strict search might fail if ext is included, try stem
-        if not models:
-            stem = os.path.splitext(filename)[0]
-            if len(stem) > 3: # Avoid searching for "model" or short terms
-                print(f"[DEBUG] No results for {filename}, trying stem: {stem}")
-                models = list(api.list_models(search=stem, limit=20, sort="downloads", direction=-1))
+        search_terms = build_search_terms(filename)
+        models = []
+
+        for term in search_terms:
+            models = list(api.list_models(search=term, limit=20, sort="downloads", direction=-1))
+            if models:
+                if term != filename:
+                    print(f"[DEBUG] No results for {filename}, trying search term: {term}")
+                break
 
         # Deep Search Fallback: Check top repos of priority authors if still nothing
         # This helps when the file is inside a repo like "flux-fp8" but we search for "flux-vae-bf16"
         if not models:
             print(f"[DEBUG] Still no results, checking priority authors directly...")
-            path_keywords = []
-            stem = os.path.splitext(filename)[0].lower()
-            # simple heuristics to filter repos? No, just check top repos.
-            
             for author in PRIORITY_AUTHORS:
                 try:
-                    # Get top 5 repos by popularity/recent
-                    author_models = list(api.list_models(author=author, limit=5, sort="downloads", direction=-1))
-                    models.extend(author_models)
+                    found = []
+                    for term in search_terms:
+                        author_models = list(api.list_models(
+                            author=author,
+                            search=term,
+                            limit=15,
+                            sort="downloads",
+                            direction=-1
+                        ))
+                        if author_models:
+                            found.extend(author_models)
+                            break
+                    if not found:
+                        found = list(api.list_models(author=author, limit=10, sort="downloads", direction=-1))
+                    models.extend(found)
                 except Exception:
                     continue
         
