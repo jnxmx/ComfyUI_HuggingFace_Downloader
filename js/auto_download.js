@@ -469,6 +469,12 @@ app.registerExtension({
 
             // 3. Missing Models Table
             const missingModels = data.missing || [];
+            missingModels.sort((a, b) => {
+                const aMissing = a.url ? 0 : 1;
+                const bMissing = b.url ? 0 : 1;
+                if (aMissing !== bMissing) return bMissing - aMissing;
+                return (a.filename || "").localeCompare(b.filename || "");
+            });
             // Container for rows
             const rowsContainer = document.createElement("div");
             Object.assign(rowsContainer.style, {
