@@ -425,7 +425,11 @@ def resolve_proxy_widget_folder(widget_name: str | None) -> str | None:
         return "checkpoints"
     return None
 
-def collect_proxy_widget_models(node: dict, linked_widget_indices: set[int] | None = None) -> list[dict]:
+def collect_proxy_widget_models(
+    node: dict,
+    linked_widget_indices: set[int] | None = None,
+    linked_widget_names: set[str] | None = None
+) -> list[dict]:
     props = node.get("properties") or {}
     proxy = props.get("proxyWidgets")
     widgets = node.get("widgets_values")
@@ -435,12 +439,14 @@ def collect_proxy_widget_models(node: dict, linked_widget_indices: set[int] | No
     proxy_len = len(proxy)
     results = []
     for idx, value in enumerate(widgets):
-        if linked_widget_indices and idx in linked_widget_indices:
-            continue
         proxy_item = proxy[idx] if idx < proxy_len else None
         widget_name = None
         if isinstance(proxy_item, (list, tuple)) and len(proxy_item) >= 2:
             widget_name = proxy_item[1]
+        if linked_widget_names and widget_name and widget_name in linked_widget_names:
+            continue
+        if linked_widget_indices and idx in linked_widget_indices and not widget_name:
+            continue
         if not isinstance(value, str):
             continue
         if value.startswith("http://") or value.startswith("https://"):
@@ -496,6 +502,7 @@ def _collect_models_from_nodes(
         node_type = node.get("type", "")
 
         linked_widget_indices = set()
+        linked_widget_names = set()
         widget_pos = 0
         has_linked_widget_input = False
         for input_item in node.get("inputs", []):
@@ -504,12 +511,19 @@ def _collect_models_from_nodes(
                 if link_id is not None:
                     linked_widget_indices.add(widget_pos)
                     has_linked_widget_input = True
+                    input_name = input_item.get("name")
+                    if isinstance(input_name, str) and input_name:
+                        linked_widget_names.add(input_name)
                 widget_pos += 1
         
         # Subgraph wrapper nodes (UUID-type) proxy model widgets from inside the subgraph.
         # Capture those proxy widgets here so models are still discovered.
         if is_subgraph_node(node_type):
-            proxy_models = collect_proxy_widget_models(node, linked_widget_indices)
+            proxy_models = collect_proxy_widget_models(
+                node,
+                linked_widget_indices,
+                linked_widget_names
+            )
             for proxy_model in proxy_models:
                 filename = proxy_model.get("filename")
                 if not filename:
