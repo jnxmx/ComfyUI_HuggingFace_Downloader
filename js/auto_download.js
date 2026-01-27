@@ -319,7 +319,7 @@ app.registerExtension({
             detailEl.style.fontSize = "12px";
             detailEl.style.color = "#aaa";
             detailEl.style.marginTop = "8px";
-            detailEl.textContent = "Elapsed: 0s";
+            detailEl.textContent = "Waiting for status...";
 
             const cancelBtn = document.createElement("button");
             cancelBtn.textContent = "Cancel";
@@ -347,13 +347,6 @@ app.registerExtension({
                 }
             };
 
-            const startTime = Date.now();
-            const timer = setInterval(() => {
-                if (cancelled) return;
-                const elapsed = Math.floor((Date.now() - startTime) / 1000);
-                detailEl.textContent = `Elapsed: ${elapsed}s`;
-            }, 500);
-
             panel.appendChild(statusEl);
             panel.appendChild(detailEl);
             panel.appendChild(cancelBtn);
@@ -364,7 +357,7 @@ app.registerExtension({
                 dlg,
                 setStatus: (text) => { statusEl.textContent = text; },
                 setDetail: (text) => { detailEl.textContent = text; },
-                cleanup: () => { clearInterval(timer); },
+                cleanup: () => {},
                 remove: () => { if (dlg.parentElement) dlg.remove(); }
             };
         };
@@ -1029,13 +1022,40 @@ app.registerExtension({
         const runAutoDownload = async () => {
             let loadingDlg = null;
             let aborted = false;
+            let statusTimer = null;
             try {
                 // Show loading dialog immediately
                 const controller = new AbortController();
                 loadingDlg = showLoadingDialog(() => {
                     aborted = true;
+                    if (statusTimer) {
+                        clearInterval(statusTimer);
+                        statusTimer = null;
+                    }
                     controller.abort();
                 });
+
+                const requestId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+                const pollStatus = async () => {
+                    try {
+                        const statusResp = await fetch(`/search_status?request_id=${encodeURIComponent(requestId)}`);
+                        if (statusResp.status !== 200) return;
+                        const statusData = await statusResp.json();
+                        const status = statusData.status || {};
+                        const message = status.message || "🔍 Looking for links...";
+                        const parts = [];
+                        if (status.filename) parts.push(`Model: ${status.filename}`);
+                        if (status.source) parts.push(`Source: ${status.source}`);
+                        const detail = parts.length ? parts.join(" • ") : "Waiting for status...";
+                        loadingDlg.setStatus(message);
+                        loadingDlg.setDetail(detail);
+                    } catch (e) {
+                        // Ignore polling errors during search
+                    }
+                };
+                statusTimer = setInterval(pollStatus, 600);
+                pollStatus();
 
                 const workflow = app.graph.serialize();
                 console.log("[AutoDownload] Scanning workflow:", workflow);
@@ -1044,12 +1064,16 @@ app.registerExtension({
                 const resp = await fetch("/check_missing_models", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(workflow),
+                    body: JSON.stringify({ ...workflow, request_id: requestId }),
                     signal: controller.signal
                 });
 
                 // Remove loading dialog
                 if (loadingDlg) {
+                    if (statusTimer) {
+                        clearInterval(statusTimer);
+                        statusTimer = null;
+                    }
                     loadingDlg.cleanup();
                     loadingDlg.remove();
                 }
@@ -1066,6 +1090,10 @@ app.registerExtension({
             } catch (e) {
                 // Remove loading dialog on error
                 if (loadingDlg) {
+                    if (statusTimer) {
+                        clearInterval(statusTimer);
+                        statusTimer = null;
+                    }
                     loadingDlg.cleanup();
                     if (aborted || (e && e.name === "AbortError")) {
                         loadingDlg.setStatus("Cancelled.");

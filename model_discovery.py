@@ -233,7 +233,7 @@ def find_quantized_alternatives(filename: str, registries: list[tuple[str, dict]
 
     return alternatives
 
-def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]], status_cb=None) -> List[Dict[str, Any]]:
     """
     Checks ComfyUI-Manager cache for missing model URLs and enriches the missing_models list.
     Locations to check:
@@ -247,6 +247,12 @@ def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]]) -> List[Dic
     for model in missing_models:
         if model.get("url"):
             continue
+        if status_cb:
+            status_cb({
+                "message": "Checking manager cache",
+                "source": "manager_cache",
+                "filename": model.get("filename")
+            })
         filename = model["filename"]
         requested_path = model.get("requested_path") or filename
         filename_key = filename.lower()
@@ -869,7 +875,7 @@ def _set_hf_rate_limited() -> None:
     _hf_rate_limited_until = time.time() + HF_SEARCH_RATE_LIMIT_SECONDS
     print(f"[WARN] Hugging Face rate limit hit; pausing search for {HF_SEARCH_RATE_LIMIT_SECONDS}s.")
 
-def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any] | None:
+def search_huggingface_model(filename: str, token: str = None, status_cb=None) -> Dict[str, Any] | None:
     """
     Searches Hugging Face for the filename, prioritizing specific authors.
     Returns metadata dict with url/hf_repo/hf_path or None.
@@ -891,6 +897,13 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
     if _hf_api_calls >= HF_SEARCH_MAX_CALLS:
         print(f"[DEBUG] HF search budget exhausted; skipping {filename}")
         return None
+
+    if status_cb:
+        status_cb({
+            "message": "Searching Hugging Face",
+            "source": "huggingface_search",
+            "filename": filename
+        })
 
     print(f"[DEBUG] Searching HF for: {filename}")
 
@@ -947,6 +960,12 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
         # This helps when the file is inside a repo like "flux-fp8" but we search for "flux-vae-bf16"
         if not models:
             print(f"[DEBUG] Still no results, checking priority authors directly...")
+            if status_cb:
+                status_cb({
+                    "message": "Checking priority authors",
+                    "source": "huggingface_priority_authors",
+                    "filename": filename
+                })
             for author in PRIORITY_AUTHORS:
                 try:
                     found = []
@@ -1100,7 +1119,7 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
     _hf_search_cache[key] = None
     return None
 
-def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[str, Any]:
+def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb=None) -> Dict[str, Any]:
     """
     Main entry point.
     1. Parse workflow.
@@ -1217,6 +1236,12 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[s
         for model in missing_models:
             if model.get("url"):
                 continue
+            if status_cb:
+                status_cb({
+                    "message": "Checking popular models",
+                    "source": "popular_models",
+                    "filename": model.get("filename")
+                })
             filename_key = model["filename"].lower()
             entry = popular_models.get(filename_key) or popular_models.get(os.path.basename(filename_key))
             if entry and entry.get("url"):
@@ -1229,15 +1254,21 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[s
 
     # 4. Check ComfyUI Manager model list/cache for missing models
     if missing_models:
-        missing_models = load_comfyui_manager_cache(missing_models)
+        missing_models = load_comfyui_manager_cache(missing_models, status_cb=status_cb)
 
     # 5. Search HF for remaining missing models (that didn't have URL from registry/manager)
     token = get_token()
     final_missing = []
     for m in missing_models:
         if not m.get("url"):
+            if status_cb:
+                status_cb({
+                    "message": "Searching Hugging Face",
+                    "source": "huggingface_search",
+                    "filename": m.get("filename")
+                })
             # Try HF search
-            result = search_huggingface_model(m["filename"], token)
+            result = search_huggingface_model(m["filename"], token, status_cb=status_cb)
             if result:
                 m["url"] = result.get("url")
                 m["hf_repo"] = result.get("hf_repo")

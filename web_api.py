@@ -16,6 +16,8 @@ download_queue_lock = threading.Lock()
 download_status = {}
 download_status_lock = threading.Lock()
 download_worker_running = False
+search_status = {}
+search_status_lock = threading.Lock()
 
 def _build_parsed_download_info(model: dict) -> dict:
     """Build parsed download info for run_download using HF repo/path if provided."""
@@ -45,6 +47,15 @@ def _set_download_status(download_id: str, fields: dict):
         existing = download_status.get(download_id, {})
         existing.update(fields)
         download_status[download_id] = existing
+
+def _set_search_status(request_id: str, fields: dict):
+    if not request_id:
+        return
+    with search_status_lock:
+        existing = search_status.get(request_id, {})
+        existing.update(fields)
+        existing["updated_at"] = time.time()
+        search_status[request_id] = existing
 
 def _download_worker():
     global download_worker_running
@@ -208,7 +219,21 @@ async def check_missing_models(request):
     try:
         print("[DEBUG] check_missing_models called")
         data = await request.json()
-        result = process_workflow_for_missing_models(data)
+        request_id = data.get("request_id") or uuid.uuid4().hex
+        _set_search_status(request_id, {"message": "Scanning workflow", "source": "workflow"})
+
+        def status_cb(payload):
+            if not payload:
+                return
+            if isinstance(payload, str):
+                _set_search_status(request_id, {"message": payload})
+                return
+            if isinstance(payload, dict):
+                _set_search_status(request_id, payload)
+
+        result = process_workflow_for_missing_models(data, status_cb=status_cb)
+        _set_search_status(request_id, {"message": "Done", "source": "complete"})
+        result["request_id"] = request_id
         return web.json_response(result)
     except Exception as e:
         print(f"[ERROR] check_missing_models failed: {e}")
@@ -332,6 +357,12 @@ def setup(app):
             else:
                 filtered = dict(download_status)
         return web.json_response({"downloads": filtered})
+
+    async def search_status_endpoint(request):
+        request_id = request.query.get("request_id", "")
+        with search_status_lock:
+            status = search_status.get(request_id, {}) if request_id else {}
+        return web.json_response({"status": status})
     
     async def restart(request):
         """Restart ComfyUI server"""
@@ -349,3 +380,4 @@ def setup(app):
     app.router.add_post("/restart", restart)
     app.router.add_post("/queue_download", queue_download)
     app.router.add_get("/download_status", download_status_endpoint)
+    app.router.add_get("/search_status", search_status_endpoint)
