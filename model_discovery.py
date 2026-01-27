@@ -435,6 +435,8 @@ def collect_proxy_widget_models(node: dict, linked_widget_indices: set[int] | No
     proxy_len = len(proxy)
     results = []
     for idx, value in enumerate(widgets):
+        if linked_widget_indices and idx in linked_widget_indices:
+            continue
         proxy_item = proxy[idx] if idx < proxy_len else None
         widget_name = None
         if isinstance(proxy_item, (list, tuple)) and len(proxy_item) >= 2:
@@ -474,8 +476,7 @@ def _collect_models_from_nodes(
     found_models: list[dict],
     note_links: dict,
     note_links_normalized: dict,
-    node_title_fallback: str,
-    allow_linked_subgraph_inputs: bool = False
+    node_title_fallback: str
 ) -> None:
     for node in nodes:
         # Skip disabled/muted nodes
@@ -495,7 +496,6 @@ def _collect_models_from_nodes(
         node_type = node.get("type", "")
 
         linked_widget_indices = set()
-        linked_widget_sources = {}
         widget_pos = 0
         has_linked_widget_input = False
         for input_item in node.get("inputs", []):
@@ -504,9 +504,6 @@ def _collect_models_from_nodes(
                 if link_id is not None:
                     linked_widget_indices.add(widget_pos)
                     has_linked_widget_input = True
-                    if link_id in links_map:
-                        origin_id, _ = links_map[link_id]
-                        linked_widget_sources[widget_pos] = origin_id
                 widget_pos += 1
         
         # Subgraph wrapper nodes (UUID-type) proxy model widgets from inside the subgraph.
@@ -608,9 +605,7 @@ def _collect_models_from_nodes(
             if isinstance(widgets, list):
                 for idx, val in enumerate(widgets):
                     if idx in linked_widget_indices:
-                        origin_id = linked_widget_sources.get(idx)
-                        if not (allow_linked_subgraph_inputs and origin_id is not None and origin_id < 0):
-                            continue
+                        continue
                     if not isinstance(val, str):
                         continue
 
@@ -731,8 +726,7 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
             found_models,
             note_links,
             note_links_normalized,
-            f"Subgraph Node ({subgraph_name})",
-            allow_linked_subgraph_inputs=True
+            f"Subgraph Node ({subgraph_name})"
         )
 
     links_map = _build_links_map(workflow.get("links", []))
