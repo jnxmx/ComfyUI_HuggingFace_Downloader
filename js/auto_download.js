@@ -282,7 +282,7 @@ app.registerExtension({
         };
 
         /* Show loading dialog immediately */
-        const showLoadingDialog = () => {
+        const showLoadingDialog = (onCancel) => {
             const existing = document.getElementById("auto-download-dialog");
             if (existing) existing.remove();
 
@@ -311,11 +311,62 @@ app.registerExtension({
                 fontSize: "18px",
                 border: "1px solid #3c3c3c"
             });
-            panel.innerHTML = "<div>🔍 Looking for links...</div>";
+
+            const statusEl = document.createElement("div");
+            statusEl.textContent = "🔍 Looking for links...";
+
+            const detailEl = document.createElement("div");
+            detailEl.style.fontSize = "12px";
+            detailEl.style.color = "#aaa";
+            detailEl.style.marginTop = "8px";
+            detailEl.textContent = "Elapsed: 0s";
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.textContent = "Cancel";
+            Object.assign(cancelBtn.style, {
+                marginTop: "16px",
+                padding: "6px 14px",
+                background: "#2b2f3a",
+                color: "#ddd",
+                border: "1px solid #444",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "12px"
+            });
+
+            let cancelled = false;
+            cancelBtn.onclick = () => {
+                if (!cancelled) {
+                    cancelled = true;
+                    statusEl.textContent = "Cancelled.";
+                    cancelBtn.textContent = "Close";
+                    clearInterval(timer);
+                    if (onCancel) onCancel();
+                } else {
+                    if (dlg.parentElement) dlg.remove();
+                }
+            };
+
+            const startTime = Date.now();
+            const timer = setInterval(() => {
+                if (cancelled) return;
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                detailEl.textContent = `Elapsed: ${elapsed}s`;
+            }, 500);
+
+            panel.appendChild(statusEl);
+            panel.appendChild(detailEl);
+            panel.appendChild(cancelBtn);
 
             dlg.appendChild(panel);
             document.body.appendChild(dlg);
-            return dlg;
+            return {
+                dlg,
+                setStatus: (text) => { statusEl.textContent = text; },
+                setDetail: (text) => { detailEl.textContent = text; },
+                cleanup: () => { clearInterval(timer); },
+                remove: () => { if (dlg.parentElement) dlg.remove(); }
+            };
         };
 
         /* ──────────────── UI Components ──────────────── */
@@ -977,9 +1028,14 @@ app.registerExtension({
 
         const runAutoDownload = async () => {
             let loadingDlg = null;
+            let aborted = false;
             try {
                 // Show loading dialog immediately
-                loadingDlg = showLoadingDialog();
+                const controller = new AbortController();
+                loadingDlg = showLoadingDialog(() => {
+                    aborted = true;
+                    controller.abort();
+                });
 
                 const workflow = app.graph.serialize();
                 console.log("[AutoDownload] Scanning workflow:", workflow);
@@ -988,11 +1044,15 @@ app.registerExtension({
                 const resp = await fetch("/check_missing_models", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(workflow)
+                    body: JSON.stringify(workflow),
+                    signal: controller.signal
                 });
 
                 // Remove loading dialog
-                if (loadingDlg) loadingDlg.remove();
+                if (loadingDlg) {
+                    loadingDlg.cleanup();
+                    loadingDlg.remove();
+                }
 
                 if (resp.status !== 200) {
                     throw new Error("Failed to scan models: " + resp.statusText + " (" + resp.status + ")");
@@ -1005,7 +1065,14 @@ app.registerExtension({
 
             } catch (e) {
                 // Remove loading dialog on error
-                if (loadingDlg) loadingDlg.remove();
+                if (loadingDlg) {
+                    loadingDlg.cleanup();
+                    if (aborted || (e && e.name === "AbortError")) {
+                        loadingDlg.setStatus("Cancelled.");
+                        return;
+                    }
+                    loadingDlg.remove();
+                }
                 console.error("[AutoDownload] Error:", e);
                 alert("Error: " + e);
             }

@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 from typing import List, Dict, Any, Tuple
 from huggingface_hub import HfApi
 from .downloader import get_token
@@ -23,6 +24,24 @@ PRIORITY_AUTHORS = [
 POPULAR_MODELS_FILE = os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json")
 _popular_models_cache = None
 _manager_model_list_cache = None
+_hf_search_cache: dict[str, dict | None] = {}
+_hf_api_calls = 0
+_hf_rate_limited_until = 0.0
+
+HF_SEARCH_MAX_CALLS = int(os.getenv("HF_SEARCH_MAX_CALLS", "200"))
+HF_SEARCH_RATE_LIMIT_SECONDS = int(os.getenv("HF_SEARCH_RATE_LIMIT_SECONDS", "300"))
+
+HF_SEARCH_SKIP_FILENAMES = {
+    "pytorch_model.bin",
+    "adapter_model.bin",
+    "diffusion_pytorch_model.bin",
+    "model.safetensors",
+    "model.bin",
+    "model.ckpt",
+    "model.pt",
+    "config.json",
+    "tokenizer.json",
+}
 
 def extract_huggingface_info(url: str) -> tuple[str | None, str | None]:
     """Extract HuggingFace repo and file path from a resolve/blob URL."""
@@ -831,13 +850,48 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
 
     return missing, existing, path_mismatches
 
+def _normalize_hf_search_key(filename: str) -> str:
+    return os.path.basename(filename or "").lower()
+
+def _hf_search_allowed() -> bool:
+    global _hf_api_calls
+    if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
+        return False
+    if _hf_api_calls >= HF_SEARCH_MAX_CALLS:
+        return False
+    _hf_api_calls += 1
+    return True
+
+def _set_hf_rate_limited() -> None:
+    global _hf_rate_limited_until
+    if _hf_rate_limited_until:
+        return
+    _hf_rate_limited_until = time.time() + HF_SEARCH_RATE_LIMIT_SECONDS
+    print(f"[WARN] Hugging Face rate limit hit; pausing search for {HF_SEARCH_RATE_LIMIT_SECONDS}s.")
+
 def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any] | None:
     """
     Searches Hugging Face for the filename, prioritizing specific authors.
     Returns metadata dict with url/hf_repo/hf_path or None.
     """
     api = HfApi(token=token)
-    
+
+    key = _normalize_hf_search_key(filename)
+    if key in _hf_search_cache:
+        return _hf_search_cache[key]
+
+    if key in HF_SEARCH_SKIP_FILENAMES:
+        print(f"[DEBUG] Skipping HF search for generic filename: {filename}")
+        _hf_search_cache[key] = None
+        return None
+
+    if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
+        print(f"[DEBUG] HF search paused due to rate limit; skipping {filename}")
+        return None
+    if _hf_api_calls >= HF_SEARCH_MAX_CALLS:
+        print(f"[DEBUG] HF search budget exhausted; skipping {filename}")
+        return None
+
     print(f"[DEBUG] Searching HF for: {filename}")
 
     def add_term(terms: list[str], term: str | None):
@@ -866,12 +920,24 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
     # Actually, listing models by author and filtering is expensive. 
     # Better to use the global search and filter results.
     
+    def is_rate_limited_error(err: Exception) -> bool:
+        text = str(err)
+        return "429" in text or "Too Many Requests" in text or "rate limit" in text.lower()
+
     try:
         search_terms = build_search_terms(filename)
         models = []
 
         for term in search_terms:
-            models = list(api.list_models(search=term, limit=20, sort="downloads", direction=-1))
+            if not _hf_search_allowed():
+                return None
+            try:
+                models = list(api.list_models(search=term, limit=20, sort="downloads", direction=-1))
+            except Exception as e:
+                if is_rate_limited_error(e):
+                    _set_hf_rate_limited()
+                    return None
+                raise
             if models:
                 if term != filename:
                     print(f"[DEBUG] No results for {filename}, trying search term: {term}")
@@ -885,18 +951,34 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
                 try:
                     found = []
                     for term in search_terms:
-                        author_models = list(api.list_models(
-                            author=author,
-                            search=term,
-                            limit=15,
-                            sort="downloads",
-                            direction=-1
-                        ))
+                        if not _hf_search_allowed():
+                            return None
+                        try:
+                            author_models = list(api.list_models(
+                                author=author,
+                                search=term,
+                                limit=15,
+                                sort="downloads",
+                                direction=-1
+                            ))
+                        except Exception as e:
+                            if is_rate_limited_error(e):
+                                _set_hf_rate_limited()
+                                return None
+                            raise
                         if author_models:
                             found.extend(author_models)
                             break
                     if not found:
-                        found = list(api.list_models(author=author, limit=50, sort="downloads", direction=-1))
+                        if not _hf_search_allowed():
+                            return None
+                        try:
+                            found = list(api.list_models(author=author, limit=50, sort="downloads", direction=-1))
+                        except Exception as e:
+                            if is_rate_limited_error(e):
+                                _set_hf_rate_limited()
+                                return None
+                            raise
                     models.extend(found)
                 except Exception:
                     continue
@@ -942,12 +1024,18 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
             if author in PRIORITY_AUTHORS:
                  # Check if this repo actually has the file
                  try:
+                     if not _hf_search_allowed():
+                         return None
                      files = api.list_repo_files(repo_id=model_id, token=token)
                      if filename in files:
-                         return build_result(model_id, filename)
+                         result = build_result(model_id, filename)
+                         _hf_search_cache[key] = result
+                         return result
                      for f in files:
                          if f.endswith(filename):
-                             return build_result(model_id, f)
+                             result = build_result(model_id, f)
+                             _hf_search_cache[key] = result
+                             return result
                  except Exception:
                      continue
 
@@ -957,18 +1045,26 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
             try:
                  if tokens and not any(t in model_id.lower() for t in tokens):
                      continue
+                 if not _hf_search_allowed():
+                     return None
                  files = api.list_repo_files(repo_id=model_id, token=token)
                  if filename in files:
-                     return build_result(model_id, filename)
+                     result = build_result(model_id, filename)
+                     _hf_search_cache[key] = result
+                     return result
                  for f in files:
                      if f.endswith(filename):
-                         return build_result(model_id, f)
+                         result = build_result(model_id, f)
+                         _hf_search_cache[key] = result
+                         return result
             except Exception:
                  continue
 
         # Final fallback: scan priority authors more broadly if nothing matched
         for author in PRIORITY_AUTHORS:
             try:
+                if not _hf_search_allowed():
+                    return None
                 author_models = list(api.list_models(author=author, limit=50, sort="downloads", direction=-1))
             except Exception:
                 continue
@@ -977,18 +1073,31 @@ def search_huggingface_model(filename: str, token: str = None) -> Dict[str, Any]
                 try:
                     if tokens and not any(t in model_id.lower() for t in tokens):
                         continue
+                    if not _hf_search_allowed():
+                        return None
                     files = api.list_repo_files(repo_id=model_id, token=token)
                     if filename in files:
-                        return build_result(model_id, filename)
+                        result = build_result(model_id, filename)
+                        _hf_search_cache[key] = result
+                        return result
                     for f in files:
                         if f.endswith(filename):
-                            return build_result(model_id, f)
+                            result = build_result(model_id, f)
+                            _hf_search_cache[key] = result
+                            return result
                 except Exception:
                     continue
                  
     except Exception as e:
-        print(f"[ERROR] check_huggingface failed: {e}")
-        
+        if is_rate_limited_error(e):
+            _set_hf_rate_limited()
+        else:
+            print(f"[ERROR] check_huggingface failed: {e}")
+
+    if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
+        return None
+
+    _hf_search_cache[key] = None
     return None
 
 def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[str, Any]:
@@ -999,6 +1108,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[s
     3. If missing, search HF.
     """
     
+    global _hf_api_calls
+    _hf_api_calls = 0
     required_models = extract_models_from_workflow(workflow_json)
 
     # Drop duplicate proxy-widget models across subgraph wrappers.
@@ -1034,6 +1145,33 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[s
         deduped.append(models[0])
 
     required_models = deduped
+
+    # Collapse duplicate model entries across nodes when they resolve to the same target.
+    dedup_by_key = {}
+    for model in required_models:
+        key = (
+            (model.get("filename") or "").lower(),
+            _normalize_dedupe_path(model.get("requested_path")),
+            _normalize_dedupe_path(model.get("suggested_folder"))
+        )
+        existing = dedup_by_key.get(key)
+        if not existing:
+            dedup_by_key[key] = model
+            continue
+        # Prefer entries that already include a URL or come from explicit download nodes.
+        def score(entry: dict) -> int:
+            s = 0
+            if entry.get("url"):
+                s += 10
+            if entry.get("node_title") and "hugging face download model" in entry.get("node_title", "").lower():
+                s += 5
+            if entry.get("origin") == "proxy_widget":
+                s -= 1
+            return s
+        if score(model) > score(existing):
+            dedup_by_key[key] = model
+
+    required_models = list(dedup_by_key.values())
     
     # Remove duplicates based on filename and node_id to avoid redundant checks for the same model in the same node
     # However, if a model is referenced by multiple nodes, we want to keep those distinct entries
