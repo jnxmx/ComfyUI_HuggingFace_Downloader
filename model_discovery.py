@@ -400,7 +400,7 @@ def resolve_proxy_widget_folder(widget_name: str | None) -> str | None:
         return "checkpoints"
     return None
 
-def collect_proxy_widget_models(node: dict) -> list[dict]:
+def collect_proxy_widget_models(node: dict, linked_widget_indices: set[int] | None = None) -> list[dict]:
     props = node.get("properties") or {}
     proxy = props.get("proxyWidgets")
     widgets = node.get("widgets_values")
@@ -410,6 +410,8 @@ def collect_proxy_widget_models(node: dict) -> list[dict]:
     limit = min(len(proxy), len(widgets))
     results = []
     for idx in range(limit):
+        if linked_widget_indices and idx in linked_widget_indices:
+            continue
         proxy_item = proxy[idx]
         widget_name = None
         if isinstance(proxy_item, (list, tuple)) and len(proxy_item) >= 2:
@@ -426,7 +428,8 @@ def collect_proxy_widget_models(node: dict) -> list[dict]:
                 "filename": parsed_filename,
                 "requested_path": None,
                 "url": value,
-                "suggested_folder": suggested_folder
+                "suggested_folder": suggested_folder,
+                "origin": "proxy_widget"
             })
             continue
         if not any(value.endswith(ext) for ext in MODEL_EXTENSIONS):
@@ -437,7 +440,8 @@ def collect_proxy_widget_models(node: dict) -> list[dict]:
             "filename": filename,
             "requested_path": requested_path,
             "url": None,
-            "suggested_folder": suggested_folder
+            "suggested_folder": suggested_folder,
+            "origin": "proxy_widget"
         })
     return results
 
@@ -480,12 +484,10 @@ def _collect_models_from_nodes(
         # Subgraph wrapper nodes (UUID-type) proxy model widgets from inside the subgraph.
         # Capture those proxy widgets here so models are still discovered.
         if is_subgraph_node(node_type):
-            proxy_models = collect_proxy_widget_models(node)
+            proxy_models = collect_proxy_widget_models(node, linked_widget_indices)
             for proxy_model in proxy_models:
                 filename = proxy_model.get("filename")
                 if not filename:
-                    continue
-                if any(m["filename"] == filename and m.get("node_id") == node_id for m in found_models):
                     continue
                 found_models.append({
                     "filename": filename,
@@ -493,7 +495,8 @@ def _collect_models_from_nodes(
                     "url": proxy_model.get("url"),
                     "node_id": node_id,
                     "node_title": node_title,
-                    "suggested_folder": proxy_model.get("suggested_folder")
+                    "suggested_folder": proxy_model.get("suggested_folder"),
+                    "origin": proxy_model.get("origin")
                 })
             continue
         
@@ -659,8 +662,10 @@ def _collect_models_from_nodes(
                                                 
                                                 # Let's verify if URL looks like a model
                                                 if any(u_val.endswith(ext) for ext in MODEL_EXTENSIONS) or "blob" in u_val or "resolve" in u_val:
-                                                    m["url"] = u_val
-                                                    m["note"] = f"Resolved from upstream node {upstream_node.get('title', upstream_id)}"
+                                                    url_filename = u_val.split("?")[0].split("/")[-1]
+                                                    if url_filename and url_filename.lower() == m["filename"].lower():
+                                                        m["url"] = u_val
+                                                        m["note"] = f"Resolved from upstream node {upstream_node.get('title', upstream_id)}"
     
 def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
@@ -995,6 +1000,40 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any]) -> Dict[s
     """
     
     required_models = extract_models_from_workflow(workflow_json)
+
+    # Drop duplicate proxy-widget models across subgraph wrappers.
+    def _normalize_dedupe_path(value: str | None) -> str:
+        if not value:
+            return ""
+        return value.replace("\\", "/").strip("/")
+
+    deduped = []
+    seen_proxy = {}
+    for model in required_models:
+        filename = model.get("filename") or ""
+        key = (
+            filename.lower(),
+            _normalize_dedupe_path(model.get("requested_path")),
+            _normalize_dedupe_path(model.get("suggested_folder"))
+        )
+        if model.get("origin") == "proxy_widget":
+            seen_proxy.setdefault(key, []).append(model)
+            continue
+        deduped.append(model)
+
+    for key, models in seen_proxy.items():
+        if any(
+            m for m in deduped
+            if (
+                (m.get("filename") or "").lower(),
+                _normalize_dedupe_path(m.get("requested_path")),
+                _normalize_dedupe_path(m.get("suggested_folder"))
+            ) == key
+        ):
+            continue
+        deduped.append(models[0])
+
+    required_models = deduped
     
     # Remove duplicates based on filename and node_id to avoid redundant checks for the same model in the same node
     # However, if a model is referenced by multiple nodes, we want to keep those distinct entries
