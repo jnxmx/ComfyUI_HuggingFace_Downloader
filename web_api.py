@@ -4,6 +4,7 @@ import traceback
 import threading
 import time
 import uuid
+import asyncio
 from aiohttp import web
 from .backup import backup_to_huggingface, restore_from_huggingface
 from .file_manager import get_model_subfolders
@@ -231,7 +232,11 @@ async def check_missing_models(request):
             if isinstance(payload, dict):
                 _set_search_status(request_id, payload)
 
-        result = process_workflow_for_missing_models(data, status_cb=status_cb)
+        result = await asyncio.to_thread(
+            process_workflow_for_missing_models,
+            data,
+            status_cb
+        )
         _set_search_status(request_id, {"message": "Done", "source": "complete"})
         result["request_id"] = request_id
         return web.json_response(result)

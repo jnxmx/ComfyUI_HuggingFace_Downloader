@@ -432,16 +432,13 @@ def collect_proxy_widget_models(node: dict, linked_widget_indices: set[int] | No
     if not isinstance(proxy, list) or not isinstance(widgets, list):
         return []
 
-    limit = min(len(proxy), len(widgets))
+    proxy_len = len(proxy)
     results = []
-    for idx in range(limit):
-        if linked_widget_indices and idx in linked_widget_indices:
-            continue
-        proxy_item = proxy[idx]
+    for idx, value in enumerate(widgets):
+        proxy_item = proxy[idx] if idx < proxy_len else None
         widget_name = None
         if isinstance(proxy_item, (list, tuple)) and len(proxy_item) >= 2:
             widget_name = proxy_item[1]
-        value = widgets[idx]
         if not isinstance(value, str):
             continue
         if value.startswith("http://") or value.startswith("https://"):
@@ -477,7 +474,8 @@ def _collect_models_from_nodes(
     found_models: list[dict],
     note_links: dict,
     note_links_normalized: dict,
-    node_title_fallback: str
+    node_title_fallback: str,
+    allow_linked_subgraph_inputs: bool = False
 ) -> None:
     for node in nodes:
         # Skip disabled/muted nodes
@@ -497,13 +495,18 @@ def _collect_models_from_nodes(
         node_type = node.get("type", "")
 
         linked_widget_indices = set()
+        linked_widget_sources = {}
         widget_pos = 0
         has_linked_widget_input = False
         for input_item in node.get("inputs", []):
             if "widget" in input_item:
-                if input_item.get("link") is not None:
+                link_id = input_item.get("link")
+                if link_id is not None:
                     linked_widget_indices.add(widget_pos)
                     has_linked_widget_input = True
+                    if link_id in links_map:
+                        origin_id, _ = links_map[link_id]
+                        linked_widget_sources[widget_pos] = origin_id
                 widget_pos += 1
         
         # Subgraph wrapper nodes (UUID-type) proxy model widgets from inside the subgraph.
@@ -605,7 +608,9 @@ def _collect_models_from_nodes(
             if isinstance(widgets, list):
                 for idx, val in enumerate(widgets):
                     if idx in linked_widget_indices:
-                        continue
+                        origin_id = linked_widget_sources.get(idx)
+                        if not (allow_linked_subgraph_inputs and origin_id is not None and origin_id < 0):
+                            continue
                     if not isinstance(val, str):
                         continue
 
@@ -726,7 +731,8 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
             found_models,
             note_links,
             note_links_normalized,
-            f"Subgraph Node ({subgraph_name})"
+            f"Subgraph Node ({subgraph_name})",
+            allow_linked_subgraph_inputs=True
         )
 
     links_map = _build_links_map(workflow.get("links", []))
@@ -1131,66 +1137,61 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     _hf_api_calls = 0
     required_models = extract_models_from_workflow(workflow_json)
 
-    # Drop duplicate proxy-widget models across subgraph wrappers.
     def _normalize_dedupe_path(value: str | None) -> str:
         if not value:
             return ""
         return value.replace("\\", "/").strip("/")
 
-    deduped = []
-    seen_proxy = {}
-    for model in required_models:
-        filename = model.get("filename") or ""
-        key = (
-            filename.lower(),
-            _normalize_dedupe_path(model.get("requested_path")),
-            _normalize_dedupe_path(model.get("suggested_folder"))
-        )
-        if model.get("origin") == "proxy_widget":
-            seen_proxy.setdefault(key, []).append(model)
-            continue
-        deduped.append(model)
+    def _score_entry(entry: dict) -> int:
+        score = 0
+        if entry.get("url"):
+            score += 10
+        if entry.get("node_title") and "hugging face download model" in entry.get("node_title", "").lower():
+            score += 5
+        requested_path = _normalize_dedupe_path(entry.get("requested_path"))
+        if "/" in requested_path:
+            score += 4
+        if entry.get("suggested_folder"):
+            score += 2
+        if entry.get("origin") != "proxy_widget":
+            score += 1
+        return score
 
-    for key, models in seen_proxy.items():
-        if any(
-            m for m in deduped
-            if (
-                (m.get("filename") or "").lower(),
-                _normalize_dedupe_path(m.get("requested_path")),
-                _normalize_dedupe_path(m.get("suggested_folder"))
-            ) == key
-        ):
+    # Collapse duplicates by filename, preferring entries with richer path/folder info.
+    grouped_by_name = {}
+    for model in required_models:
+        filename = (model.get("filename") or "").lower()
+        if not filename:
             continue
-        deduped.append(models[0])
+        grouped_by_name.setdefault(filename, []).append(model)
+
+    deduped = []
+    for _, models in grouped_by_name.items():
+        folder_groups = {}
+        for model in models:
+            folder_key = _normalize_dedupe_path(model.get("suggested_folder"))
+            folder_groups.setdefault(folder_key, []).append(model)
+
+        # If we have folder-specific entries, drop ambiguous ones without a folder.
+        if len(folder_groups) > 1 and "" in folder_groups:
+            del folder_groups[""]
+
+        for group in folder_groups.values():
+            best = group[0]
+            best_score = _score_entry(best)
+            for candidate in group[1:]:
+                cand_score = _score_entry(candidate)
+                if cand_score > best_score:
+                    best = candidate
+                    best_score = cand_score
+                elif cand_score == best_score:
+                    # Tie-breaker: prefer longer requested_path (keeps subfolder info).
+                    if len(_normalize_dedupe_path(candidate.get("requested_path"))) > len(_normalize_dedupe_path(best.get("requested_path"))):
+                        best = candidate
+                        best_score = cand_score
+            deduped.append(best)
 
     required_models = deduped
-
-    # Collapse duplicate model entries across nodes when they resolve to the same target.
-    dedup_by_key = {}
-    for model in required_models:
-        key = (
-            (model.get("filename") or "").lower(),
-            _normalize_dedupe_path(model.get("requested_path")),
-            _normalize_dedupe_path(model.get("suggested_folder"))
-        )
-        existing = dedup_by_key.get(key)
-        if not existing:
-            dedup_by_key[key] = model
-            continue
-        # Prefer entries that already include a URL or come from explicit download nodes.
-        def score(entry: dict) -> int:
-            s = 0
-            if entry.get("url"):
-                s += 10
-            if entry.get("node_title") and "hugging face download model" in entry.get("node_title", "").lower():
-                s += 5
-            if entry.get("origin") == "proxy_widget":
-                s -= 1
-            return s
-        if score(model) > score(existing):
-            dedup_by_key[key] = model
-
-    required_models = list(dedup_by_key.values())
     
     # Remove duplicates based on filename and node_id to avoid redundant checks for the same model in the same node
     # However, if a model is referenced by multiple nodes, we want to keep those distinct entries
