@@ -100,6 +100,7 @@ def _download_worker():
                 last_report = time.time()
                 last_change = time.time()
                 last_stall_log = time.time()
+                waiting_logged = False
                 try:
                     while not stop_event.is_set():
                         bytes_now = None
@@ -149,6 +150,12 @@ def _download_worker():
                                 dt = now - last_time
                                 inst_speed = (delta / dt) if dt > 0 else 0
                             ema_speed = inst_speed if ema_speed is None else (0.2 * inst_speed + 0.8 * ema_speed)
+                            stalled_for = now - last_change
+                            if stalled_for >= 30 and not waiting_logged:
+                                print(f"[DEBUG] monitor_progress {filename}: waiting for data (no size change for {stalled_for:.0f}s)")
+                                waiting_logged = True
+                            if bytes_now != last_bytes:
+                                waiting_logged = False
                             if bytes_now == last_bytes and (now - last_change) >= 10 and (now - last_stall_log) >= 10:
                                 stall_for = now - last_change
                                 total_label = expected_size if expected_size is not None else "unknown"
@@ -157,12 +164,16 @@ def _download_worker():
                             eta_seconds = None
                             if expected_size and ema_speed and ema_speed > 0:
                                 eta_seconds = max(0, (expected_size - bytes_now) / ema_speed)
+                            if stalled_for >= 30:
+                                ema_speed = 0
+                                eta_seconds = None
                             _set_download_status(download_id, {
                                 "status": "downloading",
                                 "downloaded_bytes": bytes_now,
                                 "total_bytes": expected_size,
                                 "speed_bps": ema_speed,
                                 "eta_seconds": eta_seconds,
+                                "phase": "waiting_for_data" if stalled_for >= 30 else "downloading",
                                 "updated_at": now
                             })
                             last_bytes = bytes_now
