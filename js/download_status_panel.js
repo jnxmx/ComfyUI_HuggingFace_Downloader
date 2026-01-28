@@ -115,6 +115,9 @@ app.registerExtension({
                     border-top-color: #4aa3ff;
                     animation: hf-downloader-spin 0.9s linear infinite;
                 }
+                #${PANEL_ID} .hf-downloader-spinner.hidden {
+                    visibility: hidden;
+                }
                 #${PANEL_ID} .hf-downloader-spinner.idle {
                     animation: none;
                     border-top-color: #2a2d36;
@@ -255,19 +258,30 @@ app.registerExtension({
             ensurePanel();
             panel.style.display = "flex";
 
-            const activeCount = entries.filter((entry) =>
-                entry.status === "queued" || entry.status === "downloading"
-            ).length;
+            const activeStatuses = new Set([
+                "queued",
+                "downloading",
+                "copying",
+                "cleaning_cache",
+                "verifying",
+                "downloaded",
+                "finalizing"
+            ]);
+            const activeCount = entries.filter((entry) => activeStatuses.has(entry.status)).length;
             countBadge.textContent = String(activeCount);
 
             listBody.innerHTML = "";
 
             const order = {
                 downloading: 0,
-                verifying: 1,
-                queued: 2,
-                failed: 3,
-                completed: 4
+                copying: 1,
+                cleaning_cache: 2,
+                verifying: 3,
+                downloaded: 4,
+                finalizing: 5,
+                queued: 6,
+                failed: 7,
+                completed: 8
             };
 
             entries.sort((a, b) => {
@@ -304,7 +318,9 @@ app.registerExtension({
 
                 const spinner = document.createElement("div");
                 spinner.className = "hf-downloader-spinner";
-                if (info.status === "completed" || info.status === "failed") {
+                if (info.status === "queued" || info.status === "downloaded") {
+                    spinner.classList.add("hidden");
+                } else if (info.status === "completed" || info.status === "failed") {
                     spinner.classList.add("idle");
                     spinner.style.borderTopColor = info.status === "failed" ? "#ff6b6b" : "#5bd98c";
                 } else if (info.status === "verifying") {
