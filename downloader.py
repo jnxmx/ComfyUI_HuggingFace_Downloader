@@ -165,7 +165,10 @@ def _verify_file_integrity(dest_path: str,
 
 def run_download(parsed_data: dict,
                  final_folder: str,
-                 sync: bool = False) -> tuple[str, str]:
+                 sync: bool = False,
+                 defer_verify: bool = False,
+                 overwrite: bool = False,
+                 return_info: bool = False) -> tuple:
     """
     Downloads a single file from Hugging Face Hub and copies it to models/<final_folder>.
     Cleans up the cached copy to save disk space.
@@ -190,15 +193,21 @@ def run_download(parsed_data: dict,
         dest_path = os.path.join(target_dir, os.path.basename(remote_filename))
 
         if os.path.exists(dest_path):
-            try:
-                _verify_file_integrity(dest_path, expected_size, expected_sha)
-                size_gb = os.path.getsize(dest_path) / (1024 ** 3)
-                message = f"{file_name} already exists | {size_gb:.3f} GB"
-                print("[DEBUG]", message)
-                return (message, dest_path) if sync else ("", "")
-            except Exception as e:
-                print(f"[DEBUG] Existing file failed verification, re-downloading: {e}")
+            if overwrite:
+                print("[DEBUG] Overwrite requested, deleting existing file before download.")
                 _safe_remove(dest_path)
+            else:
+                try:
+                    _verify_file_integrity(dest_path, expected_size, expected_sha)
+                    size_gb = os.path.getsize(dest_path) / (1024 ** 3)
+                    message = f"{file_name} already exists | {size_gb:.3f} GB"
+                    print("[DEBUG]", message)
+                    if return_info:
+                        return (message, dest_path, {"expected_size": expected_size, "expected_sha": expected_sha})
+                    return (message, dest_path) if sync else ("", "")
+                except Exception as e:
+                    print(f"[DEBUG] Existing file failed verification, re-downloading: {e}")
+                    _safe_remove(dest_path)
 
         download_start = time.time()
         print(f"[DEBUG] hf_hub_download start: {parsed_data['repo']}/{remote_filename}")
@@ -215,17 +224,20 @@ def run_download(parsed_data: dict,
         shutil.copyfile(file_path_in_cache, dest_path)
         print("[DEBUG] File copied to:", dest_path)
 
-        try:
-            _verify_file_integrity(dest_path, expected_size, expected_sha)
-        except Exception as e:
-            _safe_remove(dest_path)
-            raise RuntimeError(f"Download verification failed: {e}") from e
+        if not defer_verify:
+            try:
+                _verify_file_integrity(dest_path, expected_size, expected_sha)
+            except Exception as e:
+                _safe_remove(dest_path)
+                raise RuntimeError(f"Download verification failed: {e}") from e
 
         clear_cache_for_path(file_path_in_cache)
 
         size_gb = os.path.getsize(dest_path) / (1024 ** 3)
         final_message = f"Downloaded {file_name} | {size_gb:.3f} GB"
         print("[DEBUG]", final_message)
+        if return_info:
+            return (final_message, dest_path, {"expected_size": expected_size, "expected_sha": expected_sha})
         return (final_message, dest_path) if sync else ("", "")
     except Exception as e:
         # Provide clearer feedback for common authentication/authorization problems
