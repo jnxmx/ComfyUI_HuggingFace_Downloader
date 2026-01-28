@@ -103,16 +103,24 @@ app.registerExtension({
                     letter-spacing: 0.4px;
                 }
                 #${PANEL_ID} .hf-downloader-progress {
-                    height: 6px;
-                    background: #2a2d36;
-                    border-radius: 4px;
-                    overflow: hidden;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
                 }
-                #${PANEL_ID} .hf-downloader-progress-bar {
-                    height: 100%;
-                    width: 0%;
-                    background: linear-gradient(90deg, #4aa3ff, #5bd98c);
-                    transition: width 0.2s ease;
+                #${PANEL_ID} .hf-downloader-spinner {
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 50%;
+                    border: 2px solid #2a2d36;
+                    border-top-color: #4aa3ff;
+                    animation: hf-downloader-spin 0.9s linear infinite;
+                }
+                #${PANEL_ID} .hf-downloader-spinner.idle {
+                    animation: none;
+                    border-top-color: #2a2d36;
+                }
+                @keyframes hf-downloader-spin {
+                    to { transform: rotate(360deg); }
                 }
                 #${PANEL_ID} .hf-downloader-meta {
                     font-size: 11px;
@@ -206,6 +214,11 @@ app.registerExtension({
             switch (status) {
                 case "downloading":
                     return "#4aa3ff";
+                case "copying":
+                case "cleaning_cache":
+                case "downloaded":
+                case "finalizing":
+                    return "#9ad6ff";
                 case "verifying":
                     return "#ffd166";
                 case "completed":
@@ -289,27 +302,21 @@ app.registerExtension({
                 const progress = document.createElement("div");
                 progress.className = "hf-downloader-progress";
 
-                const bar = document.createElement("div");
-                bar.className = "hf-downloader-progress-bar";
-
-                const totalBytes = info.total_bytes || 0;
-                const downloadedBytes = info.downloaded_bytes || 0;
-                if (totalBytes > 0) {
-                    const pct = Math.max(0, Math.min(100, (downloadedBytes / totalBytes) * 100));
-                    bar.style.width = `${pct}%`;
-                } else if (info.status === "downloading") {
-                    bar.style.width = "35%";
-                } else if (info.status === "completed") {
-                    bar.style.width = "100%";
-                } else {
-                    bar.style.width = "0%";
+                const spinner = document.createElement("div");
+                spinner.className = "hf-downloader-spinner";
+                if (info.status === "completed" || info.status === "failed") {
+                    spinner.classList.add("idle");
+                    spinner.style.borderTopColor = info.status === "failed" ? "#ff6b6b" : "#5bd98c";
+                } else if (info.status === "verifying") {
+                    spinner.style.borderTopColor = "#ffd166";
                 }
-
-                progress.appendChild(bar);
+                progress.appendChild(spinner);
 
                 const meta = document.createElement("div");
                 meta.className = "hf-downloader-meta";
 
+                const totalBytes = info.total_bytes || 0;
+                const downloadedBytes = info.downloaded_bytes || 0;
                 const sizeText = totalBytes
                     ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
                     : formatBytes(downloadedBytes);
