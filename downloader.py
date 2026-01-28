@@ -8,7 +8,7 @@ import json
 import zipfile
 import hashlib
 import yaml
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 
 from huggingface_hub import (
     HfApi,
@@ -21,7 +21,12 @@ from huggingface_hub import (
 os.environ.setdefault("HF_HUB_ENABLE_HF_XET", "1")
 
 token_override = os.getenv("HF_TOKEN")
-SHA_VERIFY_MAX_BYTES = int(os.getenv("HF_DOWNLOADER_SHA_MAX_BYTES", str(1024 ** 3)))
+_sha_max_env = os.getenv("HF_DOWNLOADER_SHA_MAX_BYTES", "0")
+try:
+    _sha_max_val = int(_sha_max_env)
+except Exception:
+    _sha_max_val = 0
+SHA_VERIFY_MAX_BYTES = _sha_max_val if _sha_max_val > 0 else None
 
 def folder_size(directory: str) -> int:
     total = 0
@@ -151,7 +156,7 @@ def _verify_file_integrity(dest_path: str,
             )
     if expected_sha:
         size_for_sha = expected_size if expected_size is not None else os.path.getsize(dest_path)
-        if size_for_sha > SHA_VERIFY_MAX_BYTES:
+        if SHA_VERIFY_MAX_BYTES is not None and size_for_sha > SHA_VERIFY_MAX_BYTES:
             print(f"[DEBUG] Skipping SHA256 for large file ({size_for_sha} bytes).")
             return
         sha256 = hashlib.sha256()
@@ -168,7 +173,8 @@ def run_download(parsed_data: dict,
                  sync: bool = False,
                  defer_verify: bool = False,
                  overwrite: bool = False,
-                 return_info: bool = False) -> tuple:
+                 return_info: bool = False,
+                 status_cb: Optional[Callable[[str], None]] = None) -> tuple:
     """
     Downloads a single file from Hugging Face Hub and copies it to models/<final_folder>.
     Cleans up the cached copy to save disk space.
@@ -221,16 +227,22 @@ def run_download(parsed_data: dict,
         print(f"[DEBUG] hf_hub_download finished in {elapsed:.1f}s")
         print("[DEBUG] File downloaded to cache:", file_path_in_cache)
 
+        if status_cb:
+            status_cb("copying")
         shutil.copyfile(file_path_in_cache, dest_path)
         print("[DEBUG] File copied to:", dest_path)
 
         if not defer_verify:
             try:
+                if status_cb:
+                    status_cb("verifying")
                 _verify_file_integrity(dest_path, expected_size, expected_sha)
             except Exception as e:
                 _safe_remove(dest_path)
                 raise RuntimeError(f"Download verification failed: {e}") from e
 
+        if status_cb:
+            status_cb("cleaning_cache")
         clear_cache_for_path(file_path_in_cache)
 
         size_gb = os.path.getsize(dest_path) / (1024 ** 3)

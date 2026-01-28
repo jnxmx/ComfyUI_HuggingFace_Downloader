@@ -248,6 +248,12 @@ def _download_worker():
                 ).start()
 
             overwrite = bool(item.get("overwrite"))
+            def status_cb(phase: str):
+                _set_download_status(download_id, {
+                    "status": phase,
+                    "phase": phase,
+                    "updated_at": time.time()
+                })
             if VERIFY_AFTER_QUEUE:
                 msg, path, info = run_download(
                     parsed,
@@ -255,7 +261,8 @@ def _download_worker():
                     sync=True,
                     defer_verify=True,
                     overwrite=overwrite,
-                    return_info=True
+                    return_info=True,
+                    status_cb=status_cb
                 )
                 _set_download_status(download_id, {
                     "status": "downloaded",
@@ -273,7 +280,7 @@ def _download_worker():
                         "message": msg
                     })
             else:
-                msg, path = run_download(parsed, item["folder"], sync=True, overwrite=overwrite)
+                msg, path = run_download(parsed, item["folder"], sync=True, overwrite=overwrite, status_cb=status_cb)
                 _set_download_status(download_id, {
                     "status": "completed",
                     "message": msg,
