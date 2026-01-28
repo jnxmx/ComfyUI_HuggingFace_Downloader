@@ -24,6 +24,15 @@ pending_verifications_lock = threading.Lock()
 
 # Defer verification until the download queue is empty (default on).
 VERIFY_AFTER_QUEUE = True
+# Minimum idle time before running deferred verification.
+VERIFY_IDLE_SECONDS = 5
+last_queue_activity = 0.0
+last_queue_activity_lock = threading.Lock()
+
+def _touch_queue_activity():
+    global last_queue_activity
+    with last_queue_activity_lock:
+        last_queue_activity = time.time()
 
 def _build_parsed_download_info(model: dict) -> dict:
     """Build parsed download info for run_download using HF repo/path if provided."""
@@ -70,43 +79,48 @@ def _download_worker():
         with download_queue_lock:
             if download_queue:
                 item = download_queue.pop(0)
+        if item:
+            _touch_queue_activity()
 
         if not item:
             if VERIFY_AFTER_QUEUE:
-                with pending_verifications_lock:
-                    to_verify = pending_verifications[:]
-                    pending_verifications.clear()
-                for entry in to_verify:
-                    download_id = entry.get("download_id")
-                    dest_path = entry.get("dest_path")
-                    expected_size = entry.get("expected_size")
-                    expected_sha = entry.get("expected_sha")
-                    if not download_id or not dest_path:
-                        continue
-                    _set_download_status(download_id, {
-                        "status": "verifying",
-                        "updated_at": time.time()
-                    })
-                    try:
-                        from .downloader import _verify_file_integrity
-                        _verify_file_integrity(dest_path, expected_size, expected_sha)
+                with last_queue_activity_lock:
+                    idle_for = time.time() - last_queue_activity
+                if idle_for >= VERIFY_IDLE_SECONDS:
+                    with pending_verifications_lock:
+                        to_verify = pending_verifications[:]
+                        pending_verifications.clear()
+                    for entry in to_verify:
+                        download_id = entry.get("download_id")
+                        dest_path = entry.get("dest_path")
+                        expected_size = entry.get("expected_size")
+                        expected_sha = entry.get("expected_sha")
+                        if not download_id or not dest_path:
+                            continue
                         _set_download_status(download_id, {
-                            "status": "completed",
-                            "finished_at": time.time(),
-                            "message": entry.get("message"),
-                            "path": dest_path
+                            "status": "verifying",
+                            "updated_at": time.time()
                         })
-                    except Exception as e:
                         try:
-                            if os.path.exists(dest_path):
-                                os.remove(dest_path)
-                        except Exception:
-                            pass
-                        _set_download_status(download_id, {
-                            "status": "failed",
-                            "error": f"Verification failed: {e}",
-                            "finished_at": time.time()
-                        })
+                            from .downloader import _verify_file_integrity
+                            _verify_file_integrity(dest_path, expected_size, expected_sha)
+                            _set_download_status(download_id, {
+                                "status": "completed",
+                                "finished_at": time.time(),
+                                "message": entry.get("message"),
+                                "path": dest_path
+                            })
+                        except Exception as e:
+                            try:
+                                if os.path.exists(dest_path):
+                                    os.remove(dest_path)
+                            except Exception:
+                                pass
+                            _set_download_status(download_id, {
+                                "status": "failed",
+                                "error": f"Verification failed: {e}",
+                                "finished_at": time.time()
+                            })
             time.sleep(0.2)
             continue
 
@@ -133,7 +147,7 @@ def _download_worker():
                 "updated_at": time.time()
             })
 
-            def monitor_progress(stop_event, download_id, expected_size, blob_path, incomplete_path, filename):
+            def monitor_progress(stop_event, download_id, expected_size, blob_path, incomplete_path, filename, defer_verify):
                 last_bytes = None
                 last_time = time.time()
                 ema_speed = None
@@ -161,11 +175,12 @@ def _download_worker():
                                 last_change = now
                             if expected_size and bytes_now >= expected_size:
                                 _set_download_status(download_id, {
-                                    "status": "verifying",
+                                    "status": "downloading" if defer_verify else "verifying",
                                     "downloaded_bytes": bytes_now,
                                     "total_bytes": expected_size,
                                     "speed_bps": 0,
                                     "eta_seconds": None,
+                                    "phase": "finalizing" if defer_verify else "verifying",
                                     "updated_at": now
                                 })
                                 return
@@ -175,11 +190,12 @@ def _download_worker():
                                 if near_done and stalled:
                                     print(f"[DEBUG] monitor_progress {filename}: stalled near completion, switching to verifying")
                                     _set_download_status(download_id, {
-                                        "status": "verifying",
+                                        "status": "downloading" if defer_verify else "verifying",
                                         "downloaded_bytes": bytes_now,
                                         "total_bytes": expected_size,
                                         "speed_bps": 0,
                                         "eta_seconds": None,
+                                        "phase": "finalizing" if defer_verify else "verifying",
                                         "updated_at": now
                                     })
                                     return
@@ -227,7 +243,7 @@ def _download_worker():
                 blob_path, incomplete_path = get_blob_paths(parsed["repo"], etag)
                 threading.Thread(
                     target=monitor_progress,
-                    args=(stop_event, download_id, expected_size, blob_path, incomplete_path, remote_filename),
+                    args=(stop_event, download_id, expected_size, blob_path, incomplete_path, remote_filename, VERIFY_AFTER_QUEUE),
                     daemon=True
                 ).start()
 
@@ -247,6 +263,7 @@ def _download_worker():
                     "path": path,
                     "updated_at": time.time()
                 })
+                _touch_queue_activity()
                 with pending_verifications_lock:
                     pending_verifications.append({
                         "download_id": download_id,
@@ -263,6 +280,7 @@ def _download_worker():
                     "path": path,
                     "finished_at": time.time()
                 })
+                _touch_queue_activity()
         except Exception as e:
             _set_download_status(download_id, {
                 "status": "failed",
@@ -423,6 +441,8 @@ def setup(app):
                 })
                 queued.append({"download_id": download_id, "filename": filename})
 
+            if queued:
+                _touch_queue_activity()
             _start_download_worker()
             return web.json_response({"queued": queued})
         except Exception as e:
