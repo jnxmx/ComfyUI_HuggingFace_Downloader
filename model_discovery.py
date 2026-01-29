@@ -363,6 +363,7 @@ NODE_TYPE_MAPPING = {
     "AIO_Preprocessor": None,  # Uses different models depending on type parameter
 }
 
+
 def _build_links_map(raw_links: list[Any]) -> dict:
     links_map = {}
     for link in raw_links:
@@ -500,6 +501,9 @@ def _collect_models_from_nodes(
             
         node_title = node.get("title") or node.get("type", node_title_fallback)
         node_type = node.get("type", "")
+        node_cnr = ""
+        if isinstance(node.get("properties"), dict):
+            node_cnr = node["properties"].get("cnr_id", "") or ""
 
         linked_widget_indices = set()
         linked_widget_names = set()
@@ -598,23 +602,28 @@ def _collect_models_from_nodes(
             continue  # Don't process Notes as loader nodes
 
         # 2. Check properties -> models (Standard ComfyUI template format)
-        if "properties" in node and "models" in node["properties"]:
-            if not has_linked_widget_input:
-                for model_info in node["properties"]["models"]:
-                    name = model_info.get("name")
-                    filename, requested_path = split_model_identifier(name) if name else (name, None)
-                    found_models.append({
-                        "filename": filename,
-                        "requested_path": requested_path,
-                        "url": model_info.get("url"),
-                        "node_id": node_id,
-                        "node_title": node_title,
-                        "suggested_folder": model_info.get("directory")
-                    })
+        if node_cnr != "comfyui_controlnet_aux":
+            if "properties" in node and "models" in node["properties"]:
+                if not has_linked_widget_input:
+                    for model_info in node["properties"]["models"]:
+                        name = model_info.get("name")
+                        filename, requested_path = split_model_identifier(name) if name else (name, None)
+                        found_models.append({
+                            "filename": filename,
+                            "requested_path": requested_path,
+                            "url": model_info.get("url"),
+                            "node_id": node_id,
+                            "node_title": node_title,
+                            "suggested_folder": model_info.get("directory")
+                        })
                 
         # 3. Check widgets_values for filenames
         # SKIP for Notes/PrimitiveStrings as we handled them specifically above
-        if "widgets_values" in node and not ("Note" in node_type or "PrimitiveString" in node_type):
+        if (
+            "widgets_values" in node
+            and not ("Note" in node_type or "PrimitiveString" in node_type)
+            and node_cnr != "comfyui_controlnet_aux"
+        ):
             widgets = node["widgets_values"]
             if isinstance(widgets, list):
                 for idx, val in enumerate(widgets):
@@ -954,6 +963,12 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
     try:
         search_terms = build_search_terms(filename)
         models = []
+        if status_cb:
+            status_cb({
+                "message": "Searching Hugging Face",
+                "source": "huggingface_search",
+                "filename": filename
+            })
 
         for term in search_terms:
             if not _hf_search_allowed():
@@ -963,6 +978,13 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
             except Exception as e:
                 if is_rate_limited_error(e):
                     _set_hf_rate_limited()
+                    if status_cb:
+                        status_cb({
+                            "message": "Hugging Face rate limit hit",
+                            "source": "huggingface_search",
+                            "filename": filename,
+                            "detail": str(e)
+                        })
                     return None
                 raise
             if models:
@@ -980,9 +1002,17 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                     "source": "huggingface_priority_authors",
                     "filename": filename
                 })
-            for author in PRIORITY_AUTHORS:
+            total_authors = len(PRIORITY_AUTHORS)
+            for author_index, author in enumerate(PRIORITY_AUTHORS, start=1):
                 try:
                     found = []
+                    if status_cb:
+                        status_cb({
+                            "message": f"Checking priority author {author_index}/{total_authors}",
+                            "source": "huggingface_priority_authors",
+                            "filename": filename,
+                            "detail": author
+                        })
                     for term in search_terms:
                         if not _hf_search_allowed():
                             return None
@@ -997,6 +1027,13 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                         except Exception as e:
                             if is_rate_limited_error(e):
                                 _set_hf_rate_limited()
+                                if status_cb:
+                                    status_cb({
+                                        "message": "Hugging Face rate limit hit",
+                                        "source": "huggingface_priority_authors",
+                                        "filename": filename,
+                                        "detail": str(e)
+                                    })
                                 return None
                             raise
                         if author_models:
@@ -1010,6 +1047,13 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                         except Exception as e:
                             if is_rate_limited_error(e):
                                 _set_hf_rate_limited()
+                                if status_cb:
+                                    status_cb({
+                                        "message": "Hugging Face rate limit hit",
+                                        "source": "huggingface_priority_authors",
+                                        "filename": filename,
+                                        "detail": str(e)
+                                    })
                                 return None
                             raise
                     models.extend(found)
@@ -1063,11 +1107,25 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                      if filename in files:
                          result = build_result(model_id, filename)
                          _hf_search_cache[key] = result
+                         if status_cb:
+                             status_cb({
+                                 "message": "Found on Hugging Face",
+                                 "source": "huggingface_search",
+                                 "filename": filename,
+                                 "detail": model_id
+                             })
                          return result
                      for f in files:
                          if f.endswith(filename):
                              result = build_result(model_id, f)
                              _hf_search_cache[key] = result
+                             if status_cb:
+                                 status_cb({
+                                     "message": "Found on Hugging Face",
+                                     "source": "huggingface_search",
+                                     "filename": filename,
+                                     "detail": model_id
+                                 })
                              return result
                  except Exception:
                      continue
@@ -1084,11 +1142,25 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                  if filename in files:
                      result = build_result(model_id, filename)
                      _hf_search_cache[key] = result
+                     if status_cb:
+                         status_cb({
+                             "message": "Found on Hugging Face",
+                             "source": "huggingface_search",
+                             "filename": filename,
+                             "detail": model_id
+                         })
                      return result
                  for f in files:
                      if f.endswith(filename):
                          result = build_result(model_id, f)
                          _hf_search_cache[key] = result
+                         if status_cb:
+                             status_cb({
+                                 "message": "Found on Hugging Face",
+                                 "source": "huggingface_search",
+                                 "filename": filename,
+                                 "detail": model_id
+                             })
                          return result
             except Exception:
                  continue
@@ -1099,7 +1171,17 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                 if not _hf_search_allowed():
                     return None
                 author_models = list(api.list_models(author=author, limit=50, sort="downloads", direction=-1))
-            except Exception:
+            except Exception as e:
+                if is_rate_limited_error(e):
+                    _set_hf_rate_limited()
+                    if status_cb:
+                        status_cb({
+                            "message": "Hugging Face rate limit hit",
+                            "source": "huggingface_priority_authors",
+                            "filename": filename,
+                            "detail": str(e)
+                        })
+                    return None
                 continue
             for model in author_models:
                 model_id = model.modelId
@@ -1112,20 +1194,58 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                     if filename in files:
                         result = build_result(model_id, filename)
                         _hf_search_cache[key] = result
+                        if status_cb:
+                            status_cb({
+                                "message": "Found on Hugging Face",
+                                "source": "huggingface_search",
+                                "filename": filename,
+                                "detail": model_id
+                            })
                         return result
                     for f in files:
                         if f.endswith(filename):
                             result = build_result(model_id, f)
                             _hf_search_cache[key] = result
+                            if status_cb:
+                                status_cb({
+                                    "message": "Found on Hugging Face",
+                                    "source": "huggingface_search",
+                                    "filename": filename,
+                                    "detail": model_id
+                                })
                             return result
-                except Exception:
+                except Exception as e:
+                    if is_rate_limited_error(e):
+                        _set_hf_rate_limited()
+                        if status_cb:
+                            status_cb({
+                                "message": "Hugging Face rate limit hit",
+                                "source": "huggingface_priority_authors",
+                                "filename": filename,
+                                "detail": str(e)
+                            })
+                        return None
                     continue
                  
     except Exception as e:
         if is_rate_limited_error(e):
             _set_hf_rate_limited()
+            if status_cb:
+                status_cb({
+                    "message": "Hugging Face rate limit hit",
+                    "source": "huggingface_search",
+                    "filename": filename,
+                    "detail": str(e)
+                })
         else:
             print(f"[ERROR] check_huggingface failed: {e}")
+            if status_cb:
+                status_cb({
+                    "message": "Hugging Face search error",
+                    "source": "huggingface_search",
+                    "filename": filename,
+                    "detail": str(e)
+                })
 
     if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
         return None
