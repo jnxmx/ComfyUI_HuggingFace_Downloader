@@ -807,6 +807,9 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
     # If not, os.getcwd() might be more reliable if this script is run from custom_nodes
     # For now, assuming folder_paths is correctly configured.
     
+    def _is_path_like(value: str) -> bool:
+        return ("/" in value) or ("\\" in value)
+
     for model in found_models:
         filename = model["filename"]
         requested_path = model.get("requested_path") or filename
@@ -822,13 +825,20 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             folder_type = "checkpoints"
         
         # Use ComfyUI's folder_paths to get valid paths for this type
-        search_paths = folder_paths.get_folder_paths(folder_type)
+        try:
+            search_paths = folder_paths.get_folder_paths(folder_type)
+        except KeyError:
+            search_paths = []
+
         if not search_paths:
-             # Fallback to standard models/ structure if type unknown
+            # Fallback to standard models/ structure if type unknown
             # This might not be ideal as folder_paths.get_folder_paths is the canonical way
             # but provides a safety net.
-            comfy_root = os.getcwd() # Assuming this is ComfyUI root
-            search_paths = [os.path.join(comfy_root, "models", folder_type)]
+            comfy_root = getattr(folder_paths, "base_path", os.getcwd())
+            if folder_type and (os.path.isabs(folder_type) or _is_path_like(folder_type)):
+                search_paths = [folder_type if os.path.isabs(folder_type) else os.path.join(comfy_root, folder_type)]
+            else:
+                search_paths = [os.path.join(comfy_root, "models", folder_type)]
 
         found_path = None
         found_root = None
