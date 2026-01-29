@@ -1017,6 +1017,12 @@ app.registerExtension({
             dlg.appendChild(panel);
             document.body.appendChild(dlg);
             loadFolderList();
+            setTimeout(() => {
+                if (urlInput) {
+                    urlInput.focus();
+                    urlInput.select();
+                }
+            }, 0);
         };
 
         const runAutoDownload = async () => {
