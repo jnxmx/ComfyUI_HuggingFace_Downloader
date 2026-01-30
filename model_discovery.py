@@ -1685,6 +1685,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     "filename": m.get("filename")
                 })
             break
+        _hf_api_calls = 0
         _hf_search_deadline = time.time() + HF_SEARCH_MAX_SECONDS if HF_SEARCH_MAX_SECONDS > 0 else 0.0
         _hf_search_time_exhausted = False
         if status_cb:
@@ -1714,6 +1715,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     "filename": m.get("filename")
                 })
             break
+        _hf_api_calls = 0
         _hf_search_deadline = time.time() + HF_SEARCH_MAX_SECONDS if HF_SEARCH_MAX_SECONDS > 0 else 0.0
         _hf_search_time_exhausted = False
         if status_cb:
