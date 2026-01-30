@@ -175,6 +175,7 @@ def enrich_model_with_url(model: Dict[str, Any], url: str, source: str, director
     if hf_repo:
         model["hf_repo"] = hf_repo
         model["hf_path"] = hf_path
+    print(f"[DEBUG] Found URL for {model.get('filename')} via {source}: {url}")
 
 def is_quant_variant_filename(filename: str) -> bool:
     name = os.path.splitext(filename.lower())[0]
@@ -940,8 +941,10 @@ def search_huggingface_model(
     if key in _hf_search_cache:
         cached = _hf_search_cache[key]
         if cached is not None:
+            print(f"[DEBUG] HF cache hit for {filename}")
             return cached
         if mode == "basic":
+            print(f"[DEBUG] HF cache miss for {filename} (basic), skipping")
             return None
 
     if key in HF_SEARCH_SKIP_FILENAMES:
@@ -1026,6 +1029,7 @@ def search_huggingface_model(
         if mode in ("basic", "full"):
             for term in search_terms:
                 if not _hf_search_allowed():
+                    print(f"[DEBUG] HF search budget/rate limit hit before term search for {filename}")
                     return None
                 try:
                     models = list(call_with_timeout(api.list_models, search=term, limit=20, sort="downloads", direction=-1))
@@ -1088,6 +1092,7 @@ def search_huggingface_model(
                         })
                     for term in author_search_terms:
                         if not _hf_search_allowed():
+                            print(f"[DEBUG] HF search budget/rate limit hit before author term search for {filename}")
                             return None
                         try:
                             author_models = list(call_with_timeout(
@@ -1217,6 +1222,7 @@ def search_huggingface_model(
                     if filename in files:
                         result = build_result(model_id, filename)
                         _hf_search_cache[key] = result
+                        print(f"[DEBUG] Found {filename} in repo {model_id} (priority author)")
                         if status_cb:
                             status_cb({
                                 "message": "Found on Hugging Face",
@@ -1229,6 +1235,7 @@ def search_huggingface_model(
                         if f.endswith(filename):
                             result = build_result(model_id, f)
                             _hf_search_cache[key] = result
+                            print(f"[DEBUG] Found {filename} in repo {model_id} (priority author, suffix match)")
                             if status_cb:
                                 status_cb({
                                     "message": "Found on Hugging Face",
@@ -1263,13 +1270,16 @@ def search_huggingface_model(
             model_id = model.modelId
             try:
                 if tokens and not any(t in model_id.lower() for t in tokens):
+                    print(f"[DEBUG] Skipping repo {model_id} for {filename} due to token filter")
                     continue
                 if not _hf_search_allowed():
+                    print(f"[DEBUG] HF search budget/rate limit hit before repo scan for {filename}")
                     return None
                 files = call_with_timeout(api.list_repo_files, repo_id=model_id, token=token)
                 if filename in files:
                     result = build_result(model_id, filename)
                     _hf_search_cache[key] = result
+                    print(f"[DEBUG] Found {filename} in repo {model_id}")
                     if status_cb:
                         status_cb({
                             "message": "Found on Hugging Face",
@@ -1282,6 +1292,7 @@ def search_huggingface_model(
                     if f.endswith(filename):
                         result = build_result(model_id, f)
                         _hf_search_cache[key] = result
+                        print(f"[DEBUG] Found {filename} in repo {model_id} (suffix match)")
                         if status_cb:
                             status_cb({
                                 "message": "Found on Hugging Face",
@@ -1359,6 +1370,7 @@ def search_huggingface_model(
                         if filename in files:
                             result = build_result(model_id, filename)
                             _hf_search_cache[key] = result
+                            print(f"[DEBUG] Found {filename} in repo {model_id} (priority author final)")
                             if status_cb:
                                 status_cb({
                                     "message": "Found on Hugging Face",
@@ -1371,6 +1383,7 @@ def search_huggingface_model(
                             if f.endswith(filename):
                                 result = build_result(model_id, f)
                                 _hf_search_cache[key] = result
+                                print(f"[DEBUG] Found {filename} in repo {model_id} (priority author final, suffix match)")
                                 if status_cb:
                                     status_cb({
                                         "message": "Found on Hugging Face",
@@ -1461,6 +1474,7 @@ def search_huggingface_model(
                         if filename in files:
                             result = build_result(model_id, filename)
                             _hf_search_cache[key] = result
+                            print(f"[DEBUG] Found {filename} in repo {model_id} (priority no-token)")
                             if status_cb:
                                 status_cb({
                                     "message": "Found on Hugging Face",
@@ -1473,6 +1487,7 @@ def search_huggingface_model(
                             if f.endswith(filename):
                                 result = build_result(model_id, f)
                                 _hf_search_cache[key] = result
+                                print(f"[DEBUG] Found {filename} in repo {model_id} (priority no-token, suffix match)")
                                 if status_cb:
                                     status_cb({
                                         "message": "Found on Hugging Face",
