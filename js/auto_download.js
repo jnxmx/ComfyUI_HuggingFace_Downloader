@@ -282,7 +282,7 @@ app.registerExtension({
         };
 
         /* Show loading dialog immediately */
-        const showLoadingDialog = (onCancel) => {
+        const showLoadingDialog = (onCancel, onSkip) => {
             const existing = document.getElementById("auto-download-dialog");
             if (existing) existing.remove();
 
@@ -334,6 +334,22 @@ app.registerExtension({
                 fontSize: "12px"
             });
 
+            const skipBtn = document.createElement("button");
+            skipBtn.textContent = "Skip Current";
+            Object.assign(skipBtn.style, {
+                marginTop: "16px",
+                marginLeft: "10px",
+                padding: "6px 14px",
+                background: "#2b2f3a",
+                color: "#ddd",
+                border: "1px solid #444",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "12px",
+                opacity: "0.6"
+            });
+            skipBtn.disabled = true;
+
             let cancelled = false;
             cancelBtn.onclick = () => {
                 if (!cancelled) {
@@ -347,9 +363,15 @@ app.registerExtension({
                 }
             };
 
+            skipBtn.onclick = () => {
+                if (skipBtn.disabled) return;
+                if (onSkip) onSkip();
+            };
+
             panel.appendChild(statusEl);
             panel.appendChild(detailEl);
             panel.appendChild(cancelBtn);
+            panel.appendChild(skipBtn);
 
             dlg.appendChild(panel);
             document.body.appendChild(dlg);
@@ -357,6 +379,10 @@ app.registerExtension({
                 dlg,
                 setStatus: (text) => { statusEl.textContent = text; },
                 setDetail: (text) => { detailEl.textContent = text; },
+                setSkippable: (canSkip) => {
+                    skipBtn.disabled = !canSkip;
+                    skipBtn.style.opacity = canSkip ? "1" : "0.6";
+                },
                 cleanup: () => {},
                 remove: () => { if (dlg.parentElement) dlg.remove(); }
             };
@@ -1025,14 +1051,26 @@ app.registerExtension({
             }, 0);
         };
 
-        const runAutoDownload = async () => {
+        const runAutoDownload = async (skippedFilenames = new Set()) => {
             let loadingDlg = null;
             let aborted = false;
+            let skipRequested = false;
+            let currentFilename = "";
             let statusTimer = null;
             try {
                 // Show loading dialog immediately
                 const controller = new AbortController();
                 loadingDlg = showLoadingDialog(() => {
+                    aborted = true;
+                    if (statusTimer) {
+                        clearInterval(statusTimer);
+                        statusTimer = null;
+                    }
+                    controller.abort();
+                }, () => {
+                    if (!currentFilename) return;
+                    skippedFilenames.add(currentFilename.toLowerCase());
+                    skipRequested = true;
                     aborted = true;
                     if (statusTimer) {
                         clearInterval(statusTimer);
@@ -1051,12 +1089,8 @@ app.registerExtension({
 
                 const doFetch = async (path, options = {}) => {
                     if (window.api && typeof window.api.fetchApi === "function") {
-                        try {
-                            const apiPath = String(path || "").replace(/^\/+/, "");
-                            return await window.api.fetchApi(apiPath, options);
-                        } catch (e) {
-                            // fall through to direct fetch
-                        }
+                        const apiPath = String(path || "").replace(/^\/+/, "");
+                        return window.api.fetchApi(apiPath, options);
                     }
                     const baseUrl = resolveBaseUrl();
                     const relPath = String(path || "").replace(/^\/+/, "");
@@ -1070,12 +1104,18 @@ app.registerExtension({
                         if (statusResp.status !== 200) return;
                         const statusData = await statusResp.json();
                         const status = statusData.status || {};
-                        const message = status.message || "🔍 Looking for links...";
+                        const detailRaw = status.detail || "";
+                        let message = status.message || "🔍 Looking for links...";
                         const type = status.source || "search";
                         const filename = status.filename || "";
+                        currentFilename = filename || "";
+                        if (type === "huggingface_priority_authors" && detailRaw && !/searching/i.test(message)) {
+                            message = `Searching ${detailRaw}`;
+                        }
                         const detail = filename ? `${type}:${filename}` : type;
                         loadingDlg.setStatus(message);
                         loadingDlg.setDetail(detail);
+                        loadingDlg.setSkippable(Boolean(currentFilename));
                     } catch (e) {
                         // Ignore polling errors during search
                     }
@@ -1090,7 +1130,7 @@ app.registerExtension({
                 const resp = await doFetch("/check_missing_models", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ...workflow, request_id: requestId }),
+                    body: JSON.stringify({ ...workflow, request_id: requestId, skip_filenames: Array.from(skippedFilenames) }),
                     signal: controller.signal
                 });
 
@@ -1129,6 +1169,16 @@ app.registerExtension({
                     }
                     loadingDlg.cleanup();
                     if (aborted || (e && e.name === "AbortError")) {
+                        if (skipRequested) {
+                            skipRequested = false;
+                            aborted = false;
+                            currentFilename = "";
+                            // Restart scan with updated skip list
+                            setTimeout(() => {
+                                runAutoDownload(skippedFilenames);
+                            }, 0);
+                            return;
+                        }
                         loadingDlg.setStatus("Cancelled.");
                         return;
                     }
