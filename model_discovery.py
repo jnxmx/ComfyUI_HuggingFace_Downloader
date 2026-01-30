@@ -922,7 +922,11 @@ def search_huggingface_model(
 
     key = _normalize_hf_search_key(filename)
     if key in _hf_search_cache:
-        return _hf_search_cache[key]
+        cached = _hf_search_cache[key]
+        if cached is not None:
+            return cached
+        if mode == "basic":
+            return None
 
     if key in HF_SEARCH_SKIP_FILENAMES:
         print(f"[DEBUG] Skipping HF search for generic filename: {filename}")
@@ -1184,22 +1188,22 @@ def search_huggingface_model(
         # Final fallback: scan priority authors more broadly if nothing matched
         if mode in ("priority", "full"):
             for author in PRIORITY_AUTHORS:
-            try:
-                if not _hf_search_allowed():
-                    return None
-                author_models = list(api.list_models(author=author, limit=100, sort="downloads", direction=-1))
-            except Exception as e:
-                if is_rate_limited_error(e):
-                    _set_hf_rate_limited()
-                    if status_cb:
-                        status_cb({
-                            "message": "Hugging Face rate limit hit",
-                            "source": "huggingface_priority_authors",
-                            "filename": filename,
-                            "detail": str(e)
-                        })
-                    return None
-                continue
+                try:
+                    if not _hf_search_allowed():
+                        return None
+                    author_models = list(api.list_models(author=author, limit=100, sort="downloads", direction=-1))
+                except Exception as e:
+                    if is_rate_limited_error(e):
+                        _set_hf_rate_limited()
+                        if status_cb:
+                            status_cb({
+                                "message": "Hugging Face rate limit hit",
+                                "source": "huggingface_priority_authors",
+                                "filename": filename,
+                                "detail": str(e)
+                            })
+                        return None
+                    continue
                 for model in author_models:
                     model_id = model.modelId
                     try:
@@ -1267,7 +1271,8 @@ def search_huggingface_model(
     if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
         return None
 
-    _hf_search_cache[key] = None
+    if mode != "basic":
+        _hf_search_cache[key] = None
     return None
 
 def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb=None) -> Dict[str, Any]:
@@ -1281,42 +1286,6 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     global _hf_api_calls
     _hf_api_calls = 0
     required_models = extract_models_from_workflow(workflow_json)
-
-    def _derive_repo_hints_from_filename(name: str) -> set[str]:
-        if not name:
-            return set()
-        stem = os.path.splitext(os.path.basename(name))[0].lower()
-        tokens = [t for t in re.split(r"[-_]", stem) if t]
-        hints: set[str] = set()
-
-        if tokens:
-            first = tokens[0]
-            if len(first) >= 4:
-                hints.add(first)
-            m = re.match(r"([a-z]+)(\d+)", first)
-            if m:
-                hints.add(f"{m.group(1)}-{m.group(2)}")
-                hints.add(f"{m.group(1)}{m.group(2)}")
-
-        if len(tokens) >= 2 and tokens[0].isalpha():
-            if tokens[1].isdigit():
-                hints.add(f"{tokens[0]}-{tokens[1]}")
-                hints.add(f"{tokens[0]}{tokens[1]}")
-            if tokens[1].startswith("v") and tokens[1][1:].isdigit():
-                hints.add(f"{tokens[0]}-{tokens[1]}")
-
-        return hints
-
-    repo_id_hints: set[str] = set()
-    repo_name_hints: set[str] = set()
-    for model in required_models:
-        url = model.get("url")
-        if url:
-            repo_id, _ = extract_huggingface_info(url)
-            if repo_id:
-                repo_id_hints.add(repo_id)
-                repo_name_hints.add(repo_id.split("/")[-1])
-        repo_name_hints.update(_derive_repo_hints_from_filename(model.get("filename") or ""))
 
     def _normalize_dedupe_path(value: str | None) -> str:
         if not value:
@@ -1440,29 +1409,45 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
 
     # 5. Search HF for remaining missing models (that didn't have URL from registry/manager)
     token = get_token()
-    final_missing = []
-    for m in missing_models:
-        if not m.get("url"):
-            if status_cb:
-                status_cb({
-                    "message": "Searching Hugging Face",
-                    "source": "huggingface_search",
-                    "filename": m.get("filename")
-                })
-            # Try HF search
-            result = search_huggingface_model(
-                m["filename"],
-                token,
-                status_cb=status_cb,
-                repo_hints=sorted(repo_name_hints),
-                repo_id_hints=sorted(repo_id_hints)
-            )
-            if result:
-                m["url"] = result.get("url")
-                m["hf_repo"] = result.get("hf_repo")
-                m["hf_path"] = result.get("hf_path")
-                m["source"] = "huggingface_search"
-        final_missing.append(m)
+    for m in [m for m in missing_models if not m.get("url")]:
+        if status_cb:
+            status_cb({
+                "message": "Searching Hugging Face",
+                "source": "huggingface_search",
+                "filename": m.get("filename")
+            })
+        result = search_huggingface_model(
+            m["filename"],
+            token,
+            status_cb=status_cb,
+            mode="basic"
+        )
+        if result:
+            m["url"] = result.get("url")
+            m["hf_repo"] = result.get("hf_repo")
+            m["hf_path"] = result.get("hf_path")
+            m["source"] = "huggingface_search"
+
+    for m in [m for m in missing_models if not m.get("url")]:
+        if status_cb:
+            status_cb({
+                "message": "Searching Hugging Face",
+                "source": "huggingface_search",
+                "filename": m.get("filename")
+            })
+        result = search_huggingface_model(
+            m["filename"],
+            token,
+            status_cb=status_cb,
+            mode="priority"
+        )
+        if result:
+            m["url"] = result.get("url")
+            m["hf_repo"] = result.get("hf_repo")
+            m["hf_path"] = result.get("hf_path")
+            m["source"] = "huggingface_search"
+
+    final_missing = missing_models
 
     # 6. Quantized variant detection for unresolved models (no URL)
     if final_missing:

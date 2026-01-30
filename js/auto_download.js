@@ -1050,11 +1050,9 @@ app.registerExtension({
                         const statusData = await statusResp.json();
                         const status = statusData.status || {};
                         const message = status.message || "🔍 Looking for links...";
-                        const parts = [];
-                        if (status.filename) parts.push(`Model: ${status.filename}`);
-                        if (status.source) parts.push(`Source: ${status.source}`);
-                        if (status.detail) parts.push(status.detail);
-                        const detail = parts.length ? parts.join(" • ") : "Waiting for status...";
+                        const type = status.source || "search";
+                        const filename = status.filename || "";
+                        const detail = filename ? `${type}:${filename}` : type;
                         loadingDlg.setStatus(message);
                         loadingDlg.setDetail(detail);
                     } catch (e) {
