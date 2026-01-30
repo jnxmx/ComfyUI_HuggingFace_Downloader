@@ -1052,7 +1052,8 @@ app.registerExtension({
                 const doFetch = async (path, options = {}) => {
                     if (window.api && typeof window.api.fetchApi === "function") {
                         try {
-                            return await window.api.fetchApi(path, options);
+                            const apiPath = String(path || "").replace(/^\/+/, "");
+                            return await window.api.fetchApi(apiPath, options);
                         } catch (e) {
                             // fall through to direct fetch
                         }

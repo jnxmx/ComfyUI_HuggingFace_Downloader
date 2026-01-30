@@ -1135,7 +1135,6 @@ def search_huggingface_model(
                             raise
                         if author_models:
                             found.extend(author_models)
-                            break
                     print(f"[DEBUG] Priority author {author} search returned {len(found)} repos for {filename}")
                     if 0 < len(found) <= 5:
                         try:
