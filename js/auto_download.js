@@ -1050,14 +1050,17 @@ app.registerExtension({
                 };
 
                 const doFetch = async (path, options = {}) => {
+                    if (window.api && typeof window.api.fetchApi === "function") {
+                        try {
+                            return await window.api.fetchApi(path, options);
+                        } catch (e) {
+                            // fall through to direct fetch
+                        }
+                    }
                     const baseUrl = resolveBaseUrl();
                     const relPath = String(path || "").replace(/^\/+/, "");
                     const url = new URL(relPath, baseUrl).toString();
-                    const resp = await fetch(url, options);
-                    if (resp.status === 405 && window.api && typeof window.api.fetchApi === "function") {
-                        return window.api.fetchApi(path, options);
-                    }
-                    return resp;
+                    return fetch(url, options);
                 };
 
                 const pollStatus = async () => {
