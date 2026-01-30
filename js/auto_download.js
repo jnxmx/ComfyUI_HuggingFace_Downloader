@@ -1043,9 +1043,16 @@ app.registerExtension({
 
                 const requestId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
+                const doFetch = async (path, options = {}) => {
+                    if (window.api && typeof window.api.fetchApi === "function") {
+                        return window.api.fetchApi(path, options);
+                    }
+                    return fetch(path, options);
+                };
+
                 const pollStatus = async () => {
                     try {
-                        const statusResp = await fetch(`/search_status?request_id=${encodeURIComponent(requestId)}`);
+                        const statusResp = await doFetch(`/search_status?request_id=${encodeURIComponent(requestId)}`);
                         if (statusResp.status !== 200) return;
                         const statusData = await statusResp.json();
                         const status = statusData.status || {};
@@ -1066,7 +1073,7 @@ app.registerExtension({
                 console.log("[AutoDownload] Scanning workflow:", workflow);
 
                 // Call backend
-                const resp = await fetch("/check_missing_models", {
+                const resp = await doFetch("/check_missing_models", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ ...workflow, request_id: requestId }),
@@ -1084,7 +1091,14 @@ app.registerExtension({
                 }
 
                 if (resp.status !== 200) {
-                    throw new Error("Failed to scan models: " + resp.statusText + " (" + resp.status + ")");
+                    let detail = resp.statusText;
+                    try {
+                        const bodyText = await resp.text();
+                        if (bodyText) detail = bodyText;
+                    } catch (e) {
+                        // ignore
+                    }
+                    throw new Error("Failed to scan models: " + detail + " (" + resp.status + ")");
                 }
                 const data = await resp.json();
                 console.log("[AutoDownload] Scan results:", data);
