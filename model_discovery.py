@@ -2,6 +2,7 @@ import os
 import re
 import json
 import time
+import concurrent.futures
 from typing import List, Dict, Any, Tuple
 from huggingface_hub import HfApi
 from .downloader import get_token
@@ -27,9 +28,13 @@ _manager_model_list_cache = None
 _hf_search_cache: dict[str, dict | None] = {}
 _hf_api_calls = 0
 _hf_rate_limited_until = 0.0
+_hf_search_deadline = 0.0
+_hf_search_time_exhausted = False
 
 HF_SEARCH_MAX_CALLS = int(os.getenv("HF_SEARCH_MAX_CALLS", "200"))
 HF_SEARCH_RATE_LIMIT_SECONDS = int(os.getenv("HF_SEARCH_RATE_LIMIT_SECONDS", "300"))
+HF_SEARCH_MAX_SECONDS = int(os.getenv("HF_SEARCH_MAX_SECONDS", "60"))
+HF_SEARCH_CALL_TIMEOUT = int(os.getenv("HF_SEARCH_CALL_TIMEOUT", "20"))
 
 HF_SEARCH_SKIP_FILENAMES = {
     "pytorch_model.bin",
@@ -896,6 +901,10 @@ def _hf_search_allowed() -> bool:
     global _hf_api_calls
     if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
         return False
+    if _hf_search_deadline and time.time() >= _hf_search_deadline:
+        global _hf_search_time_exhausted
+        _hf_search_time_exhausted = True
+        return False
     if _hf_api_calls >= HF_SEARCH_MAX_CALLS:
         return False
     _hf_api_calls += 1
@@ -907,6 +916,15 @@ def _set_hf_rate_limited() -> None:
         return
     _hf_rate_limited_until = time.time() + HF_SEARCH_RATE_LIMIT_SECONDS
     print(f"[WARN] Hugging Face rate limit hit; pausing search for {HF_SEARCH_RATE_LIMIT_SECONDS}s.")
+
+def _hf_search_budget_exhausted() -> bool:
+    if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
+        return True
+    if _hf_search_deadline and time.time() >= _hf_search_deadline:
+        return True
+    if _hf_api_calls >= HF_SEARCH_MAX_CALLS:
+        return True
+    return False
 
 def search_huggingface_model(
     filename: str,
@@ -979,6 +997,15 @@ def search_huggingface_model(
         text = str(err)
         return "429" in text or "Too Many Requests" in text or "rate limit" in text.lower()
 
+    def is_timeout_error(err: Exception) -> bool:
+        text = str(err).lower()
+        return "timeout" in text or "timed out" in text or "gateway" in text or "504" in text or "524" in text
+
+    def call_with_timeout(fn, *args, **kwargs):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(fn, *args, **kwargs)
+            return fut.result(timeout=HF_SEARCH_CALL_TIMEOUT)
+
     try:
         search_terms = build_search_terms(filename)
         models = []
@@ -994,8 +1021,26 @@ def search_huggingface_model(
                 if not _hf_search_allowed():
                     return None
                 try:
-                    models = list(api.list_models(search=term, limit=20, sort="downloads", direction=-1))
+                    models = list(call_with_timeout(api.list_models, search=term, limit=20, sort="downloads", direction=-1))
+                except concurrent.futures.TimeoutError:
+                    if status_cb:
+                        status_cb({
+                            "message": "Hugging Face search timeout",
+                            "source": "huggingface_search",
+                            "filename": filename,
+                            "detail": f"list_models({term})"
+                        })
+                    return None
                 except Exception as e:
+                    if is_timeout_error(e):
+                        if status_cb:
+                            status_cb({
+                                "message": "Hugging Face search timeout",
+                                "source": "huggingface_search",
+                                "filename": filename,
+                                "detail": f"list_models({term})"
+                            })
+                        return None
                     if is_rate_limited_error(e):
                         _set_hf_rate_limited()
                         if status_cb:
@@ -1037,14 +1082,33 @@ def search_huggingface_model(
                         if not _hf_search_allowed():
                             return None
                         try:
-                            author_models = list(api.list_models(
+                            author_models = list(call_with_timeout(
+                                api.list_models,
                                 author=author,
                                 search=term,
                                 limit=15,
                                 sort="downloads",
                                 direction=-1
                             ))
+                        except concurrent.futures.TimeoutError:
+                            if status_cb:
+                                status_cb({
+                                    "message": "Hugging Face search timeout",
+                                    "source": "huggingface_priority_authors",
+                                    "filename": filename,
+                                    "detail": f"list_models({author}, {term})"
+                                })
+                            return None
                         except Exception as e:
+                            if is_timeout_error(e):
+                                if status_cb:
+                                    status_cb({
+                                        "message": "Hugging Face search timeout",
+                                        "source": "huggingface_priority_authors",
+                                        "filename": filename,
+                                        "detail": f"list_models({author}, {term})"
+                                    })
+                                return None
                             if is_rate_limited_error(e):
                                 _set_hf_rate_limited()
                                 if status_cb:
@@ -1063,8 +1127,26 @@ def search_huggingface_model(
                         if not _hf_search_allowed():
                             return None
                         try:
-                            found = list(api.list_models(author=author, limit=100, sort="downloads", direction=-1))
+                            found = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads", direction=-1))
+                        except concurrent.futures.TimeoutError:
+                            if status_cb:
+                                status_cb({
+                                    "message": "Hugging Face search timeout",
+                                    "source": "huggingface_priority_authors",
+                                    "filename": filename,
+                                    "detail": f"list_models({author})"
+                                })
+                            return None
                         except Exception as e:
+                            if is_timeout_error(e):
+                                if status_cb:
+                                    status_cb({
+                                        "message": "Hugging Face search timeout",
+                                        "source": "huggingface_priority_authors",
+                                        "filename": filename,
+                                        "detail": f"list_models({author})"
+                                    })
+                                return None
                             if is_rate_limited_error(e):
                                 _set_hf_rate_limited()
                                 if status_cb:
@@ -1119,70 +1201,106 @@ def search_huggingface_model(
             author = model_id.split("/")[0] if "/" in model_id else ""
             
             if author in PRIORITY_AUTHORS:
-                 # Check if this repo actually has the file
-                 try:
-                     if not _hf_search_allowed():
-                         return None
-                     files = api.list_repo_files(repo_id=model_id, token=token)
-                     if filename in files:
-                         result = build_result(model_id, filename)
-                         _hf_search_cache[key] = result
-                         if status_cb:
-                             status_cb({
-                                 "message": "Found on Hugging Face",
-                                 "source": "huggingface_search",
-                                 "filename": filename,
-                                 "detail": model_id
-                             })
-                         return result
-                     for f in files:
-                         if f.endswith(filename):
-                             result = build_result(model_id, f)
-                             _hf_search_cache[key] = result
-                             if status_cb:
-                                 status_cb({
-                                     "message": "Found on Hugging Face",
-                                     "source": "huggingface_search",
-                                     "filename": filename,
-                                     "detail": model_id
-                                 })
-                             return result
-                 except Exception:
-                     continue
+                # Check if this repo actually has the file
+                try:
+                    if not _hf_search_allowed():
+                        return None
+                    files = call_with_timeout(api.list_repo_files, repo_id=model_id, token=token)
+                    if filename in files:
+                        result = build_result(model_id, filename)
+                        _hf_search_cache[key] = result
+                        if status_cb:
+                            status_cb({
+                                "message": "Found on Hugging Face",
+                                "source": "huggingface_search",
+                                "filename": filename,
+                                "detail": model_id
+                            })
+                        return result
+                    for f in files:
+                        if f.endswith(filename):
+                            result = build_result(model_id, f)
+                            _hf_search_cache[key] = result
+                            if status_cb:
+                                status_cb({
+                                    "message": "Found on Hugging Face",
+                                    "source": "huggingface_search",
+                                    "filename": filename,
+                                    "detail": model_id
+                                })
+                            return result
+                except concurrent.futures.TimeoutError:
+                    if status_cb:
+                        status_cb({
+                            "message": "Hugging Face search timeout",
+                            "source": "huggingface_search",
+                            "filename": filename,
+                            "detail": f"list_repo_files({model_id})"
+                        })
+                    continue
+                except Exception as e:
+                    if is_timeout_error(e):
+                        if status_cb:
+                            status_cb({
+                                "message": "Hugging Face search timeout",
+                                "source": "huggingface_search",
+                                "filename": filename,
+                                "detail": f"list_repo_files({model_id})"
+                            })
+                        continue
+                    continue
 
         # If no priority author found, check the rest of the results
         for model in models:
             model_id = model.modelId
             try:
-                 if tokens and not any(t in model_id.lower() for t in tokens):
-                     continue
-                 if not _hf_search_allowed():
-                     return None
-                 files = api.list_repo_files(repo_id=model_id, token=token)
-                 if filename in files:
-                     result = build_result(model_id, filename)
-                     _hf_search_cache[key] = result
-                     if status_cb:
-                         status_cb({
-                             "message": "Found on Hugging Face",
-                             "source": "huggingface_search",
-                             "filename": filename,
-                             "detail": model_id
-                         })
-                     return result
-                 for f in files:
-                     if f.endswith(filename):
-                         result = build_result(model_id, f)
-                         _hf_search_cache[key] = result
-                         if status_cb:
-                             status_cb({
-                                 "message": "Found on Hugging Face",
-                                 "source": "huggingface_search",
-                                 "filename": filename,
-                                 "detail": model_id
-                             })
-                         return result
-            except Exception:
+                if tokens and not any(t in model_id.lower() for t in tokens):
+                    continue
+                if not _hf_search_allowed():
+                    return None
+                files = call_with_timeout(api.list_repo_files, repo_id=model_id, token=token)
+                if filename in files:
+                    result = build_result(model_id, filename)
+                    _hf_search_cache[key] = result
+                    if status_cb:
+                        status_cb({
+                            "message": "Found on Hugging Face",
+                            "source": "huggingface_search",
+                            "filename": filename,
+                            "detail": model_id
+                        })
+                        return result
+                for f in files:
+                    if f.endswith(filename):
+                        result = build_result(model_id, f)
+                        _hf_search_cache[key] = result
+                        if status_cb:
+                            status_cb({
+                                "message": "Found on Hugging Face",
+                                "source": "huggingface_search",
+                                "filename": filename,
+                                "detail": model_id
+                            })
+                        return result
+            except concurrent.futures.TimeoutError:
+                if status_cb:
+                    status_cb({
+                        "message": "Hugging Face search timeout",
+                        "source": "huggingface_search",
+                        "filename": filename,
+                        "detail": f"list_repo_files({model_id})"
+                    })
+                continue
+            except Exception as e:
+                if is_timeout_error(e):
+                    if status_cb:
+                        status_cb({
+                            "message": "Hugging Face search timeout",
+                            "source": "huggingface_search",
+                            "filename": filename,
+                            "detail": f"list_repo_files({model_id})"
+                        })
+                    continue
                  continue
 
         # Final fallback: scan priority authors more broadly if nothing matched
@@ -1191,8 +1309,26 @@ def search_huggingface_model(
                 try:
                     if not _hf_search_allowed():
                         return None
-                    author_models = list(api.list_models(author=author, limit=100, sort="downloads", direction=-1))
+                    author_models = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads", direction=-1))
+                except concurrent.futures.TimeoutError:
+                    if status_cb:
+                        status_cb({
+                            "message": "Hugging Face search timeout",
+                            "source": "huggingface_priority_authors",
+                            "filename": filename,
+                            "detail": f"list_models({author})"
+                        })
+                    return None
                 except Exception as e:
+                    if is_timeout_error(e):
+                        if status_cb:
+                            status_cb({
+                                "message": "Hugging Face search timeout",
+                                "source": "huggingface_priority_authors",
+                                "filename": filename,
+                                "detail": f"list_models({author})"
+                            })
+                        return None
                     if is_rate_limited_error(e):
                         _set_hf_rate_limited()
                         if status_cb:
@@ -1211,7 +1347,7 @@ def search_huggingface_model(
                             continue
                         if not _hf_search_allowed():
                             return None
-                        files = api.list_repo_files(repo_id=model_id, token=token)
+                        files = call_with_timeout(api.list_repo_files, repo_id=model_id, token=token)
                         if filename in files:
                             result = build_result(model_id, filename)
                             _hf_search_cache[key] = result
@@ -1235,7 +1371,25 @@ def search_huggingface_model(
                                         "detail": model_id
                                     })
                                 return result
+                    except concurrent.futures.TimeoutError:
+                        if status_cb:
+                            status_cb({
+                                "message": "Hugging Face search timeout",
+                                "source": "huggingface_priority_authors",
+                                "filename": filename,
+                                "detail": f"list_repo_files({model_id})"
+                            })
+                        continue
                     except Exception as e:
+                        if is_timeout_error(e):
+                            if status_cb:
+                                status_cb({
+                                    "message": "Hugging Face search timeout",
+                                    "source": "huggingface_priority_authors",
+                                    "filename": filename,
+                                    "detail": f"list_repo_files({model_id})"
+                                })
+                            continue
                         if is_rate_limited_error(e):
                             _set_hf_rate_limited()
                             if status_cb:
@@ -1283,8 +1437,11 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     3. If missing, search HF.
     """
     
-    global _hf_api_calls
+    global _hf_api_calls, _hf_search_deadline, _hf_search_time_exhausted, _hf_rate_limited_until
     _hf_api_calls = 0
+    _hf_search_deadline = time.time() + HF_SEARCH_MAX_SECONDS if HF_SEARCH_MAX_SECONDS > 0 else 0.0
+    _hf_search_time_exhausted = False
+    _hf_rate_limited_until = None
     required_models = extract_models_from_workflow(workflow_json)
 
     def _normalize_dedupe_path(value: str | None) -> str:
@@ -1410,6 +1567,14 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     # 5. Search HF for remaining missing models (that didn't have URL from registry/manager)
     token = get_token()
     for m in [m for m in missing_models if not m.get("url")]:
+        if _hf_search_time_exhausted or _hf_search_budget_exhausted():
+            if status_cb:
+                status_cb({
+                    "message": "Hugging Face search budget exhausted",
+                    "source": "huggingface_search",
+                    "filename": m.get("filename")
+                })
+            break
         if status_cb:
             status_cb({
                 "message": "Searching Hugging Face",
@@ -1429,6 +1594,14 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             m["source"] = "huggingface_search"
 
     for m in [m for m in missing_models if not m.get("url")]:
+        if _hf_search_time_exhausted or _hf_search_budget_exhausted():
+            if status_cb:
+                status_cb({
+                    "message": "Hugging Face search budget exhausted",
+                    "source": "huggingface_search",
+                    "filename": m.get("filename")
+                })
+            break
         if status_cb:
             status_cb({
                 "message": "Searching Hugging Face",
