@@ -1063,7 +1063,7 @@ def search_huggingface_model(
             print(f"[DEBUG] Still no results, checking priority authors directly...")
             if status_cb:
                 status_cb({
-                    "message": "Checking priority authors",
+                    "message": "Checking priority authors (token-filtered)",
                     "source": "huggingface_priority_authors",
                     "filename": filename
                 })
@@ -1329,17 +1329,17 @@ def search_huggingface_model(
                                 "detail": f"list_models({author})"
                             })
                         return None
-                    if is_rate_limited_error(e):
-                        _set_hf_rate_limited()
-                        if status_cb:
-                            status_cb({
-                                "message": "Hugging Face rate limit hit",
-                                "source": "huggingface_priority_authors",
-                                "filename": filename,
-                                "detail": str(e)
-                            })
-                        return None
-                    continue
+                        if is_rate_limited_error(e):
+                            _set_hf_rate_limited()
+                            if status_cb:
+                                status_cb({
+                                    "message": "Hugging Face rate limit hit",
+                                    "source": "huggingface_priority_authors",
+                                    "filename": filename,
+                                    "detail": str(e)
+                                })
+                            return None
+                        continue
                 for model in author_models:
                     model_id = model.modelId
                     try:
@@ -1367,6 +1367,108 @@ def search_huggingface_model(
                                     status_cb({
                                         "message": "Found on Hugging Face",
                                         "source": "huggingface_search",
+                                        "filename": filename,
+                                        "detail": model_id
+                                    })
+                                return result
+                    except concurrent.futures.TimeoutError:
+                        if status_cb:
+                            status_cb({
+                                "message": "Hugging Face search timeout",
+                                "source": "huggingface_priority_authors",
+                                "filename": filename,
+                                "detail": f"list_repo_files({model_id})"
+                            })
+                        continue
+                    except Exception as e:
+                        if is_timeout_error(e):
+                            if status_cb:
+                                status_cb({
+                                    "message": "Hugging Face search timeout",
+                                    "source": "huggingface_priority_authors",
+                                    "filename": filename,
+                                    "detail": f"list_repo_files({model_id})"
+                                })
+                            continue
+                        if is_rate_limited_error(e):
+                            _set_hf_rate_limited()
+                            if status_cb:
+                                status_cb({
+                                    "message": "Hugging Face rate limit hit",
+                                    "source": "huggingface_priority_authors",
+                                    "filename": filename,
+                                    "detail": str(e)
+                                })
+                            return None
+                        continue
+
+            # Additional priority-author pass without token filtering (last resort).
+            if status_cb:
+                status_cb({
+                    "message": "Checking priority authors (no token filter)",
+                    "source": "huggingface_priority_authors",
+                    "filename": filename
+                })
+            for author in PRIORITY_AUTHORS:
+                try:
+                    if not _hf_search_allowed():
+                        return None
+                    author_models = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads", direction=-1))
+                except concurrent.futures.TimeoutError:
+                    if status_cb:
+                        status_cb({
+                            "message": "Hugging Face search timeout",
+                            "source": "huggingface_priority_authors",
+                            "filename": filename,
+                            "detail": f"list_models({author})"
+                        })
+                    return None
+                except Exception as e:
+                    if is_timeout_error(e):
+                        if status_cb:
+                            status_cb({
+                                "message": "Hugging Face search timeout",
+                                "source": "huggingface_priority_authors",
+                                "filename": filename,
+                                "detail": f"list_models({author})"
+                            })
+                        return None
+                    if is_rate_limited_error(e):
+                        _set_hf_rate_limited()
+                        if status_cb:
+                            status_cb({
+                                "message": "Hugging Face rate limit hit",
+                                "source": "huggingface_priority_authors",
+                                "filename": filename,
+                                "detail": str(e)
+                            })
+                        return None
+                    continue
+                for model in author_models:
+                    model_id = model.modelId
+                    try:
+                        if not _hf_search_allowed():
+                            return None
+                        files = call_with_timeout(api.list_repo_files, repo_id=model_id, token=token)
+                        if filename in files:
+                            result = build_result(model_id, filename)
+                            _hf_search_cache[key] = result
+                            if status_cb:
+                                status_cb({
+                                    "message": "Found on Hugging Face",
+                                    "source": "huggingface_priority_authors",
+                                    "filename": filename,
+                                    "detail": model_id
+                                })
+                            return result
+                        for f in files:
+                            if f.endswith(filename):
+                                result = build_result(model_id, f)
+                                _hf_search_cache[key] = result
+                                if status_cb:
+                                    status_cb({
+                                        "message": "Found on Hugging Face",
+                                        "source": "huggingface_priority_authors",
                                         "filename": filename,
                                         "detail": model_id
                                     })
@@ -1577,7 +1679,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             break
         if status_cb:
             status_cb({
-                "message": "Searching Hugging Face",
+                "message": "Searching Hugging Face (basic)",
                 "source": "huggingface_search",
                 "filename": m.get("filename")
             })
@@ -1604,7 +1706,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             break
         if status_cb:
             status_cb({
-                "message": "Searching Hugging Face",
+                "message": "Searching Hugging Face (priority)",
                 "source": "huggingface_search",
                 "filename": m.get("filename")
             })
