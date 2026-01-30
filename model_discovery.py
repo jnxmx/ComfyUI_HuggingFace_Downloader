@@ -998,7 +998,7 @@ def search_huggingface_model(
             alpha = re.sub(r"\d+", "", t).lower()
             add_term(terms, alpha)
         return terms
-    
+
     # 1. Try to search specifically in priority authors' repos first?
     # Actually, listing models by author and filtering is expensive. 
     # Better to use the global search and filter results.
@@ -1136,6 +1136,7 @@ def search_huggingface_model(
                         if author_models:
                             found.extend(author_models)
                             break
+                    print(f"[DEBUG] Priority author {author} search returned {len(found)} repos for {filename}")
                     if not found:
                         if not _hf_search_allowed():
                             return None
@@ -1171,6 +1172,7 @@ def search_huggingface_model(
                                     })
                                 return None
                             raise
+                        print(f"[DEBUG] Priority author {author} list returned {len(found)} repos for {filename}")
                     models.extend(found)
                 except Exception:
                     continue
@@ -1357,8 +1359,9 @@ def search_huggingface_model(
                                     "filename": filename,
                                     "detail": str(e)
                                 })
-                            return None
-                        continue
+                        return None
+                    continue
+                print(f"[DEBUG] Priority author final list for {author}: {len(author_models)} repos for {filename}")
                 for model in author_models:
                     model_id = model.modelId
                     try:
@@ -1465,6 +1468,7 @@ def search_huggingface_model(
                             })
                         return None
                     continue
+                print(f"[DEBUG] Priority author no-token list for {author}: {len(author_models)} repos for {filename}")
                 for model in author_models:
                     model_id = model.modelId
                     try:
