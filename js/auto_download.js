@@ -1043,11 +1043,21 @@ app.registerExtension({
 
                 const requestId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
+                const resolveBaseUrl = () => {
+                    const path = window.location.pathname || "/";
+                    const basePath = path.endsWith("/") ? path : path.replace(/\/[^/]*$/, "/");
+                    return window.location.origin + basePath;
+                };
+
                 const doFetch = async (path, options = {}) => {
-                    if (window.api && typeof window.api.fetchApi === "function") {
+                    const baseUrl = resolveBaseUrl();
+                    const relPath = String(path || "").replace(/^\/+/, "");
+                    const url = new URL(relPath, baseUrl).toString();
+                    const resp = await fetch(url, options);
+                    if (resp.status === 405 && window.api && typeof window.api.fetchApi === "function") {
                         return window.api.fetchApi(path, options);
                     }
-                    return fetch(path, options);
+                    return resp;
                 };
 
                 const pollStatus = async () => {
