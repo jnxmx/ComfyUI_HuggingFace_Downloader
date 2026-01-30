@@ -986,6 +986,15 @@ def search_huggingface_model(
         if len(tokens) >= 3:
             add_term(terms, "-".join(tokens[:3]))
         return terms
+
+    def build_author_search_terms(name: str) -> list[str]:
+        terms = build_search_terms(name)
+        stem = os.path.splitext(name)[0]
+        tokens = [t for t in re.split(r"[-_]", stem) if t]
+        for t in tokens:
+            alpha = re.sub(r"\d+", "", t).lower()
+            add_term(terms, alpha)
+        return terms
     
     # 1. Try to search specifically in priority authors' repos first?
     # Actually, listing models by author and filtering is expensive. 
@@ -1065,6 +1074,7 @@ def search_huggingface_model(
                     "source": "huggingface_priority_authors",
                     "filename": filename
                 })
+            author_search_terms = build_author_search_terms(filename)
             total_authors = len(PRIORITY_AUTHORS)
             for author_index, author in enumerate(PRIORITY_AUTHORS, start=1):
                 try:
@@ -1076,7 +1086,7 @@ def search_huggingface_model(
                             "filename": filename,
                             "detail": author
                         })
-                    for term in search_terms:
+                    for term in author_search_terms:
                         if not _hf_search_allowed():
                             return None
                         try:
