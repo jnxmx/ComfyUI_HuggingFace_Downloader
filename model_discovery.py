@@ -920,8 +920,6 @@ def _set_hf_rate_limited() -> None:
 def _hf_search_budget_exhausted() -> bool:
     if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
         return True
-    if _hf_search_deadline and time.time() >= _hf_search_deadline:
-        return True
     if _hf_api_calls >= HF_SEARCH_MAX_CALLS:
         return True
     return False
@@ -1541,7 +1539,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     
     global _hf_api_calls, _hf_search_deadline, _hf_search_time_exhausted, _hf_rate_limited_until
     _hf_api_calls = 0
-    _hf_search_deadline = time.time() + HF_SEARCH_MAX_SECONDS if HF_SEARCH_MAX_SECONDS > 0 else 0.0
+    _hf_search_deadline = 0.0
     _hf_search_time_exhausted = False
     _hf_rate_limited_until = None
     required_models = extract_models_from_workflow(workflow_json)
@@ -1669,7 +1667,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     # 5. Search HF for remaining missing models (that didn't have URL from registry/manager)
     token = get_token()
     for m in [m for m in missing_models if not m.get("url")]:
-        if _hf_search_time_exhausted or _hf_search_budget_exhausted():
+        if _hf_search_budget_exhausted():
             if status_cb:
                 status_cb({
                     "message": "Hugging Face search budget exhausted",
@@ -1677,6 +1675,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     "filename": m.get("filename")
                 })
             break
+        _hf_search_deadline = time.time() + HF_SEARCH_MAX_SECONDS if HF_SEARCH_MAX_SECONDS > 0 else 0.0
+        _hf_search_time_exhausted = False
         if status_cb:
             status_cb({
                 "message": "Searching Hugging Face (basic)",
@@ -1696,7 +1696,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             m["source"] = "huggingface_search"
 
     for m in [m for m in missing_models if not m.get("url")]:
-        if _hf_search_time_exhausted or _hf_search_budget_exhausted():
+        if _hf_search_budget_exhausted():
             if status_cb:
                 status_cb({
                     "message": "Hugging Face search budget exhausted",
@@ -1704,6 +1704,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     "filename": m.get("filename")
                 })
             break
+        _hf_search_deadline = time.time() + HF_SEARCH_MAX_SECONDS if HF_SEARCH_MAX_SECONDS > 0 else 0.0
+        _hf_search_time_exhausted = False
         if status_cb:
             status_cb({
                 "message": "Searching Hugging Face (priority)",
