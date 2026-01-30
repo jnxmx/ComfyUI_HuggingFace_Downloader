@@ -1137,6 +1137,12 @@ def search_huggingface_model(
                             found.extend(author_models)
                             break
                     print(f"[DEBUG] Priority author {author} search returned {len(found)} repos for {filename}")
+                    if 0 < len(found) <= 5:
+                        try:
+                            ids = [m.modelId for m in found]
+                            print(f"[DEBUG] Priority author {author} repos for {filename}: {ids}")
+                        except Exception:
+                            pass
                     if not found:
                         if not _hf_search_allowed():
                             return None
@@ -1173,6 +1179,12 @@ def search_huggingface_model(
                                 return None
                             raise
                         print(f"[DEBUG] Priority author {author} list returned {len(found)} repos for {filename}")
+                        if 0 < len(found) <= 5:
+                            try:
+                                ids = [m.modelId for m in found]
+                                print(f"[DEBUG] Priority author {author} list repos for {filename}: {ids}")
+                            except Exception:
+                                pass
                     models.extend(found)
                 except Exception:
                     continue
@@ -1246,6 +1258,7 @@ def search_huggingface_model(
                                     "detail": model_id
                                 })
                             return result
+                    print(f"[DEBUG] {filename} not in repo {model_id} (priority author)")
                 except concurrent.futures.TimeoutError:
                     print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority author)")
                     if status_cb:
@@ -1291,7 +1304,7 @@ def search_huggingface_model(
                             "filename": filename,
                             "detail": model_id
                         })
-                        return result
+                    return result
                 for f in files:
                     if f.endswith(filename):
                         result = build_result(model_id, f)
@@ -1305,6 +1318,7 @@ def search_huggingface_model(
                                 "detail": model_id
                             })
                         return result
+                print(f"[DEBUG] {filename} not in repo {model_id}")
             except concurrent.futures.TimeoutError:
                 if status_cb:
                     status_cb({
@@ -1398,6 +1412,7 @@ def search_huggingface_model(
                                         "detail": model_id
                                     })
                                 return result
+                        print(f"[DEBUG] {filename} not in repo {model_id} (priority author final)")
                     except concurrent.futures.TimeoutError:
                         print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority author final)")
                         if status_cb:
@@ -1505,6 +1520,7 @@ def search_huggingface_model(
                                         "detail": model_id
                                     })
                                 return result
+                        print(f"[DEBUG] {filename} not in repo {model_id} (priority no-token)")
                     except concurrent.futures.TimeoutError:
                         print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority no-token)")
                         if status_cb:
