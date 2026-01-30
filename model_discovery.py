@@ -929,7 +929,8 @@ def search_huggingface_model(
     filename: str,
     token: str = None,
     status_cb=None,
-    mode: str = "full"
+    mode: str = "full",
+    workflow_keywords: list[str] | None = None
 ) -> Dict[str, Any] | None:
     """
     Searches Hugging Face for the filename, prioritizing specific authors.
@@ -1009,6 +1010,13 @@ def search_huggingface_model(
         if len(alpha) >= 3:
             token_hints.append(alpha)
     token_hints = list(dict.fromkeys(token_hints))
+    workflow_hints = []
+    if workflow_keywords:
+        for t in workflow_keywords:
+            t = str(t or "").strip().lower()
+            if len(t) >= 3:
+                workflow_hints.append(t)
+    workflow_hints = list(dict.fromkeys(workflow_hints))
 
     def _repo_score(model_id: str) -> int:
         mid = model_id.lower()
@@ -1018,7 +1026,16 @@ def search_huggingface_model(
         for t in token_hints:
             if t and t in mid:
                 score += 10
+        for t in workflow_hints:
+            if t and t in mid:
+                score += 6
         return score
+
+    def _workflow_match(model_id: str) -> bool:
+        if not workflow_hints:
+            return False
+        mid = model_id.lower()
+        return any(t in mid for t in workflow_hints)
 
     # 1. Try to search specifically in priority authors' repos first?
     # Actually, listing models by author and filtering is expensive. 
@@ -1249,8 +1266,10 @@ def search_huggingface_model(
         ]
         priority_models = sorted(
             priority_models,
-            key=lambda m: _repo_score(getattr(m, "modelId", "")),
-            reverse=True
+            key=lambda m: (
+                0 if _workflow_match(getattr(m, "modelId", "")) else 1,
+                -_repo_score(getattr(m, "modelId", ""))
+            )
         )
 
         for model in priority_models:
@@ -1311,7 +1330,74 @@ def search_huggingface_model(
                 continue
 
         # If no priority author found, check the rest of the results
-        for model in models:
+        priority_ids = {m.modelId for m in priority_models}
+        other_models = [m for m in models if m.modelId not in priority_ids]
+        other_workflow = [m for m in other_models if _workflow_match(getattr(m, "modelId", ""))]
+        other_workflow = sorted(
+            other_workflow,
+            key=lambda m: -_repo_score(getattr(m, "modelId", ""))
+        )
+        other_rest = [m for m in other_models if m not in other_workflow]
+        other_rest = sorted(
+            other_rest,
+            key=lambda m: -_repo_score(getattr(m, "modelId", ""))
+        )
+
+        for model in other_workflow:
+            model_id = model.modelId
+            try:
+                if not _hf_search_allowed():
+                    print(f"[DEBUG] HF search budget/rate limit hit before workflow repo scan for {filename}")
+                    return None
+                files = call_with_timeout(api.list_repo_files, repo_id=model_id, token=token)
+                if filename in files:
+                    result = build_result(model_id, filename)
+                    _hf_search_cache[key] = result
+                    print(f"[DEBUG] Found {filename} in repo {model_id}")
+                    if status_cb:
+                        status_cb({
+                            "message": "Found on Hugging Face",
+                            "source": "huggingface_search",
+                            "filename": filename,
+                            "detail": model_id
+                        })
+                    return result
+                for f in files:
+                    if f.endswith(filename):
+                        result = build_result(model_id, f)
+                        _hf_search_cache[key] = result
+                        print(f"[DEBUG] Found {filename} in repo {model_id} (suffix match)")
+                        if status_cb:
+                            status_cb({
+                                "message": "Found on Hugging Face",
+                                "source": "huggingface_search",
+                                "filename": filename,
+                                "detail": model_id
+                            })
+                        return result
+                print(f"[DEBUG] {filename} not in repo {model_id}")
+            except concurrent.futures.TimeoutError:
+                if status_cb:
+                    status_cb({
+                        "message": "Hugging Face search timeout",
+                        "source": "huggingface_search",
+                        "filename": filename,
+                        "detail": f"list_repo_files({model_id})"
+                    })
+                continue
+            except Exception as e:
+                if is_timeout_error(e):
+                    if status_cb:
+                        status_cb({
+                            "message": "Hugging Face search timeout",
+                            "source": "huggingface_search",
+                            "filename": filename,
+                            "detail": f"list_repo_files({model_id})"
+                        })
+                    continue
+                continue
+
+        for model in other_rest:
             model_id = model.modelId
             try:
                 if tokens and not any(t in model_id.lower() for t in tokens):
@@ -1690,6 +1776,22 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             unique_required_models.append(model)
             seen_model_node_pairs.add(key)
     
+    # Collect workflow-wide keywords to bias repo ordering.
+    keyword_counts: dict[str, int] = {}
+    for model in required_models:
+        name = os.path.splitext(model.get("filename") or "")[0].lower()
+        if not name:
+            continue
+        for t in re.split(r"[-_]", name):
+            t = t.strip().lower()
+            if len(t) < 3:
+                continue
+            keyword_counts[t] = keyword_counts.get(t, 0) + 1
+            alpha = re.sub(r"\d+", "", t)
+            if len(alpha) >= 3:
+                keyword_counts[alpha] = keyword_counts.get(alpha, 0) + 1
+    workflow_keywords = [k for k, _ in sorted(keyword_counts.items(), key=lambda kv: kv[1], reverse=True)[:10]]
+
     # 1. Check local existence using ComfyUI's folder_paths
     missing_models, existing_models, path_mismatches = check_model_files(unique_required_models)
 
@@ -1781,7 +1883,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             m["filename"],
             token,
             status_cb=status_cb,
-            mode="basic"
+            mode="basic",
+            workflow_keywords=workflow_keywords
         )
         if result:
             m["url"] = result.get("url")
@@ -1814,7 +1917,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             m["filename"],
             token,
             status_cb=status_cb,
-            mode="priority"
+            mode="priority",
+            workflow_keywords=workflow_keywords
         )
         if result:
             m["url"] = result.get("url")
