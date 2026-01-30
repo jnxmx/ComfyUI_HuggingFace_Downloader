@@ -1301,7 +1301,7 @@ def search_huggingface_model(
                             "detail": f"list_repo_files({model_id})"
                         })
                     continue
-                 continue
+                continue
 
         # Final fallback: scan priority authors more broadly if nothing matched
         if mode in ("priority", "full"):
