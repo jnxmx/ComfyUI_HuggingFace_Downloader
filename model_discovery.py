@@ -908,7 +908,12 @@ def _set_hf_rate_limited() -> None:
     _hf_rate_limited_until = time.time() + HF_SEARCH_RATE_LIMIT_SECONDS
     print(f"[WARN] Hugging Face rate limit hit; pausing search for {HF_SEARCH_RATE_LIMIT_SECONDS}s.")
 
-def search_huggingface_model(filename: str, token: str = None, status_cb=None) -> Dict[str, Any] | None:
+def search_huggingface_model(
+    filename: str,
+    token: str = None,
+    status_cb=None,
+    mode: str = "full"
+) -> Dict[str, Any] | None:
     """
     Searches Hugging Face for the filename, prioritizing specific authors.
     Returns metadata dict with url/hf_repo/hf_path or None.
@@ -980,31 +985,32 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                 "filename": filename
             })
 
-        for term in search_terms:
-            if not _hf_search_allowed():
-                return None
-            try:
-                models = list(api.list_models(search=term, limit=20, sort="downloads", direction=-1))
-            except Exception as e:
-                if is_rate_limited_error(e):
-                    _set_hf_rate_limited()
-                    if status_cb:
-                        status_cb({
-                            "message": "Hugging Face rate limit hit",
-                            "source": "huggingface_search",
-                            "filename": filename,
-                            "detail": str(e)
-                        })
+        if mode in ("basic", "full"):
+            for term in search_terms:
+                if not _hf_search_allowed():
                     return None
-                raise
-            if models:
-                if term != filename:
-                    print(f"[DEBUG] No results for {filename}, trying search term: {term}")
-                break
+                try:
+                    models = list(api.list_models(search=term, limit=20, sort="downloads", direction=-1))
+                except Exception as e:
+                    if is_rate_limited_error(e):
+                        _set_hf_rate_limited()
+                        if status_cb:
+                            status_cb({
+                                "message": "Hugging Face rate limit hit",
+                                "source": "huggingface_search",
+                                "filename": filename,
+                                "detail": str(e)
+                            })
+                        return None
+                    raise
+                if models:
+                    if term != filename:
+                        print(f"[DEBUG] No results for {filename}, trying search term: {term}")
+                    break
 
         # Deep Search Fallback: Check priority authors if still nothing
         # This helps when the file is inside a repo like "flux-fp8" but we search for "flux-vae-bf16"
-        if not models:
+        if mode in ("priority", "full") and not models:
             print(f"[DEBUG] Still no results, checking priority authors directly...")
             if status_cb:
                 status_cb({
@@ -1053,7 +1059,7 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                         if not _hf_search_allowed():
                             return None
                         try:
-                            found = list(api.list_models(author=author, limit=50, sort="downloads", direction=-1))
+                            found = list(api.list_models(author=author, limit=100, sort="downloads", direction=-1))
                         except Exception as e:
                             if is_rate_limited_error(e):
                                 _set_hf_rate_limited()
@@ -1176,11 +1182,12 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                  continue
 
         # Final fallback: scan priority authors more broadly if nothing matched
-        for author in PRIORITY_AUTHORS:
+        if mode in ("priority", "full"):
+            for author in PRIORITY_AUTHORS:
             try:
                 if not _hf_search_allowed():
                     return None
-                author_models = list(api.list_models(author=author, limit=50, sort="downloads", direction=-1))
+                author_models = list(api.list_models(author=author, limit=100, sort="downloads", direction=-1))
             except Exception as e:
                 if is_rate_limited_error(e):
                     _set_hf_rate_limited()
@@ -1193,28 +1200,16 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                         })
                     return None
                 continue
-            for model in author_models:
-                model_id = model.modelId
-                try:
-                    if tokens and not any(t in model_id.lower() for t in tokens):
-                        continue
-                    if not _hf_search_allowed():
-                        return None
-                    files = api.list_repo_files(repo_id=model_id, token=token)
-                    if filename in files:
-                        result = build_result(model_id, filename)
-                        _hf_search_cache[key] = result
-                        if status_cb:
-                            status_cb({
-                                "message": "Found on Hugging Face",
-                                "source": "huggingface_search",
-                                "filename": filename,
-                                "detail": model_id
-                            })
-                        return result
-                    for f in files:
-                        if f.endswith(filename):
-                            result = build_result(model_id, f)
+                for model in author_models:
+                    model_id = model.modelId
+                    try:
+                        if tokens and not any(t in model_id.lower() for t in tokens):
+                            continue
+                        if not _hf_search_allowed():
+                            return None
+                        files = api.list_repo_files(repo_id=model_id, token=token)
+                        if filename in files:
+                            result = build_result(model_id, filename)
                             _hf_search_cache[key] = result
                             if status_cb:
                                 status_cb({
@@ -1224,18 +1219,30 @@ def search_huggingface_model(filename: str, token: str = None, status_cb=None) -
                                     "detail": model_id
                                 })
                             return result
-                except Exception as e:
-                    if is_rate_limited_error(e):
-                        _set_hf_rate_limited()
-                        if status_cb:
-                            status_cb({
-                                "message": "Hugging Face rate limit hit",
-                                "source": "huggingface_priority_authors",
-                                "filename": filename,
-                                "detail": str(e)
-                            })
-                        return None
-                    continue
+                        for f in files:
+                            if f.endswith(filename):
+                                result = build_result(model_id, f)
+                                _hf_search_cache[key] = result
+                                if status_cb:
+                                    status_cb({
+                                        "message": "Found on Hugging Face",
+                                        "source": "huggingface_search",
+                                        "filename": filename,
+                                        "detail": model_id
+                                    })
+                                return result
+                    except Exception as e:
+                        if is_rate_limited_error(e):
+                            _set_hf_rate_limited()
+                            if status_cb:
+                                status_cb({
+                                    "message": "Hugging Face rate limit hit",
+                                    "source": "huggingface_priority_authors",
+                                    "filename": filename,
+                                    "detail": str(e)
+                                })
+                            return None
+                        continue
                  
     except Exception as e:
         if is_rate_limited_error(e):
@@ -1274,6 +1281,42 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     global _hf_api_calls
     _hf_api_calls = 0
     required_models = extract_models_from_workflow(workflow_json)
+
+    def _derive_repo_hints_from_filename(name: str) -> set[str]:
+        if not name:
+            return set()
+        stem = os.path.splitext(os.path.basename(name))[0].lower()
+        tokens = [t for t in re.split(r"[-_]", stem) if t]
+        hints: set[str] = set()
+
+        if tokens:
+            first = tokens[0]
+            if len(first) >= 4:
+                hints.add(first)
+            m = re.match(r"([a-z]+)(\d+)", first)
+            if m:
+                hints.add(f"{m.group(1)}-{m.group(2)}")
+                hints.add(f"{m.group(1)}{m.group(2)}")
+
+        if len(tokens) >= 2 and tokens[0].isalpha():
+            if tokens[1].isdigit():
+                hints.add(f"{tokens[0]}-{tokens[1]}")
+                hints.add(f"{tokens[0]}{tokens[1]}")
+            if tokens[1].startswith("v") and tokens[1][1:].isdigit():
+                hints.add(f"{tokens[0]}-{tokens[1]}")
+
+        return hints
+
+    repo_id_hints: set[str] = set()
+    repo_name_hints: set[str] = set()
+    for model in required_models:
+        url = model.get("url")
+        if url:
+            repo_id, _ = extract_huggingface_info(url)
+            if repo_id:
+                repo_id_hints.add(repo_id)
+                repo_name_hints.add(repo_id.split("/")[-1])
+        repo_name_hints.update(_derive_repo_hints_from_filename(model.get("filename") or ""))
 
     def _normalize_dedupe_path(value: str | None) -> str:
         if not value:
@@ -1407,7 +1450,13 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     "filename": m.get("filename")
                 })
             # Try HF search
-            result = search_huggingface_model(m["filename"], token, status_cb=status_cb)
+            result = search_huggingface_model(
+                m["filename"],
+                token,
+                status_cb=status_cb,
+                repo_hints=sorted(repo_name_hints),
+                repo_id_hints=sorted(repo_id_hints)
+            )
             if result:
                 m["url"] = result.get("url")
                 m["hf_repo"] = result.get("hf_repo")
