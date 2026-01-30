@@ -1085,7 +1085,7 @@ def search_huggingface_model(
                     found = []
                     if status_cb:
                         status_cb({
-                            "message": f"Checking priority author {author_index}/{total_authors}",
+                            "message": author,
                             "source": "huggingface_priority_authors",
                             "filename": filename,
                             "detail": author
@@ -1247,6 +1247,7 @@ def search_huggingface_model(
                                 })
                             return result
                 except concurrent.futures.TimeoutError:
+                    print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority author)")
                     if status_cb:
                         status_cb({
                             "message": "Hugging Face search timeout",
@@ -1257,6 +1258,7 @@ def search_huggingface_model(
                     continue
                 except Exception as e:
                     if is_timeout_error(e):
+                        print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority author)")
                         if status_cb:
                             status_cb({
                                 "message": "Hugging Face search timeout",
@@ -1360,12 +1362,13 @@ def search_huggingface_model(
                                     "detail": str(e)
                                 })
                         return None
-                    continue
+                        continue
                 print(f"[DEBUG] Priority author final list for {author}: {len(author_models)} repos for {filename}")
                 for model in author_models:
                     model_id = model.modelId
                     try:
                         if tokens and not any(t in model_id.lower() for t in tokens):
+                            print(f"[DEBUG] Skipping repo {model_id} for {filename} due to token filter (priority author final)")
                             continue
                         if not _hf_search_allowed():
                             return None
@@ -1396,6 +1399,7 @@ def search_huggingface_model(
                                     })
                                 return result
                     except concurrent.futures.TimeoutError:
+                        print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority author final)")
                         if status_cb:
                             status_cb({
                                 "message": "Hugging Face search timeout",
@@ -1406,6 +1410,7 @@ def search_huggingface_model(
                         continue
                     except Exception as e:
                         if is_timeout_error(e):
+                            print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority author final)")
                             if status_cb:
                                 status_cb({
                                     "message": "Hugging Face search timeout",
@@ -1501,6 +1506,7 @@ def search_huggingface_model(
                                     })
                                 return result
                     except concurrent.futures.TimeoutError:
+                        print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority no-token)")
                         if status_cb:
                             status_cb({
                                 "message": "Hugging Face search timeout",
@@ -1511,6 +1517,7 @@ def search_huggingface_model(
                         continue
                     except Exception as e:
                         if is_timeout_error(e):
+                            print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority no-token)")
                             if status_cb:
                                 status_cb({
                                     "message": "Hugging Face search timeout",
