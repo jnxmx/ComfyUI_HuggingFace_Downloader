@@ -14,6 +14,10 @@ __all__ = ["NODE_CLASS_MAPPINGS", "WEB_DIRECTORY"]
 try:
     from . import web_api
     import server
-    web_api.setup(server.PromptServer.instance.app)
+    routes = getattr(server.PromptServer.instance, "routes", None)
+    if routes is not None:
+        web_api.setup(routes)
+    else:
+        web_api.setup(server.PromptServer.instance.app)
 except Exception as e:
     print(f"[ComfyUI_HuggingFace_Downloader] Web API not loaded: {e}")

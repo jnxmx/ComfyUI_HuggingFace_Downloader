@@ -434,19 +434,35 @@ async def restore_from_hf(request):
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
-def setup(app):
-    app.router.add_get("/folder_structure", folder_structure)
-    app.router.add_post("/backup_to_hf", backup_to_hf)
-    app.router.add_post("/restore_from_hf", restore_from_hf)
-    app.router.add_post("/check_missing_models", check_missing_models)
-    app.router.add_post("/install_models", install_models)
-    app.router.add_post("/fix_nunchaku_svdq", fix_nunchaku_svdq)
-    app.router.add_get("/api/folder_structure", folder_structure)
-    app.router.add_post("/api/backup_to_hf", backup_to_hf)
-    app.router.add_post("/api/restore_from_hf", restore_from_hf)
-    app.router.add_post("/api/check_missing_models", check_missing_models)
-    app.router.add_post("/api/install_models", install_models)
-    app.router.add_post("/api/fix_nunchaku_svdq", fix_nunchaku_svdq)
+_ROUTES_REGISTERED = False
+
+def _register_route(target, method, path, handler):
+    if hasattr(target, "router"):
+        add = getattr(target.router, f"add_{method}")
+        add(path, handler)
+        return
+    if hasattr(target, method):
+        getattr(target, method)(path)(handler)
+        return
+    raise RuntimeError("Unsupported route registration target")
+
+def setup(app_or_routes):
+    global _ROUTES_REGISTERED
+    if _ROUTES_REGISTERED:
+        return
+
+    _register_route(app_or_routes, "get", "/folder_structure", folder_structure)
+    _register_route(app_or_routes, "post", "/backup_to_hf", backup_to_hf)
+    _register_route(app_or_routes, "post", "/restore_from_hf", restore_from_hf)
+    _register_route(app_or_routes, "post", "/check_missing_models", check_missing_models)
+    _register_route(app_or_routes, "post", "/install_models", install_models)
+    _register_route(app_or_routes, "post", "/fix_nunchaku_svdq", fix_nunchaku_svdq)
+    _register_route(app_or_routes, "get", "/api/folder_structure", folder_structure)
+    _register_route(app_or_routes, "post", "/api/backup_to_hf", backup_to_hf)
+    _register_route(app_or_routes, "post", "/api/restore_from_hf", restore_from_hf)
+    _register_route(app_or_routes, "post", "/api/check_missing_models", check_missing_models)
+    _register_route(app_or_routes, "post", "/api/install_models", install_models)
+    _register_route(app_or_routes, "post", "/api/fix_nunchaku_svdq", fix_nunchaku_svdq)
 
     async def queue_download(request):
         """Queue background downloads with status tracking."""
@@ -510,11 +526,13 @@ def setup(app):
         app.loop.call_later(1, restart_server)
         return web.json_response({"status": "ok"})
         
-    app.router.add_post("/restart", restart)
-    app.router.add_post("/queue_download", queue_download)
-    app.router.add_get("/download_status", download_status_endpoint)
-    app.router.add_get("/search_status", search_status_endpoint)
-    app.router.add_post("/api/restart", restart)
-    app.router.add_post("/api/queue_download", queue_download)
-    app.router.add_get("/api/download_status", download_status_endpoint)
-    app.router.add_get("/api/search_status", search_status_endpoint)
+    _register_route(app_or_routes, "post", "/restart", restart)
+    _register_route(app_or_routes, "post", "/queue_download", queue_download)
+    _register_route(app_or_routes, "get", "/download_status", download_status_endpoint)
+    _register_route(app_or_routes, "get", "/search_status", search_status_endpoint)
+    _register_route(app_or_routes, "post", "/api/restart", restart)
+    _register_route(app_or_routes, "post", "/api/queue_download", queue_download)
+    _register_route(app_or_routes, "get", "/api/download_status", download_status_endpoint)
+    _register_route(app_or_routes, "get", "/api/search_status", search_status_endpoint)
+
+    _ROUTES_REGISTERED = True
