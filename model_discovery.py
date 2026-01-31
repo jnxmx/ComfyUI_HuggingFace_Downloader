@@ -956,6 +956,12 @@ def _hf_search_budget_exhausted() -> bool:
         return True
     return False
 
+def _reset_hf_search_budget() -> None:
+    global _hf_api_calls, _hf_search_deadline, _hf_search_time_exhausted
+    _hf_api_calls = 0
+    _hf_search_deadline = time.time() + HF_SEARCH_MAX_SECONDS if HF_SEARCH_MAX_SECONDS > 0 else 0.0
+    _hf_search_time_exhausted = False
+
 def search_huggingface_model(
     filename: str,
     token: str = None,
@@ -1132,7 +1138,7 @@ def search_huggingface_model(
             print(f"[DEBUG] Still no results, checking priority authors directly...")
             if status_cb:
                 status_cb({
-                    "message": "Checking priority authors (token-filtered)",
+                    "message": "Checking priority authors",
                     "source": "huggingface_priority_authors",
                     "filename": filename
                 })
@@ -1270,15 +1276,6 @@ def search_huggingface_model(
                 "hf_repo": model_id,
                 "hf_path": file_path
             }
-
-        tokens = []
-        for t in re.split(r"[-_]", os.path.splitext(filename)[0]):
-            t = t.lower()
-            if len(t) >= 3:
-                tokens.append(t)
-            alpha = re.sub(r"\d+", "", t)
-            if len(alpha) >= 3:
-                tokens.append(alpha)
 
         priority_repo_ids: list[str] = []
         if priority_author_repos and not skip_priority_repo_scan:
@@ -1424,9 +1421,6 @@ def search_huggingface_model(
         for model in other_rest:
             model_id = model.modelId
             try:
-                if tokens and not any(t in model_id.lower() for t in tokens):
-                    print(f"[DEBUG] Skipping repo {model_id} for {filename} due to token filter")
-                    continue
                 files = _get_repo_files(api, model_id, token)
                 filename_lower = filename.lower()
                 if any(os.path.basename(f).lower() == filename_lower for f in files):
@@ -1511,9 +1505,6 @@ def search_huggingface_model(
                 for model in author_models:
                     model_id = model.modelId
                     try:
-                        if tokens and not any(t in model_id.lower() for t in tokens):
-                            print(f"[DEBUG] Skipping repo {model_id} for {filename} due to token filter (priority author final)")
-                            continue
                         files = _get_repo_files(api, model_id, token)
                         filename_lower = filename.lower()
                         if any(os.path.basename(f).lower() == filename_lower for f in files):
@@ -1777,6 +1768,24 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             print(f"[DEBUG] Priority author repo cache init failed: {e}")
             priority_author_repos = None
 
+    priority_tokens: list[str] = []
+    if missing_models:
+        for model in missing_models:
+            if model.get("url"):
+                continue
+            filename = model.get("filename")
+            if not filename:
+                continue
+            stem = os.path.splitext(filename)[0].lower()
+            for part in re.split(r"[-_]", stem):
+                part = part.strip().lower()
+                if len(part) >= 3:
+                    priority_tokens.append(part)
+                alpha = re.sub(r"\d+", "", part)
+                if len(alpha) >= 3:
+                    priority_tokens.append(alpha)
+    priority_tokens = list(dict.fromkeys(priority_tokens))
+
     def _workflow_match_repo(repo_id: str) -> bool:
         if not workflow_keywords:
             return False
@@ -1784,13 +1793,14 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         return any(k in repo_lower for k in workflow_keywords)
 
     def _workflow_repo_score(repo_id: str) -> int:
-        if not workflow_keywords:
-            return 0
         repo_lower = repo_id.lower()
         score = 0
-        for k in workflow_keywords:
-            if k in repo_lower:
+        for k in workflow_keywords or []:
+            if k and k in repo_lower:
                 score += 5
+        for t in priority_tokens:
+            if t and t in repo_lower:
+                score += 4
         if _workflow_match_repo(repo_id):
             score += 50
         return score
@@ -1821,6 +1831,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                 "source": "huggingface_priority_repos"
             })
 
+        remaining: dict[str, dict] = {}
         for model in [m for m in missing_models if not m.get("url")]:
             if _skip_hf_search(model):
                 print(f"[DEBUG] Skipping HF search for {model.get('filename')} (user skipped)")
@@ -1828,88 +1839,98 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             filename = model.get("filename")
             if not filename:
                 continue
-            filename_lower = filename.lower()
-            for repo_id in priority_repo_ids:
-                author = repo_id.split("/")[0] if "/" in repo_id else repo_id
+            remaining[filename.lower()] = model
+
+        if not remaining:
+            return
+
+        for repo_id in priority_repo_ids:
+            if not remaining:
+                break
+            current_model = next(iter(remaining.values()))
+            current_filename = current_model.get("filename") or ""
+            author = repo_id.split("/")[0] if "/" in repo_id else repo_id
+            if status_cb:
+                status_cb({
+                    "message": f"Searching {author}",
+                    "source": "huggingface_priority_repos",
+                    "filename": current_filename,
+                    "detail": author
+                })
+            try:
+                files = _get_repo_files(api, repo_id, token)
+            except HFSearchBudgetError:
+                print(f"[DEBUG] HF search budget/rate limit hit before priority repo scan for {current_filename}")
                 if status_cb:
                     status_cb({
-                        "message": f"Searching {author}",
+                        "message": "Hugging Face search budget exhausted",
                         "source": "huggingface_priority_repos",
-                        "filename": filename,
-                        "detail": author
+                        "filename": current_filename
                     })
-                try:
-                    files = _get_repo_files(api, repo_id, token)
-                except HFSearchBudgetError:
-                    print(f"[DEBUG] HF search budget/rate limit hit before priority repo scan for {filename}")
-                    if status_cb:
-                        status_cb({
-                            "message": "Hugging Face search budget exhausted",
-                            "source": "huggingface_priority_repos",
-                            "filename": filename
-                        })
-                    return
-                except concurrent.futures.TimeoutError:
-                    print(f"[DEBUG] list_repo_files timeout for {repo_id} while searching {filename} (priority repo scan)")
+                return
+            except concurrent.futures.TimeoutError:
+                print(f"[DEBUG] list_repo_files timeout for {repo_id} while searching {current_filename} (priority repo scan)")
+                if status_cb:
+                    status_cb({
+                        "message": "Hugging Face search timeout",
+                        "source": "huggingface_priority_repos",
+                        "filename": current_filename,
+                        "detail": f"list_repo_files({repo_id})"
+                    })
+                continue
+            except Exception as e:
+                if is_timeout_error(e):
+                    print(f"[DEBUG] list_repo_files timeout for {repo_id} while searching {current_filename} (priority repo scan)")
                     if status_cb:
                         status_cb({
                             "message": "Hugging Face search timeout",
                             "source": "huggingface_priority_repos",
-                            "filename": filename,
+                            "filename": current_filename,
                             "detail": f"list_repo_files({repo_id})"
                         })
                     continue
-                except Exception as e:
-                    if is_timeout_error(e):
-                        print(f"[DEBUG] list_repo_files timeout for {repo_id} while searching {filename} (priority repo scan)")
-                        if status_cb:
-                            status_cb({
-                                "message": "Hugging Face search timeout",
-                                "source": "huggingface_priority_repos",
-                                "filename": filename,
-                                "detail": f"list_repo_files({repo_id})"
-                            })
-                        continue
-                    if is_rate_limited_error(e):
-                        _set_hf_rate_limited()
-                        if status_cb:
-                            status_cb({
-                                "message": "Hugging Face rate limit hit",
-                                "source": "huggingface_priority_repos",
-                                "filename": filename,
-                                "detail": str(e)
-                            })
-                        return
-                    continue
+                if is_rate_limited_error(e):
+                    _set_hf_rate_limited()
+                    if status_cb:
+                        status_cb({
+                            "message": "Hugging Face rate limit hit",
+                            "source": "huggingface_priority_repos",
+                            "filename": current_filename,
+                            "detail": str(e)
+                        })
+                    return
+                continue
 
-                match_path = None
-                for f in files:
-                    if os.path.basename(f).lower() == filename_lower:
-                        if match_path is None or len(f) < len(match_path):
-                            match_path = f
-                if match_path:
-                    model["url"] = f"https://huggingface.co/{repo_id}/resolve/main/{match_path}"
-                    model["hf_repo"] = repo_id
-                    model["hf_path"] = match_path
-                    model["source"] = "priority_repo_scan"
-                    _hf_search_cache[filename_lower] = {
-                        "url": model["url"],
-                        "hf_repo": repo_id,
-                        "hf_path": match_path
-                    }
-                    print(f"[DEBUG] Found {filename} in repo {repo_id} (priority repo scan)")
-                    break
+            found_paths: dict[str, str] = {}
+            for f in files:
+                base = os.path.basename(f).lower()
+                if base not in remaining:
+                    continue
+                prev = found_paths.get(base)
+                if prev is None or len(f) < len(prev):
+                    found_paths[base] = f
+
+            for base, match_path in found_paths.items():
+                model = remaining.pop(base, None)
+                if not model:
+                    continue
+                model["url"] = f"https://huggingface.co/{repo_id}/resolve/main/{match_path}"
+                model["hf_repo"] = repo_id
+                model["hf_path"] = match_path
+                model["source"] = "priority_repo_scan"
+                _hf_search_cache[base] = {
+                    "url": model["url"],
+                    "hf_repo": repo_id,
+                    "hf_path": match_path
+                }
+                print(f"[DEBUG] Found {model.get('filename')} in repo {repo_id} (priority repo scan)")
 
     if missing_models and priority_author_repos:
-        _hf_api_calls = 0
-        _hf_search_deadline = time.time() + HF_SEARCH_MAX_SECONDS if HF_SEARCH_MAX_SECONDS > 0 else 0.0
-        _hf_search_time_exhausted = False
+        _reset_hf_search_budget()
         _scan_priority_repos_for_missing()
 
     def _run_hf_stage(label: str, mode: str):
-        _hf_api_calls = 0
-        _hf_search_deadline = time.time() + HF_SEARCH_MAX_SECONDS if HF_SEARCH_MAX_SECONDS > 0 else 0.0
-        _hf_search_time_exhausted = False
+        _reset_hf_search_budget()
         for m in [m for m in missing_models if not m.get("url")]:
             if _skip_hf_search(m):
                 print(f"[DEBUG] Skipping HF search for {m.get('filename')} (user skipped)")

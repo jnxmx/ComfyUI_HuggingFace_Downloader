@@ -1096,7 +1096,8 @@ app.registerExtension({
                 };
 
                 const doFetch = async (path, options = {}) => {
-                    if (api && typeof api.fetchApi === "function") {
+                    const method = String(options.method || "GET").toUpperCase();
+                    if (method === "GET" && api && typeof api.fetchApi === "function") {
                         let apiPath = String(path || "");
                         if (!apiPath.startsWith("/")) apiPath = "/" + apiPath;
                         return api.fetchApi(apiPath, options);
