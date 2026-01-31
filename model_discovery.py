@@ -3,6 +3,9 @@ import re
 import json
 import time
 import concurrent.futures
+import urllib.request
+import urllib.error
+from urllib.parse import quote
 from typing import List, Dict, Any, Tuple
 from types import SimpleNamespace
 from huggingface_hub import HfApi
@@ -32,6 +35,7 @@ _hf_rate_limited_until = 0.0
 _hf_search_deadline = 0.0
 _hf_search_time_exhausted = False
 _hf_repo_files_cache: dict[str, list[str] | None] = {}
+_hf_readme_cache: dict[str, str | None] = {}
 
 HF_SEARCH_MAX_CALLS = int(os.getenv("HF_SEARCH_MAX_CALLS", "200"))
 HF_SEARCH_RATE_LIMIT_SECONDS = int(os.getenv("HF_SEARCH_RATE_LIMIT_SECONDS", "300"))
@@ -79,6 +83,123 @@ def _get_repo_files(api: HfApi, repo_id: str, token: str | None) -> list[str]:
         raise
     _hf_repo_files_cache[repo_id] = files or []
     return files or []
+
+def _get_repo_readme(repo_id: str, token: str | None) -> str | None:
+    if repo_id in _hf_readme_cache:
+        return _hf_readme_cache[repo_id]
+    if not _hf_search_allowed():
+        raise HFSearchBudgetError()
+
+    def _fetch(url: str) -> str | None:
+        headers = {"User-Agent": "ComfyUI-HF-Downloader"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=HF_SEARCH_CALL_TIMEOUT) as resp:
+            data = resp.read()
+            return data.decode("utf-8", errors="ignore")
+
+    base = f"https://huggingface.co/{repo_id}/resolve/main/"
+    for name in ("README.md", "README.MD"):
+        try:
+            text = call_with_timeout(_fetch, base + name)
+            if text:
+                _hf_readme_cache[repo_id] = text
+                return text
+        except Exception:
+            continue
+
+    _hf_readme_cache[repo_id] = None
+    return None
+
+def _readme_path_for_filename(readme: str, filename: str) -> str | None:
+    if not readme or not filename:
+        return None
+    pattern = re.compile(rf"([\\w./-]*{re.escape(filename)})", re.IGNORECASE)
+    matches = pattern.findall(readme)
+    if not matches:
+        return None
+    path = min(matches, key=len)
+    path = path.lstrip("./")
+    path = path.lstrip("/")
+    return path or filename
+
+def _try_readme_match(
+    repo_id: str,
+    filename: str,
+    token: str | None,
+    status_cb,
+    source: str
+) -> Dict[str, Any] | None:
+    try:
+        readme = _get_repo_readme(repo_id, token)
+    except HFSearchBudgetError:
+        print(f"[DEBUG] HF search budget/rate limit hit before README scan for {filename}")
+        return None
+    except Exception:
+        return None
+    if not readme:
+        return None
+    path = _readme_path_for_filename(readme, filename)
+    if not path:
+        return None
+    result = {
+        "url": f"https://huggingface.co/{repo_id}/resolve/main/{path}",
+        "hf_repo": repo_id,
+        "hf_path": path
+    }
+    print(f"[DEBUG] Found {filename} mentioned in README of {repo_id}")
+    if status_cb:
+        status_cb({
+            "message": "Found on Hugging Face",
+            "source": "huggingface_search",
+            "filename": filename,
+            "detail": f"{repo_id} (readme)"
+        })
+    return result
+
+def _hf_full_text_search_repos(query: str, token: str | None) -> list[str]:
+    if not query:
+        return []
+    if not _hf_search_allowed():
+        raise HFSearchBudgetError()
+
+    def _fetch(url: str) -> str | None:
+        headers = {"User-Agent": "ComfyUI-HF-Downloader"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=HF_SEARCH_CALL_TIMEOUT) as resp:
+            data = resp.read()
+            return data.decode("utf-8", errors="ignore")
+
+    url = f"https://huggingface.co/search/full-text?type=model&q={quote(query)}"
+    html = call_with_timeout(_fetch, url)
+    if not html:
+        return []
+
+    repos: list[str] = []
+    for repo_id in re.findall(r'data-repo-id="([^"]+)"', html):
+        repos.append(repo_id)
+    for repo_id in re.findall(r'href="/([^/]+/[^/]+)"', html):
+        repos.append(repo_id)
+
+    filtered: list[str] = []
+    seen = set()
+    for repo_id in repos:
+        repo_id = repo_id.split("?")[0].strip()
+        if "/" not in repo_id:
+            continue
+        owner = repo_id.split("/")[0]
+        if owner in {"datasets", "spaces", "collections", "docs", "community", "pricing", "login", "signup"}:
+            continue
+        if repo_id in seen:
+            continue
+        seen.add(repo_id)
+        filtered.append(repo_id)
+        if len(filtered) >= 10:
+            break
+    return filtered
 
 def extract_huggingface_info(url: str) -> tuple[str | None, str | None]:
     """Extract HuggingFace repo and file path from a resolve/blob URL."""
@@ -1076,10 +1197,11 @@ def _hf_search_budget_exhausted() -> bool:
     return False
 
 def _reset_hf_search_budget() -> None:
-    global _hf_api_calls, _hf_search_deadline, _hf_search_time_exhausted
+    global _hf_api_calls, _hf_search_deadline, _hf_search_time_exhausted, _hf_readme_cache
     _hf_api_calls = 0
     _hf_search_deadline = time.time() + HF_SEARCH_MAX_SECONDS if HF_SEARCH_MAX_SECONDS > 0 else 0.0
     _hf_search_time_exhausted = False
+    _hf_readme_cache = {}
 
 def search_huggingface_model(
     filename: str,
@@ -1250,6 +1372,24 @@ def search_huggingface_model(
                     if term != filename:
                         print(f"[DEBUG] No results for {filename}, trying search term: {term}")
                     break
+
+        if mode == "full" and not models:
+            try:
+                if status_cb:
+                    status_cb({
+                        "message": "Searching Hugging Face",
+                        "source": "huggingface_full_text",
+                        "filename": filename
+                    })
+                repo_ids = _hf_full_text_search_repos(filename, token)
+                if repo_ids:
+                    print(f"[DEBUG] Full-text search found {len(repo_ids)} repos for {filename}")
+                    models = [SimpleNamespace(modelId=rid) for rid in repo_ids]
+            except HFSearchBudgetError:
+                print(f"[DEBUG] HF search budget/rate limit hit before full-text search for {filename}")
+                return None
+            except Exception:
+                pass
 
         # Deep Search Fallback: Check priority authors if still nothing
         # This helps when the file is inside a repo like "flux-fp8" but we search for "flux-vae-bf16"
@@ -1450,6 +1590,10 @@ def search_huggingface_model(
                             "detail": model_id
                         })
                     return result
+                readme_match = _try_readme_match(model_id, filename, token, status_cb, "priority author")
+                if readme_match:
+                    _hf_search_cache[key] = readme_match
+                    return readme_match
                 print(f"[DEBUG] {filename} not in repo {model_id} (priority author)")
             except HFSearchBudgetError:
                 print(f"[DEBUG] HF search budget/rate limit hit before priority repo scan for {filename}")
@@ -1512,6 +1656,10 @@ def search_huggingface_model(
                             "detail": model_id
                         })
                     return result
+                readme_match = _try_readme_match(model_id, filename, token, status_cb, "workflow")
+                if readme_match:
+                    _hf_search_cache[key] = readme_match
+                    return readme_match
                 print(f"[DEBUG] {filename} not in repo {model_id}")
             except HFSearchBudgetError:
                 print(f"[DEBUG] HF search budget/rate limit hit before workflow repo scan for {filename}")
@@ -1558,6 +1706,10 @@ def search_huggingface_model(
                             "detail": model_id
                         })
                     return result
+                readme_match = _try_readme_match(model_id, filename, token, status_cb, "repo")
+                if readme_match:
+                    _hf_search_cache[key] = readme_match
+                    return readme_match
                 print(f"[DEBUG] {filename} not in repo {model_id}")
             except HFSearchBudgetError:
                 print(f"[DEBUG] HF search budget/rate limit hit before repo scan for {filename}")
@@ -1642,6 +1794,10 @@ def search_huggingface_model(
                                     "detail": model_id
                                 })
                             return result
+                        readme_match = _try_readme_match(model_id, filename, token, status_cb, "priority author final")
+                        if readme_match:
+                            _hf_search_cache[key] = readme_match
+                            return readme_match
                         print(f"[DEBUG] {filename} not in repo {model_id} (priority author final)")
                     except HFSearchBudgetError:
                         print(f"[DEBUG] HF search budget/rate limit hit before priority repo scan for {filename}")
