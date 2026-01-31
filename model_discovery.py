@@ -1858,6 +1858,53 @@ def search_huggingface_model(
     if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
         return None
 
+    if mode == "full":
+        try:
+            if status_cb:
+                status_cb({
+                    "message": "Searching Hugging Face",
+                    "source": "huggingface_full_text",
+                    "filename": filename
+                })
+            repo_ids = _hf_full_text_search_repos(filename, token)
+            if repo_ids:
+                print(f"[DEBUG] Full-text fallback found {len(repo_ids)} repos for {filename}")
+            for repo_id in repo_ids:
+                try:
+                    files = _get_repo_files(api, repo_id, token)
+                    filename_lower = filename.lower()
+                    if any(os.path.basename(f).lower() == filename_lower for f in files):
+                        match_path = next(
+                            (f for f in files if os.path.basename(f).lower() == filename_lower),
+                            filename
+                        )
+                        result = {
+                            "url": f"https://huggingface.co/{repo_id}/resolve/main/{match_path}",
+                            "hf_repo": repo_id,
+                            "hf_path": match_path
+                        }
+                        _hf_search_cache[key] = result
+                        print(f"[DEBUG] Found {filename} in repo {repo_id} (full-text)")
+                        if status_cb:
+                            status_cb({
+                                "message": "Found on Hugging Face",
+                                "source": "huggingface_search",
+                                "filename": filename,
+                                "detail": f"{repo_id} (full-text)"
+                            })
+                        return result
+                except Exception:
+                    pass
+                readme_match = _try_readme_match(repo_id, filename, token, status_cb, "full-text")
+                if readme_match:
+                    _hf_search_cache[key] = readme_match
+                    return readme_match
+        except HFSearchBudgetError:
+            print(f"[DEBUG] HF search budget/rate limit hit before full-text fallback for {filename}")
+            return None
+        except Exception:
+            pass
+
     if mode != "basic":
         _hf_search_cache[key] = None
     return None
