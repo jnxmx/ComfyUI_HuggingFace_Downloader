@@ -1177,15 +1177,19 @@ app.registerExtension({
 
                 const doFetch = async (path, options = {}) => {
                     const method = String(options.method || "GET").toUpperCase();
+                    let apiPath = String(path || "");
+                    if (!apiPath.startsWith("/")) apiPath = "/" + apiPath;
                     if (method === "GET" && api && typeof api.fetchApi === "function") {
-                        let apiPath = String(path || "");
-                        if (!apiPath.startsWith("/")) apiPath = "/" + apiPath;
                         return api.fetchApi(apiPath, options);
                     }
                     const baseUrl = resolveBaseUrl();
                     const relPath = String(path || "").replace(/^\/+/, "");
                     const url = new URL(relPath, baseUrl).toString();
-                    return fetch(url, options);
+                    const resp = await fetch(url, options);
+                    if (resp.status === 405 && api && typeof api.fetchApi === "function") {
+                        return api.fetchApi(apiPath, options);
+                    }
+                    return resp;
                 };
 
                 const pollStatus = async () => {
