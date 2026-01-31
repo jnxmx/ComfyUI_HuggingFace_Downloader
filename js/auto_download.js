@@ -167,11 +167,54 @@ app.registerExtension({
             return window.location.origin + basePath;
         };
 
-        const postJson = async (path, payload) => {
+        const getApiBase = () => {
+            const base = api?.api_base || api?.apiBase || api?.basePath || api?.base || "";
+            if (!base) return "";
+            return String(base).replace(/\/+$/, "");
+        };
+
+        const buildUrl = (base, pathPart) => {
+            const relPath = String(pathPart || "").replace(/^\/+/, "");
+            return new URL(relPath, base).toString();
+        };
+
+        const doFetch = async (path, options = {}) => {
+            const method = String(options.method || "GET").toUpperCase();
+            let apiPath = String(path || "");
+            if (!apiPath.startsWith("/")) apiPath = "/" + apiPath;
+
+            if (api && typeof api.fetchApi === "function") {
+                try {
+                    const resp = await api.fetchApi(apiPath, options);
+                    if (resp.status !== 405 && resp.status !== 404) {
+                        return resp;
+                    }
+                    console.warn(`[AutoDownload] api.fetchApi ${apiPath} returned ${resp.status}`);
+                } catch (err) {
+                    console.warn(`[AutoDownload] api.fetchApi ${apiPath} failed`, err);
+                }
+            }
+
             const baseUrl = resolveBaseUrl();
-            const relPath = String(path || "").replace(/^\/+/, "");
-            const url = new URL(relPath, baseUrl).toString();
-            return fetch(url, {
+            const apiBase = getApiBase();
+            const attempts = [buildUrl(baseUrl, apiPath)];
+            if (apiBase) {
+                attempts.push(buildUrl(baseUrl, `${apiBase}${apiPath}`));
+            }
+
+            for (const url of attempts) {
+                const resp = await fetch(url, options);
+                console.warn(`[AutoDownload] fetch ${url} returned ${resp.status}`);
+                if (resp.status !== 405 && resp.status !== 404) {
+                    return resp;
+                }
+            }
+
+            return fetch(attempts[0], options);
+        };
+
+        const postJson = async (path, payload) => {
+            return doFetch(path, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
@@ -1174,50 +1217,6 @@ app.registerExtension({
                 });
 
                 const requestId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-
-                const getApiBase = () => {
-                    const base = api?.api_base || api?.apiBase || api?.basePath || api?.base || "";
-                    if (!base) return "";
-                    return String(base).replace(/\/+$/, "");
-                };
-
-                const buildUrl = (base, pathPart) => {
-                    const relPath = String(pathPart || "").replace(/^\/+/, "");
-                    return new URL(relPath, base).toString();
-                };
-
-                const doFetch = async (path, options = {}) => {
-                    const method = String(options.method || "GET").toUpperCase();
-                    let apiPath = String(path || "");
-                    if (!apiPath.startsWith("/")) apiPath = "/" + apiPath;
-
-                    if (method === "GET" && api && typeof api.fetchApi === "function") {
-                        return api.fetchApi(apiPath, options);
-                    }
-
-                    const baseUrl = resolveBaseUrl();
-                    const apiBase = getApiBase();
-                    const attempts = [];
-
-                    attempts.push(buildUrl(baseUrl, apiPath));
-                    if (apiBase) {
-                        attempts.push(buildUrl(baseUrl, `${apiBase}${apiPath}`));
-                    }
-
-                    for (const url of attempts) {
-                        const resp = await fetch(url, options);
-                        if (resp.status !== 405 && resp.status !== 404) {
-                            return resp;
-                        }
-                    }
-
-                    if (api && typeof api.fetchApi === "function") {
-                        const resp = await api.fetchApi(apiPath, options);
-                        return resp;
-                    }
-
-                    return fetch(attempts[0], options);
-                };
 
                 const pollStatus = async () => {
                     try {
