@@ -8,7 +8,7 @@ import asyncio
 from aiohttp import web
 from .backup import backup_to_huggingface, restore_from_huggingface
 from .file_manager import get_model_subfolders
-from .model_discovery import process_workflow_for_missing_models
+from .model_discovery import process_workflow_for_missing_models, update_workflow_nunchaku_svdq
 from .downloader import run_download, get_remote_file_metadata, get_blob_paths, get_token
 from .parse_link import parse_link
 
@@ -380,6 +380,24 @@ async def install_models(request):
     except Exception as e:
          return web.json_response({"error": str(e)}, status=500)
 
+async def fix_nunchaku_svdq(request):
+    """Normalize Nunchaku SVDQ filenames in the workflow based on GPU architecture."""
+    try:
+        data = await request.json()
+        workflow = data.get("workflow")
+        if not workflow:
+            return web.json_response({"error": "Workflow JSON is required"}, status=400)
+        updated_workflow, updated_count, precision = update_workflow_nunchaku_svdq(workflow)
+        return web.json_response({
+            "workflow": updated_workflow,
+            "updated_count": updated_count,
+            "precision": precision
+        })
+    except Exception as e:
+        print(f"[ERROR] fix_nunchaku_svdq failed: {e}")
+        print(f"[ERROR] Traceback: {traceback.format_exc()}")
+        return web.json_response({"error": str(e) if str(e) else repr(e)}, status=500)
+
 async def backup_to_hf(request):
     data = await request.json()
     folders = data.get("folders", [])
@@ -422,6 +440,7 @@ def setup(app):
     app.router.add_post("/restore_from_hf", restore_from_hf)
     app.router.add_post("/check_missing_models", check_missing_models)
     app.router.add_post("/install_models", install_models)
+    app.router.add_post("/fix_nunchaku_svdq", fix_nunchaku_svdq)
 
     async def queue_download(request):
         """Queue background downloads with status tracking."""

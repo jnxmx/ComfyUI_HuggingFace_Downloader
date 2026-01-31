@@ -379,6 +379,13 @@ NODE_TYPE_MAPPING = {
     
     # Nunchaku
     "NunchakuFluxDiTLoader": "diffusion_models",
+    "NunchakuQwenImageDiTLoader": "diffusion_models",
+    "NunchakuZImageDiTLoader": "diffusion_models",
+    "NunchakuTextEncoderLoader": "text_encoders",
+    "NunchakuTextEncoderLoaderV2": "text_encoders",
+    "NunchakuIPAdapterLoader": "ipadapter",
+    "NunchakuPulidLoader": "pulid",
+    "NunchakuPuLIDLoaderV2": "pulid",
     
     # IPAdapter
     "IPAdapterPlus": "ipadapter",
@@ -397,6 +404,110 @@ NODE_TYPE_MAPPING = {
     "DownloadAndLoadFlorence2Model": "LLM",
     
 }
+
+NUNCHAKU_NODE_TYPES = {
+    "NunchakuFluxDiTLoader",
+    "NunchakuQwenImageDiTLoader",
+    "NunchakuZImageDiTLoader",
+    "NunchakuTextEncoderLoader",
+    "NunchakuTextEncoderLoaderV2",
+    "NunchakuIPAdapterLoader",
+    "NunchakuPulidLoader",
+    "NunchakuPuLIDLoaderV2",
+}
+
+def _get_nunchaku_precision() -> str:
+    try:
+        import torch  # type: ignore
+        if torch.cuda.is_available():
+            major, minor = torch.cuda.get_device_capability(0)
+            sm = f"{major}{minor}"
+            return "fp4" if sm == "120" else "int4"
+    except Exception:
+        pass
+    return "int4"
+
+def _normalize_svdq_filename(name: str, precision: str) -> str:
+    if not name.startswith("svdq-"):
+        return name
+    updated = name
+    if "svdq-int4" in updated and precision == "fp4":
+        updated = updated.replace("svdq-int4", "svdq-fp4", 1)
+    elif "svdq-fp4" in updated and precision == "int4":
+        updated = updated.replace("svdq-fp4", "svdq-int4", 1)
+    if not any(updated.endswith(ext) for ext in MODEL_EXTENSIONS):
+        updated = f"{updated}.safetensors"
+    return updated
+
+def normalize_nunchaku_svdq_name(value: str, precision: str | None = None) -> str:
+    if not isinstance(value, str) or not value:
+        return value
+    precision = precision or _get_nunchaku_precision()
+    updated = value.replace("{precision}", precision)
+    if "://" in updated:
+        base = updated.split("?")[0]
+        filename = base.split("/")[-1]
+        normalized_filename = _normalize_svdq_filename(filename, precision)
+        if normalized_filename != filename:
+            return updated.replace(filename, normalized_filename)
+        return updated
+    return _normalize_svdq_filename(updated, precision)
+
+def _update_nodes_nunchaku_svdq(nodes: list[dict], precision: str) -> int:
+    updated = 0
+    for node in nodes:
+        node_type = node.get("type", "")
+        if node_type not in NUNCHAKU_NODE_TYPES:
+            continue
+
+        widgets = node.get("widgets_values")
+        if isinstance(widgets, list):
+            for idx, val in enumerate(widgets):
+                if not isinstance(val, str):
+                    continue
+                normalized = normalize_nunchaku_svdq_name(val, precision)
+                if normalized != val:
+                    widgets[idx] = normalized
+                    updated += 1
+
+        props = node.get("properties")
+        if isinstance(props, dict):
+            models = props.get("models")
+            if isinstance(models, list):
+                for model_info in models:
+                    if not isinstance(model_info, dict):
+                        continue
+                    name = model_info.get("name")
+                    if isinstance(name, str):
+                        normalized = normalize_nunchaku_svdq_name(name, precision)
+                        if normalized != name:
+                            model_info["name"] = normalized
+                            updated += 1
+                    url = model_info.get("url")
+                    if isinstance(url, str):
+                        normalized = normalize_nunchaku_svdq_name(url, precision)
+                        if normalized != url:
+                            model_info["url"] = normalized
+                            updated += 1
+    return updated
+
+def update_workflow_nunchaku_svdq(workflow: Dict[str, Any]) -> tuple[Dict[str, Any], int, str]:
+    precision = _get_nunchaku_precision()
+    updated = 0
+
+    nodes = workflow.get("nodes", [])
+    if isinstance(nodes, list):
+        updated += _update_nodes_nunchaku_svdq(nodes, precision)
+
+    definitions = workflow.get("definitions", {})
+    subgraphs = definitions.get("subgraphs", [])
+    if isinstance(subgraphs, list):
+        for subgraph in subgraphs:
+            sub_nodes = subgraph.get("nodes", [])
+            if isinstance(sub_nodes, list):
+                updated += _update_nodes_nunchaku_svdq(sub_nodes, precision)
+
+    return workflow, updated, precision
 
 
 def _build_links_map(raw_links: list[Any]) -> dict:
@@ -536,6 +647,7 @@ def _collect_models_from_nodes(
             
         node_title = node.get("title") or node.get("type", node_title_fallback)
         node_type = node.get("type", "")
+        nunchaku_precision = _get_nunchaku_precision() if node_type in NUNCHAKU_NODE_TYPES else None
         node_cnr = ""
         if isinstance(node.get("properties"), dict):
             node_cnr = node["properties"].get("cnr_id", "") or ""
@@ -644,11 +756,16 @@ def _collect_models_from_nodes(
                 if not has_linked_widget_input:
                     for model_info in node["properties"]["models"]:
                         name = model_info.get("name")
+                        if isinstance(name, str) and nunchaku_precision:
+                            name = normalize_nunchaku_svdq_name(name, nunchaku_precision)
+                        url = model_info.get("url")
+                        if isinstance(url, str) and nunchaku_precision:
+                            url = normalize_nunchaku_svdq_name(url, nunchaku_precision)
                         filename, requested_path = split_model_identifier(name) if name else (name, None)
                         found_models.append({
                             "filename": filename,
                             "requested_path": requested_path,
-                            "url": model_info.get("url"),
+                            "url": url,
                             "node_id": node_id,
                             "node_title": node_title,
                             "suggested_folder": model_info.get("directory")
@@ -668,6 +785,8 @@ def _collect_models_from_nodes(
                         continue
                     if not isinstance(val, str):
                         continue
+                    if nunchaku_precision:
+                        val = normalize_nunchaku_svdq_name(val, nunchaku_precision)
 
                     # CASE A: Value is a URL
                     if val.startswith("http://") or val.startswith("https://"):

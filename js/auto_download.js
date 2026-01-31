@@ -161,6 +161,47 @@ app.registerExtension({
             window.hfDownloader[name] = action;
         };
 
+        const resolveBaseUrl = () => {
+            const path = window.location.pathname || "/";
+            const basePath = path.endsWith("/") ? path : path.replace(/\/[^/]*$/, "/");
+            return window.location.origin + basePath;
+        };
+
+        const postJson = async (path, payload) => {
+            const baseUrl = resolveBaseUrl();
+            const relPath = String(path || "").replace(/^\/+/, "");
+            const url = new URL(relPath, baseUrl).toString();
+            return fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+        };
+
+        const updateWorkflowInComfyUI = async (workflow) => {
+            if (!app || !app.graph) {
+                console.warn("[AutoDownload] app.graph not available for workflow update");
+                return false;
+            }
+            try {
+                if (typeof app.graph.configure === "function") {
+                    app.graph.configure(workflow);
+                    return true;
+                }
+                if (typeof app.graph.deserialize === "function") {
+                    app.graph.deserialize(workflow);
+                    return true;
+                }
+                if (typeof app.loadGraphData === "function") {
+                    await app.loadGraphData(workflow, false, false, null);
+                    return true;
+                }
+            } catch (e) {
+                console.warn("[AutoDownload] Failed to update workflow in UI:", e);
+            }
+            return false;
+        };
+
         let availableFolders = [
             "checkpoints",
             "loras",
@@ -314,7 +355,7 @@ app.registerExtension({
             });
 
             const statusEl = document.createElement("div");
-            statusEl.textContent = "🔍 Looking for links...";
+            statusEl.textContent = "Looking for links...";
 
             const detailEl = document.createElement("div");
             detailEl.style.fontSize = "12px";
@@ -438,7 +479,52 @@ app.registerExtension({
 
             /* Header */
             const header = document.createElement("div");
-            header.innerHTML = `<h3>Auto-Download Models</h3><p style="font-size:12px;color:#aaa">Detected missing models and valid URLs.</p>`;
+            Object.assign(header.style, {
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: "12px"
+            });
+
+            const headerText = document.createElement("div");
+            headerText.innerHTML = `<h3>Auto-Download Models</h3><p style="font-size:12px;color:#aaa">Detected missing models and valid URLs.</p>`;
+
+            const fixBtn = createButton("Fix Nunchaku SVDQ", "p-button p-component p-button-secondary", async () => {
+                if (!app?.graph) {
+                    showToast("No workflow loaded.", "warn");
+                    return;
+                }
+                fixBtn.disabled = true;
+                const original = fixBtn.textContent;
+                fixBtn.textContent = "Fixing...";
+                try {
+                    const workflow = app.graph.serialize();
+                    const resp = await postJson("/fix_nunchaku_svdq", { workflow });
+                    if (resp.status !== 200) {
+                        const detail = await resp.text();
+                        throw new Error(detail || resp.statusText);
+                    }
+                    const data = await resp.json();
+                    if (data.updated_count > 0) {
+                        const updated = await updateWorkflowInComfyUI(data.workflow);
+                        if (!updated) {
+                            showToast("Updated workflow returned, but UI update failed. Try reloading.", "warn");
+                        } else {
+                            showToast(`Updated ${data.updated_count} Nunchaku model reference(s) for ${data.precision}.`, "success");
+                        }
+                    } else {
+                        showToast("No Nunchaku SVDQ changes needed.", "info");
+                    }
+                } catch (e) {
+                    showToast(`Failed to fix Nunchaku SVDQ: ${e}`, "error");
+                } finally {
+                    fixBtn.disabled = false;
+                    fixBtn.textContent = original;
+                }
+            });
+
+            header.appendChild(headerText);
+            header.appendChild(fixBtn);
             panel.appendChild(header);
 
             /* Content Area (Scrollable) */
@@ -1089,12 +1175,6 @@ app.registerExtension({
 
                 const requestId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
-                const resolveBaseUrl = () => {
-                    const path = window.location.pathname || "/";
-                    const basePath = path.endsWith("/") ? path : path.replace(/\/[^/]*$/, "/");
-                    return window.location.origin + basePath;
-                };
-
                 const doFetch = async (path, options = {}) => {
                     const method = String(options.method || "GET").toUpperCase();
                     if (method === "GET" && api && typeof api.fetchApi === "function") {
@@ -1115,12 +1195,16 @@ app.registerExtension({
                         const statusData = await statusResp.json();
                         const status = statusData.status || {};
                         const detailRaw = status.detail || "";
-                        let message = status.message || "🔍 Looking for links...";
+                        let message = status.message || "Looking for links...";
                         const type = status.source || "search";
                         const filename = status.filename || "";
                         currentFilename = filename || "";
-                        if (detailRaw && type.startsWith("huggingface_") && !/searching/i.test(message)) {
-                            message = `Searching ${detailRaw}`;
+                        if (detailRaw) {
+                            if (!status.message) {
+                                message = `Searching ${detailRaw}`;
+                            } else if (!message.includes(detailRaw)) {
+                                message = `${message} (${detailRaw})`;
+                            }
                         }
                         const detail = filename ? `${type}:${filename}` : type;
                         loadingDlg.setStatus(message);
