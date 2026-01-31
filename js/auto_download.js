@@ -1,4 +1,5 @@
 import { app } from "../../../scripts/app.js";
+import { api } from "../../../scripts/api.js";
 
 app.registerExtension({
     name: "autoDownloadModels",
@@ -865,6 +866,13 @@ app.registerExtension({
 
             dlg.appendChild(panel);
             document.body.appendChild(dlg);
+            setTimeout(() => {
+                const firstUrlInput = dlg.querySelector("input[placeholder='HuggingFace URL...']");
+                if (firstUrlInput) {
+                    firstUrlInput.focus();
+                    firstUrlInput.select();
+                }
+            }, 0);
         };
 
         const showManualDownloadDialog = () => {
@@ -1088,9 +1096,10 @@ app.registerExtension({
                 };
 
                 const doFetch = async (path, options = {}) => {
-                    if (window.api && typeof window.api.fetchApi === "function") {
-                        const apiPath = String(path || "").replace(/^\/+/, "");
-                        return window.api.fetchApi(apiPath, options);
+                    if (api && typeof api.fetchApi === "function") {
+                        let apiPath = String(path || "");
+                        if (!apiPath.startsWith("/")) apiPath = "/" + apiPath;
+                        return api.fetchApi(apiPath, options);
                     }
                     const baseUrl = resolveBaseUrl();
                     const relPath = String(path || "").replace(/^\/+/, "");
@@ -1109,7 +1118,7 @@ app.registerExtension({
                         const type = status.source || "search";
                         const filename = status.filename || "";
                         currentFilename = filename || "";
-                        if (type === "huggingface_priority_authors" && detailRaw && !/searching/i.test(message)) {
+                        if (detailRaw && type.startsWith("huggingface_") && !/searching/i.test(message)) {
                             message = `Searching ${detailRaw}`;
                         }
                         const detail = filename ? `${type}:${filename}` : type;
