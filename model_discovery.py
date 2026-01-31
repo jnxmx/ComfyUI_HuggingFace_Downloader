@@ -87,7 +87,7 @@ def _get_repo_files(api: HfApi, repo_id: str, token: str | None) -> list[str]:
 def _get_repo_readme(repo_id: str, token: str | None) -> str | None:
     if repo_id in _hf_readme_cache:
         return _hf_readme_cache[repo_id]
-    if not _hf_search_allowed():
+    if not _hf_html_allowed():
         raise HFSearchBudgetError()
 
     def _fetch(url: str) -> str | None:
@@ -161,7 +161,7 @@ def _try_readme_match(
 def _hf_full_text_search_repos(query: str, token: str | None) -> list[str]:
     if not query:
         return []
-    if not _hf_search_allowed():
+    if not _hf_html_allowed():
         raise HFSearchBudgetError()
 
     def _fetch(url: str) -> str | None:
@@ -1182,6 +1182,15 @@ def _hf_search_allowed() -> bool:
     _hf_api_calls += 1
     return True
 
+def _hf_html_allowed() -> bool:
+    if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
+        return False
+    if _hf_search_deadline and time.time() >= _hf_search_deadline:
+        global _hf_search_time_exhausted
+        _hf_search_time_exhausted = True
+        return False
+    return True
+
 def _set_hf_rate_limited() -> None:
     global _hf_rate_limited_until
     if _hf_rate_limited_until:
@@ -1217,6 +1226,7 @@ def search_huggingface_model(
     Returns metadata dict with url/hf_repo/hf_path or None.
     """
     api = HfApi(token=token)
+    budget_exhausted = False
 
     key = _normalize_hf_search_key(filename)
     if key in _hf_search_cache:
@@ -1335,7 +1345,8 @@ def search_huggingface_model(
             for term in search_terms:
                 if not _hf_search_allowed():
                     print(f"[DEBUG] HF search budget/rate limit hit before term search for {filename}")
-                    return None
+                    budget_exhausted = True
+                    break
                 try:
                     models = list(call_with_timeout(api.list_models, search=term, limit=20, sort="downloads", direction=-1))
                 except concurrent.futures.TimeoutError:
@@ -1372,6 +1383,8 @@ def search_huggingface_model(
                     if term != filename:
                         print(f"[DEBUG] No results for {filename}, trying search term: {term}")
                     break
+            if budget_exhausted:
+                models = []
 
         if mode == "full" and not models:
             try:
@@ -1416,7 +1429,8 @@ def search_huggingface_model(
                     for term in author_search_terms:
                         if not _hf_search_allowed():
                             print(f"[DEBUG] HF search budget/rate limit hit before author term search for {filename}")
-                            return None
+                            budget_exhausted = True
+                            break
                         try:
                             author_models = list(call_with_timeout(
                                 api.list_models,
@@ -1458,6 +1472,8 @@ def search_huggingface_model(
                             raise
                         if author_models:
                             found.extend(author_models)
+                    if budget_exhausted:
+                        break
                     print(f"[DEBUG] Priority author {author} search returned {len(found)} repos for {filename}")
                     if 0 < len(found) <= 5:
                         try:
@@ -1467,7 +1483,8 @@ def search_huggingface_model(
                             pass
                     if not _hf_search_allowed():
                         print(f"[DEBUG] HF search budget/rate limit hit before author list for {filename}")
-                        return None
+                        budget_exhausted = True
+                        break
                     try:
                         author_list = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads", direction=-1))
                     except concurrent.futures.TimeoutError:
@@ -1515,6 +1532,8 @@ def search_huggingface_model(
                         except Exception:
                             pass
                     models.extend(found)
+                    if budget_exhausted:
+                        break
                 except Exception:
                     continue
         
@@ -1597,7 +1616,8 @@ def search_huggingface_model(
                 print(f"[DEBUG] {filename} not in repo {model_id} (priority author)")
             except HFSearchBudgetError:
                 print(f"[DEBUG] HF search budget/rate limit hit before priority repo scan for {filename}")
-                return None
+                budget_exhausted = True
+                break
             except concurrent.futures.TimeoutError:
                 print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority author)")
                 if status_cb:
@@ -1620,6 +1640,8 @@ def search_huggingface_model(
                         })
                     continue
                 continue
+        if budget_exhausted:
+            priority_models = []
 
         # If no priority author found, check the rest of the results
         priority_ids = {m.modelId for m in priority_models}
@@ -1663,7 +1685,8 @@ def search_huggingface_model(
                 print(f"[DEBUG] {filename} not in repo {model_id}")
             except HFSearchBudgetError:
                 print(f"[DEBUG] HF search budget/rate limit hit before workflow repo scan for {filename}")
-                return None
+                budget_exhausted = True
+                break
             except concurrent.futures.TimeoutError:
                 if status_cb:
                     status_cb({
@@ -1673,6 +1696,8 @@ def search_huggingface_model(
                         "detail": f"list_repo_files({model_id})"
                     })
                 continue
+        if budget_exhausted:
+            other_workflow = []
             except Exception as e:
                 if is_timeout_error(e):
                     if status_cb:
@@ -1713,7 +1738,8 @@ def search_huggingface_model(
                 print(f"[DEBUG] {filename} not in repo {model_id}")
             except HFSearchBudgetError:
                 print(f"[DEBUG] HF search budget/rate limit hit before repo scan for {filename}")
-                return None
+                budget_exhausted = True
+                break
             except concurrent.futures.TimeoutError:
                 if status_cb:
                     status_cb({
@@ -1723,6 +1749,8 @@ def search_huggingface_model(
                         "detail": f"list_repo_files({model_id})"
                     })
                 continue
+        if budget_exhausted:
+            other_rest = []
             except Exception as e:
                 if is_timeout_error(e):
                     if status_cb:
@@ -1740,7 +1768,8 @@ def search_huggingface_model(
             for author in PRIORITY_AUTHORS:
                 try:
                     if not _hf_search_allowed():
-                        return None
+                        budget_exhausted = True
+                        break
                     author_models = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads", direction=-1))
                 except concurrent.futures.TimeoutError:
                     if status_cb:
@@ -1801,7 +1830,8 @@ def search_huggingface_model(
                         print(f"[DEBUG] {filename} not in repo {model_id} (priority author final)")
                     except HFSearchBudgetError:
                         print(f"[DEBUG] HF search budget/rate limit hit before priority repo scan for {filename}")
-                        return None
+                        budget_exhausted = True
+                        break
                     except concurrent.futures.TimeoutError:
                         print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority author final)")
                         if status_cb:
@@ -1812,6 +1842,8 @@ def search_huggingface_model(
                                 "detail": f"list_repo_files({model_id})"
                             })
                         continue
+                if budget_exhausted:
+                    break
                     except Exception as e:
                         if is_timeout_error(e):
                             print(f"[DEBUG] list_repo_files timeout for {model_id} while searching {filename} (priority author final)")
