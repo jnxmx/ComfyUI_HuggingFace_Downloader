@@ -441,6 +441,12 @@ def setup(app):
     app.router.add_post("/check_missing_models", check_missing_models)
     app.router.add_post("/install_models", install_models)
     app.router.add_post("/fix_nunchaku_svdq", fix_nunchaku_svdq)
+    app.router.add_get("/api/folder_structure", folder_structure)
+    app.router.add_post("/api/backup_to_hf", backup_to_hf)
+    app.router.add_post("/api/restore_from_hf", restore_from_hf)
+    app.router.add_post("/api/check_missing_models", check_missing_models)
+    app.router.add_post("/api/install_models", install_models)
+    app.router.add_post("/api/fix_nunchaku_svdq", fix_nunchaku_svdq)
 
     async def queue_download(request):
         """Queue background downloads with status tracking."""
@@ -508,3 +514,7 @@ def setup(app):
     app.router.add_post("/queue_download", queue_download)
     app.router.add_get("/download_status", download_status_endpoint)
     app.router.add_get("/search_status", search_status_endpoint)
+    app.router.add_post("/api/restart", restart)
+    app.router.add_post("/api/queue_download", queue_download)
+    app.router.add_get("/api/download_status", download_status_endpoint)
+    app.router.add_get("/api/search_status", search_status_endpoint)
