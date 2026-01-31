@@ -439,16 +439,10 @@ _ROUTES_REGISTERED = False
 def _register_route(target, method, path, handler):
     if hasattr(target, "router"):
         add = getattr(target.router, f"add_{method}")
-        try:
-            add(path, handler)
-        except RuntimeError:
-            pass
+        add(path, handler)
         return
     if hasattr(target, method):
-        try:
-            getattr(target, method)(path)(handler)
-        except RuntimeError:
-            pass
+        getattr(target, method)(path)(handler)
         return
     raise RuntimeError("Unsupported route registration target")
 
@@ -457,30 +451,18 @@ def setup(app_or_routes):
     if _ROUTES_REGISTERED:
         return
 
-    targets = []
-    if app_or_routes is not None:
-        targets.append(app_or_routes)
-    try:
-        import server
-        app = getattr(server.PromptServer.instance, "app", None)
-        if app is not None and app not in targets:
-            targets.append(app)
-    except Exception:
-        pass
-
-    for target in targets:
-        _register_route(target, "get", "/folder_structure", folder_structure)
-        _register_route(target, "post", "/backup_to_hf", backup_to_hf)
-        _register_route(target, "post", "/restore_from_hf", restore_from_hf)
-        _register_route(target, "post", "/check_missing_models", check_missing_models)
-        _register_route(target, "post", "/install_models", install_models)
-        _register_route(target, "post", "/fix_nunchaku_svdq", fix_nunchaku_svdq)
-        _register_route(target, "get", "/api/folder_structure", folder_structure)
-        _register_route(target, "post", "/api/backup_to_hf", backup_to_hf)
-        _register_route(target, "post", "/api/restore_from_hf", restore_from_hf)
-        _register_route(target, "post", "/api/check_missing_models", check_missing_models)
-        _register_route(target, "post", "/api/install_models", install_models)
-        _register_route(target, "post", "/api/fix_nunchaku_svdq", fix_nunchaku_svdq)
+    _register_route(app_or_routes, "get", "/folder_structure", folder_structure)
+    _register_route(app_or_routes, "post", "/backup_to_hf", backup_to_hf)
+    _register_route(app_or_routes, "post", "/restore_from_hf", restore_from_hf)
+    _register_route(app_or_routes, "post", "/check_missing_models", check_missing_models)
+    _register_route(app_or_routes, "post", "/install_models", install_models)
+    _register_route(app_or_routes, "post", "/fix_nunchaku_svdq", fix_nunchaku_svdq)
+    _register_route(app_or_routes, "get", "/api/folder_structure", folder_structure)
+    _register_route(app_or_routes, "post", "/api/backup_to_hf", backup_to_hf)
+    _register_route(app_or_routes, "post", "/api/restore_from_hf", restore_from_hf)
+    _register_route(app_or_routes, "post", "/api/check_missing_models", check_missing_models)
+    _register_route(app_or_routes, "post", "/api/install_models", install_models)
+    _register_route(app_or_routes, "post", "/api/fix_nunchaku_svdq", fix_nunchaku_svdq)
 
     async def queue_download(request):
         """Queue background downloads with status tracking."""
@@ -544,14 +526,13 @@ def setup(app_or_routes):
         app.loop.call_later(1, restart_server)
         return web.json_response({"status": "ok"})
         
-    for target in targets:
-        _register_route(target, "post", "/restart", restart)
-        _register_route(target, "post", "/queue_download", queue_download)
-        _register_route(target, "get", "/download_status", download_status_endpoint)
-        _register_route(target, "get", "/search_status", search_status_endpoint)
-        _register_route(target, "post", "/api/restart", restart)
-        _register_route(target, "post", "/api/queue_download", queue_download)
-        _register_route(target, "get", "/api/download_status", download_status_endpoint)
-        _register_route(target, "get", "/api/search_status", search_status_endpoint)
+    _register_route(app_or_routes, "post", "/restart", restart)
+    _register_route(app_or_routes, "post", "/queue_download", queue_download)
+    _register_route(app_or_routes, "get", "/download_status", download_status_endpoint)
+    _register_route(app_or_routes, "get", "/search_status", search_status_endpoint)
+    _register_route(app_or_routes, "post", "/api/restart", restart)
+    _register_route(app_or_routes, "post", "/api/queue_download", queue_download)
+    _register_route(app_or_routes, "get", "/api/download_status", download_status_endpoint)
+    _register_route(app_or_routes, "get", "/api/search_status", search_status_endpoint)
 
     _ROUTES_REGISTERED = True
