@@ -483,7 +483,7 @@ app.registerExtension({
         };
 
         /* Show loading dialog immediately */
-        const showLoadingDialog = (onCancel, onSkip, options = {}) => {
+        const showLoadingDialog = (onSkip, options = {}) => {
             const skipModeActive = Boolean(options.skipModeActive);
             const existing = document.getElementById("auto-download-dialog");
             if (existing) existing.remove();
@@ -505,105 +505,69 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "linear-gradient(180deg, #191d28 0%, #161b27 100%)",
+                background: "#171b24",
                 color: "#fff",
-                padding: "26px 28px",
-                borderRadius: "14px",
+                padding: "22px 24px",
+                borderRadius: "12px",
                 textAlign: "left",
-                width: "520px",
+                width: "480px",
                 maxWidth: "92vw",
-                border: "1px solid #394562",
-                boxShadow: "0 18px 44px rgba(0, 0, 0, 0.55)"
-            });
-
-            const titleEl = document.createElement("div");
-            titleEl.textContent = "Looking for links";
-            Object.assign(titleEl.style, {
-                fontSize: "15px",
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-                color: "#9aa6c9",
-                marginBottom: "8px"
+                border: "1px solid #3a4560",
+                boxShadow: "0 14px 34px rgba(0, 0, 0, 0.5)"
             });
 
             const statusEl = document.createElement("div");
             statusEl.textContent = "Preparing scan...";
             Object.assign(statusEl.style, {
-                fontSize: "34px",
-                lineHeight: "1.15",
+                fontSize: "18px",
+                lineHeight: "1.25",
                 fontWeight: "600",
-                letterSpacing: "-0.01em"
+                letterSpacing: "-0.005em"
             });
 
             const detailEl = document.createElement("div");
             detailEl.textContent = "Preparing workflow scan...";
             Object.assign(detailEl.style, {
-                fontSize: "13px",
+                fontSize: "12px",
                 color: "#a2aec8",
-                marginTop: "10px",
+                marginTop: "8px",
                 minHeight: "18px"
             });
 
             const actionsEl = document.createElement("div");
             Object.assign(actionsEl.style, {
                 display: "flex",
-                gap: "10px",
-                marginTop: "18px",
+                gap: "8px",
+                marginTop: "14px",
                 justifyContent: "flex-start"
             });
 
             const buttonBaseStyle = {
-                padding: "8px 14px",
-                borderRadius: "8px",
+                padding: "7px 16px",
+                borderRadius: "7px",
                 cursor: "pointer",
                 fontSize: "13px",
                 fontWeight: "600"
             };
 
-            const cancelBtn = document.createElement("button");
-            cancelBtn.textContent = "Cancel";
-            Object.assign(cancelBtn.style, {
-                ...buttonBaseStyle,
-                background: "#2a3143",
-                color: "#dce6ff",
-                border: "1px solid #41516f"
-            });
-
             const skipBtn = document.createElement("button");
-            skipBtn.textContent = skipModeActive ? "Skipping unresolved..." : "Skip unresolved";
+            skipBtn.textContent = "Skip";
             Object.assign(skipBtn.style, {
                 ...buttonBaseStyle,
-                background: "#343946",
-                color: "#ced6eb",
-                border: "1px solid #4a5267",
+                background: "#2c3344",
+                color: "#e2e9f8",
+                border: "1px solid #465673",
                 opacity: skipModeActive ? "0.65" : "1"
             });
             skipBtn.disabled = skipModeActive;
-
-            let cancelled = false;
-            cancelBtn.onclick = () => {
-                if (!cancelled) {
-                    cancelled = true;
-                    statusEl.textContent = "Cancelling...";
-                    detailEl.textContent = "Stopping current scan.";
-                    cancelBtn.textContent = "Close";
-                    skipBtn.disabled = true;
-                    skipBtn.style.opacity = "0.65";
-                    if (onCancel) onCancel();
-                } else {
-                    if (dlg.parentElement) dlg.remove();
-                }
-            };
 
             skipBtn.onclick = () => {
                 if (skipBtn.disabled) return;
                 if (onSkip) onSkip();
             };
 
-            panel.appendChild(titleEl);
             panel.appendChild(statusEl);
             panel.appendChild(detailEl);
-            actionsEl.appendChild(cancelBtn);
             actionsEl.appendChild(skipBtn);
             panel.appendChild(actionsEl);
 
@@ -615,18 +579,7 @@ app.registerExtension({
                 setDetail: (text) => { detailEl.textContent = text; },
                 setSkipMode: (active) => {
                     skipBtn.disabled = Boolean(active);
-                    skipBtn.textContent = active ? "Skipping unresolved..." : "Skip unresolved";
                     skipBtn.style.opacity = active ? "0.65" : "1";
-                },
-                setCancelState: (closing) => {
-                    if (!cancelled) {
-                        cancelled = true;
-                    }
-                    if (closing) {
-                        cancelBtn.textContent = "Close";
-                        skipBtn.disabled = true;
-                        skipBtn.style.opacity = "0.65";
-                    }
                 },
                 cleanup: () => {},
                 remove: () => { if (dlg.parentElement) dlg.remove(); }
@@ -1366,13 +1319,6 @@ app.registerExtension({
                 // Show loading dialog immediately
                 const controller = new AbortController();
                 loadingDlg = showLoadingDialog(() => {
-                    aborted = true;
-                    if (statusTimer) {
-                        clearInterval(statusTimer);
-                        statusTimer = null;
-                    }
-                    controller.abort();
-                }, () => {
                     skipRequested = true;
                     aborted = true;
                     loadingDlg.setSkipMode(true);
@@ -1530,9 +1476,7 @@ app.registerExtension({
                             }, 0);
                             return;
                         }
-                        loadingDlg.setStatus("Cancelled.");
-                        loadingDlg.setDetail("Auto scan was stopped.");
-                        loadingDlg.setCancelState(true);
+                        loadingDlg.remove();
                         return;
                     }
                     loadingDlg.remove();
