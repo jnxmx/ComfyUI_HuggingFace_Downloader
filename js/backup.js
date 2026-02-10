@@ -39,6 +39,25 @@ app.registerExtension({
             }
         };
 
+        const ensureTreeStyles = () => {
+            if (document.getElementById("hf-backup-tree-style")) return;
+            const style = document.createElement("style");
+            style.id = "hf-backup-tree-style";
+            style.textContent = `
+#backup-hf-dialog summary.hf-tree-summary {
+    list-style: none;
+}
+#backup-hf-dialog summary.hf-tree-summary::-webkit-details-marker {
+    display: none;
+}
+#backup-hf-dialog summary.hf-tree-summary::marker {
+    display: none;
+    content: "";
+}
+`;
+            document.head.appendChild(style);
+        };
+
         const requestJson = async (url, init = {}) => {
             const options = { ...init };
             if (options.body && !options.headers) {
@@ -153,10 +172,12 @@ app.registerExtension({
             return Array.from(dedup.values());
         };
 
-        const makeNodeRow = (node, state, onSelectionChange) => {
+        const makeNodeRow = (node, state, onSelectionChange, opts = {}) => {
+            const { hasChildren = false, isOpen = false } = opts;
             const row = document.createElement("div");
             Object.assign(row.style, {
-                display: "flex",
+                display: "grid",
+                gridTemplateColumns: "16px 22px minmax(0,1fr)",
                 alignItems: "center",
                 gap: "8px",
                 padding: "4px 6px",
@@ -164,6 +185,18 @@ app.registerExtension({
                 minHeight: "24px",
                 minWidth: "0",
             });
+
+            const expander = document.createElement("span");
+            expander.className = "hf-tree-expander";
+            expander.textContent = hasChildren ? (isOpen ? "▾" : "▸") : "";
+            Object.assign(expander.style, {
+                width: "16px",
+                textAlign: "center",
+                color: "#cfd6df",
+                fontSize: "12px",
+                userSelect: "none",
+            });
+            row.appendChild(expander);
 
             if (node.selectable && node.action) {
                 const cb = document.createElement("input");
@@ -183,11 +216,16 @@ app.registerExtension({
                 if (cb.checked) {
                     state.selected.set(node.id, node.action);
                 }
-                row.appendChild(cb);
+                const cbWrap = document.createElement("span");
+                cbWrap.style.display = "flex";
+                cbWrap.style.alignItems = "center";
+                cbWrap.style.justifyContent = "center";
+                cbWrap.appendChild(cb);
+                row.appendChild(cbWrap);
             } else {
                 const spacer = document.createElement("span");
-                spacer.style.display = "inline-block";
-                spacer.style.width = "16px";
+                spacer.style.display = "block";
+                spacer.style.width = "22px";
                 row.appendChild(spacer);
             }
 
@@ -220,9 +258,25 @@ app.registerExtension({
                     details.style.borderRadius = "6px";
 
                     const summary = document.createElement("summary");
+                    summary.className = "hf-tree-summary";
                     summary.style.cursor = "pointer";
+                    summary.style.listStyle = "none";
+                    summary.style.display = "block";
+                    summary.style.padding = "0";
+                    summary.style.margin = "0";
                     summary.style.outline = "none";
-                    summary.appendChild(makeNodeRow(node, state, onSelectionChange));
+                    const row = makeNodeRow(node, state, onSelectionChange, {
+                        hasChildren: true,
+                        isOpen: details.open,
+                    });
+                    summary.appendChild(row);
+
+                    details.addEventListener("toggle", () => {
+                        const expander = row.querySelector(".hf-tree-expander");
+                        if (expander) {
+                            expander.textContent = details.open ? "▾" : "▸";
+                        }
+                    });
 
                     const childWrap = document.createElement("div");
                     renderNodes(node.children, childWrap, state, onSelectionChange, depth + 1);
@@ -231,7 +285,7 @@ app.registerExtension({
                     details.appendChild(childWrap);
                     list.appendChild(details);
                 } else {
-                    list.appendChild(makeNodeRow(node, state, onSelectionChange));
+                    list.appendChild(makeNodeRow(node, state, onSelectionChange, { hasChildren: false }));
                 }
             });
 
@@ -242,6 +296,7 @@ app.registerExtension({
         let currentDialogCleanup = null;
 
         const showBackupDialog = async () => {
+            ensureTreeStyles();
             if (currentDialog) {
                 if (typeof currentDialogCleanup === "function") {
                     currentDialogCleanup();
