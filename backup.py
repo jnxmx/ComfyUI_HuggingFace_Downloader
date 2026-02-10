@@ -1125,17 +1125,6 @@ def _build_local_panel_nodes() -> list:
 
     settings_path = "user/default/comfy.settings.json"
     settings_exists = _settings_file_exists(settings_path)
-    settings_children = []
-    if settings_exists:
-        settings_children.append(_make_tree_node(
-            node_id="local:file:user/default/comfy.settings.json",
-            label="comfy.settings.json",
-            node_type="file",
-            selectable=True,
-            default_checked=False,
-            action={"kind": "path", "path": settings_path, "entry_type": "file"},
-            children=[]
-        ))
     nodes.append(_make_tree_node(
         node_id="local:category:settings",
         label="Settings",
@@ -1143,7 +1132,7 @@ def _build_local_panel_nodes() -> list:
         selectable=settings_exists,
         default_checked=settings_exists,
         action={"kind": "path", "path": settings_path, "entry_type": "file"} if settings_exists else None,
-        children=settings_children
+        children=[]
     ))
 
     workflows_base = "user/default/workflows"
@@ -1297,17 +1286,6 @@ def _build_backup_panel_nodes(repo_name: str, token: str, comfy_files: list) -> 
 
     settings_repo_path = "ComfyUI/user/default/comfy.settings.json"
     settings_exists = settings_repo_path in comfy_set
-    settings_children = []
-    if settings_exists:
-        settings_children.append(_make_tree_node(
-            node_id="backup:file:ComfyUI/user/default/comfy.settings.json",
-            label="comfy.settings.json",
-            node_type="file",
-            selectable=True,
-            default_checked=False,
-            action={"kind": "path", "path": settings_repo_path, "entry_type": "file"},
-            children=[]
-        ))
     nodes.append(_make_tree_node(
         node_id="backup:category:settings",
         label="Settings",
@@ -1315,7 +1293,7 @@ def _build_backup_panel_nodes(repo_name: str, token: str, comfy_files: list) -> 
         selectable=settings_exists,
         default_checked=False,
         action={"kind": "path", "path": settings_repo_path, "entry_type": "file"} if settings_exists else None,
-        children=settings_children
+        children=[]
     ))
 
     workflows_base = "ComfyUI/user/default/workflows"
@@ -1502,13 +1480,15 @@ def _build_backup_panel_nodes(repo_name: str, token: str, comfy_files: list) -> 
 def get_backup_browser_tree(repo_name_or_link: str) -> dict:
     local_nodes = _build_local_panel_nodes()
     backup_nodes = _empty_panel_structure("backup")
+    backup_total_size_bytes = None
 
     if not repo_name_or_link:
         return {
             "local": local_nodes,
             "backup": backup_nodes,
             "backup_error": "No backup repository configured in settings.",
-            "repo_name": ""
+            "repo_name": "",
+            "backup_total_size_bytes": backup_total_size_bytes,
         }
 
     token, _ = get_token_and_size_limit()
@@ -1517,7 +1497,8 @@ def get_backup_browser_tree(repo_name_or_link: str) -> dict:
             "local": local_nodes,
             "backup": backup_nodes,
             "backup_error": "No Hugging Face token configured.",
-            "repo_name": repo_name_or_link
+            "repo_name": repo_name_or_link,
+            "backup_total_size_bytes": backup_total_size_bytes,
         }
 
     try:
@@ -1527,21 +1508,56 @@ def get_backup_browser_tree(repo_name_or_link: str) -> dict:
 
     try:
         api = HfApi()
-        repo_files = api.list_repo_files(repo_id=repo_name, token=token)
-        comfy_files = sorted([path for path in repo_files if path.startswith("ComfyUI/")])
+        comfy_files = []
+        siblings = None
+        try:
+            try:
+                repo_info = api.repo_info(repo_id=repo_name, token=token, files_metadata=True)
+            except TypeError:
+                repo_info = api.repo_info(repo_id=repo_name, token=token)
+            siblings = getattr(repo_info, "siblings", None)
+        except Exception as e:
+            print(f"[WARNING] Could not fetch repo metadata for size info: {e}")
+
+        if siblings:
+            size_acc = 0
+            has_size_data = False
+            for sibling in siblings:
+                if isinstance(sibling, dict):
+                    rfilename = sibling.get("rfilename", "")
+                    size = sibling.get("size")
+                else:
+                    rfilename = getattr(sibling, "rfilename", "") or ""
+                    size = getattr(sibling, "size", None)
+                if not rfilename.startswith("ComfyUI/"):
+                    continue
+                comfy_files.append(rfilename)
+                if isinstance(size, (int, float)):
+                    size_acc += int(size)
+                    has_size_data = True
+            comfy_files = sorted(set(comfy_files))
+            if has_size_data:
+                backup_total_size_bytes = size_acc
+
+        if not comfy_files:
+            repo_files = api.list_repo_files(repo_id=repo_name, token=token)
+            comfy_files = sorted([path for path in repo_files if path.startswith("ComfyUI/")])
+
         backup_nodes = _build_backup_panel_nodes(repo_name, token, comfy_files)
         return {
             "local": local_nodes,
             "backup": backup_nodes,
             "backup_error": None,
-            "repo_name": repo_name
+            "repo_name": repo_name,
+            "backup_total_size_bytes": backup_total_size_bytes,
         }
     except Exception as e:
         return {
             "local": local_nodes,
             "backup": backup_nodes,
             "backup_error": str(e),
-            "repo_name": repo_name
+            "repo_name": repo_name,
+            "backup_total_size_bytes": backup_total_size_bytes,
         }
 
 

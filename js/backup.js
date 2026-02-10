@@ -100,10 +100,23 @@ app.registerExtension({
     color: #b8c0cf;
 }
 #backup-hf-dialog .hf-backup-action-btn.p-button {
-    min-height: 26px;
-    padding: 0.22rem 0.62rem;
-    font-size: 11px;
+    min-height: 28px;
+    padding: 0.26rem 0.7rem;
+    font-size: 12px;
+    font-weight: 600;
     border-radius: 6px;
+}
+#backup-hf-dialog .hf-repo-link {
+    color: #7cb3ff;
+    text-decoration: none;
+    font-size: 12px;
+}
+#backup-hf-dialog .hf-repo-link:hover {
+    text-decoration: underline;
+}
+#backup-hf-dialog .hf-header-meta {
+    color: #9aa4b6;
+    font-size: 11px;
 }
 `;
             document.head.appendChild(style);
@@ -598,11 +611,25 @@ app.registerExtension({
                 overflow: "hidden",
             });
 
+            const headerWrap = document.createElement("div");
+            Object.assign(headerWrap.style, {
+                display: "flex",
+                flexDirection: "column",
+                gap: "2px",
+            });
+
             const header = document.createElement("div");
-            header.textContent = "Backup Manager: compare Hugging Face backup (left) with local ComfyUI install (right).";
-            header.style.fontSize = "13px";
-            header.style.color = "#cfd4de";
-            panel.appendChild(header);
+            header.textContent = "Backup Manager";
+            header.style.fontSize = "15px";
+            header.style.fontWeight = "600";
+            header.style.color = "#e5ebf7";
+            headerWrap.appendChild(header);
+
+            const headerMeta = document.createElement("div");
+            headerMeta.className = "hf-header-meta";
+            headerMeta.textContent = "";
+            headerWrap.appendChild(headerMeta);
+            panel.appendChild(headerWrap);
 
             const body = document.createElement("div");
             Object.assign(body.style, {
@@ -622,7 +649,7 @@ app.registerExtension({
                 window.removeEventListener("resize", updatePanelColumns);
             };
 
-            const makePanel = (title, subtitle) => {
+            const makePanel = (title) => {
                 const root = document.createElement("div");
                 Object.assign(root.style, {
                     background: "#1b1f28",
@@ -643,11 +670,10 @@ app.registerExtension({
                 titleEl.style.color = "#e1e6ef";
                 root.appendChild(titleEl);
 
-                const subEl = document.createElement("div");
-                subEl.textContent = subtitle;
-                subEl.style.fontSize = "10px";
-                subEl.style.color = "#8f97a5";
-                root.appendChild(subEl);
+                const metaEl = document.createElement("div");
+                metaEl.className = "hf-header-meta";
+                metaEl.style.display = "none";
+                root.appendChild(metaEl);
 
                 const errorEl = document.createElement("div");
                 Object.assign(errorEl.style, {
@@ -679,14 +705,14 @@ app.registerExtension({
                 });
                 root.appendChild(actions);
 
-                return { root, tree, actions, errorEl };
+                return { root, tree, actions, errorEl, metaEl };
             };
 
-            const backupPanel = makePanel("Backup (Hugging Face)", "Download all is always available. Selection enables extra actions.");
-            const localPanel = makePanel("Local Install (ComfyUI)", "Default selected: Settings, Custom Nodes, Workflows, Subgraphs, loras.");
+            const localPanel = makePanel("Local Install (ComfyUI)");
+            const backupPanel = makePanel("Backup (Hugging Face)");
 
-            body.appendChild(backupPanel.root);
             body.appendChild(localPanel.root);
+            body.appendChild(backupPanel.root);
             panel.appendChild(body);
 
             const footer = document.createElement("div");
@@ -712,14 +738,14 @@ app.registerExtension({
             overlay.appendChild(panel);
             document.body.appendChild(overlay);
 
-            const backupDownloadAllBtn = createButton("Download all");
+            const backupDownloadAllBtn = createButton("↑ Download all");
             const backupSelectedRow = document.createElement("div");
             Object.assign(backupSelectedRow.style, {
                 display: "none",
                 gap: "8px",
                 flexWrap: "wrap",
             });
-            const backupDownloadSelectedBtn = createButton("Download selected only", "success");
+            const backupDownloadSelectedBtn = createButton("↑ Download selected only", "success");
             const backupDeleteSelectedBtn = createButton("Delete selected from backup", "danger");
             const backupClearSelectionBtn = createButton("Clear selection", "secondary");
             backupSelectedRow.appendChild(backupDownloadSelectedBtn);
@@ -729,11 +755,59 @@ app.registerExtension({
             backupPanel.actions.appendChild(backupDownloadAllBtn);
             backupPanel.actions.appendChild(backupSelectedRow);
 
-            const localAddSelectedBtn = createButton("Add selected to backup");
+            const localAddSelectedBtn = createButton("↓ Upload to backup");
             localPanel.actions.appendChild(localAddSelectedBtn);
 
             const setStatus = (text) => {
                 status.textContent = text || "";
+            };
+
+            const formatSizeGb = (sizeBytes) => {
+                if (!Number.isFinite(sizeBytes) || sizeBytes < 0) {
+                    return null;
+                }
+                return `${(sizeBytes / (1024 ** 3)).toFixed(2)} GB`;
+            };
+
+            const updateRepoMeta = (repoName, sizeBytes) => {
+                const backupUrl = repoName ? `https://huggingface.co/${repoName}` : "";
+                const sizeLabel = formatSizeGb(sizeBytes);
+
+                headerMeta.innerHTML = "";
+                backupPanel.metaEl.innerHTML = "";
+
+                if (!repoName) {
+                    headerMeta.textContent = "No backup repository configured.";
+                    backupPanel.metaEl.style.display = "none";
+                    return;
+                }
+
+                const makeLink = () => {
+                    const link = document.createElement("a");
+                    link.className = "hf-repo-link";
+                    link.href = backupUrl;
+                    link.target = "_blank";
+                    link.rel = "noopener noreferrer";
+                    link.textContent = repoName;
+                    return link;
+                };
+
+                const headerLink = makeLink();
+                headerMeta.appendChild(headerLink);
+                if (sizeLabel) {
+                    const size = document.createElement("span");
+                    size.textContent = ` \u00b7 ${sizeLabel}`;
+                    headerMeta.appendChild(size);
+                }
+
+                const panelLink = makeLink();
+                backupPanel.metaEl.appendChild(panelLink);
+                if (sizeLabel) {
+                    const size = document.createElement("span");
+                    size.textContent = ` \u00b7 ${sizeLabel}`;
+                    backupPanel.metaEl.appendChild(size);
+                }
+                backupPanel.metaEl.style.display = "block";
             };
 
             const updateActions = () => {
@@ -779,6 +853,7 @@ app.registerExtension({
                 renderGroupedTree(payload.local || [], localPanel.tree, localState, updateActions);
                 initializeDefaultSelections(backupState);
                 initializeDefaultSelections(localState);
+                updateRepoMeta(payload.repo_name || "", payload.backup_total_size_bytes);
 
                 if (payload.backup_error) {
                     backupPanel.errorEl.style.display = "block";
