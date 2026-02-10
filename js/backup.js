@@ -1112,6 +1112,9 @@ app.registerExtension({
 
             const setBusy = (value, msg = "") => {
                 busy = value;
+                if (!overlay.isConnected) {
+                    return;
+                }
                 panel.style.opacity = "1";
                 setStatus(msg);
                 updateActions();
@@ -1152,6 +1155,7 @@ app.registerExtension({
                         categories: ["Settings", "Workflows", "Subgraphs", "Custom Nodes", "Models", "Input", "Output"],
                     });
                     setBusy(true, "Restoring full backup...");
+                    closeDialog();
                     const result = await requestJson("/restore_from_hf", { method: "POST", body: JSON.stringify({}) });
                     showToast({
                         severity: "success",
@@ -1162,7 +1166,7 @@ app.registerExtension({
                     await loadTree();
                     showOperationDone({
                         title: "Backup restore complete",
-                        showRefresh: true,
+                        showRefresh: false,
                     });
                     if (result.restart_required) {
                         showRestartDialog();
@@ -1193,6 +1197,7 @@ app.registerExtension({
                         categories: inferCategoriesFromItems(items, ["Selected items"]),
                     });
                     setBusy(true, "Restoring selected items...");
+                    closeDialog();
                     const result = await requestJson("/restore_selected_from_hf", {
                         method: "POST",
                         body: JSON.stringify({ items }),
@@ -1209,7 +1214,7 @@ app.registerExtension({
                     showOperationDone({
                         title: "Backup restore complete",
                         detail: `Restored ${restoredFiles} file(s).`,
-                        showRefresh: true,
+                        showRefresh: false,
                     });
                     if (result.restart_required) {
                         showRestartDialog();
@@ -1278,6 +1283,7 @@ app.registerExtension({
                         categories: inferCategoriesFromItems(items, ["Selected items"]),
                     });
                     setBusy(true, "Uploading selected local items...");
+                    closeDialog();
                     const result = await requestJson("/backup_selected_to_hf", {
                         method: "POST",
                         body: JSON.stringify({ items }),
