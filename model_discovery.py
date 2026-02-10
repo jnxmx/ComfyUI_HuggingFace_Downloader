@@ -704,6 +704,30 @@ def _collect_models_from_nodes(
                     if isinstance(input_name, str) and input_name:
                         linked_widget_names.add(input_name)
                 widget_pos += 1
+
+        # Gather currently selected model-like widget values for this node.
+        # Some workflows keep stale entries in properties.models (template metadata),
+        # so we later only trust matching property rows when widget-selected models exist.
+        widget_model_keys = set()
+        widgets_for_keys = node.get("widgets_values")
+        if isinstance(widgets_for_keys, list):
+            for idx, raw_val in enumerate(widgets_for_keys):
+                if idx in linked_widget_indices:
+                    continue
+                if not isinstance(raw_val, str):
+                    continue
+                val = raw_val.strip()
+                if not val:
+                    continue
+                if val.startswith("http://") or val.startswith("https://"):
+                    parsed_filename = val.split("?")[0].split("/")[-1]
+                    if any(parsed_filename.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
+                        widget_model_keys.add(normalize_filename_key(parsed_filename))
+                    continue
+                if _looks_like_model_widget_value(val, node_type):
+                    filename, _requested_path = split_model_identifier(val)
+                    if filename:
+                        widget_model_keys.add(normalize_filename_key(filename))
         
         # Subgraph wrapper nodes (UUID-type) proxy model widgets from inside the subgraph.
         # Capture those proxy widgets here so models are still discovered.
@@ -793,6 +817,15 @@ def _collect_models_from_nodes(
                     for model_info in node["properties"]["models"]:
                         name = model_info.get("name")
                         filename, requested_path = split_model_identifier(name) if name else (name, None)
+                        if not filename:
+                            continue
+                        filename_key = normalize_filename_key(filename)
+                        # If widget-selected models exist, ignore property rows that don't
+                        # match any active widget value (stale template metadata).
+                        if widget_model_keys and filename_key not in widget_model_keys:
+                            continue
+                        if any(m["filename"] == filename and m["node_id"] == node_id for m in found_models):
+                            continue
                         found_models.append({
                             "filename": filename,
                             "requested_path": requested_path,
