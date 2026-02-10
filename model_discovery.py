@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Tuple
 from types import SimpleNamespace
 from huggingface_hub import HfApi
 from .downloader import get_token
+from .parse_link import parse_link
 import folder_paths
 
 # Known extensions for model files
@@ -98,6 +99,46 @@ def extract_huggingface_info(url: str) -> tuple[str | None, str | None]:
     if not match:
         return None, None
     return match.group(1), match.group(2)
+
+def extract_hf_repo_and_path(url: str) -> tuple[str | None, str | None]:
+    """Extract HF repo/path from a URL or shorthand, including non-resolve direct file paths."""
+    hf_repo, hf_path = extract_huggingface_info(url)
+    if hf_repo and hf_path:
+        return hf_repo, hf_path
+
+    try:
+        parsed = parse_link(url)
+    except Exception:
+        return None, None
+
+    repo = parsed.get("repo")
+    filename = parsed.get("file")
+    if not repo or not filename:
+        return None, None
+
+    subfolder = (parsed.get("subfolder") or "").strip("/")
+    if subfolder:
+        return repo, f"{subfolder}/{filename}"
+    return repo, filename
+
+def is_specific_model_file_url(url: str, expected_filename: str | None = None) -> bool:
+    """True when URL/shorthand points to a specific model file path (not repo/folder)."""
+    hf_repo, hf_path = extract_hf_repo_and_path(url)
+    if not hf_repo or not hf_path:
+        return False
+
+    file_name = os.path.basename(hf_path.replace("\\", "/")).strip()
+    if not file_name:
+        return False
+    if not any(file_name.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
+        return False
+
+    if expected_filename:
+        expected_base = os.path.basename(expected_filename.replace("\\", "/")).strip().lower()
+        if expected_base and expected_base != file_name.lower():
+            return False
+
+    return True
 
 def normalize_save_path(save_path: str | None) -> str | None:
     if not save_path:
@@ -799,6 +840,8 @@ def _collect_models_from_nodes(
                         # Regex to find markdown links: [text](url)
                         links = re.findall(r'\[([^\]]+)\]\((https?://[^)]+)\)', val, re.IGNORECASE)
                         for label, url in links:
+                            if not is_specific_model_file_url(url):
+                                continue
                             url_filename = url.split("?")[0].split("/")[-1]
                             candidates = []
                             if any(url_filename.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
@@ -984,16 +1027,23 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
         "Unknown Node"
     )
 
-    # Enrich found_models with URLs from note_links (highest priority)
+    # Enrich found_models with URLs from note_links.
+    # Note links should never override an already valid file URL from loader metadata.
     for model in found_models:
         note_key = normalize_filename_key(model["filename"])
         url = note_links.get(note_key)
         if not url:
             url = note_links_normalized.get(normalize_filename_compact(model["filename"]))
-        if url:
-            model["url"] = url
-            model["source"] = "note"
-            model["note"] = "URL from Note"
+        if not url:
+            continue
+        if not is_specific_model_file_url(url, expected_filename=model["filename"]):
+            continue
+        existing_url = model.get("url")
+        if existing_url and is_specific_model_file_url(existing_url):
+            continue
+        model["url"] = url
+        model["source"] = "note"
+        model["note"] = "URL from Note"
 
     return found_models
 
@@ -2019,11 +2069,22 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
 
     # 2. Enrich any workflow-provided URLs with source + HF metadata
     for model in missing_models:
+        current_url = model.get("url")
+        if current_url and not is_specific_model_file_url(current_url):
+            print(
+                f"[DEBUG] Ignoring non-file workflow URL for {model.get('filename')}: {current_url}"
+            )
+            model.pop("url", None)
+            model.pop("hf_repo", None)
+            model.pop("hf_path", None)
+            if model.get("source") == "note":
+                model["note"] = "Ignored non-file note URL"
+
         if model.get("url") and not model.get("source"):
             model["source"] = "workflow_metadata"
         if model.get("url") and not model.get("hf_repo"):
-            hf_repo, hf_path = extract_huggingface_info(model.get("url", ""))
-            if hf_repo:
+            hf_repo, hf_path = extract_hf_repo_and_path(model.get("url", ""))
+            if hf_repo and hf_path:
                 model["hf_repo"] = hf_repo
                 model["hf_path"] = hf_path
 
