@@ -738,14 +738,14 @@ app.registerExtension({
             overlay.appendChild(panel);
             document.body.appendChild(overlay);
 
-            const backupDownloadAllBtn = createButton("↑ Download all");
+            const backupDownloadAllBtn = createButton("↓ Download all");
             const backupSelectedRow = document.createElement("div");
             Object.assign(backupSelectedRow.style, {
                 display: "none",
                 gap: "8px",
                 flexWrap: "wrap",
             });
-            const backupDownloadSelectedBtn = createButton("↑ Download selected only", "success");
+            const backupDownloadSelectedBtn = createButton("↓ Download selected only", "success");
             const backupDeleteSelectedBtn = createButton("Delete selected from backup", "danger");
             const backupClearSelectionBtn = createButton("Clear selection", "secondary");
             backupSelectedRow.appendChild(backupDownloadSelectedBtn);
@@ -755,7 +755,7 @@ app.registerExtension({
             backupPanel.actions.appendChild(backupDownloadAllBtn);
             backupPanel.actions.appendChild(backupSelectedRow);
 
-            const localAddSelectedBtn = createButton("↓ Upload to backup");
+            const localAddSelectedBtn = createButton("↑ Upload to backup");
             localPanel.actions.appendChild(localAddSelectedBtn);
 
             const setStatus = (text) => {
