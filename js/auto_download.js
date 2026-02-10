@@ -282,6 +282,81 @@ app.registerExtension({
             return parts.length ? parts[parts.length - 1] : null;
         };
 
+        const normalizeWorkflowPath = (value) => String(value || "").replace(/\\/g, "/").trim();
+
+        const getPathBasename = (value) => {
+            const normalized = normalizeWorkflowPath(value).replace(/\/+$/, "");
+            if (!normalized) return "";
+            const idx = normalized.lastIndexOf("/");
+            return idx === -1 ? normalized : normalized.slice(idx + 1);
+        };
+
+        const getPathDirname = (value) => {
+            const normalized = normalizeWorkflowPath(value).replace(/\/+$/, "");
+            if (!normalized) return "";
+            const idx = normalized.lastIndexOf("/");
+            return idx === -1 ? "" : normalized.slice(0, idx);
+        };
+
+        const findModelWidgetInNode = (node, rowData) => {
+            if (!node || !Array.isArray(node.widgets)) return null;
+            const candidates = [
+                rowData.requestedPath,
+                rowData.originalFilename,
+                rowData.initialWidgetValue
+            ].filter(Boolean);
+
+            for (const candidate of candidates) {
+                const widget = node.widgets.find((w) => (
+                    typeof w?.value === "string" &&
+                    normalizeWorkflowPath(w.value) === normalizeWorkflowPath(candidate)
+                ));
+                if (widget) return widget;
+            }
+
+            const candidateBasenames = new Set(
+                candidates
+                    .map(getPathBasename)
+                    .filter(Boolean)
+                    .map((x) => x.toLowerCase())
+            );
+            if (!candidateBasenames.size) return null;
+
+            return node.widgets.find((w) => (
+                typeof w?.value === "string" &&
+                candidateBasenames.has(getPathBasename(w.value).toLowerCase())
+            )) || null;
+        };
+
+        const buildUpdatedWidgetValue = (rowData) => {
+            const downloadedFilename = (rowData.filename || "").trim();
+            if (!downloadedFilename) return "";
+            const requestedPath = normalizeWorkflowPath(rowData.requestedPath || rowData.originalFilename || "");
+            if (!requestedPath) {
+                return downloadedFilename;
+            }
+            const dir = getPathDirname(requestedPath);
+            return dir ? `${dir}/${downloadedFilename}` : downloadedFilename;
+        };
+
+        const applyDownloadedReferenceToWorkflow = (rowData) => {
+            if (!rowData || rowData.nodeId === undefined || rowData.nodeId === null) return false;
+            const node = app.graph.getNodeById(rowData.nodeId);
+            if (!node) return false;
+
+            const widget = findModelWidgetInNode(node, rowData);
+            if (!widget || typeof widget.value !== "string") return false;
+
+            const nextValue = buildUpdatedWidgetValue(rowData);
+            if (!nextValue) return false;
+            if (normalizeWorkflowPath(widget.value) === normalizeWorkflowPath(nextValue)) return false;
+
+            widget.value = nextValue;
+            rowData.initialWidgetValue = nextValue;
+            node.setDirtyCanvas(true);
+            return true;
+        };
+
         /* Show loading dialog immediately */
         const showLoadingDialog = (onCancel, onSkip) => {
             const existing = document.getElementById("auto-download-dialog");
@@ -623,11 +698,15 @@ app.registerExtension({
                     const rowData = {
                         checkbox: cb,
                         filename: m.filename,
+                        originalFilename: m.filename,
+                        requestedPath: m.requested_path || m.filename,
+                        initialWidgetValue: m.requested_path || m.filename,
                         urlInput: urlInput,
                         folderInput: folderPicker.input,
                         nameEl: nameEl,
                         metaEl: metaEl,
-                        nodeTitle: m.node_title || "Unknown Node"
+                        nodeTitle: m.node_title || "Unknown Node",
+                        nodeId: m.node_id
                     };
                     rowInputs.push(rowData);
 
@@ -746,7 +825,8 @@ app.registerExtension({
             });
 
             const downloadBtn = createButton("Download Selected", "p-button p-component p-button-success", async () => {
-                const toDownload = rowInputs.filter(r => r.checkbox.checked).map(r => ({
+                const selectedRows = rowInputs.filter((r) => r.checkbox.checked);
+                const toDownload = selectedRows.map((r) => ({
                     filename: r.filename,
                     url: r.urlInput.value.trim(),
                     folder: r.folderInput.value.trim()
@@ -770,12 +850,16 @@ app.registerExtension({
                 downloadBtn.textContent = "Queued";
 
                 const queueable = [];
-                for (const item of toDownload) {
+                const queueRows = [];
+                for (let i = 0; i < toDownload.length; i += 1) {
+                    const item = toDownload[i];
+                    const row = selectedRows[i];
                     if (!item.url) {
                         setStatus(`Skipped ${item.filename} (missing URL).`, "#f5b14c");
                         continue;
                     }
                     queueable.push(item);
+                    queueRows.push(row);
                 }
                 if (queueable.length === 0) {
                     setStatus("No valid URLs to queue.", "#f5b14c");
@@ -797,6 +881,14 @@ app.registerExtension({
                     const res = await resp.json();
                     const queued = res.queued || [];
                     const downloadIds = queued.map(q => q.download_id);
+                    const queueRowsById = new Map();
+                    for (let i = 0; i < queued.length; i += 1) {
+                        const q = queued[i];
+                        const row = queueRows[i];
+                        if (q?.download_id && row) {
+                            queueRowsById.set(q.download_id, row);
+                        }
+                    }
 
                     setStatus(`Queued ${queued.length} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
 
@@ -830,11 +922,35 @@ app.registerExtension({
                             if (pending.size === 0) {
                                 stopPolling();
                                 const failures = downloadIds.filter((id) => downloads[id]?.status === "failed").length;
-                                if (failures) {
-                                    setStatus(`Finished with ${failures} error(s). See Downloads panel for details.`, "#ff6b6b");
-                                } else {
-                                    setStatus("All downloads finished.", "#5bd98c");
+                                let updatedRefs = 0;
+                                for (const id of downloadIds) {
+                                    const info = downloads[id];
+                                    if (info?.status !== "completed") continue;
+                                    const row = queueRowsById.get(id);
+                                    if (!row) continue;
+                                    if (applyDownloadedReferenceToWorkflow(row)) {
+                                        updatedRefs += 1;
+                                    }
                                 }
+
+                                let statusMessage;
+                                let statusColor;
+                                if (failures) {
+                                    statusMessage = `Finished with ${failures} error(s). See Downloads panel for details.`;
+                                    statusColor = "#ff6b6b";
+                                } else {
+                                    statusMessage = "All downloads finished.";
+                                    statusColor = "#5bd98c";
+                                }
+                                if (updatedRefs > 0) {
+                                    statusMessage += ` Updated ${updatedRefs} workflow reference${updatedRefs === 1 ? "" : "s"} to downloaded filename${updatedRefs === 1 ? "" : "s"}.`;
+                                    showToast({
+                                        severity: "success",
+                                        summary: "Workflow updated",
+                                        detail: `Updated ${updatedRefs} model reference${updatedRefs === 1 ? "" : "s"} automatically.`
+                                    });
+                                }
+                                setStatus(statusMessage, statusColor);
                                 downloadBtn.style.display = "none";
                                 closeBtn.textContent = "Finish";
                                 closeBtn.className = "p-button p-component p-button-success";
