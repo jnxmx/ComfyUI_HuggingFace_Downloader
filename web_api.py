@@ -6,7 +6,14 @@ import time
 import uuid
 import asyncio
 from aiohttp import web
-from .backup import backup_to_huggingface, restore_from_huggingface
+from .backup import (
+    backup_to_huggingface,
+    restore_from_huggingface,
+    get_backup_browser_tree,
+    backup_selected_to_huggingface,
+    restore_selected_from_huggingface,
+    delete_selected_from_huggingface,
+)
 from .file_manager import get_model_subfolders
 from .model_discovery import process_workflow_for_missing_models
 from .downloader import run_download, get_remote_file_metadata, get_blob_paths, get_token
@@ -449,46 +456,115 @@ async def install_models(request):
     except Exception as e:
          return web.json_response({"error": str(e)}, status=500)
 
+def _read_backup_repo_name() -> str:
+    settings_path = os.path.join("user", "default", "comfy.settings.json")
+    if not os.path.exists(settings_path):
+        return ""
+    try:
+        with open(settings_path, "r", encoding="utf-8") as handle:
+            settings = json.load(handle)
+        return settings.get("downloaderbackup.repo_name", "").strip()
+    except Exception:
+        return ""
+
+
+def _parse_size_limit(value, default=5.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+async def backup_browser_tree(request):
+    repo_name = _read_backup_repo_name()
+    try:
+        payload = get_backup_browser_tree(repo_name)
+        return web.json_response({"status": "ok", **payload})
+    except Exception as e:
+        return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+
 async def backup_to_hf(request):
     data = await request.json()
     folders = data.get("folders", [])
-    size_limit_gb = float(data.get("size_limit_gb", 5))
-    # Read repo name from comfy.settings.json
-    settings_path = os.path.join("user", "default", "comfy.settings.json")
-    repo_name = ""
-    if os.path.exists(settings_path):
-        with open(settings_path, "r") as f:
-            settings = json.load(f)
-        repo_name = settings.get("downloaderbackup.repo_name", "").strip()
+    size_limit_gb = _parse_size_limit(data.get("size_limit_gb", 5), default=5)
+    repo_name = _read_backup_repo_name()
     if not repo_name:
         return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
     try:
-        # Pass size_limit_gb as a keyword argument, not a positional argument
         backup_to_huggingface(repo_name, folders, size_limit_gb=size_limit_gb)
         return web.json_response({"status": "ok"})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
+
+async def backup_selected_to_hf_endpoint(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    selections = data.get("items", [])
+    size_limit_gb = _parse_size_limit(data.get("size_limit_gb", 5), default=5)
+    repo_name = _read_backup_repo_name()
+    if not repo_name:
+        return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
+    try:
+        result = backup_selected_to_huggingface(repo_name, selections, size_limit_gb=size_limit_gb)
+        return web.json_response({"status": "ok", **result})
+    except Exception as e:
+        return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+
 async def restore_from_hf(request):
-    # Read repo name from comfy.settings.json
-    settings_path = os.path.join("user", "default", "comfy.settings.json")
-    repo_name = ""
-    if os.path.exists(settings_path):
-        with open(settings_path, "r") as f:
-            settings = json.load(f)
-        repo_name = settings.get("downloaderbackup.repo_name", "").strip()
+    repo_name = _read_backup_repo_name()
     if not repo_name:
         return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
     try:
         restore_from_huggingface(repo_name)
-        return web.json_response({"status": "ok"})
+        return web.json_response({"status": "ok", "restart_required": True})
+    except Exception as e:
+        return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+
+async def restore_selected_from_hf_endpoint(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    selections = data.get("items", [])
+    repo_name = _read_backup_repo_name()
+    if not repo_name:
+        return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
+    try:
+        result = restore_selected_from_huggingface(repo_name, selections)
+        return web.json_response({"status": "ok", **result})
+    except Exception as e:
+        return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+
+async def delete_from_hf_backup_endpoint(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    selections = data.get("items", [])
+    repo_name = _read_backup_repo_name()
+    if not repo_name:
+        return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
+    try:
+        result = delete_selected_from_huggingface(repo_name, selections)
+        return web.json_response({"status": "ok", **result})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
 def setup(app):
     app.router.add_get("/folder_structure", folder_structure)
+    app.router.add_get("/backup_browser_tree", backup_browser_tree)
     app.router.add_post("/backup_to_hf", backup_to_hf)
+    app.router.add_post("/backup_selected_to_hf", backup_selected_to_hf_endpoint)
     app.router.add_post("/restore_from_hf", restore_from_hf)
+    app.router.add_post("/restore_selected_from_hf", restore_selected_from_hf_endpoint)
+    app.router.add_post("/delete_from_hf_backup", delete_from_hf_backup_endpoint)
     app.router.add_post("/check_missing_models", check_missing_models)
     app.router.add_post("/install_models", install_models)
 
