@@ -119,6 +119,93 @@ app.registerExtension({
     color: #9aa4b6;
     font-size: 11px;
 }
+#hf-backup-op-panel {
+    position: fixed;
+    right: 16px;
+    top: 16px;
+    width: 360px;
+    max-width: calc(100vw - 32px);
+    background: #1f2128;
+    border: 1px solid #3c3c3c;
+    border-radius: 10px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
+    color: #ddd;
+    font-size: 12px;
+    z-index: 10002;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+}
+#hf-backup-op-panel .hf-backup-op-body {
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+#hf-backup-op-panel .hf-backup-op-item {
+    background: #1a1c22;
+    border: 1px solid #2d2f36;
+    border-radius: 6px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+#hf-backup-op-panel .hf-backup-op-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+#hf-backup-op-panel .hf-backup-op-spinner {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid #2a2d36;
+    border-top-color: #4aa3ff;
+    animation: hf-backup-op-spin 0.9s linear infinite;
+    flex: 0 0 auto;
+}
+#hf-backup-op-panel .hf-backup-op-spinner.done {
+    animation: none;
+    border-top-color: #5bd98c;
+}
+#hf-backup-op-panel .hf-backup-op-spinner.error {
+    animation: none;
+    border-top-color: #ff6b6b;
+}
+@keyframes hf-backup-op-spin {
+    to { transform: rotate(360deg); }
+}
+#hf-backup-op-panel .hf-backup-op-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e8ebf2;
+}
+#hf-backup-op-panel .hf-backup-op-detail {
+    font-size: 11px;
+    color: #aab1bc;
+    min-height: 15px;
+}
+#hf-backup-op-panel .hf-backup-op-actions {
+    display: none;
+    justify-content: flex-end;
+    padding: 8px 10px;
+    border-top: 1px solid #333;
+    background: #20222a;
+}
+#hf-backup-op-panel .hf-backup-op-refresh {
+    border: 1px solid #3f8d4d;
+    background: #38a84f;
+    color: #fff;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 600;
+}
+#hf-backup-op-panel .hf-backup-op-refresh:hover {
+    background: #43b95c;
+}
 `;
             document.head.appendChild(style);
         };
@@ -551,6 +638,174 @@ app.registerExtension({
 
         let currentDialog = null;
         let currentDialogCleanup = null;
+        let opStatusRotateTimer = null;
+        let opStatusHideTimer = null;
+
+        const clearOpStatusTimers = () => {
+            if (opStatusRotateTimer) {
+                clearInterval(opStatusRotateTimer);
+                opStatusRotateTimer = null;
+            }
+            if (opStatusHideTimer) {
+                clearTimeout(opStatusHideTimer);
+                opStatusHideTimer = null;
+            }
+        };
+
+        const ensureOperationStatusPanel = () => {
+            let panel = document.getElementById("hf-backup-op-panel");
+            if (!panel) {
+                panel = document.createElement("div");
+                panel.id = "hf-backup-op-panel";
+
+                const body = document.createElement("div");
+                body.className = "hf-backup-op-body";
+
+                const item = document.createElement("div");
+                item.className = "hf-backup-op-item";
+
+                const main = document.createElement("div");
+                main.className = "hf-backup-op-main";
+
+                const spinner = document.createElement("div");
+                spinner.className = "hf-backup-op-spinner";
+
+                const title = document.createElement("div");
+                title.className = "hf-backup-op-title";
+
+                main.appendChild(spinner);
+                main.appendChild(title);
+
+                const detail = document.createElement("div");
+                detail.className = "hf-backup-op-detail";
+
+                item.appendChild(main);
+                item.appendChild(detail);
+                body.appendChild(item);
+
+                const actions = document.createElement("div");
+                actions.className = "hf-backup-op-actions";
+                const refreshButton = document.createElement("button");
+                refreshButton.type = "button";
+                refreshButton.className = "hf-backup-op-refresh";
+                refreshButton.textContent = "Refresh ComfyUI";
+                refreshButton.onclick = () => window.location.reload();
+                actions.appendChild(refreshButton);
+
+                panel.appendChild(body);
+                panel.appendChild(actions);
+                document.body.appendChild(panel);
+            }
+
+            return {
+                panel,
+                spinner: panel.querySelector(".hf-backup-op-spinner"),
+                title: panel.querySelector(".hf-backup-op-title"),
+                detail: panel.querySelector(".hf-backup-op-detail"),
+                actions: panel.querySelector(".hf-backup-op-actions"),
+            };
+        };
+
+        const normalizeActionPath = (value) => String(value || "")
+            .replace(/\\/g, "/")
+            .replace(/^\/+/, "")
+            .replace(/^\.\/+/, "")
+            .replace(/^ComfyUI\//i, "");
+
+        const inferCategoryFromPath = (path) => {
+            const normalized = normalizeActionPath(path).toLowerCase();
+            if (!normalized) return null;
+            if (normalized.endsWith("user/default/comfy.settings.json")) return "Settings";
+            if (normalized.startsWith("user/default/workflows/.subgraphs") || normalized.includes("/.subgraphs/")) return "Subgraphs";
+            if (normalized.startsWith("user/default/workflows")) return "Workflows";
+            if (normalized.startsWith("custom_nodes")) return "Custom Nodes";
+            if (normalized === "input" || normalized.startsWith("input/")) return "Input";
+            if (normalized === "output" || normalized.startsWith("output/")) return "Output";
+            if (normalized.startsWith("models/")) {
+                const folder = normalized.split("/")[1];
+                return folder ? `Models / ${folder}` : "Models";
+            }
+            return "Files";
+        };
+
+        const inferCategoriesFromItems = (items = [], fallback = []) => {
+            const ordered = [];
+            const seen = new Set();
+            const add = (label) => {
+                if (!label || seen.has(label)) return;
+                seen.add(label);
+                ordered.push(label);
+            };
+
+            for (const action of items || []) {
+                if (!action || typeof action !== "object") continue;
+                const kind = String(action.kind || "");
+                if (kind === "local_custom_nodes_all" || kind === "custom_nodes_all" || kind === "snapshot_custom_node") {
+                    add("Custom Nodes");
+                    continue;
+                }
+                if (kind === "paths" && Array.isArray(action.paths)) {
+                    action.paths.forEach((p) => add(inferCategoryFromPath(p)));
+                    continue;
+                }
+                if (kind === "path") {
+                    add(inferCategoryFromPath(action.path));
+                }
+            }
+
+            if (!ordered.length) {
+                fallback.forEach((item) => add(item));
+            }
+            return ordered;
+        };
+
+        const showOperationProgress = ({ title, categories = [] }) => {
+            clearOpStatusTimers();
+            const refs = ensureOperationStatusPanel();
+            refs.panel.style.display = "flex";
+            refs.title.textContent = title || "Backup in progress. Please wait.";
+            refs.spinner.classList.remove("done", "error");
+            refs.actions.style.display = "none";
+
+            if (!categories.length) {
+                refs.detail.textContent = "Working...";
+                return;
+            }
+
+            let index = 0;
+            refs.detail.textContent = `Processing: ${categories[0]}`;
+            if (categories.length > 1) {
+                opStatusRotateTimer = setInterval(() => {
+                    index = (index + 1) % categories.length;
+                    refs.detail.textContent = `Processing: ${categories[index]}`;
+                }, 1400);
+            }
+        };
+
+        const showOperationDone = ({ title, detail, showRefresh = false }) => {
+            clearOpStatusTimers();
+            const refs = ensureOperationStatusPanel();
+            refs.panel.style.display = "flex";
+            refs.title.textContent = title || "Operation complete.";
+            refs.detail.textContent = detail || "";
+            refs.spinner.classList.remove("error");
+            refs.spinner.classList.add("done");
+            refs.actions.style.display = showRefresh ? "flex" : "none";
+        };
+
+        const showOperationError = ({ title, detail }) => {
+            clearOpStatusTimers();
+            const refs = ensureOperationStatusPanel();
+            refs.panel.style.display = "flex";
+            refs.title.textContent = title || "Backup operation failed.";
+            refs.detail.textContent = detail || "";
+            refs.spinner.classList.remove("done");
+            refs.spinner.classList.add("error");
+            refs.actions.style.display = "none";
+            opStatusHideTimer = setTimeout(() => {
+                refs.panel.style.display = "none";
+            }, 7000);
+        };
 
         const showBackupDialog = async () => {
             ensureTreeStyles();
@@ -592,6 +847,7 @@ app.registerExtension({
 
             overlay.addEventListener("click", (e) => {
                 if (e.target === overlay) {
+                    if (busy) return;
                     closeDialog();
                 }
             });
@@ -654,6 +910,7 @@ app.registerExtension({
                 closeIconButton.style.color = "#a9b2c2";
             };
             closeIconButton.onclick = () => {
+                if (busy) return;
                 closeDialog();
             };
             headerWrap.appendChild(closeIconButton);
@@ -855,7 +1112,7 @@ app.registerExtension({
 
             const setBusy = (value, msg = "") => {
                 busy = value;
-                panel.style.opacity = busy ? "0.78" : "1";
+                panel.style.opacity = "1";
                 setStatus(msg);
                 updateActions();
             };
@@ -890,6 +1147,10 @@ app.registerExtension({
 
             backupDownloadAllBtn.onclick = async () => {
                 try {
+                    showOperationProgress({
+                        title: "Backup restore in progress. Please wait.",
+                        categories: ["Settings", "Workflows", "Subgraphs", "Custom Nodes", "Models", "Input", "Output"],
+                    });
                     setBusy(true, "Restoring full backup...");
                     const result = await requestJson("/restore_from_hf", { method: "POST", body: JSON.stringify({}) });
                     showToast({
@@ -899,10 +1160,18 @@ app.registerExtension({
                         life: 4500,
                     });
                     await loadTree();
+                    showOperationDone({
+                        title: "Backup restore complete",
+                        showRefresh: true,
+                    });
                     if (result.restart_required) {
                         showRestartDialog();
                     }
                 } catch (e) {
+                    showOperationError({
+                        title: "Backup restore failed",
+                        detail: String(e.message || e),
+                    });
                     showToast({
                         severity: "error",
                         summary: "Download failed",
@@ -919,6 +1188,10 @@ app.registerExtension({
                 if (!items.length) return;
 
                 try {
+                    showOperationProgress({
+                        title: "Backup restore in progress. Please wait.",
+                        categories: inferCategoriesFromItems(items, ["Selected items"]),
+                    });
                     setBusy(true, "Restoring selected items...");
                     const result = await requestJson("/restore_selected_from_hf", {
                         method: "POST",
@@ -933,10 +1206,19 @@ app.registerExtension({
                         life: 5000,
                     });
                     await loadTree();
+                    showOperationDone({
+                        title: "Backup restore complete",
+                        detail: `Restored ${restoredFiles} file(s).`,
+                        showRefresh: true,
+                    });
                     if (result.restart_required) {
                         showRestartDialog();
                     }
                 } catch (e) {
+                    showOperationError({
+                        title: "Selected restore failed",
+                        detail: String(e.message || e),
+                    });
                     showToast({
                         severity: "error",
                         summary: "Selected restore failed",
@@ -991,6 +1273,10 @@ app.registerExtension({
                 if (!items.length) return;
 
                 try {
+                    showOperationProgress({
+                        title: "Backup in progress. Please wait.",
+                        categories: inferCategoriesFromItems(items, ["Selected items"]),
+                    });
                     setBusy(true, "Uploading selected local items...");
                     const result = await requestJson("/backup_selected_to_hf", {
                         method: "POST",
@@ -1004,7 +1290,16 @@ app.registerExtension({
                         life: 5000,
                     });
                     await loadTree();
+                    showOperationDone({
+                        title: "Backup upload complete",
+                        detail: `Uploaded ${uploaded} item(s).`,
+                        showRefresh: true,
+                    });
                 } catch (e) {
+                    showOperationError({
+                        title: "Backup upload failed",
+                        detail: String(e.message || e),
+                    });
                     showToast({
                         severity: "error",
                         summary: "Upload failed",
