@@ -3,6 +3,8 @@ import re
 import json
 import time
 import concurrent.futures
+import urllib.request
+import urllib.error
 from typing import List, Dict, Any, Tuple
 from types import SimpleNamespace
 from huggingface_hub import HfApi
@@ -32,12 +34,14 @@ _hf_rate_limited_until = 0.0
 _hf_search_deadline = 0.0
 _hf_search_time_exhausted = False
 _hf_repo_files_cache: dict[str, list[str] | None] = {}
+_hf_url_exists_cache: dict[str, bool] = {}
 
 HF_SEARCH_MAX_CALLS = int(os.getenv("HF_SEARCH_MAX_CALLS", "200"))
 HF_SEARCH_RATE_LIMIT_SECONDS = int(os.getenv("HF_SEARCH_RATE_LIMIT_SECONDS", "300"))
 HF_SEARCH_MAX_SECONDS = int(os.getenv("HF_SEARCH_MAX_SECONDS", "60"))
 HF_SEARCH_CALL_TIMEOUT = int(os.getenv("HF_SEARCH_CALL_TIMEOUT", "20"))
 PRIORITY_REPO_SCAN_LIMIT = int(os.getenv("HF_PRIORITY_REPO_SCAN_LIMIT", "100"))
+HF_URL_CHECK_TIMEOUT = int(os.getenv("HF_URL_CHECK_TIMEOUT", "8"))
 
 HF_SEARCH_SKIP_FILENAMES = {
     "pytorch_model.bin",
@@ -144,6 +148,68 @@ def load_popular_models_registry() -> dict:
 
     _popular_models_cache = registry
     return _popular_models_cache
+
+def _iter_registry_urls(entry: dict) -> list[str]:
+    urls: list[str] = []
+    primary = entry.get("url")
+    if isinstance(primary, str) and primary.strip():
+        urls.append(primary.strip())
+
+    for key in ("candidate_urls", "priority_urls", "urls"):
+        value = entry.get(key)
+        if not isinstance(value, list):
+            continue
+        for url in value:
+            if isinstance(url, str) and url.strip():
+                urls.append(url.strip())
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for url in urls:
+        if url in seen:
+            continue
+        seen.add(url)
+        deduped.append(url)
+    return deduped
+
+def _hf_url_exists(url: str) -> bool:
+    if not url or "huggingface.co" not in url:
+        return False
+    cached = _hf_url_exists_cache.get(url)
+    if cached is not None:
+        return cached
+
+    headers = {
+        "User-Agent": "ComfyUI-HuggingFace-Downloader/1.0",
+        "Accept": "*/*",
+    }
+
+    def _request(method: str, extra_headers: dict | None = None) -> bool:
+        req_headers = dict(headers)
+        if extra_headers:
+            req_headers.update(extra_headers)
+        req = urllib.request.Request(url, method=method, headers=req_headers)
+        with urllib.request.urlopen(req, timeout=HF_URL_CHECK_TIMEOUT) as resp:
+            code = getattr(resp, "status", None) or resp.getcode()
+            return 200 <= int(code) < 400
+
+    ok = False
+    try:
+        ok = _request("HEAD")
+    except urllib.error.HTTPError as e:
+        # Some endpoints disallow HEAD. Try a tiny ranged GET before giving up.
+        if e.code in (401, 403, 405):
+            try:
+                ok = _request("GET", {"Range": "bytes=0-0"})
+            except Exception:
+                ok = False
+        else:
+            ok = False
+    except Exception:
+        ok = False
+
+    _hf_url_exists_cache[url] = ok
+    return ok
 
 def load_comfyui_manager_model_list() -> dict:
     """Load ComfyUI Manager model-list.json from known locations."""
@@ -1724,16 +1790,32 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     "message": "Checking popular models",
                     "source": "popular_models",
                     "filename": model.get("filename")
-                })
+            })
             filename_key = model["filename"].lower()
             entry = popular_models.get(filename_key) or popular_models.get(os.path.basename(filename_key))
-            if entry and entry.get("url"):
-                enrich_model_with_url(
-                    model,
-                    entry["url"],
-                    "popular_models",
-                    directory=entry.get("directory")
-                )
+            if not entry:
+                continue
+
+            candidate_urls = _iter_registry_urls(entry)
+            if not candidate_urls:
+                continue
+
+            live_url = None
+            for candidate_url in candidate_urls:
+                if _hf_url_exists(candidate_url):
+                    live_url = candidate_url
+                    break
+
+            if not live_url:
+                print(f"[DEBUG] Skipping stale curated URLs for {model.get('filename')}; falling back to other sources")
+                continue
+
+            enrich_model_with_url(
+                model,
+                live_url,
+                entry.get("source") or "popular_models",
+                directory=entry.get("directory")
+            )
 
     # 4. Check ComfyUI Manager model list/cache for missing models
     if missing_models:
