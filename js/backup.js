@@ -160,7 +160,133 @@ app.registerExtension({
         const createSelectionState = () => ({
             selected: new Map(),
             checkboxes: new Map(),
+            nodes: new Map(),
+            parentById: new Map(),
+            childrenById: new Map(),
+            depthById: new Map(),
+            defaultCheckedIds: new Set(),
         });
+
+        const linkParentChild = (state, parentId, childId) => {
+            if (!parentId || !childId) return;
+            state.parentById.set(childId, parentId);
+            const children = state.childrenById.get(parentId) || [];
+            children.push(childId);
+            state.childrenById.set(parentId, children);
+        };
+
+        const getSelectableDescendantIds = (state, nodeId) => {
+            const ids = [];
+            const stack = [...(state.childrenById.get(nodeId) || [])];
+            while (stack.length) {
+                const current = stack.pop();
+                if (state.checkboxes.has(current)) {
+                    ids.push(current);
+                }
+                const children = state.childrenById.get(current);
+                if (children?.length) {
+                    stack.push(...children);
+                }
+            }
+            return ids;
+        };
+
+        const updateSelectedMapForNode = (state, nodeId, checked, indeterminate = false) => {
+            const node = state.nodes.get(nodeId);
+            if (!node?.action) return;
+            if (checked && !indeterminate) {
+                state.selected.set(nodeId, node.action);
+            } else {
+                state.selected.delete(nodeId);
+            }
+        };
+
+        const setCheckboxVisual = (state, nodeId, checked, indeterminate = false) => {
+            const cb = state.checkboxes.get(nodeId);
+            if (!cb) return;
+            cb.checked = Boolean(checked);
+            cb.indeterminate = Boolean(indeterminate);
+        };
+
+        const updateAncestorStates = (state, nodeId) => {
+            let parentId = state.parentById.get(nodeId);
+            while (parentId) {
+                const parentCb = state.checkboxes.get(parentId);
+                if (parentCb) {
+                    const descendants = getSelectableDescendantIds(state, parentId);
+                    if (descendants.length) {
+                        let checkedCount = 0;
+                        let hasIndeterminate = false;
+                        for (const id of descendants) {
+                            const cb = state.checkboxes.get(id);
+                            if (!cb) continue;
+                            if (cb.indeterminate) {
+                                hasIndeterminate = true;
+                            } else if (cb.checked) {
+                                checkedCount += 1;
+                            }
+                        }
+
+                        const allChecked = checkedCount === descendants.length && !hasIndeterminate;
+                        const noneChecked = checkedCount === 0 && !hasIndeterminate;
+                        if (allChecked) {
+                            setCheckboxVisual(state, parentId, true, false);
+                            updateSelectedMapForNode(state, parentId, true, false);
+                        } else if (noneChecked) {
+                            setCheckboxVisual(state, parentId, false, false);
+                            updateSelectedMapForNode(state, parentId, false, false);
+                        } else {
+                            setCheckboxVisual(state, parentId, false, true);
+                            updateSelectedMapForNode(state, parentId, false, true);
+                        }
+                    }
+                }
+                parentId = state.parentById.get(parentId);
+            }
+        };
+
+        const setNodeSelectionCascade = (state, nodeId, checked) => {
+            if (state.checkboxes.has(nodeId)) {
+                setCheckboxVisual(state, nodeId, checked, false);
+                updateSelectedMapForNode(state, nodeId, checked, false);
+            }
+
+            const descendants = getSelectableDescendantIds(state, nodeId);
+            for (const id of descendants) {
+                setCheckboxVisual(state, id, checked, false);
+                updateSelectedMapForNode(state, id, checked, false);
+            }
+
+            updateAncestorStates(state, nodeId);
+        };
+
+        const clearSelectionState = (state) => {
+            state.selected.clear();
+            for (const cb of state.checkboxes.values()) {
+                cb.checked = false;
+                cb.indeterminate = false;
+            }
+        };
+
+        const initializeDefaultSelections = (state) => {
+            const defaultIds = Array.from(state.defaultCheckedIds).sort(
+                (a, b) => (state.depthById.get(a) || 0) - (state.depthById.get(b) || 0)
+            );
+            clearSelectionState(state);
+            for (const id of defaultIds) {
+                setNodeSelectionCascade(state, id, true);
+            }
+        };
+
+        const resetSelectionStructure = (state) => {
+            state.selected.clear();
+            state.checkboxes.clear();
+            state.nodes.clear();
+            state.parentById.clear();
+            state.childrenById.clear();
+            state.depthById.clear();
+            state.defaultCheckedIds.clear();
+        };
 
         const getSelectedItems = (state) => {
             const dedup = new Map();
@@ -205,16 +331,12 @@ app.registerExtension({
                 cb.addEventListener("mousedown", (e) => e.stopPropagation());
                 cb.addEventListener("click", (e) => e.stopPropagation());
                 cb.addEventListener("change", () => {
-                    if (cb.checked) {
-                        state.selected.set(node.id, node.action);
-                    } else {
-                        state.selected.delete(node.id);
-                    }
+                    setNodeSelectionCascade(state, node.id, cb.checked);
                     onSelectionChange();
                 });
                 state.checkboxes.set(node.id, cb);
                 if (cb.checked) {
-                    state.selected.set(node.id, node.action);
+                    state.defaultCheckedIds.add(node.id);
                 }
                 const cbWrap = document.createElement("span");
                 cbWrap.style.display = "flex";
@@ -240,7 +362,7 @@ app.registerExtension({
             return row;
         };
 
-        const renderNodes = (nodes, mount, state, onSelectionChange, depth = 0) => {
+        const renderNodes = (nodes, mount, state, onSelectionChange, depth = 0, parentId = null) => {
             const list = document.createElement("div");
             Object.assign(list.style, {
                 display: "flex",
@@ -250,6 +372,10 @@ app.registerExtension({
             });
 
             (nodes || []).forEach((node) => {
+                state.nodes.set(node.id, node);
+                state.depthById.set(node.id, depth);
+                linkParentChild(state, parentId, node.id);
+
                 const hasChildren = Array.isArray(node.children) && node.children.length > 0;
 
                 if (hasChildren) {
@@ -279,7 +405,7 @@ app.registerExtension({
                     });
 
                     const childWrap = document.createElement("div");
-                    renderNodes(node.children, childWrap, state, onSelectionChange, depth + 1);
+                    renderNodes(node.children, childWrap, state, onSelectionChange, depth + 1, node.id);
 
                     details.appendChild(summary);
                     details.appendChild(childWrap);
@@ -506,10 +632,7 @@ app.registerExtension({
             };
 
             const clearBackupSelection = () => {
-                for (const cb of backupState.checkboxes.values()) {
-                    cb.checked = false;
-                }
-                backupState.selected.clear();
+                clearSelectionState(backupState);
                 updateActions();
             };
 
@@ -521,10 +644,8 @@ app.registerExtension({
             };
 
             const loadTree = async () => {
-                backupState.selected.clear();
-                backupState.checkboxes.clear();
-                localState.selected.clear();
-                localState.checkboxes.clear();
+                resetSelectionStructure(backupState);
+                resetSelectionStructure(localState);
 
                 backupPanel.tree.innerHTML = "Loading...";
                 localPanel.tree.innerHTML = "Loading...";
@@ -538,6 +659,8 @@ app.registerExtension({
 
                 renderNodes(payload.backup || [], backupPanel.tree, backupState, updateActions, 0);
                 renderNodes(payload.local || [], localPanel.tree, localState, updateActions, 0);
+                initializeDefaultSelections(backupState);
+                initializeDefaultSelections(localState);
 
                 if (payload.backup_error) {
                     backupPanel.errorEl.style.display = "block";
