@@ -2,34 +2,2071 @@
   "version": "1.0.0",
   "description": "Curated list of popular models with download URLs",
   "models": {
-    "v1-5-pruned-emaonly.safetensors": {
-      "url": "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors",
+    "1k3d68.onnx": {
+      "url": "https://huggingface.co/MonsterMMORPG/tools/resolve/main/1k3d68.onnx",
+      "type": "insightface",
+      "directory": "insightface/models/antelopev2",
+      "source": "comfyui_manager_model_list"
+    },
+    "2d106det.onnx": {
+      "url": "https://huggingface.co/MonsterMMORPG/tools/resolve/main/2d106det.onnx",
+      "type": "insightface",
+      "directory": "insightface/models/antelopev2",
+      "source": "comfyui_manager_model_list"
+    },
+    "4x-AnimeSharp.pth": {
+      "url": "https://huggingface.co/Kim2091/AnimeSharp/resolve/main/4x-AnimeSharp.pth",
+      "type": "upscale",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "4x-UltraSharp.pth": {
+      "url": "https://huggingface.co/Kim2091/4x-UltraSharp/resolve/main/4x-UltraSharp.pth",
+      "type": "upscaler",
+      "directory": "upscale_models"
+    },
+    "4x_foolhardy_Remacri.pth": {
+      "url": "https://huggingface.co/FacehugmanIII/4x_foolhardy_Remacri/resolve/main/4x_foolhardy_Remacri.pth",
+      "type": "upscale",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "4x_NMKD-Siax_200k.pth": {
+      "url": "https://huggingface.co/gemasai/4x_NMKD-Siax_200k/resolve/main/4x_NMKD-Siax_200k.pth",
+      "type": "upscale",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "8x_NMKD-Faces_160000_G.pth": {
+      "url": "https://huggingface.co/gemasai/8x_NMKD-Faces_160000_G/resolve/main/8x_NMKD-Faces_160000_G.pth",
+      "type": "upscale",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "8x_NMKD-Superscale_150000_G.pth": {
+      "url": "https://huggingface.co/uwg/upscaler/resolve/main/ESRGAN/8x_NMKD-Superscale_150000_G.pth",
+      "type": "upscale",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "AbyssOrangeMix2_hard.safetensors": {
+      "url": "https://huggingface.co/WarriorMama777/OrangeMixs/resolve/main/Models/AbyssOrangeMix2/AbyssOrangeMix2_hard.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "ae.safetensors": {
+      "url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/ae.safetensors",
+      "type": "vae",
+      "directory": "vae"
+    },
+    "antelopev2.zip": {
+      "url": "https://huggingface.co/MonsterMMORPG/tools/resolve/main/antelopev2.zip",
+      "type": "insightface",
+      "directory": "insightface/models",
+      "source": "comfyui_manager_model_list"
+    },
+    "AOM3A1_orangemixs.safetensors": {
+      "url": "https://huggingface.co/WarriorMama777/OrangeMixs/resolve/main/Models/AbyssOrangeMix3/AOM3A1_orangemixs.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "AOM3A3_orangemixs.safetensors": {
+      "url": "https://huggingface.co/WarriorMama777/OrangeMixs/resolve/main/Models/AbyssOrangeMix3/AOM3A3_orangemixs.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "art_lora.safetensors": {
+      "url": "https://huggingface.co/XLabs-AI/flux-lora-collection/resolve/main/scenery_lora.safetensors",
+      "type": "lora",
+      "directory": "xlabs/loras",
+      "source": "comfyui_manager_model_list"
+    },
+    "awq-int4-flux.1-t5xxl.safetensors": {
+      "url": "https://huggingface.co/mit-han-lab/nunchaku-t5/blob/main/awq-int4-flux.1-t5xxl.safetensors",
+      "type": "text_encoder",
+      "directory": "text_encoders"
+    },
+    "bad_prompt_version2-neg.pt": {
+      "url": "https://civitai.com/api/download/models/60095",
+      "type": "embedding",
+      "directory": "embeddings/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "chatglm3-4bit.safetensors": {
+      "url": "https://huggingface.co/Kijai/ChatGLM3-safetensors/resolve/main/chatglm3-4bit.safetensors",
+      "type": "llm",
+      "directory": "LLM",
+      "source": "comfyui_manager_model_list"
+    },
+    "chatglm3-8bit.safetensors": {
+      "url": "https://huggingface.co/Kijai/ChatGLM3-safetensors/resolve/main/chatglm3-8bit.safetensors",
+      "type": "llm",
+      "directory": "LLM",
+      "source": "comfyui_manager_model_list"
+    },
+    "chatglm3-fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/ChatGLM3-safetensors/resolve/main/chatglm3-fp16.safetensors",
+      "type": "llm",
+      "directory": "LLM",
+      "source": "comfyui_manager_model_list"
+    },
+    "CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/image_encoder/model.safetensors",
+      "type": "clip_vision",
+      "directory": "clip_vision",
+      "source": "comfyui_manager_model_list"
+    },
+    "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/image_encoder/model.safetensors",
+      "type": "clip_vision",
+      "directory": "clip_vision",
+      "source": "comfyui_manager_model_list"
+    },
+    "clip-vit-large-patch14-336.bin": {
+      "url": "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-Plus/resolve/main/image_encoder/pytorch_model.bin",
+      "type": "clip_vision",
+      "directory": "clip_vision",
+      "source": "comfyui_manager_model_list"
+    },
+    "clip-vit-large-patch14.safetensors": {
+      "url": "https://huggingface.co/openai/clip-vit-large-patch14/resolve/main/model.safetensors",
+      "type": "clip_vision",
+      "directory": "clip_vision",
+      "source": "comfyui_manager_model_list"
+    },
+    "clip_g.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/stable-diffusion-3.5-fp8/resolve/main/text_encoders/clip_g.safetensors",
+      "type": "clip",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "clip_l.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+      "type": "clip",
+      "directory": "clip"
+    },
+    "clip_vision_g.safetensors": {
+      "url": "https://huggingface.co/stabilityai/control-lora/resolve/main/revision/clip_vision_g.safetensors",
+      "type": "clip_vision",
+      "directory": "clip_vision",
+      "source": "comfyui_manager_model_list"
+    },
+    "clip_vision_h.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/clip_vision/clip_vision_h.safetensors",
+      "type": "clip_vision",
+      "directory": "clip_vision",
+      "source": "comfyui_manager_model_list"
+    },
+    "CN-anytest_v3-50000_am_dim128.safetensors": {
+      "url": "https://huggingface.co/2vXpSwA7/iroiro-lora/resolve/main/test_controlnet2/CN-anytest_v3-50000_am_dim128.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "CN-anytest_v3-50000_am_dim256.safetensors": {
+      "url": "https://huggingface.co/2vXpSwA7/iroiro-lora/resolve/main/test_controlnet2/CN-anytest_v3-50000_am_dim256.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "CN-anytest_v3-50000_fp16.safetensors": {
+      "url": "https://huggingface.co/2vXpSwA7/iroiro-lora/resolve/main/test_controlnet2/CN-anytest_v3-50000_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "CN-anytest_v3-50000_pn_dim128.safetensors": {
+      "url": "https://huggingface.co/2vXpSwA7/iroiro-lora/resolve/main/test_controlnet2/CN-anytest_v3-50000_pn_dim128.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "CN-anytest_v3-50000_pn_dim256.safetensors": {
+      "url": "https://huggingface.co/2vXpSwA7/iroiro-lora/resolve/main/test_controlnet2/CN-anytest_v3-50000_pn_dim256.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "CN-anytest_v4-marged.safetensors": {
+      "url": "https://huggingface.co/2vXpSwA7/iroiro-lora/resolve/main/test_controlnet2/CN-anytest_v4-marged.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "CN-anytest_v4-marged_am_dim128.safetensors": {
+      "url": "https://huggingface.co/2vXpSwA7/iroiro-lora/resolve/main/test_controlnet2/CN-anytest_v4-marged_am_dim128.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "CN-anytest_v4-marged_am_dim256.safetensors": {
+      "url": "https://huggingface.co/2vXpSwA7/iroiro-lora/resolve/main/test_controlnet2/CN-anytest_v4-marged_am_dim256.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "CN-anytest_v4-marged_pn_dim128.safetensors": {
+      "url": "https://huggingface.co/2vXpSwA7/iroiro-lora/resolve/main/test_controlnet2/CN-anytest_v4-marged_pn_dim128.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "CN-anytest_v4-marged_pn_dim256.safetensors": {
+      "url": "https://huggingface.co/2vXpSwA7/iroiro-lora/resolve/main/test_controlnet2/CN-anytest_v4-marged_pn_dim256.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "codeformer.pth": {
+      "url": "https://huggingface.co/facefusion/codeformer/resolve/main/codeformer.pth",
+      "type": "face_restore",
+      "directory": "facerestore_models"
+    },
+    "control-lora-canny-rank128.safetensors": {
+      "url": "https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank128/control-lora-canny-rank128.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "control-lora-canny-rank256.safetensors": {
+      "url": "https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-canny-rank256.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "control-lora-depth-rank128.safetensors": {
+      "url": "https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank128/control-lora-depth-rank128.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "control-lora-depth-rank256.safetensors": {
+      "url": "https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-depth-rank256.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "control-lora-recolor-rank128.safetensors": {
+      "url": "https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank128/control-lora-recolor-rank128.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "control-lora-recolor-rank256.safetensors": {
+      "url": "https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-recolor-rank256.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "control-lora-sketch-rank128-metadata.safetensors": {
+      "url": "https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank128/control-lora-sketch-rank128-metadata.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "control-lora-sketch-rank256.safetensors": {
+      "url": "https://huggingface.co/stabilityai/control-lora/resolve/main/control-LoRAs-rank256/control-lora-sketch-rank256.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_boxdepth_LooseControlfp16.safetensors": {
+      "url": "https://huggingface.co/ioclab/LooseControl_WebUICombine/resolve/main/control_boxdepth_LooseControlfp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_sd15_inpaint_depth_hand_fp16.safetensors": {
+      "url": "https://huggingface.co/hr16/ControlNet-HandRefiner-pruned/resolve/main/control_sd15_inpaint_depth_hand_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11e_sd15_ip2p_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11e_sd15_ip2p_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11e_sd15_shuffle_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11e_sd15_shuffle_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11f1e_sd15_tile_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11f1e_sd15_tile_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11f1p_sd15_depth.pth": {
+      "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11f1p_sd15_depth.pth",
+      "type": "controlnet",
+      "directory": "controlnet"
+    },
+    "control_v11f1p_sd15_depth_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11f1p_sd15_depth_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11p_sd15_canny.pth": {
+      "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_canny.pth",
+      "type": "controlnet",
+      "directory": "controlnet"
+    },
+    "control_v11p_sd15_canny_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11p_sd15_canny_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11p_sd15_inpaint_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11p_sd15_inpaint_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11p_sd15_lineart_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11p_sd15_lineart_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11p_sd15_mlsd_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11p_sd15_mlsd_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11p_sd15_normalbae_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11p_sd15_normalbae_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11p_sd15_openpose.pth": {
+      "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_openpose.pth",
+      "type": "controlnet",
+      "directory": "controlnet"
+    },
+    "control_v11p_sd15_openpose_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11p_sd15_openpose_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11p_sd15_scribble_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11p_sd15_scribble_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11p_sd15_seg_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11p_sd15_seg_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11p_sd15_softedge_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11p_sd15_softedge_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11p_sd15s2_lineart_anime_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11p_sd15s2_lineart_anime_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v11u_sd15_tile_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/ControlNet-v1-1_fp16_safetensors/resolve/main/control_v11u_sd15_tile_fp16.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "control_v1p_sdxl_qrcode_monster.safetensors": {
+      "url": "https://huggingface.co/monster-labs/control_v1p_sdxl_qrcode_monster/resolve/main/diffusion_pytorch_model.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "controlnet-sd-xl-1.0-softedge-dexined.safetensors": {
+      "url": "https://huggingface.co/SargeZT/controlnet-sd-xl-1.0-softedge-dexined/resolve/main/controlnet-sd-xl-1.0-softedge-dexined.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "Cosmos-1_0-Diffusion-14B-Text2World.safetensors": {
+      "url": "https://huggingface.co/mcmonkey/cosmos-1.0/resolve/main/Cosmos-1_0-Diffusion-14B-Text2World.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/cosmos-1.0",
+      "source": "comfyui_manager_model_list"
+    },
+    "Cosmos-1_0-Diffusion-14B-Video2World.safetensors": {
+      "url": "https://huggingface.co/mcmonkey/cosmos-1.0/resolve/main/Cosmos-1_0-Diffusion-14B-Video2World.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/cosmos-1.0",
+      "source": "comfyui_manager_model_list"
+    },
+    "Cosmos-1_0-Diffusion-7B-Text2World.safetensors": {
+      "url": "https://huggingface.co/mcmonkey/cosmos-1.0/resolve/main/Cosmos-1_0-Diffusion-7B-Text2World.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/cosmos-1.0",
+      "source": "comfyui_manager_model_list"
+    },
+    "Cosmos-1_0-Diffusion-7B-Video2World.safetensors": {
+      "url": "https://huggingface.co/mcmonkey/cosmos-1.0/resolve/main/Cosmos-1_0-Diffusion-7B-Video2World.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/cosmos-1.0",
+      "source": "comfyui_manager_model_list"
+    },
+    "cosmos_cv8x8x8_1.0.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/cosmos_1.0_text_encoder_and_VAE_ComfyUI/resolve/main/vae/cosmos_cv8x8x8_1.0.safetensors",
+      "type": "vae",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "customnet_inpaint_v1.pt": {
+      "url": "https://huggingface.co/TencentARC/CustomNet/resolve/main/customnet_inpaint_v1.pt",
+      "type": "customnet",
+      "directory": "checkpoints/customnet",
+      "source": "comfyui_manager_model_list"
+    },
+    "customnet_v1.pt": {
+      "url": "https://huggingface.co/TencentARC/CustomNet/resolve/main/customnet_v1.pt",
+      "type": "customnet",
+      "directory": "checkpoints/customnet",
+      "source": "comfyui_manager_model_list"
+    },
+    "decoder.pt": {
+      "url": "https://openaipublic.azureedge.net/diff-vae/c9cebd3132dd9c42936d803e33424145a748843c8f716c0814838bdc8a2fe7cb/decoder.pt",
+      "type": "vae",
+      "directory": "vae/SD1.5/openai_consistency_decoder",
+      "source": "comfyui_manager_model_list"
+    },
+    "deepbump256.onnx": {
+      "url": "https://github.com/HugoTini/DeepBump/raw/master/deepbump256.onnx",
+      "type": "deepbump",
+      "directory": "deepbump",
+      "source": "comfyui_manager_model_list"
+    },
+    "deepfashion2_yolov8s-seg.pt": {
+      "url": "https://huggingface.co/Bingsu/adetailer/resolve/main/deepfashion2_yolov8s-seg.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/segm",
+      "source": "comfyui_manager_model_list"
+    },
+    "depth-zoe-xl-v1.0-controlnet.safetensors": {
+      "url": "https://huggingface.co/SargeZT/controlnet-sd-xl-1.0-depth-16bit-zoe/resolve/main/depth-zoe-xl-v1.0-controlnet.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "depth_anything_v2_vitb_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resolve/main/depth_anything_v2_vitb_fp16.safetensors",
+      "type": "depthanything",
+      "directory": "depthanything",
+      "source": "comfyui_manager_model_list"
+    },
+    "depth_anything_v2_vitb_fp32.safetensors": {
+      "url": "https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resolve/main/depth_anything_v2_vitb_fp32.safetensors",
+      "type": "depthanything",
+      "directory": "depthanything",
+      "source": "comfyui_manager_model_list"
+    },
+    "depth_anything_v2_vitl_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resolve/main/depth_anything_v2_vitl_fp16.safetensors",
+      "type": "depthanything",
+      "directory": "depthanything",
+      "source": "comfyui_manager_model_list"
+    },
+    "depth_anything_v2_vitl_fp32.safetensors": {
+      "url": "https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resolve/main/depth_anything_v2_vitl_fp32.safetensors",
+      "type": "depthanything",
+      "directory": "depthanything",
+      "source": "comfyui_manager_model_list"
+    },
+    "depth_anything_v2_vits_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resolve/main/depth_anything_v2_vits_fp16.safetensors",
+      "type": "depthanything",
+      "directory": "depthanything",
+      "source": "comfyui_manager_model_list"
+    },
+    "depth_anything_v2_vits_fp32.safetensors": {
+      "url": "https://huggingface.co/Kijai/DepthAnythingV2-safetensors/resolve/main/depth_anything_v2_vits_fp32.safetensors",
+      "type": "depthanything",
+      "directory": "depthanything",
+      "source": "comfyui_manager_model_list"
+    },
+    "depth_pro.fp16.safetensors": {
+      "url": "https://huggingface.co/spacepxl/ml-depth-pro/resolve/main/depth_pro.fp16.safetensors",
+      "type": "depth_pro",
+      "directory": "depth/ml-depth-pro",
+      "source": "comfyui_manager_model_list"
+    },
+    "depthfm-v1_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/depth-fm-pruned/resolve/main/depthfm-v1_fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/depthfm",
+      "source": "comfyui_manager_model_list"
+    },
+    "depthfm-v1_fp32.safetensors": {
+      "url": "https://huggingface.co/Kijai/depth-fm-pruned/resolve/main/depthfm-v1_fp32.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/depthfm",
+      "source": "comfyui_manager_model_list"
+    },
+    "det_10g.onnx": {
+      "url": "https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/det_10g.onnx",
+      "type": "insightface",
+      "directory": "insightface/models/buffalo_l",
+      "source": "comfyui_manager_model_list"
+    },
+    "detection_mobilenet0.25_Final.pth": {
+      "url": "https://github.com/xinntao/facexlib/releases/download/v0.1.0/detection_mobilenet0.25_Final.pth",
+      "type": "facexlib",
+      "directory": "facerestore_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "detection_Resnet50_Final.pth": {
+      "url": "https://github.com/xinntao/facexlib/releases/download/v0.1.0/detection_Resnet50_Final.pth",
+      "type": "facexlib",
+      "directory": "facerestore_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "diffusion_pytorch_model.fp16.safetensors": {
+      "url": "https://huggingface.co/diffusers/stable-diffusion-xl-1.0-inpainting-0.1/resolve/main/unet/diffusion_pytorch_model.fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/xl-inpaint-0.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "diffusion_pytorch_model.safetensors": {
+      "url": "https://huggingface.co/ali-vilab/VACE-Wan2.1-1.3B-Preview/blob/main/diffusion_pytorch_model.safetensors",
       "type": "checkpoint",
       "directory": "checkpoints"
     },
-    "v1-5-pruned-emaonly-fp16.safetensors": {
-      "url": "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors",
-      "type": "checkpoint",
-      "directory": "checkpoints",
-      "note": "FP16 version - same source file"
+    "diffusion_pytorch_model_promax.safetensors": {
+      "url": "https://huggingface.co/xinsir/controlnet-union-sdxl-1.0/resolve/main/diffusion_pytorch_model_promax.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL/controlnet-union-sdxl-1.0",
+      "source": "comfyui_manager_model_list"
     },
-    "v1-5-pruned.safetensors": {
-      "url": "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned.safetensors",
+    "diffusion_pytorch_model_twins.safetensors": {
+      "url": "https://huggingface.co/xinsir/controlnet-openpose-sdxl-1.0/resolve/main/diffusion_pytorch_model_twins.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL/controlnet-openpose-sdxl-1.0",
+      "source": "comfyui_manager_model_list"
+    },
+    "diffusion_pytorch_model_V2.safetensors": {
+      "url": "https://huggingface.co/xinsir/controlnet-canny-sdxl-1.0/resolve/main/diffusion_pytorch_model_V2.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL/controlnet-canny-sdxl-1.0",
+      "source": "comfyui_manager_model_list"
+    },
+    "dmd2_sdxl_4step_lora.safetensors": {
+      "url": "https://huggingface.co/tianweiy/DMD2/resolve/main/dmd2_sdxl_4step_lora.safetensors",
+      "type": "lora",
+      "directory": "loras/DMD2",
+      "source": "comfyui_manager_model_list"
+    },
+    "dmd2_sdxl_4step_lora_fp16.safetensors": {
+      "url": "https://huggingface.co/tianweiy/DMD2/resolve/main/dmd2_sdxl_4step_lora_fp16.safetensors",
+      "type": "lora",
+      "directory": "loras/DMD2",
+      "source": "comfyui_manager_model_list"
+    },
+    "dynamicrafter_1024_v1_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/DynamiCrafter_pruned/resolve/main/dynamicrafter_1024_v1_bf16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/dynamicrafter",
+      "source": "comfyui_manager_model_list"
+    },
+    "dynamicrafter_512_interp_v1_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/DynamiCrafter_pruned/resolve/main/dynamicrafter_512_interp_v1_bf16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/dynamicrafter",
+      "source": "comfyui_manager_model_list"
+    },
+    "easynegative.safetensors": {
+      "url": "https://civitai.com/api/download/models/9208",
+      "type": "embedding",
+      "directory": "embeddings/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "efficient_sam_s_cpu.jit": {
+      "url": "https://huggingface.co/camenduru/YoloWorld-EfficientSAM/resolve/main/efficient_sam_s_cpu.jit",
+      "type": "efficient_sam",
+      "directory": "yolo_world",
+      "source": "comfyui_manager_model_list"
+    },
+    "efficient_sam_s_gpu.jit": {
+      "url": "https://huggingface.co/camenduru/YoloWorld-EfficientSAM/resolve/main/efficient_sam_s_gpu.jit",
+      "type": "efficient_sam",
+      "directory": "yolo_world",
+      "source": "comfyui_manager_model_list"
+    },
+    "effnet_encoder.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/effnet_encoder.safetensors",
+      "type": "vae",
+      "directory": "vae/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "ESRGAN_4x.pth": {
+      "url": "https://huggingface.co/Afizi/ESRGAN_4x.pth/resolve/main/ESRGAN_4x.pth",
+      "type": "upscale",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "face_yolov8m-seg_60.pt": {
+      "url": "https://github.com/hben35096/assets/releases/download/yolo8/face_yolov8m-seg_60.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/segm",
+      "source": "comfyui_manager_model_list"
+    },
+    "face_yolov8m.pt": {
+      "url": "https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov8m.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/bbox",
+      "source": "comfyui_manager_model_list"
+    },
+    "face_yolov8n-seg2_60.pt": {
+      "url": "https://github.com/hben35096/assets/releases/download/yolo8/face_yolov8n-seg2_60.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/segm",
+      "source": "comfyui_manager_model_list"
+    },
+    "face_yolov8n.pt": {
+      "url": "https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov8n.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/bbox",
+      "source": "comfyui_manager_model_list"
+    },
+    "face_yolov8n_v2.pt": {
+      "url": "https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov8n_v2.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/bbox",
+      "source": "comfyui_manager_model_list"
+    },
+    "face_yolov8s.pt": {
+      "url": "https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov8s.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/bbox",
+      "source": "comfyui_manager_model_list"
+    },
+    "fantasytalking_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/fantasytalking_fp16.safetensors",
       "type": "checkpoint",
       "directory": "checkpoints"
     },
-    "sd_xl_base_1.0.safetensors": {
-      "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
+    "fast-hunyuan-video-t2v-720p-Q4_K_M.gguf": {
+      "url": "https://huggingface.co/city96/FastHunyuan-gguf/resolve/main/fast-hunyuan-video-t2v-720p-Q4_K_M.gguf",
+      "type": "gguf_model",
+      "directory": "diffusion_models"
+    },
+    "flux-canny-controlnet-v3.safetensors": {
+      "url": "https://huggingface.co/XLabs-AI/flux-controlnet-collections/resolve/main/flux-canny-controlnet-v3.safetensors",
+      "type": "controlnet",
+      "directory": "xlabs/controlnets",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux-depth-controlnet-v3.safetensors": {
+      "url": "https://huggingface.co/XLabs-AI/flux-controlnet-collections/resolve/main/flux-depth-controlnet-v3.safetensors",
+      "type": "controlnet",
+      "directory": "xlabs/controlnets",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux-hed-controlnet-v3.safetensors": {
+      "url": "https://huggingface.co/XLabs-AI/flux-controlnet-collections/resolve/main/flux-hed-controlnet-v3.safetensors",
+      "type": "controlnet",
+      "directory": "xlabs/controlnets",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-dev-F16.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-F16.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-dev-fp8.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/flux1-dev/resolve/main/flux1-dev-fp8.safetensors",
       "type": "checkpoint",
       "directory": "checkpoints"
     },
-    "sd_xl_refiner_1.0.safetensors": {
-      "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors",
+    "flux1-dev-kontext_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/flux1-kontext-dev_ComfyUI/resolve/main/split_files/diffusion_models/flux1-dev-kontext_fp8_scaled.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models"
+    },
+    "flux1-dev-Q2_K.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q2_K.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-dev-Q3_K_S.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q3_K_S.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-dev-Q4_0.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q4_0.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-dev-Q4_1.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q4_1.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-dev-Q4_K_S.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q4_K_S.gguf",
+      "type": "gguf_model",
+      "directory": "diffusion_models"
+    },
+    "flux1-dev-Q5_0.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q5_0.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-dev-Q5_1.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q5_1.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-dev-Q5_K_S.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q5_K_S.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-dev-Q6_K.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q6_K.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-dev-Q8_0.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-dev-gguf/resolve/main/flux1-dev-Q8_0.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-dev.safetensors": {
+      "url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models"
+    },
+    "flux1-schnell-F16.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-F16.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell-fp8.safetensors": {
+      "url": "https://huggingface.co/Kijai/flux-fp8/resolve/main/flux1-schnell-fp8.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell-Q2_K.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q2_K.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell-Q3_K_S.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q3_K_S.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell-Q4_0.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q4_0.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell-Q4_1.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q4_1.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell-Q4_K_S.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q4_K_S.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell-Q5_0.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q5_0.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell-Q5_1.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q5_1.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell-Q5_K_S.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q5_K_S.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell-Q6_K.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q6_K.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell-Q8_0.gguf": {
+      "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q8_0.gguf",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux1-schnell.safetensors": {
+      "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models"
+    },
+    "flux_dev_fp8_scaled_diffusion_model.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/flux_dev_scaled_fp8_test/resolve/main/flux_dev_fp8_scaled_diffusion_model.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/FLUX1",
+      "source": "comfyui_manager_model_list"
+    },
+    "flux_shakker_labs_union_pro-fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Kijai/flux-fp8/resolve/main/flux_shakker_labs_union_pro-fp8_e4m3fn.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/FLUX.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "fusers.ckpt": {
+      "url": "https://huggingface.co/logtd/instance_diffusion/resolve/main/fusers.ckpt",
+      "type": "instancediffusion",
+      "directory": "instance_models/fuser_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "genderage.onnx": {
+      "url": "https://huggingface.co/MonsterMMORPG/tools/resolve/main/genderage.onnx",
+      "type": "insightface",
+      "directory": "insightface/models/antelopev2",
+      "source": "comfyui_manager_model_list"
+    },
+    "GFPGANv1.3.pth": {
+      "url": "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.3.pth",
+      "type": "face_restore",
+      "directory": "face_restore",
+      "source": "comfyui_manager_model_list"
+    },
+    "GFPGANv1.4.pth": {
+      "url": "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth",
+      "type": "face_restore",
+      "directory": "face_restore",
+      "source": "comfyui_manager_model_list"
+    },
+    "gligen_sd14_textbox_pruned_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/GLIGEN_pruned_safetensors/resolve/main/gligen_sd14_textbox_pruned_fp16.safetensors",
+      "type": "gligen",
+      "directory": "gligen/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "glintr100.onnx": {
+      "url": "https://huggingface.co/MonsterMMORPG/tools/resolve/main/glintr100.onnx",
+      "type": "insightface",
+      "directory": "insightface/models/antelopev2",
+      "source": "comfyui_manager_model_list"
+    },
+    "google_t5-v1_1-xxl_encoderonly-fp16.safetensors": {
+      "url": "https://huggingface.co/mcmonkey/google_t5-v1_1-xxl_encoderonly/resolve/main/model.safetensors",
+      "type": "clip",
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
+    },
+    "google_t5-v1_1-xxl_encoderonly-fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/mcmonkey/google_t5-v1_1-xxl_encoderonly/resolve/main/t5xxl_fp8_e4m3fn.safetensors",
+      "type": "clip",
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
+    },
+    "GroundingDINO_SwinT_OGC.cfg.py": {
+      "url": "https://huggingface.co/ShilongLiu/GroundingDINO/raw/main/GroundingDINO_SwinT_OGC.cfg.py",
+      "type": "groundingdino",
+      "directory": "groundingdino",
+      "source": "comfyui_manager_model_list"
+    },
+    "groundingdino_swint_ogc.pth": {
+      "url": "https://huggingface.co/ShilongLiu/GroundingDINO/resolve/main/groundingdino_swint_ogc.pth",
+      "type": "groundingdino",
+      "directory": "groundingdino",
+      "source": "comfyui_manager_model_list"
+    },
+    "hair_yolov8n-seg_60.pt": {
+      "url": "https://github.com/hben35096/assets/releases/download/yolo8/hair_yolov8n-seg_60.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/segm",
+      "source": "comfyui_manager_model_list"
+    },
+    "hand_yolov8n.pt": {
+      "url": "https://huggingface.co/Bingsu/adetailer/resolve/main/hand_yolov8n.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/bbox",
+      "source": "comfyui_manager_model_list"
+    },
+    "hand_yolov8s.pt": {
+      "url": "https://huggingface.co/Bingsu/adetailer/resolve/main/hand_yolov8s.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/bbox",
+      "source": "comfyui_manager_model_list"
+    },
+    "high_noise_model.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/high_noise_model.safetensors",
       "type": "checkpoint",
       "directory": "checkpoints"
     },
-    "sd3_medium_incl_clips_t5xxlfp8.safetensors": {
-      "url": "https://huggingface.co/stabilityai/stable-diffusion-3-medium/resolve/main/sd3_medium_incl_clips_t5xxlfp8.safetensors",
+    "hunyuan_dit_1.0.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/hunyuan_dit_comfyui/resolve/main/hunyuan_dit_1.0.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/hunyuan_dit_comfyui",
+      "source": "comfyui_manager_model_list"
+    },
+    "hunyuan_dit_1.1.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/hunyuan_dit_comfyui/resolve/main/hunyuan_dit_1.1.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/hunyuan_dit_comfyui",
+      "source": "comfyui_manager_model_list"
+    },
+    "hunyuan_dit_1.2.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/hunyuan_dit_comfyui/resolve/main/hunyuan_dit_1.2.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/hunyuan_dit_comfyui",
+      "source": "comfyui_manager_model_list"
+    },
+    "hunyuan_video_image_to_video_720p_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_repackaged/resolve/main/split_files/diffusion_models/hunyuan_video_image_to_video_720p_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/hunyuan_video",
+      "source": "comfyui_manager_model_list"
+    },
+    "hunyuan_video_t2v_720p_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_repackaged/resolve/main/split_files/diffusion_models/hunyuan_video_t2v_720p_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/hunyuan_video",
+      "source": "comfyui_manager_model_list"
+    },
+    "hunyuan_video_vae_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/HunyuanVideo_comfy/resolve/main/hunyuan_video_vae_bf16.safetensors",
+      "type": "vae",
+      "directory": "vae"
+    },
+    "Hyper-FLUX.1-dev-16steps-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-FLUX.1-dev-16steps-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/FLUX.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-FLUX.1-dev-8steps-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-FLUX.1-dev-8steps-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/FLUX.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SD15-12steps-CFG-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SD15-12steps-CFG-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SD15",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SD15-1step-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SD15-1step-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SD15",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SD15-2steps-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SD15-2steps-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SD15",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SD15-4steps-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SD15-4steps-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SD15",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SD15-8steps-CFG-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SD15-8steps-CFG-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SD15",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SD15-8steps-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SD15-8steps-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SD15",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SD3-16steps-CFG-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SD3-16steps-CFG-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SD3",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SD3-4steps-CFG-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SD3-4steps-CFG-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SD3",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SD3-8steps-CFG-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SD3-8steps-CFG-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SD3",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SDXL-12steps-CFG-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SDXL-12steps-CFG-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SDXL-1step-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SDXL-1step-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SDXL-2steps-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SDXL-2steps-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SDXL-4steps-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SDXL-4steps-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SDXL-8steps-CFG-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SDXL-8steps-CFG-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "Hyper-SDXL-8steps-lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/Hyper-SD/resolve/main/Hyper-SDXL-8steps-lora.safetensors",
+      "type": "lora",
+      "directory": "loras/HyperSD/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "iclight_sd15_fbc.safetensors": {
+      "url": "https://huggingface.co/lllyasviel/ic-light/resolve/main/iclight_sd15_fbc.safetensors",
+      "type": "ic_light",
+      "directory": "diffusion_models/IC-Light",
+      "source": "comfyui_manager_model_list"
+    },
+    "iclight_sd15_fc.safetensors": {
+      "url": "https://huggingface.co/lllyasviel/ic-light/resolve/main/iclight_sd15_fc.safetensors",
+      "type": "ic_light",
+      "directory": "diffusion_models/IC-Light",
+      "source": "comfyui_manager_model_list"
+    },
+    "iclight_sd15_fcon.safetensors": {
+      "url": "https://huggingface.co/lllyasviel/ic-light/resolve/main/iclight_sd15_fcon.safetensors",
+      "type": "ic_light",
+      "directory": "diffusion_models/IC-Light",
+      "source": "comfyui_manager_model_list"
+    },
+    "illuminatiDiffusionV1_v11-unclip-h-fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/illuminatiDiffusionV1_v11_unCLIP/resolve/main/illuminatiDiffusionV1_v11-unclip-h-fp16.safetensors",
+      "type": "unclip",
+      "directory": "checkpoints/SD2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid-plus_sd15.bin": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plus_sd15.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid-plus_sd15_lora.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plus_sd15_lora.safetensors",
+      "type": "lora",
+      "directory": "loras/ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid-plusv2_sd15.bin": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sd15.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid-plusv2_sd15_lora.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sd15_lora.safetensors",
+      "type": "lora",
+      "directory": "loras/ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid-plusv2_sdxl.bin": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid-plusv2_sdxl_lora.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-plusv2_sdxl_lora.safetensors",
+      "type": "lora",
+      "directory": "loras/ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid-portrait-v11_sd15.bin": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-portrait-v11_sd15.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid-portrait_sd15.bin": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-portrait_sd15.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid-portrait_sdxl.bin": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-portrait_sdxl.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid-portrait_sdxl_unnorm.bin": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid-portrait_sdxl_unnorm.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid_sd15.bin": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sd15.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid_sd15_lora.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sd15_lora.safetensors",
+      "type": "lora",
+      "directory": "loras/ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid_sdxl.bin": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sdxl.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-faceid_sdxl_lora.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter-FaceID/resolve/main/ip-adapter-faceid_sdxl_lora.safetensors",
+      "type": "lora",
+      "directory": "loras/ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-full-face_sd15.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-full-face_sd15.safetensors",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-plus-face_sd15.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus-face_sd15.safetensors",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-plus-face_sdxl_vit-h.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus-face_sdxl_vit-h.safetensors",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter-plus_sd15.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15.safetensors",
+      "type": "ipadapter",
+      "directory": "ipadapter"
+    },
+    "ip-adapter-plus_sdxl_vit-h.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter.bin": {
+      "url": "https://huggingface.co/InstantX/InstantID/resolve/main/ip-adapter.bin",
+      "type": "instantid",
+      "directory": "instantid",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter_sd15.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15.safetensors",
+      "type": "ipadapter",
+      "directory": "ipadapter"
+    },
+    "ip-adapter_sd15_light.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15_light.safetensors",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter_sd15_light_v11.bin": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15_light_v11.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter_sd15_vit-G.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15_vit-G.safetensors",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip-adapter_sdxl.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl.safetensors",
+      "type": "ipadapter",
+      "directory": "ipadapter"
+    },
+    "ip-adapter_sdxl_vit-h.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl_vit-h.safetensors",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip_adapter.safetensors": {
+      "url": "https://huggingface.co/XLabs-AI/flux-ip-adapter/resolve/main/ip_adapter.safetensors",
+      "type": "lora",
+      "directory": "xlabs/ipadapters",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip_plus_composition_sd15.safetensors": {
+      "url": "https://huggingface.co/ostris/ip-composition-adapter/resolve/main/ip_plus_composition_sd15.safetensors",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "ip_plus_composition_sdxl.safetensors": {
+      "url": "https://huggingface.co/ostris/ip-composition-adapter/resolve/main/ip_plus_composition_sdxl.safetensors",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors": {
+      "url": "https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "kl-f8-anime2.ckpt": {
+      "url": "https://huggingface.co/hakurei/waifu-diffusion-v1-4/resolve/main/vae/kl-f8-anime2.ckpt",
+      "type": "vae",
+      "directory": "vae/SD2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "Kolors-IP-Adapter-FaceID-Plus.bin": {
+      "url": "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-FaceID-Plus/resolve/main/ipa-faceid-plus.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "Kolors-IP-Adapter-Plus.bin": {
+      "url": "https://huggingface.co/Kwai-Kolors/Kolors-IP-Adapter-Plus/resolve/main/ip_adapter_plus_general.bin",
+      "type": "ip_adapter",
+      "directory": "ipadapter",
+      "source": "comfyui_manager_model_list"
+    },
+    "last.ckpt": {
+      "url": "https://heibox.uni-heidelberg.de/f/578df07c8fc04ffbadf3/?dl=1",
+      "type": "upscale",
+      "directory": "upscale_models/ldsr",
+      "source": "comfyui_manager_model_list"
+    },
+    "LBM_relighting.safetensors": {
+      "url": "https://huggingface.co/jasperai/LBM_relighting/resolve/main/model.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/LBM",
+      "source": "comfyui_manager_model_list"
+    },
+    "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank32_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank32_bf16.safetensors",
+      "type": "lora",
+      "directory": "loras"
+    },
+    "lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Lightx2v/lightx2v_T2V_14B_cfg_step_distill_v2_lora_rank64_bf16.safetensors",
+      "type": "lora",
+      "directory": "loras"
+    },
+    "llava-llama-3-8B-v1_1-Q4_K_M.gguf": {
+      "url": "https://huggingface.co/city96/llava-llama-3-8b-v1_1-imat-gguf/resolve/main/llava-llama-3-8B-v1_1-Q4_K_M.gguf",
+      "type": "gguf_model",
+      "directory": "diffusion_models"
+    },
+    "llava_llama3_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_repackaged/resolve/main/split_files/text_encoders/llava_llama3_fp16.safetensors",
+      "type": "clip",
+      "directory": "text_encoders",
+      "source": "comfyui_manager_model_list"
+    },
+    "llava_llama3_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_repackaged/resolve/main/split_files/text_encoders/llava_llama3_fp8_scaled.safetensors",
+      "type": "clip",
+      "directory": "text_encoders",
+      "source": "comfyui_manager_model_list"
+    },
+    "llava_llama3_vision.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_repackaged/resolve/main/split_files/clip_vision/llava_llama3_vision.safetensors",
+      "type": "clip_vision",
+      "directory": "text_encoders",
+      "source": "comfyui_manager_model_list"
+    },
+    "LongCat_distill_lora_alpha64_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/LongCat-Video_comfy/blob/main/LongCat_distill_lora_alpha64_bf16.safetensors",
+      "type": "lora",
+      "directory": "loras"
+    },
+    "lotus-depth-d-v-1-1-fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/lotus-comfyui/resolve/main/lotus-depth-d-v-1-1-fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "lotus-depth-g-v1-0-fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/lotus-comfyui/resolve/main/lotus-depth-g-v1-0-fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "lotus-depth-g-v1-0.safetensors": {
+      "url": "https://huggingface.co/Kijai/lotus-comfyui/resolve/main/lotus-depth-g-v1-0.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "lotus-normal-d-v1-0-fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/lotus-comfyui/resolve/main/lotus-normal-d-v1-0-fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "lotus-normal-d-v1-0.safetensors": {
+      "url": "https://huggingface.co/Kijai/lotus-comfyui/resolve/main/lotus-normal-d-v1-0.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "lotus-normal-g-v1-0-fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/lotus-comfyui/resolve/main/lotus-normal-g-v1-0-fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "lotus-normal-g-v1-0.safetensors": {
+      "url": "https://huggingface.co/Kijai/lotus-comfyui/resolve/main/lotus-normal-g-v1-0.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "low_noise_model.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1/low_noise_model.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "lt_long_mm_16_64_frames.ckpt": {
+      "url": "https://huggingface.co/Lightricks/LongAnimateDiff/resolve/main/lt_long_mm_16_64_frames.ckpt",
+      "type": "animatediff",
+      "directory": "animatediff_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "lt_long_mm_16_64_frames_v1.1.ckpt": {
+      "url": "https://huggingface.co/Lightricks/LongAnimateDiff/resolve/main/lt_long_mm_16_64_frames_v1.1.ckpt",
+      "type": "animatediff",
+      "directory": "animatediff_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "lt_long_mm_32_frames.ckpt": {
+      "url": "https://huggingface.co/Lightricks/LongAnimateDiff/resolve/main/lt_long_mm_32_frames.ckpt",
+      "type": "animatediff",
+      "directory": "animatediff_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltx-video-2b-v0.9.1.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.1.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/LTXV",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltx-video-2b-v0.9.5.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/blob/main/ltx-video-2b-v0.9.5.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "ltx-video-2b-v0.9.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/LTXV",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-097-ic-lora-canny-control-comfyui.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video-ICLoRA-canny-13b-0.9.7/resolve/main/ltxv-097-ic-lora-canny-control-comfyui.safetensors",
+      "type": "lora",
+      "directory": "loras",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-097-ic-lora-depth-control-comfyui.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video-ICLoRA-depth-13b-0.9.7/resolve/main/ltxv-097-ic-lora-depth-control-comfyui.safetensors",
+      "type": "lora",
+      "directory": "loras",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-097-ic-lora-pose-control-comfyui.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video-ICLoRA-pose-13b-0.9.7/resolve/main/ltxv-097-ic-lora-pose-control-comfyui.safetensors",
+      "type": "lora",
+      "directory": "loras",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-098-ic-lora-detailer-comfyui.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video-ICLoRA-detailer-13b-0.9.8/resolve/main/ltxv-098-ic-lora-detailer-comfyui.safetensors",
+      "type": "lora",
+      "directory": "loras",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-13b-0.9.7-dev-fp8.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-dev-fp8.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/LTXV",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-13b-0.9.7-dev.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-dev.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/LTXV",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-13b-0.9.7-distilled-fp8.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-distilled-fp8.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/LTXV",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-13b-0.9.7-distilled-lora128.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-distilled-lora128.safetensors",
+      "type": "lora",
+      "directory": "loras",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-13b-0.9.7-distilled.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.7-distilled.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/LTXV",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-13b-0.9.8-distilled-fp8.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.8-distilled-fp8.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/LTXV",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-13b-0.9.8-distilled.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-13b-0.9.8-distilled.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/LTXV",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-2b-0.9.8-distilled-fp8.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-2b-0.9.8-distilled-fp8.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/LTXV",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-2b-0.9.8-distilled.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-2b-0.9.8-distilled.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/LTXV",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-spatial-upscaler-0.9.7.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-spatial-upscaler-0.9.7.safetensors",
+      "type": "upscale",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "ltxv-temporal-upscaler-0.9.7.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltxv-temporal-upscaler-0.9.7.safetensors",
+      "type": "upscale",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "MelBandRoformer_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/MelBandRoFormer_comfy/blob/main/MelBandRoformer_fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "mjv6_lora.safetensors": {
+      "url": "https://huggingface.co/XLabs-AI/flux-lora-collection/resolve/main/mjv6_lora.safetensors",
+      "type": "lora",
+      "directory": "xlabs/loras",
+      "source": "comfyui_manager_model_list"
+    },
+    "mm-Stabilized_high.pth": {
+      "url": "https://huggingface.co/manshoety/AD_Stabilized_Motion/resolve/main/mm-Stabilized_high.pth",
+      "type": "animatediff",
+      "directory": "animatediff_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "mm-Stabilized_mid.pth": {
+      "url": "https://huggingface.co/manshoety/AD_Stabilized_Motion/resolve/main/mm-Stabilized_mid.pth",
+      "type": "animatediff",
+      "directory": "animatediff_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "mm_sd_v14.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sd_v14.ckpt",
+      "type": "animatediff",
+      "directory": "AnimateDiff",
+      "source": "comfyui_manager_model_list"
+    },
+    "mm_sd_v15.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sd_v15.ckpt",
+      "type": "animatediff",
+      "directory": "AnimateDiff",
+      "source": "comfyui_manager_model_list"
+    },
+    "mm_sd_v15_v2.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sd_v15_v2.ckpt",
+      "type": "animatediff",
+      "directory": "animatediff_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "mm_sdxl_v10_beta.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/mm_sdxl_v10_beta.ckpt",
+      "type": "animatediff",
+      "directory": "animatediff_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "mobile_sam.pt": {
+      "url": "https://github.com/ChaoningZhang/MobileSAM/blob/master/weights/mobile_sam.pt",
+      "type": "sam",
+      "directory": "sams",
+      "source": "comfyui_manager_model_list"
+    },
+    "mochi_preview_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/mochi_preview_repackaged/blob/main/all_in_one/mochi_preview_fp8_scaled.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "model.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/text_encoder/model.safetensors",
+      "type": "clip",
+      "directory": "text_encoders/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "model_base_capfilt_large.pth": {
+      "url": "https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_capfilt_large.pth",
+      "type": "blip_model",
+      "directory": "blip",
+      "source": "comfyui_manager_model_list"
+    },
+    "MoGe_ViT_L_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/MoGe_safetensors/resolve/main/MoGe_ViT_L_fp16.safetensors",
+      "type": "moge",
+      "directory": "MoGe",
+      "source": "comfyui_manager_model_list"
+    },
+    "motionctrl.pth": {
+      "url": "https://huggingface.co/TencentARC/MotionCtrl/resolve/main/motionctrl.pth",
+      "type": "checkpoint",
+      "directory": "checkpoints/motionctrl",
+      "source": "comfyui_manager_model_list"
+    },
+    "negative_hand-neg.pt": {
+      "url": "https://civitai.com/api/download/models/60938",
+      "type": "embedding",
+      "directory": "embeddings/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "ng_deepnegative_v1_75t.pt": {
+      "url": "https://civitai.com/api/download/models/5637",
+      "type": "embedding",
+      "directory": "embeddings/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "omnigen2_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Omnigen2_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/omnigen2_fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "OpenPoseXL2.safetensors": {
+      "url": "https://huggingface.co/thibaud/controlnet-openpose-sdxl-1.0/resolve/main/OpenPoseXL2.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "orangemix.vae.pt": {
+      "url": "https://huggingface.co/WarriorMama777/OrangeMixs/resolve/main/VAEs/orangemix.vae.pt",
+      "type": "vae",
+      "directory": "vae/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "person_yolov8m-seg.pt": {
+      "url": "https://huggingface.co/Bingsu/adetailer/resolve/main/person_yolov8m-seg.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/segm",
+      "source": "comfyui_manager_model_list"
+    },
+    "person_yolov8n-seg.pt": {
+      "url": "https://huggingface.co/Bingsu/adetailer/resolve/main/person_yolov8n-seg.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/segm",
+      "source": "comfyui_manager_model_list"
+    },
+    "person_yolov8s-seg.pt": {
+      "url": "https://huggingface.co/Bingsu/adetailer/resolve/main/person_yolov8s-seg.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/segm",
+      "source": "comfyui_manager_model_list"
+    },
+    "Phantom-Wan-14B_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Phantom-Wan-14B_fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Phantom-Wan-1_3B_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Phantom-Wan-1_3B_fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "photomaker-v1.bin": {
+      "url": "https://huggingface.co/TencentARC/PhotoMaker/resolve/main/photomaker-v1.bin",
+      "type": "photomaker",
+      "directory": "photomaker",
+      "source": "comfyui_manager_model_list"
+    },
+    "photomaker-v2.bin": {
+      "url": "https://huggingface.co/TencentARC/PhotoMaker-V2/resolve/main/photomaker-v2.bin",
+      "type": "photomaker",
+      "directory": "photomaker",
+      "source": "comfyui_manager_model_list"
+    },
+    "pia.ckpt": {
+      "url": "https://huggingface.co/Leoxing/PIA/resolve/main/pia.ckpt",
+      "type": "animatediff_pia",
+      "directory": "animatediff_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "PixArt-Sigma-XL-2-1024-MS.pth": {
+      "url": "https://huggingface.co/PixArt-alpha/PixArt-Sigma/resolve/main/PixArt-Sigma-XL-2-1024-MS.pth",
+      "type": "checkpoint",
+      "directory": "checkpoints/PixArt-Sigma",
+      "source": "comfyui_manager_model_list"
+    },
+    "PixArt-Sigma-XL-2-1024-MS.safetensors": {
+      "url": "https://huggingface.co/PixArt-alpha/PixArt-Sigma-XL-2-1024-MS/resolve/main/transformer/diffusion_pytorch_model.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/PixArt-Sigma",
+      "source": "comfyui_manager_model_list"
+    },
+    "PixArt-Sigma-XL-2-512-MS.safetensors": {
+      "url": "https://huggingface.co/PixArt-alpha/PixArt-Sigma-XL-2-512-MS/resolve/main/transformer/diffusion_pytorch_model.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/PixArt-Sigma",
+      "source": "comfyui_manager_model_list"
+    },
+    "PixArt-XL-2-1024-MS.safetensors": {
+      "url": "https://huggingface.co/PixArt-alpha/PixArt-XL-2-1024-MS/resolve/main/transformer/diffusion_pytorch_model.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/PixArt-Alpha",
+      "source": "comfyui_manager_model_list"
+    },
+    "position_net.ckpt": {
+      "url": "https://huggingface.co/logtd/instance_diffusion/resolve/main/position_net.ckpt",
+      "type": "instancediffusion",
+      "directory": "instance_models/positionnet_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "pulid_flux_v0.9.1.safetensors": {
+      "url": "https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors",
+      "type": "pulid",
+      "directory": "pulid",
+      "source": "comfyui_manager_model_list"
+    },
+    "pulid_v1.1.safetensors": {
+      "url": "https://huggingface.co/guozinan/PuLID/resolve/main/pulid_v1.1.safetensors",
+      "type": "pulid",
+      "directory": "pulid",
+      "source": "comfyui_manager_model_list"
+    },
+    "pytorch_lora_weights.safetensors": {
+      "url": "https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors",
+      "type": "lora",
+      "directory": "loras/SD1.5/lcm",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-edit-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Edit-2509-Lightning-4steps-V1.0-fp32.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-fp32.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-edit-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-8steps-V1.0-bf16.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-edit-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Edit-2509-Lightning-8steps-V1.0-fp32.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-8steps-V1.0-fp32.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-edit-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Edit-Lightning-4steps-V1.0-bf16.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-Lightning-4steps-V1.0-bf16.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-edit-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Edit-Lightning-4steps-V1.0.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-Lightning-4steps-V1.0.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-edit-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Edit-Lightning-8steps-V1.0-bf16.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-Lightning-8steps-V1.0-bf16.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-edit-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Edit-Lightning-8steps-V1.0.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-Lightning-8steps-V1.0.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-edit-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-InstantX-ControlNet-Inpainting.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-InstantX-ControlNets/resolve/main/split_files/controlnet/Qwen-Image-InstantX-ControlNet-Inpainting.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/qwen-image/instantx",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-InstantX-ControlNet-Union.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-InstantX-ControlNets/resolve/main/split_files/controlnet/Qwen-Image-InstantX-ControlNet-Union.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/qwen-image/instantx",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Lightning-4steps-V1.0-bf16.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-4steps-V1.0-bf16.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Lightning-4steps-V1.0.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-4steps-V1.0.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Lightning-4steps-V2.0-bf16.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-4steps-V2.0-bf16.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Lightning-4steps-V2.0.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-4steps-V2.0.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Lightning-8steps-V1.0.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-8steps-V1.0.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Lightning-8steps-V1.1-bf16.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-8steps-V1.1-bf16.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Lightning-8steps-V1.1.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-8steps-V1.1.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Lightning-8steps-V2.0-bf16.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-8steps-V2.0-bf16.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "Qwen-Image-Lightning-8steps-V2.0.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-8steps-V2.0.safetensors",
+      "type": "lora",
+      "directory": "loras/qwen-image-lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "qwen-image-Q3_K_S.gguf": {
+      "url": "https://huggingface.co/city96/Qwen-Image-gguf/resolve/main/qwen-image-Q3_K_S.gguf",
+      "type": "gguf_model",
+      "directory": "diffusion_models"
+    },
+    "Qwen2.5-VL-7B-Instruct-Q4_K_S.gguf": {
+      "url": "https://huggingface.co/unsloth/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/Qwen2.5-VL-7B-Instruct-Q4_K_S.gguf",
+      "type": "gguf_model",
+      "directory": "text_encoders"
+    },
+    "qwen_2.5_vl_7b.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b.safetensors",
+      "type": "clip",
+      "directory": "text_encoders/qwen",
+      "source": "comfyui_manager_model_list"
+    },
+    "qwen_2.5_vl_7b_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "text_encoder",
+      "directory": "text_encoders"
+    },
+    "qwen_2.5_vl_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Omnigen2_ComfyUI_repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_fp16.safetensors",
+      "type": "clip",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "qwen_3_4b.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors",
+      "type": "text_encoder",
+      "directory": "text_encoders"
+    },
+    "qwen_image_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/qwen-image",
+      "source": "comfyui_manager_model_list"
+    },
+    "qwen_image_edit_2509_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/qwen-image-edit",
+      "source": "comfyui_manager_model_list"
+    },
+    "qwen_image_edit_2509_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/blob/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models"
+    },
+    "qwen_image_edit_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/qwen-image-edit",
+      "source": "comfyui_manager_model_list"
+    },
+    "qwen_image_edit_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_fp8_e4m3fn.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/qwen-image-edit",
+      "source": "comfyui_manager_model_list"
+    },
+    "qwen_image_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/blob/main/split_files/diffusion_models/qwen_image_fp8_e4m3fn.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models"
+    },
+    "qwen_image_vae.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+      "type": "vae",
+      "directory": "vae"
+    },
+    "ram_plus_swin_large_14m.pth": {
+      "url": "https://huggingface.co/xinyu1205/recognize-anything-plus-model/resolve/main/ram_plus_swin_large_14m.pth",
+      "type": "ram",
+      "directory": "rams",
+      "source": "comfyui_manager_model_list"
+    },
+    "ram_swin_large_14m.pth": {
+      "url": "https://huggingface.co/xinyu1205/recognize_anything_model/resolve/main/ram_swin_large_14m.pth",
+      "type": "ram",
+      "directory": "rams",
+      "source": "comfyui_manager_model_list"
+    },
+    "RealESRGAN_x2.pth": {
+      "url": "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x2.pth",
+      "type": "upscale",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "RealESRGAN_x4.pth": {
+      "url": "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4.pth",
+      "type": "upscale",
+      "directory": "default",
+      "source": "comfyui_manager_model_list"
+    },
+    "RealESRGAN_x4plus.pth": {
+      "url": "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4plus.pth",
+      "type": "upscaler",
+      "directory": "upscale_models"
+    },
+    "realism_lora.safetensors": {
+      "url": "https://huggingface.co/XLabs-AI/flux-lora-collection/resolve/main/realism_lora.safetensors",
+      "type": "lora",
+      "directory": "xlabs/loras",
+      "source": "comfyui_manager_model_list"
+    },
+    "RestoreFormer.pth": {
+      "url": "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.4/RestoreFormer.pth",
+      "type": "face_restore",
+      "directory": "face_restore",
+      "source": "comfyui_manager_model_list"
+    },
+    "RGT_S_x2.pth": {
+      "url": "https://huggingface.co/ViperYX/RGT/resolve/main/RGT_S/RGT_S_x2.pth",
+      "type": "rgt",
+      "directory": "RGT/RGT_S",
+      "source": "comfyui_manager_model_list"
+    },
+    "RGT_S_x3.pth": {
+      "url": "https://huggingface.co/ViperYX/RGT/resolve/main/RGT_S/RGT_S_x3.pth",
+      "type": "rgt",
+      "directory": "RGT/RGT_S",
+      "source": "comfyui_manager_model_list"
+    },
+    "RGT_S_x4.pth": {
+      "url": "https://huggingface.co/ViperYX/RGT/resolve/main/RGT_S/RGT_S_x4.pth",
+      "type": "rgt",
+      "directory": "RGT/RGT_S",
+      "source": "comfyui_manager_model_list"
+    },
+    "RGT_x2.pth": {
+      "url": "https://huggingface.co/ViperYX/RGT/resolve/main/RGT/RGT_x2.pth",
+      "type": "rgt",
+      "directory": "RGT/RGT",
+      "source": "comfyui_manager_model_list"
+    },
+    "RGT_x3.pth": {
+      "url": "https://huggingface.co/ViperYX/RGT/resolve/main/RGT/RGT_x3.pth",
+      "type": "rgt",
+      "directory": "RGT/RGT",
+      "source": "comfyui_manager_model_list"
+    },
+    "RGT_x4.pth": {
+      "url": "https://huggingface.co/ViperYX/RGT/resolve/main/RGT/RGT_x4.pth",
+      "type": "rgt",
+      "directory": "RGT/RGT",
+      "source": "comfyui_manager_model_list"
+    },
+    "sam2.1_hiera_base_plus.pt": {
+      "url": "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_base_plus.pt",
+      "type": "sam2.1",
+      "directory": "sams",
+      "source": "comfyui_manager_model_list"
+    },
+    "sam2.1_hiera_large.pt": {
+      "url": "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt",
+      "type": "sam2.1",
+      "directory": "sams",
+      "source": "comfyui_manager_model_list"
+    },
+    "sam2.1_hiera_small.pt": {
+      "url": "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt",
+      "type": "sam2.1",
+      "directory": "sams",
+      "source": "comfyui_manager_model_list"
+    },
+    "sam2.1_hiera_tiny.pt": {
+      "url": "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt",
+      "type": "sam2.1",
+      "directory": "sams",
+      "source": "comfyui_manager_model_list"
+    },
+    "sam2_hiera_base_plus.pt": {
+      "url": "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_base_plus.pt",
+      "type": "sam2",
+      "directory": "sams",
+      "source": "comfyui_manager_model_list"
+    },
+    "sam2_hiera_large.pt": {
+      "url": "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_large.pt",
+      "type": "sam2",
+      "directory": "sams",
+      "source": "comfyui_manager_model_list"
+    },
+    "sam2_hiera_small.pt": {
+      "url": "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_small.pt",
+      "type": "sam2",
+      "directory": "sams",
+      "source": "comfyui_manager_model_list"
+    },
+    "sam2_hiera_tiny.pt": {
+      "url": "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt",
+      "type": "sam2",
+      "directory": "sams",
+      "source": "comfyui_manager_model_list"
+    },
+    "sam_vit_b_01ec64.pth": {
+      "url": "https://huggingface.co/ybelkada/segment-anything/resolve/main/checkpoints/sam_vit_b_01ec64.pth",
+      "type": "sam",
+      "directory": "sams"
+    },
+    "sam_vit_h_4b8939.pth": {
+      "url": "https://huggingface.co/ybelkada/segment-anything/resolve/main/checkpoints/sam_vit_h_4b8939.pth",
+      "type": "sam",
+      "directory": "sams"
+    },
+    "sam_vit_l_0b3195.pth": {
+      "url": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth",
+      "type": "sam",
+      "directory": "sams",
+      "source": "comfyui_manager_model_list"
+    },
+    "scaleu.ckpt": {
+      "url": "https://huggingface.co/logtd/instance_diffusion/resolve/main/scaleu.ckpt",
+      "type": "instancediffusion",
+      "directory": "instance_models/scaleu_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "scrfd_10g_bnkps.onnx": {
+      "url": "https://huggingface.co/MonsterMMORPG/tools/resolve/main/scrfd_10g_bnkps.onnx",
+      "type": "insightface",
+      "directory": "insightface/models/antelopev2",
+      "source": "comfyui_manager_model_list"
+    },
+    "sd1.5-real-dream-16.safetensors": {
+      "url": "https://huggingface.co/sinatra-rd/sd-1.5-real-dream/resolve/main/sd1.5-real-dream-16.safetensors",
       "type": "checkpoint",
       "directory": "checkpoints"
     },
@@ -38,25 +2075,426 @@
       "type": "checkpoint",
       "directory": "checkpoints"
     },
-    "flux1-dev.safetensors": {
-      "url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors",
-      "type": "diffusion_model",
-      "directory": "diffusion_models"
+    "sd3.5_large_controlnet_blur.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-3.5-controlnets/resolve/main/sd3.5_large_controlnet_blur.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SD3.5",
+      "source": "comfyui_manager_model_list"
     },
-    "flux1-schnell.safetensors": {
-      "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors",
-      "type": "diffusion_model",
-      "directory": "diffusion_models"
+    "sd3.5_large_controlnet_canny.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-3.5-controlnets/resolve/main/sd3.5_large_controlnet_canny.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SD3.5",
+      "source": "comfyui_manager_model_list"
     },
-    "ae.safetensors": {
-      "url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/ae.safetensors",
+    "sd3.5_large_controlnet_depth.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-3.5-controlnets/resolve/main/sd3.5_large_controlnet_depth.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet/SD3.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "sd3_medium_incl_clips_t5xxlfp8.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-3-medium/resolve/main/sd3_medium_incl_clips_t5xxlfp8.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "sd_xl_base_1.0.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "sd_xl_base_1.0_0.9vae.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0_0.9vae.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "sd_xl_offset_example-lora_1.0.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_offset_example-lora_1.0.safetensors",
+      "type": "lora",
+      "directory": "loras/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "sd_xl_refiner_1.0.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "sd_xl_refiner_1.0_0.9vae.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0_0.9vae.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "sd_xl_turbo_1.0.safetensors": {
+      "url": "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SDXL-TURBO",
+      "source": "comfyui_manager_model_list"
+    },
+    "sd_xl_turbo_1.0_fp16.safetensors": {
+      "url": "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0_fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SDXL-TURBO",
+      "source": "comfyui_manager_model_list"
+    },
+    "sdxl_lightning_2step_lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/SDXL-Lightning/resolve/main/sdxl_lightning_2step_lora.safetensors",
+      "type": "lora",
+      "directory": "loras/SDXL-Lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "sdxl_lightning_4step_lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/SDXL-Lightning/resolve/main/sdxl_lightning_4step_lora.safetensors",
+      "type": "lora",
+      "directory": "loras/SDXL-Lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "sdxl_lightning_8step_lora.safetensors": {
+      "url": "https://huggingface.co/ByteDance/SDXL-Lightning/resolve/main/sdxl_lightning_8step_lora.safetensors",
+      "type": "lora",
+      "directory": "loras/SDXL-Lightning",
+      "source": "comfyui_manager_model_list"
+    },
+    "sdxl_vae.safetensors": {
+      "url": "https://huggingface.co/stabilityai/sdxl-vae/resolve/main/sdxl_vae.safetensors",
       "type": "vae",
       "directory": "vae"
     },
-    "clip_l.safetensors": {
-      "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+    "seecoder-anime-v1-0.safetensors": {
+      "url": "https://huggingface.co/shi-labs/prompt-free-diffusion/resolve/main/pretrained/pfd/seecoder/seecoder-anime-v1-0.safetensors",
+      "type": "seecoder",
+      "directory": "seecoders",
+      "source": "comfyui_manager_model_list"
+    },
+    "seecoder-pa-v1-0.safetensors": {
+      "url": "https://huggingface.co/shi-labs/prompt-free-diffusion/resolve/main/pretrained/pfd/seecoder/seecoder-pa-v1-0.safetensors",
+      "type": "seecoder",
+      "directory": "seecoders",
+      "source": "comfyui_manager_model_list"
+    },
+    "seecoder-v1-0.safetensors": {
+      "url": "https://huggingface.co/shi-labs/prompt-free-diffusion/resolve/main/pretrained/pfd/seecoder/seecoder-v1-0.safetensors",
+      "type": "seecoder",
+      "directory": "seecoders",
+      "source": "comfyui_manager_model_list"
+    },
+    "segmind-vega.safetensors": {
+      "url": "https://huggingface.co/segmind/Segmind-Vega/resolve/main/segmind-vega.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/segmind-vega",
+      "source": "comfyui_manager_model_list"
+    },
+    "sigclip_vision_patch14_384.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/sigclip_vision_384/resolve/main/sigclip_vision_patch14_384.safetensors",
+      "type": "clip_vision",
+      "directory": "clip_vision",
+      "source": "comfyui_manager_model_list"
+    },
+    "skin_yolov8m-seg_400.pt": {
+      "url": "https://github.com/hben35096/assets/releases/download/yolo8/skin_yolov8m-seg_400.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/segm",
+      "source": "comfyui_manager_model_list"
+    },
+    "skin_yolov8n-seg_400.pt": {
+      "url": "https://github.com/hben35096/assets/releases/download/yolo8/skin_yolov8n-seg_400.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/segm",
+      "source": "comfyui_manager_model_list"
+    },
+    "skin_yolov8n-seg_800.pt": {
+      "url": "https://github.com/hben35096/assets/releases/download/yolo8/skin_yolov8n-seg_800.pt",
+      "type": "ultralytics",
+      "directory": "ultralytics/segm",
+      "source": "comfyui_manager_model_list"
+    },
+    "stable_cascade_stage_b.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/comfyui_checkpoints/stable_cascade_stage_b.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "stable_cascade_stage_c.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/comfyui_checkpoints/stable_cascade_stage_c.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "stable_zero123.ckpt": {
+      "url": "https://huggingface.co/stabilityai/stable-zero123/resolve/main/stable_zero123.ckpt",
+      "type": "zero123",
+      "directory": "checkpoints/zero123",
+      "source": "comfyui_manager_model_list"
+    },
+    "stage_a.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/stage_a.safetensors",
+      "type": "vae",
+      "directory": "vae/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "stage_b.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/stage_b.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "stage_b_bf16.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/stage_b_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "stage_b_lite.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/stage_b_lite.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "stage_b_lite_bf16.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/stage_b_lite_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "stage_c.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/stage_c.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "stage_c_bf16.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/stage_c_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "stage_c_lite.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/stage_c_lite.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "stage_c_lite_bf16.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-cascade/resolve/main/stage_c_lite_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Stable-Cascade",
+      "source": "comfyui_manager_model_list"
+    },
+    "SUPIR-v0F.ckpt": {
+      "url": "https://huggingface.co/camenduru/SUPIR/resolve/main/SUPIR-v0F.ckpt",
+      "type": "checkpoint",
+      "directory": "checkpoints/SUPIR",
+      "source": "comfyui_manager_model_list"
+    },
+    "SUPIR-v0F_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/SUPIR_pruned/resolve/main/SUPIR-v0F_fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SUPIR",
+      "source": "comfyui_manager_model_list"
+    },
+    "SUPIR-v0Q.ckpt": {
+      "url": "https://huggingface.co/camenduru/SUPIR/resolve/main/SUPIR-v0Q.ckpt",
+      "type": "checkpoint",
+      "directory": "checkpoints/SUPIR",
+      "source": "comfyui_manager_model_list"
+    },
+    "SUPIR-v0Q_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/SUPIR_pruned/resolve/main/SUPIR-v0Q_fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SUPIR",
+      "source": "comfyui_manager_model_list"
+    },
+    "svd.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-video-diffusion-img2vid/resolve/main/svd.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SVD",
+      "source": "comfyui_manager_model_list"
+    },
+    "svd_xt.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt/resolve/main/svd_xt.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SVD",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2i-adapter-canny-sdxl-1.0.fp16.safetensors": {
+      "url": "https://huggingface.co/TencentARC/t2i-adapter-canny-sdxl-1.0/resolve/main/diffusion_pytorch_model.fp16.safetensors",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2i-adapter-canny-sdxl-1.0.safetensors": {
+      "url": "https://huggingface.co/TencentARC/t2i-adapter-canny-sdxl-1.0/resolve/main/diffusion_pytorch_model.safetensors",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2i-adapter-depth-midas-sdxl-1.0.fp16.safetensors": {
+      "url": "https://huggingface.co/TencentARC/t2i-adapter-depth-midas-sdxl-1.0/resolve/main/diffusion_pytorch_model.fp16.safetensors",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2i-adapter-depth-midas-sdxl-1.0.safetensors": {
+      "url": "https://huggingface.co/TencentARC/t2i-adapter-depth-midas-sdxl-1.0/resolve/main/diffusion_pytorch_model.safetensors",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2i-adapter-depth-zoe-sdxl-1.0.fp16.safetensors": {
+      "url": "https://huggingface.co/TencentARC/t2i-adapter-depth-zoe-sdxl-1.0/resolve/main/diffusion_pytorch_model.fp16.safetensors",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2i-adapter-depth-zoe-sdxl-1.0.safetensors": {
+      "url": "https://huggingface.co/TencentARC/t2i-adapter-depth-zoe-sdxl-1.0/resolve/main/diffusion_pytorch_model.safetensors",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2i-adapter-lineart-sdxl-1.0.fp16.safetensors": {
+      "url": "https://huggingface.co/TencentARC/t2i-adapter-lineart-sdxl-1.0/resolve/main/diffusion_pytorch_model.fp16.safetensors",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2i-adapter-lineart-sdxl-1.0.safetensors": {
+      "url": "https://huggingface.co/TencentARC/t2i-adapter-lineart-sdxl-1.0/resolve/main/diffusion_pytorch_model.safetensors",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2i-adapter-openpose-sdxl-1.0.safetensors": {
+      "url": "https://huggingface.co/TencentARC/t2i-adapter-openpose-sdxl-1.0/resolve/main/diffusion_pytorch_model.safetensors",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2i-adapter-sketch-sdxl-1.0.fp16.safetensors": {
+      "url": "https://huggingface.co/TencentARC/t2i-adapter-sketch-sdxl-1.0/resolve/main/diffusion_pytorch_model.fp16.safetensors",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2i-adapter-sketch-sdxl-1.0.safetensors": {
+      "url": "https://huggingface.co/TencentARC/t2i-adapter-sketch-sdxl-1.0/resolve/main/diffusion_pytorch_model.safetensors",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2iadapter_canny_sd14v1.pth": {
+      "url": "https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_canny_sd14v1.pth",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2iadapter_color_sd14v1.pth": {
+      "url": "https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_color_sd14v1.pth",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2iadapter_depth_sd14v1.pth": {
+      "url": "https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_depth_sd14v1.pth",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2iadapter_keypose_sd14v1.pth": {
+      "url": "https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_keypose_sd14v1.pth",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2iadapter_openpose_sd14v1.pth": {
+      "url": "https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_openpose_sd14v1.pth",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2iadapter_seg_sd14v1.pth": {
+      "url": "https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_seg_sd14v1.pth",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2iadapter_sketch_sd14v1.pth": {
+      "url": "https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_sketch_sd14v1.pth",
+      "type": "t2i_adapter",
+      "directory": "controlnet/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t2iadapter_style_sd14v1.pth": {
+      "url": "https://huggingface.co/TencentARC/T2I-Adapter/resolve/main/models/t2iadapter_style_sd14v1.pth",
+      "type": "t2i_style",
+      "directory": "controlnet/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t5-v1_1-xxl-encoder-f16.gguf": {
+      "url": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-f16.gguf",
       "type": "clip",
-      "directory": "clip"
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t5-v1_1-xxl-encoder-f32.gguf": {
+      "url": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-f32.gguf",
+      "type": "clip",
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t5-v1_1-xxl-encoder-Q3_K_L.gguf": {
+      "url": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q3_K_L.gguf",
+      "type": "clip",
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t5-v1_1-xxl-encoder-Q3_K_M.gguf": {
+      "url": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q3_K_M.gguf",
+      "type": "clip",
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t5-v1_1-xxl-encoder-Q3_K_S.gguf": {
+      "url": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q3_K_S.gguf",
+      "type": "clip",
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t5-v1_1-xxl-encoder-Q4_K_M.gguf": {
+      "url": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q4_K_M.gguf",
+      "type": "clip",
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t5-v1_1-xxl-encoder-Q4_K_S.gguf": {
+      "url": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q4_K_S.gguf",
+      "type": "gguf_model",
+      "directory": "text_encoders"
+    },
+    "t5-v1_1-xxl-encoder-Q5_K_M.gguf": {
+      "url": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q5_K_M.gguf",
+      "type": "clip",
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t5-v1_1-xxl-encoder-Q5_K_S.gguf": {
+      "url": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q5_K_S.gguf",
+      "type": "clip",
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t5-v1_1-xxl-encoder-Q6_K.gguf": {
+      "url": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q6_K.gguf",
+      "type": "clip",
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
+    },
+    "t5-v1_1-xxl-encoder-Q8_0.gguf": {
+      "url": "https://huggingface.co/city96/t5-v1_1-xxl-encoder-gguf/resolve/main/t5-v1_1-xxl-encoder-Q8_0.gguf",
+      "type": "clip",
+      "directory": "text_encoders/t5",
+      "source": "comfyui_manager_model_list"
     },
     "t5xxl_fp16.safetensors": {
       "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors",
@@ -68,80 +2506,640 @@
       "type": "text_encoder",
       "directory": "text_encoders"
     },
-    "sdxl_vae.safetensors": {
-      "url": "https://huggingface.co/stabilityai/sdxl-vae/resolve/main/sdxl_vae.safetensors",
-      "type": "vae",
-      "directory": "vae"
+    "t5xxl_fp8_e4m3fn_scaled.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "text_encoder",
+      "directory": "text_encoders"
     },
-    "vae-ft-mse-840000-ema-pruned.safetensors": {
-      "url": "https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.safetensors",
-      "type": "vae",
-      "directory": "vae"
+    "taef1_decoder.pth": {
+      "url": "https://github.com/madebyollin/taesd/raw/main/taef1_decoder.pth",
+      "type": "taesd",
+      "directory": "vae_approx",
+      "source": "comfyui_manager_model_list"
     },
-    "RealESRGAN_x4plus.pth": {
-      "url": "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4plus.pth",
-      "type": "upscaler",
-      "directory": "upscale_models"
+    "taef1_encoder.pth": {
+      "url": "https://github.com/madebyollin/taesd/raw/main/taef1_encoder.pth",
+      "type": "taesd",
+      "directory": "vae_approx",
+      "source": "comfyui_manager_model_list"
     },
-    "4x-UltraSharp.pth": {
-      "url": "https://huggingface.co/Kim2091/4x-UltraSharp/resolve/main/4x-UltraSharp.pth",
-      "type": "upscaler",
-      "directory": "upscale_models"
+    "taesd3_decoder.pth": {
+      "url": "https://github.com/madebyollin/taesd/raw/main/taesd3_decoder.pth",
+      "type": "taesd",
+      "directory": "vae_approx",
+      "source": "comfyui_manager_model_list"
     },
-    "codeformer.pth": {
-      "url": "https://huggingface.co/facefusion/codeformer/resolve/main/codeformer.pth",
-      "type": "face_restore",
-      "directory": "facerestore_models"
+    "taesd3_encoder.pth": {
+      "url": "https://github.com/madebyollin/taesd/raw/main/taesd3_encoder.pth",
+      "type": "taesd",
+      "directory": "vae_approx",
+      "source": "comfyui_manager_model_list"
     },
-    "control_v11p_sd15_canny.pth": {
-      "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_canny.pth",
+    "taesd_decoder.pth": {
+      "url": "https://github.com/madebyollin/taesd/raw/main/taesd_decoder.pth",
+      "type": "taesd",
+      "directory": "vae_approx",
+      "source": "comfyui_manager_model_list"
+    },
+    "taesd_encoder.pth": {
+      "url": "https://github.com/madebyollin/taesd/raw/main/taesd_encoder.pth",
+      "type": "taesd",
+      "directory": "vae_approx",
+      "source": "comfyui_manager_model_list"
+    },
+    "taesdxl_decoder.pth": {
+      "url": "https://github.com/madebyollin/taesd/raw/main/taesdxl_decoder.pth",
+      "type": "taesd",
+      "directory": "vae_approx",
+      "source": "comfyui_manager_model_list"
+    },
+    "taesdxl_encoder.pth": {
+      "url": "https://github.com/madebyollin/taesd/raw/main/taesdxl_encoder.pth",
+      "type": "taesd",
+      "directory": "vae_approx",
+      "source": "comfyui_manager_model_list"
+    },
+    "tag2text_swin_14m.pth": {
+      "url": "https://huggingface.co/xinyu1205/recognize_anything_model/resolve/main/tag2text_swin_14m.pth",
+      "type": "ram",
+      "directory": "rams",
+      "source": "comfyui_manager_model_list"
+    },
+    "temporaldiff-v1-animatediff.ckpt": {
+      "url": "https://huggingface.co/CiaraRowles/TemporalDiff/resolve/main/temporaldiff-v1-animatediff.ckpt",
+      "type": "animatediff",
+      "directory": "animatediff_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "temporalnetversion2.safetensors": {
+      "url": "https://huggingface.co/CiaraRowles/TemporalNet2/resolve/main/temporalnetversion2.safetensors",
       "type": "controlnet",
-      "directory": "controlnet"
+      "directory": "controlnet/SD1.5",
+      "source": "comfyui_manager_model_list"
     },
-    "control_v11p_sd15_openpose.pth": {
-      "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_openpose.pth",
+    "theovercomer8sContrastFix_sd15.safetensors": {
+      "url": "https://civitai.com/api/download/models/10638",
+      "type": "lora",
+      "directory": "loras/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "theovercomer8sContrastFix_sd21768.safetensors": {
+      "url": "https://civitai.com/api/download/models/10350",
+      "type": "lora",
+      "directory": "loras/SD2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "tooncrafter_512_interp-fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/DynamiCrafter_pruned/resolve/main/tooncrafter_512_interp-fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/ToonCrafter",
+      "source": "comfyui_manager_model_list"
+    },
+    "TTPLANET_Controlnet_Tile_realistic_v2_fp16.safetensors": {
+      "url": "https://huggingface.co/TTPlanet/TTPLanet_SDXL_Controlnet_Tile_Realistic/resolve/main/TTPLANET_Controlnet_Tile_realistic_v2_fp16.safetensors",
       "type": "controlnet",
-      "directory": "controlnet"
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
     },
-    "control_v11f1p_sd15_depth.pth": {
-      "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11f1p_sd15_depth.pth",
+    "TTPLANET_Controlnet_Tile_realistic_v2_rank256.safetensors": {
+      "url": "https://huggingface.co/TTPlanet/TTPLanet_SDXL_Controlnet_Tile_Realistic/resolve/main/TTPLANET_Controlnet_Tile_realistic_v2_rank256.safetensors",
       "type": "controlnet",
-      "directory": "controlnet"
-    },
-    "ip-adapter_sd15.safetensors": {
-      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15.safetensors",
-      "type": "ipadapter",
-      "directory": "ipadapter"
-    },
-    "ip-adapter-plus_sd15.safetensors": {
-      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15.safetensors",
-      "type": "ipadapter",
-      "directory": "ipadapter"
-    },
-    "ip-adapter_sdxl.safetensors": {
-      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl.safetensors",
-      "type": "ipadapter",
-      "directory": "ipadapter"
-    },
-    "sam_vit_h_4b8939.pth": {
-      "url": "https://huggingface.co/ybelkada/segment-anything/resolve/main/checkpoints/sam_vit_h_4b8939.pth",
-      "type": "sam",
-      "directory": "sams"
-    },
-    "sam_vit_b_01ec64.pth": {
-      "url": "https://huggingface.co/ybelkada/segment-anything/resolve/main/checkpoints/sam_vit_b_01ec64.pth",
-      "type": "sam",
-      "directory": "sams"
+      "directory": "controlnet/SDXL",
+      "source": "comfyui_manager_model_list"
     },
     "umt5-xxl-enc-bf16.safetensors": {
       "url": "https://huggingface.co/ALGOTECH/WanVideo_comfy/resolve/main/umt5-xxl-enc-bf16.safetensors",
       "type": "text_encoder",
       "directory": "text_encoders"
     },
+    "umt5-xxl-enc-fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/umt5-xxl-enc-fp8_e4m3fn.safetensors",
+      "type": "text_encoder",
+      "directory": "text_encoders"
+    },
+    "umt5_xxl_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp16.safetensors",
+      "type": "clip",
+      "directory": "text_encoders",
+      "source": "comfyui_manager_model_list"
+    },
+    "umt5_xxl_fp8_e4m3fn_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "text_encoder",
+      "directory": "text_encoders"
+    },
+    "v1-5-pruned-emaonly-fp16.safetensors": {
+      "url": "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints",
+      "note": "FP16 version - same source file"
+    },
+    "v1-5-pruned-emaonly.ckpt": {
+      "url": "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.ckpt",
+      "type": "checkpoint",
+      "directory": "checkpoints/SD1.5",
+      "source": "comfyui_manager_model_list"
+    },
+    "v1-5-pruned-emaonly.safetensors": {
+      "url": "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "v1-5-pruned.safetensors": {
+      "url": "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "v2-1_512-ema-pruned.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-2-1-base/resolve/main/v2-1_512-ema-pruned.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SD2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "v2-1_768-ema-pruned.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-2-1/resolve/main/v2-1_768-ema-pruned.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SD2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "v2_lora_PanLeft.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_PanLeft.ckpt",
+      "type": "motion_lora",
+      "directory": "animatediff_motion_lora",
+      "source": "comfyui_manager_model_list"
+    },
+    "v2_lora_PanRight.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_PanRight.ckpt",
+      "type": "motion_lora",
+      "directory": "animatediff_motion_lora",
+      "source": "comfyui_manager_model_list"
+    },
+    "v2_lora_RollingAnticlockwise.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_RollingAnticlockwise.ckpt",
+      "type": "motion_lora",
+      "directory": "animatediff_motion_lora",
+      "source": "comfyui_manager_model_list"
+    },
+    "v2_lora_RollingClockwise.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_RollingClockwise.ckpt",
+      "type": "motion_lora",
+      "directory": "animatediff_motion_lora",
+      "source": "comfyui_manager_model_list"
+    },
+    "v2_lora_TiltDown.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_TiltDown.ckpt",
+      "type": "motion_lora",
+      "directory": "animatediff_motion_lora",
+      "source": "comfyui_manager_model_list"
+    },
+    "v2_lora_TiltUp.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_TiltUp.ckpt",
+      "type": "motion_lora",
+      "directory": "animatediff_motion_lora",
+      "source": "comfyui_manager_model_list"
+    },
+    "v2_lora_ZoomIn.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_ZoomIn.ckpt",
+      "type": "motion_lora",
+      "directory": "animatediff_motion_lora",
+      "source": "comfyui_manager_model_list"
+    },
+    "v2_lora_ZoomOut.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v2_lora_ZoomOut.ckpt",
+      "type": "motion_lora",
+      "directory": "animatediff_motion_lora",
+      "source": "comfyui_manager_model_list"
+    },
+    "v3_sd15_adapter.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_adapter.ckpt",
+      "type": "lora",
+      "directory": "loras/SD1.5/animatediff",
+      "source": "comfyui_manager_model_list"
+    },
+    "v3_sd15_mm.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_mm.ckpt",
+      "type": "animatediff",
+      "directory": "animatediff_models",
+      "source": "comfyui_manager_model_list"
+    },
+    "v3_sd15_sparsectrl_rgb.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_sparsectrl_rgb.ckpt",
+      "type": "controlnet",
+      "directory": "controlnet/SD1.5/animatediff",
+      "source": "comfyui_manager_model_list"
+    },
+    "v3_sd15_sparsectrl_scribble.ckpt": {
+      "url": "https://huggingface.co/guoyww/animatediff/resolve/main/v3_sd15_sparsectrl_scribble.ckpt",
+      "type": "controlnet",
+      "directory": "controlnet/SD1.5/animatediff",
+      "source": "comfyui_manager_model_list"
+    },
+    "vae-ft-mse-840000-ema-pruned.safetensors": {
+      "url": "https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.safetensors",
+      "type": "vae",
+      "directory": "vae"
+    },
+    "ViT-L-14-TEXT-detail-improved-hiT-GmP-HF.safetensors": {
+      "url": "https://huggingface.co/zer0int/CLIP-GmP-ViT-L-14/resolve/main/ViT-L-14-TEXT-detail-improved-hiT-GmP-HF.safetensors",
+      "type": "clip",
+      "directory": "text_encoders/long_clip",
+      "source": "comfyui_manager_model_list"
+    },
+    "ViT-L-14-TEXT-detail-improved-hiT-GmP-TE-only-HF.safetensors": {
+      "url": "https://huggingface.co/zer0int/CLIP-GmP-ViT-L-14/resolve/main/ViT-L-14-TEXT-detail-improved-hiT-GmP-TE-only-HF.safetensors",
+      "type": "clip",
+      "directory": "text_encoders/long_clip",
+      "source": "comfyui_manager_model_list"
+    },
+    "vitpose-l-wholebody.onnx": {
+      "url": "https://huggingface.co/JunkyByte/easy_ViTPose/blob/main/onnx/wholebody/vitpose-l-wholebody.onnx",
+      "type": "onnx",
+      "directory": "onnx"
+    },
+    "vitpose_h_wholebody_data.bin": {
+      "url": "https://huggingface.co/Kijai/vitpose_comfy/blob/main/onnx/vitpose_h_wholebody_data.bin",
+      "type": "onnx",
+      "directory": "onnx"
+    },
+    "vitpose_h_wholebody_model.onnx": {
+      "url": "https://huggingface.co/Kijai/vitpose_comfy/blob/main/onnx/vitpose_h_wholebody_model.onnx",
+      "type": "onnx",
+      "directory": "onnx"
+    },
+    "w600k_r50.onnx": {
+      "url": "https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx",
+      "type": "insightface",
+      "directory": "insightface/models/buffalo_l",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1-1.3b-control-lora-tile-v0.1_comfy.safetensors": {
+      "url": "https://huggingface.co/spacepxl/Wan2.1-control-loras/blob/main/wan2.1-1.3b-control-lora-tile-v0.1_comfy.safetensors",
+      "type": "lora",
+      "directory": "loras"
+    },
+    "wan2.1-1.3b-control-lora-tile-v1.1_comfy.safetensors": {
+      "url": "https://huggingface.co/spacepxl/Wan2.1-control-loras/resolve/main/1.3b/tile/wan2.1-1.3b-control-lora-tile-v1.1_comfy.safetensors",
+      "type": "lora",
+      "directory": "loras"
+    },
+    "Wan2.1-Fun-1.3B-InP-MPS_reward_lora_comfy.safetensors": {
+      "url": "https://huggingface.co/Kijai/Wan2.1-Fun-Reward-LoRAs-comfy/blob/main/Wan2.1-Fun-1.3B-InP-MPS_reward_lora_comfy.safetensors",
+      "type": "lora",
+      "directory": "loras"
+    },
+    "Wan2.1-Fun-Control-14B_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan2.1-Fun-Control-14B_fp8_e4m3fn.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet"
+    },
+    "wan2.1_i2v_480p_14B_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_i2v_480p_14B_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_i2v_480p_14B_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_fp8_e4m3fn.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_i2v_480p_14B_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_fp8_scaled.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_i2v_720p_14B_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_720p_14B_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_i2v_720p_14B_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_i2v_720p_14B_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_e4m3fn.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_i2v_720p_14B_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_scaled.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_t2v_1.3B_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_1.3B_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_t2v_1.3B_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_t2v_14B_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_t2v_14B_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_t2v_14B_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp8_e4m3fn.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.1_t2v_14B_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_t2v_14B_fp8_scaled.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf": {
+      "url": "https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF/resolve/main/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf",
+      "type": "gguf_model",
+      "directory": "diffusion_models"
+    },
+    "Wan2.2-I2V-A14B-LowNoise-Q5_K_M.gguf": {
+      "url": "https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF/resolve/main/LowNoise/Wan2.2-I2V-A14B-LowNoise-Q5_K_M.gguf",
+      "type": "gguf_model",
+      "directory": "diffusion_models"
+    },
+    "wan2.2_i2v_high_noise_14B_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.2",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.2",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.2_i2v_low_noise_14B_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.2",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.2",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.2_t2v_high_noise_14B_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.2",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/blob/main/split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models"
+    },
+    "wan2.2_t2v_low_noise_14B_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.2",
+      "source": "comfyui_manager_model_list"
+    },
+    "wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/blob/main/split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models"
+    },
+    "wan2.2_ti2v_5B_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.2",
+      "source": "comfyui_manager_model_list"
+    },
+    "Wan21-14B-SCAIL-preview_comfy_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/SCAIL/Wan21-14B-SCAIL-preview_comfy_bf16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan21-14B-SCAIL-preview_fp8_e4m3fn_scaled_KJ.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/blob/main/SCAIL/Wan21-14B-SCAIL-preview_fp8_e4m3fn_scaled_KJ.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan21-OneToAllAnimation_fp8_e4m3fn_scaled_KJ.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/blob/main/OneToAllAnimation/Wan21-OneToAllAnimation_fp8_e4m3fn_scaled_KJ.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan21_CausVid_bidirect2_T2V_1_3B_lora_rank32.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan21_CausVid_bidirect2_T2V_1_3B_lora_rank32.safetensors",
+      "type": "lora",
+      "directory": "loras"
+    },
+    "Wan21_PusaV1_LoRA_14B_rank512_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Pusa/Wan21_PusaV1_LoRA_14B_rank512_bf16.safetensors",
+      "type": "lora",
+      "directory": "loras"
+    },
+    "Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank32.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan21_T2V_14B_lightx2v_cfg_step_distill_lora_rank32.safetensors",
+      "type": "lora",
+      "directory": "loras"
+    },
+    "Wan2_1-FLF2V-14B-720P_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan2_1-FLF2V-14B-720P_fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-FLF2V-14B-720P_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan2_1-FLF2V-14B-720P_fp8_e4m3fn.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-SkyReels-V2-DF-14B-540P_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Skyreels/Wan2_1-SkyReels-V2-DF-14B-540P_fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-SkyReels-V2-DF-14B-540P_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Skyreels/Wan2_1-SkyReels-V2-DF-14B-540P_fp8_e4m3fn.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-SkyReels-V2-DF-1_3B-540P_fp32.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Skyreels/Wan2_1-SkyReels-V2-DF-1_3B-540P_fp32.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-T2V-1-3B-EchoShot_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/EchoShot/Wan2_1-T2V-1-3B-EchoShot_fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-T2V-14B-Phantom_fp8_e4m3fn_scaled_KJ.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/blob/main/T2V/Wan2_1-T2V-14B-Phantom_fp8_e4m3fn_scaled_KJ.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-T2V-14B_fp8_e4m3fn_scaled_KJ.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/blob/main/T2V/Wan2_1-T2V-14B_fp8_e4m3fn_scaled_KJ.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-T2V-14B_fp8_e5m2.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Wan2_1-T2V-14B_fp8_e5m2.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-T2V-14B_fp8_e5m2_scaled_KJ.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/blob/main/T2V/Wan2_1-T2V-14B_fp8_e5m2_scaled_KJ.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-VACE_module_14B_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan2_1-VACE_module_14B_bf16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-VACE_module_14B_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan2_1-VACE_module_14B_fp8_e4m3fn.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1-Wan2_1-Fun-V1_1-14B-Control-Camera_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan2_1-Wan2_1-Fun-V1_1-14B-Control-Camera_fp8_e4m3fn.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet"
+    },
+    "Wan2_1_mocha-14B-preview_fp8_e4m3fn_scaled_KJ.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy_fp8_scaled/blob/main/MoCha/Wan2_1_mocha-14B-preview_fp8_e4m3fn_scaled_KJ.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1_self_forcing_dmd_1_3B_lora_rank_32_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan2_1_self_forcing_dmd_1_3B_lora_rank_32_fp16.safetensors",
+      "type": "lora",
+      "directory": "loras"
+    },
+    "Wan2_1_SkyreelsA2_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan2_1_SkyreelsA2_fp8_e4m3fn.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1_UniLumos_1_3B_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/UniLumos/Wan2_1_UniLumos_1_3B_bf16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1_VACE_1_3B_preview_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan2_1_VACE_1_3B_preview_bf16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "Wan2_1_VAE_bf16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/Wan2_1_VAE_bf16.safetensors",
+      "type": "vae",
+      "directory": "vae"
+    },
     "wan_2.1_vae.safetensors": {
       "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
       "type": "vae",
       "directory": "vae"
+    },
+    "WanAnimate_relight_lora_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/WanAnimate_relight_lora_fp16.safetensors",
+      "type": "lora",
+      "directory": "loras"
+    },
+    "wd-1-5-beta2-aesthetic-unclip-h-fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/wd-1.5-beta2_unCLIP/resolve/main/wd-1-5-beta2-aesthetic-unclip-h-fp16.safetensors",
+      "type": "unclip",
+      "directory": "checkpoints/SD2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "wd-illusion-fp16.safetensors": {
+      "url": "https://huggingface.co/waifu-diffusion/wd-1-5-beta3/resolve/main/wd-illusion-fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/SD2.1",
+      "source": "comfyui_manager_model_list"
+    },
+    "whisper_large_v3_encoder_fp16.safetensors": {
+      "url": "https://huggingface.co/Kijai/WanVideo_comfy/blob/main/HuMo/whisper_large_v3_encoder_fp16.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "x4-upscaler-ema.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-x4-upscaler/resolve/main/x4-upscaler-ema.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints/upscale",
+      "source": "comfyui_manager_model_list"
+    },
+    "yolov10m.onnx": {
+      "url": "https://huggingface.co/Wan-AI/Wan2.2-Animate-14B/blob/main/process_checkpoint/det/yolov10m.onnx",
+      "type": "onnx",
+      "directory": "onnx"
+    },
+    "yolov5l-face.pth": {
+      "url": "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/yolov5l-face.pth",
+      "type": "facexlib",
+      "directory": "facedetection",
+      "source": "comfyui_manager_model_list"
+    },
+    "yolov5n-face.pth": {
+      "url": "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/yolov5n-face.pth",
+      "type": "facexlib",
+      "directory": "facedetection",
+      "source": "comfyui_manager_model_list"
+    },
+    "Z-Image-Turbo-Fun-Controlnet-Union.safetensors": {
+      "url": "https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors",
+      "type": "controlnet",
+      "directory": "controlnet"
+    },
+    "z_image_turbo_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models"
+    },
+    "zero123-105000.ckpt": {
+      "url": "https://huggingface.co/cvlab/zero123-weights/resolve/main/105000.ckpt",
+      "type": "zero123",
+      "directory": "checkpoints/zero123",
+      "source": "comfyui_manager_model_list"
+    },
+    "zero123-165000.ckpt": {
+      "url": "https://huggingface.co/cvlab/zero123-weights/resolve/main/165000.ckpt",
+      "type": "zero123",
+      "directory": "checkpoints/zero123",
+      "source": "comfyui_manager_model_list"
+    },
+    "zero123-xl.ckpt": {
+      "url": "https://huggingface.co/kealiu/zero123-xl/resolve/main/zero123-xl.ckpt",
+      "type": "zero123",
+      "directory": "checkpoints/zero123",
+      "source": "comfyui_manager_model_list"
     }
   }
 }
