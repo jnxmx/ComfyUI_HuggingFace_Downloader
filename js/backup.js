@@ -162,6 +162,7 @@ app.registerExtension({
                 padding: "4px 6px",
                 color: node.selectable ? "#ececec" : "#9aa0a6",
                 minHeight: "24px",
+                minWidth: "0",
             });
 
             if (node.selectable && node.action) {
@@ -193,6 +194,9 @@ app.registerExtension({
             const label = document.createElement("span");
             label.textContent = node.label;
             label.style.fontSize = "13px";
+            label.style.flex = "1";
+            label.style.minWidth = "0";
+            label.style.overflowWrap = "anywhere";
             row.appendChild(label);
 
             return row;
@@ -212,12 +216,11 @@ app.registerExtension({
 
                 if (hasChildren) {
                     const details = document.createElement("details");
-                    details.open = depth === 0;
+                    details.open = false;
                     details.style.borderRadius = "6px";
 
                     const summary = document.createElement("summary");
                     summary.style.cursor = "pointer";
-                    summary.style.listStyle = "none";
                     summary.style.outline = "none";
                     summary.appendChild(makeNodeRow(node, state, onSelectionChange));
 
@@ -236,11 +239,16 @@ app.registerExtension({
         };
 
         let currentDialog = null;
+        let currentDialogCleanup = null;
 
         const showBackupDialog = async () => {
             if (currentDialog) {
+                if (typeof currentDialogCleanup === "function") {
+                    currentDialogCleanup();
+                }
                 currentDialog.remove();
                 currentDialog = null;
+                currentDialogCleanup = null;
             }
 
             const backupState = createSelectionState();
@@ -261,10 +269,18 @@ app.registerExtension({
                 padding: "16px",
                 boxSizing: "border-box",
             });
+            const closeDialog = () => {
+                if (typeof currentDialogCleanup === "function") {
+                    currentDialogCleanup();
+                }
+                overlay.remove();
+                currentDialog = null;
+                currentDialogCleanup = null;
+            };
+
             overlay.addEventListener("click", (e) => {
                 if (e.target === overlay) {
-                    overlay.remove();
-                    currentDialog = null;
+                    closeDialog();
                 }
             });
 
@@ -292,12 +308,21 @@ app.registerExtension({
 
             const body = document.createElement("div");
             Object.assign(body.style, {
-                display: "flex",
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
                 gap: "14px",
                 minHeight: "420px",
-                flexWrap: "wrap",
                 overflow: "auto",
             });
+
+            const updatePanelColumns = () => {
+                body.style.gridTemplateColumns = window.innerWidth < 980 ? "1fr" : "1fr 1fr";
+            };
+            updatePanelColumns();
+            window.addEventListener("resize", updatePanelColumns);
+            currentDialogCleanup = () => {
+                window.removeEventListener("resize", updatePanelColumns);
+            };
 
             const makePanel = (title, subtitle) => {
                 const root = document.createElement("div");
@@ -306,7 +331,7 @@ app.registerExtension({
                     border: "1px solid #3c3c3c",
                     borderRadius: "8px",
                     padding: "10px",
-                    flex: "1 1 520px",
+                    minWidth: "0",
                     minHeight: "420px",
                     display: "flex",
                     flexDirection: "column",
@@ -374,8 +399,7 @@ app.registerExtension({
 
             const closeButton = createButton("Close", "secondary");
             closeButton.onclick = () => {
-                overlay.remove();
-                currentDialog = null;
+                closeDialog();
             };
             footer.appendChild(closeButton);
 
