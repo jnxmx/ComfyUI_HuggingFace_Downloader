@@ -1379,7 +1379,116 @@ app.registerExtension({
             }
         };
 
+        const MISSING_MODELS_LIST_SELECTOR = ".comfy-missing-models";
+        const MISSING_MODELS_BUTTON_CLASS = "hf-auto-search-download-missing-btn";
+        let missingModelsObserver = null;
+
+        const injectMissingModelsActionButton = (listbox) => {
+            if (!listbox || !(listbox instanceof Element) || !listbox.parentElement) return;
+
+            const parent = listbox.parentElement;
+            if (parent.querySelector(`.${MISSING_MODELS_BUTTON_CLASS}`)) return;
+
+            const buttonWrap = document.createElement("div");
+            buttonWrap.className = MISSING_MODELS_BUTTON_CLASS;
+            Object.assign(buttonWrap.style, {
+                marginBottom: "12px",
+                display: "flex",
+                justifyContent: "center"
+            });
+
+            const actionBtn = document.createElement("button");
+            actionBtn.type = "button";
+            actionBtn.className = "p-button p-component p-button-sm";
+            actionBtn.textContent = "Auto-search and download missing models";
+            Object.assign(actionBtn.style, {
+                background: "#2196f3",
+                color: "#fff",
+                border: "none",
+                padding: "9px 16px",
+                fontWeight: "600"
+            });
+
+            actionBtn.onclick = (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+
+                const runAction = window?.hfDownloader?.runAutoDownload;
+                if (typeof runAction !== "function") {
+                    showToast({
+                        severity: "warn",
+                        summary: "Action unavailable",
+                        detail: "Auto-download tool is not ready yet."
+                    });
+                    return;
+                }
+
+                actionBtn.disabled = true;
+                actionBtn.textContent = "Starting...";
+                try {
+                    runAction();
+                } catch (err) {
+                    console.error("[AutoDownload] Failed to start auto-download from missing models dialog:", err);
+                    showToast({
+                        severity: "error",
+                        summary: "Failed to start",
+                        detail: String(err)
+                    });
+                } finally {
+                    setTimeout(() => {
+                        if (!actionBtn.isConnected) return;
+                        actionBtn.disabled = false;
+                        actionBtn.textContent = "Auto-search and download missing models";
+                    }, 1000);
+                }
+            };
+
+            buttonWrap.appendChild(actionBtn);
+            parent.insertBefore(buttonWrap, listbox);
+        };
+
+        const injectButtonsIntoMissingModelsDialogs = (root = document) => {
+            if (!root) return;
+
+            const listboxes = [];
+            if (root instanceof Element && root.matches(MISSING_MODELS_LIST_SELECTOR)) {
+                listboxes.push(root);
+            }
+            if (typeof root.querySelectorAll === "function") {
+                root.querySelectorAll(MISSING_MODELS_LIST_SELECTOR).forEach((el) => {
+                    listboxes.push(el);
+                });
+            }
+
+            for (const listbox of listboxes) {
+                injectMissingModelsActionButton(listbox);
+            }
+        };
+
+        const setupMissingModelsDialogObserver = () => {
+            if (missingModelsObserver || typeof MutationObserver === "undefined") return;
+            missingModelsObserver = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    if (!mutation.addedNodes?.length) continue;
+                    for (const node of mutation.addedNodes) {
+                        if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                        injectButtonsIntoMissingModelsDialogs(node);
+                    }
+                }
+            });
+
+            missingModelsObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+
+            injectButtonsIntoMissingModelsDialogs(document);
+            setTimeout(() => injectButtonsIntoMissingModelsDialogs(document), 300);
+            setTimeout(() => injectButtonsIntoMissingModelsDialogs(document), 1000);
+        };
+
         registerGlobalAction("runAutoDownload", runAutoDownload);
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
+        setupMissingModelsDialogObserver();
     }
 });
