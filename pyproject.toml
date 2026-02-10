@@ -1,6 +1,6 @@
 [project]
 name = "ComfyUI_HuggingFace_Downloader"
-description = "Nodes for auto download models from Hugging Face using their filenames as part of workflows"
+description = "ComfyUI tools to auto-download missing workflow models from Hugging Face and backup or restore ComfyUI data."
 version = "0.9-beta"
 
 dependencies = ["huggingface_hub>=0.32.0"]
@@ -11,5 +11,5 @@ Repository = "https://github.com/jnxmx/ComfyUI_HuggingFace_Downloader"
 
 [tool.comfy]
 PublisherId = "jnx"
-DisplayName = "ComfyUI Hugging Face Downloader"
+DisplayName = "Hugging Face Download & Backup"
 Icon = ""
