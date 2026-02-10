@@ -67,8 +67,11 @@ def _build_parsed_download_info(model: dict) -> dict:
         raise ValueError("CivitAI downloads are not supported.")
 
     parsed = parse_link(url)
-    if "file" not in parsed and model.get("filename"):
-        parsed["file"] = model["filename"]
+    if not parsed.get("file"):
+        raise ValueError(
+            "URL must point to a specific file (resolve/blob/file path). "
+            "Folder/repo links are not valid for single-file download queue."
+        )
     return parsed
 
 def _set_download_status(download_id: str, fields: dict):

@@ -23,6 +23,7 @@ PRIORITY_AUTHORS = [
     "QuantStack",
     "alibaba-pai",
     "unsloth",
+    "nunchaku-ai",
 ]
 
 POPULAR_MODELS_FILE = os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json")
@@ -35,6 +36,7 @@ _hf_search_deadline = 0.0
 _hf_search_time_exhausted = False
 _hf_repo_files_cache: dict[str, list[str] | None] = {}
 _hf_url_exists_cache: dict[str, bool] = {}
+_nunchaku_blackwell_cache: bool | None = None
 
 HF_SEARCH_MAX_CALLS = int(os.getenv("HF_SEARCH_MAX_CALLS", "200"))
 HF_SEARCH_RATE_LIMIT_SECONDS = int(os.getenv("HF_SEARCH_RATE_LIMIT_SECONDS", "300"))
@@ -114,9 +116,38 @@ def normalize_filename_compact(name: str) -> str:
 
 def split_model_identifier(value: str) -> Tuple[str, str | None]:
     normalized = value.replace("\\", "/").strip()
-    if "/" in normalized:
-        return os.path.basename(normalized), normalized
-    return normalized, None
+    if not normalized:
+        return "", None
+    return os.path.basename(normalized), normalized
+
+def _is_nunchaku_svdq_name(value: str | None) -> bool:
+    if not value:
+        return False
+    lowered = value.lower()
+    return "svdq-" in lowered and ("int4" in lowered or "fp4" in lowered)
+
+def _swap_nunchaku_precision(value: str, target_precision: str) -> str:
+    if not value:
+        return value
+    if target_precision == "fp4":
+        return re.sub(r'(?<![a-z0-9])int4(?![a-z0-9])', "fp4", value, flags=re.IGNORECASE)
+    if target_precision == "int4":
+        return re.sub(r'(?<![a-z0-9])fp4(?![a-z0-9])', "int4", value, flags=re.IGNORECASE)
+    return value
+
+def _is_nunchaku_extensionless_identifier(value: str | None) -> bool:
+    if not value:
+        return False
+    base = os.path.basename(str(value).replace("\\", "/"))
+    stem, ext = os.path.splitext(base)
+    return _is_nunchaku_svdq_name(base) and not ext
+
+def _looks_like_model_widget_value(value: str, node_type: str) -> bool:
+    if any(value.endswith(ext) for ext in MODEL_EXTENSIONS):
+        return True
+    if "nunchaku" in (node_type or "").lower() and _is_nunchaku_svdq_name(value):
+        return True
+    return False
 
 def load_popular_models_registry() -> dict:
     """Load curated popular-models.json registry."""
@@ -210,6 +241,48 @@ def _hf_url_exists(url: str) -> bool:
 
     _hf_url_exists_cache[url] = ok
     return ok
+
+def _preferred_nunchaku_precision() -> str:
+    """
+    Match ComfyUI-nunchaku logic:
+    - Blackwell (SM 120) => fp4
+    - otherwise => int4
+    """
+    global _nunchaku_blackwell_cache
+    if _nunchaku_blackwell_cache is None:
+        is_blackwell = False
+        try:
+            import torch  # Lazy import to avoid hard dependency during static tooling.
+            if torch.cuda.is_available():
+                capability = torch.cuda.get_device_capability(0)
+                sm = f"{int(capability[0])}{int(capability[1])}"
+                is_blackwell = (sm == "120" or int(capability[0]) >= 12)
+        except Exception as e:
+            print(f"[DEBUG] Could not detect GPU architecture for Nunchaku precision selection: {e}")
+        _nunchaku_blackwell_cache = is_blackwell
+    return "fp4" if _nunchaku_blackwell_cache else "int4"
+
+def _lookup_popular_entry(popular_models: dict, filename: str) -> dict | None:
+    key = (filename or "").lower()
+    if not key:
+        return None
+    entry = popular_models.get(key) or popular_models.get(os.path.basename(key))
+    if entry:
+        return entry
+
+    base = os.path.basename(key)
+    _stem, ext = os.path.splitext(base)
+    if ext:
+        return None
+
+    candidates = []
+    for k, v in popular_models.items():
+        if k == base or k.startswith(base + "."):
+            candidates.append((k, v))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda kv: len(kv[0]))
+    return candidates[0][1]
 
 def load_comfyui_manager_model_list() -> dict:
     """Load ComfyUI Manager model-list.json from known locations."""
@@ -445,6 +518,15 @@ NODE_TYPE_MAPPING = {
     
     # Nunchaku
     "NunchakuFluxDiTLoader": "diffusion_models",
+    "NunchakuQwenImageDiTLoader": "diffusion_models",
+    "NunchakuZImageDiTLoader": "diffusion_models",
+    "NunchakuTextEncoderLoader": "text_encoders",
+    "NunchakuTextEncoderLoaderV2": "text_encoders",
+    "NunchakuFluxLoraLoader": "loras",
+    "NunchakuFluxLoraStack": "loras",
+    "NunchakuIPAdapterLoader": "ipadapter",
+    "NunchakuPulidLoader": "pulid",
+    "NunchakuPuLIDLoaderV2": "pulid",
     
     # IPAdapter
     "IPAdapterPlus": "ipadapter",
@@ -757,7 +839,7 @@ def _collect_models_from_nodes(
                                 continue
 
                     # CASE B: Value is a filename
-                    if any(val.endswith(ext) for ext in MODEL_EXTENSIONS):
+                    if _looks_like_model_widget_value(val, node_type):
                         # Avoid duplicates if already found via properties
                         # Note: we don't check against subgraph findings here yet, 
                         # duplicate filtering happens in process_workflow
@@ -894,6 +976,25 @@ def recursive_find_file(filename: str, root_dir: str) -> str | None:
             return os.path.join(dirpath, filename)
     return None
 
+def recursive_find_file_by_stem(stem: str, root_dir: str) -> str | None:
+    """Recursively searches for a file by exact stem or stem + known extension."""
+    stem_lower = (stem or "").lower()
+    if not stem_lower:
+        return None
+    for dirpath, _, filenames in os.walk(root_dir):
+        for file in filenames:
+            file_lower = file.lower()
+            if file_lower == stem_lower or file_lower.startswith(stem_lower + "."):
+                return os.path.join(dirpath, file)
+    return None
+
+def recursive_find_dir(dirname: str, root_dir: str) -> str | None:
+    """Recursively searches for a directory."""
+    for dirpath, dirnames, _ in os.walk(root_dir):
+        if dirname in dirnames:
+            return os.path.join(dirpath, dirname)
+    return None
+
 def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Checks if models exist locally.
@@ -945,6 +1046,7 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
 
         found_path = None
         found_root = None
+        allow_nunchaku_fuzzy = _is_nunchaku_extensionless_identifier(filename)
         
         for root_path in search_paths:
              if not os.path.exists(root_path):
@@ -963,6 +1065,20 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
                  found_path = found_file
                  found_root = root_path
                  break
+
+             # Nunchaku workflows may store extensionless SVDQ identifiers (e.g. svdq-int4-...).
+             # Try matching stem-based filenames and directories for these nodes.
+             if allow_nunchaku_fuzzy:
+                 found_file = recursive_find_file_by_stem(filename, root_path)
+                 if found_file:
+                     found_path = found_file
+                     found_root = root_path
+                     break
+                 found_dir = recursive_find_dir(filename, root_path)
+                 if found_dir:
+                     found_path = found_dir
+                     found_root = root_path
+                     break
         
         if found_path:
             # Calculate relative path to see if it matches the widget value
@@ -1689,6 +1805,88 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             score += 1
         return score
 
+    def _variant_group_key(entry: dict) -> tuple[Any, str, str] | None:
+        filename = (entry.get("filename") or "").strip()
+        if not filename:
+            return None
+        normalized_name = os.path.basename(filename.replace("\\", "/")).lower()
+        stem, ext = os.path.splitext(normalized_name)
+        canonical_stem = canonicalize_model_base(normalized_name) or stem
+        folder_key = _normalize_dedupe_path(entry.get("suggested_folder"))
+        return (entry.get("node_id"), folder_key, f"{canonical_stem}{ext}")
+
+    def _prefer_entry_for_variant_group(entry: dict) -> tuple[int, int, int]:
+        filename = (entry.get("filename") or "").lower()
+        non_quant_bonus = 1 if filename and not is_quant_variant_filename(filename) else 0
+        return (
+            _score_entry(entry),
+            non_quant_bonus,
+            len(_normalize_dedupe_path(entry.get("requested_path")))
+        )
+
+    # Within a single node/folder, quantized and non-quantized variants of the same
+    # canonical filename should be treated as one model requirement. This prevents
+    # duplicate rows like `clip_vision_h.safetensors` + `clip_vision_h_fp16.safetensors`
+    # and preserves widget-path auto-fix after download.
+    variant_groups: dict[tuple[Any, str, str], list[dict]] = {}
+    passthrough_models: list[dict] = []
+    for model in required_models:
+        key = _variant_group_key(model)
+        if key is None:
+            passthrough_models.append(model)
+            continue
+        variant_groups.setdefault(key, []).append(model)
+
+    coalesced_models: list[dict] = list(passthrough_models)
+    for group in variant_groups.values():
+        if len(group) == 1:
+            coalesced_models.append(group[0])
+            continue
+
+        best = max(group, key=_prefer_entry_for_variant_group)
+        merged = dict(best)
+
+        if not merged.get("url"):
+            for candidate in group:
+                if candidate.get("url"):
+                    merged["url"] = candidate.get("url")
+                    if candidate.get("source"):
+                        merged["source"] = candidate.get("source")
+                    break
+
+        if not merged.get("suggested_folder"):
+            for candidate in group:
+                if candidate.get("suggested_folder"):
+                    merged["suggested_folder"] = candidate.get("suggested_folder")
+                    break
+
+        requested_candidates = []
+        for candidate in group:
+            requested = candidate.get("requested_path")
+            normalized = _normalize_dedupe_path(requested)
+            if normalized:
+                requested_candidates.append((requested, normalized))
+
+        if requested_candidates:
+            target_name = (merged.get("filename") or "").lower()
+            requested_candidates.sort(key=lambda item: len(item[1]), reverse=True)
+
+            preferred_requested = None
+            for original, normalized in requested_candidates:
+                basename = os.path.basename(normalized).lower()
+                if basename and basename != target_name:
+                    preferred_requested = original
+                    break
+
+            if not preferred_requested:
+                preferred_requested = requested_candidates[0][0]
+
+            merged["requested_path"] = preferred_requested
+
+        coalesced_models.append(merged)
+
+    required_models = coalesced_models
+
     # Collapse duplicates by filename, preferring entries with richer path/folder info.
     grouped_by_name = {}
     for model in required_models:
@@ -1724,6 +1922,35 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             deduped.append(best)
 
     required_models = deduped
+
+    # Normalize Nunchaku SVDQ precision before local presence checks.
+    # This ensures incompatible workflow variants are treated as mismatch/missing and can be corrected.
+    preferred_nunchaku_precision = _preferred_nunchaku_precision()
+    for model in required_models:
+        current_name = model.get("filename")
+        if not _is_nunchaku_svdq_name(current_name):
+            continue
+        target_name = _swap_nunchaku_precision(current_name, preferred_nunchaku_precision)
+        if not target_name or target_name == current_name:
+            continue
+
+        # Keep original requested path so mismatch reporting can still point to the workflow value.
+        if not model.get("requested_path"):
+            model["requested_path"] = current_name
+
+        model["filename"] = target_name
+        model["nunchaku_precision"] = preferred_nunchaku_precision
+        model["source"] = "nunchaku_precision_adjusted"
+
+        # Drop stale URL metadata tied to the incompatible precision.
+        model.pop("url", None)
+        model.pop("hf_repo", None)
+        model.pop("hf_path", None)
+
+        print(
+            f"[DEBUG] Pre-check Nunchaku precision adjusted: {current_name} -> {target_name} "
+            f"({preferred_nunchaku_precision})"
+        )
     
     # Remove duplicates based on filename and node_id to avoid redundant checks for the same model in the same node
     # However, if a model is referenced by multiple nodes, we want to keep those distinct entries
@@ -1791,8 +2018,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     "source": "popular_models",
                     "filename": model.get("filename")
             })
-            filename_key = model["filename"].lower()
-            entry = popular_models.get(filename_key) or popular_models.get(os.path.basename(filename_key))
+            entry = _lookup_popular_entry(popular_models, model["filename"])
             if not entry:
                 continue
 
@@ -1821,6 +2047,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     if missing_models:
         missing_models = load_comfyui_manager_cache(missing_models, status_cb=status_cb)
 
+    token = get_token()
+
     skip_filenames = {
         (f or "").lower()
         for f in (workflow_json.get("skip_filenames") or [])
@@ -1832,7 +2060,6 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         return name in skip_filenames
 
     # 5. Search HF for remaining missing models (that didn't have URL from registry/manager)
-    token = get_token()
     priority_author_repos: dict[str, list[str]] | None = None
     api = None
     if missing_models:

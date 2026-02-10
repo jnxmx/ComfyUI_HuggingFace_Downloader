@@ -322,6 +322,21 @@ app.registerExtension({
             return idx === -1 ? "" : normalized.slice(0, idx);
         };
 
+        const canonicalizeModelBasename = (value) => {
+            const base = getPathBasename(value).toLowerCase();
+            if (!base) return "";
+            const dotIdx = base.lastIndexOf(".");
+            const ext = dotIdx >= 0 ? base.slice(dotIdx) : "";
+            let stem = dotIdx >= 0 ? base.slice(0, dotIdx) : base;
+            stem = stem
+                .replace(/[-_]?fp8[-_]?e4m3fn$/i, "")
+                .replace(/[-_]?fp(16|32|8|4)$/i, "")
+                .replace(/[-_]?bf16$/i, "")
+                .replace(/[-_]?nf4$/i, "")
+                .replace(/[-_]?int(8|4)$/i, "");
+            return `${stem}${ext}`;
+        };
+
         const resolveDownloadedFilename = (rowData, statusInfo = null) => {
             const fromStatusPath = getPathBasename(statusInfo?.path || "");
             if (fromStatusPath) return fromStatusPath;
@@ -369,26 +384,45 @@ app.registerExtension({
                     .filter(Boolean)
                     .map((x) => x.toLowerCase())
             );
-            if (!candidateBasenames.size) return null;
+            if (candidateBasenames.size) {
+                const basenameMatch = node.widgets.find((w) => (
+                    typeof w?.value === "string" &&
+                    candidateBasenames.has(getPathBasename(w.value).toLowerCase())
+                ));
+                if (basenameMatch) return basenameMatch;
+            }
+
+            const candidateCanonical = new Set(
+                candidates
+                    .map(canonicalizeModelBasename)
+                    .filter(Boolean)
+            );
+            if (!candidateCanonical.size) return null;
 
             return node.widgets.find((w) => (
                 typeof w?.value === "string" &&
-                candidateBasenames.has(getPathBasename(w.value).toLowerCase())
+                candidateCanonical.has(canonicalizeModelBasename(w.value))
             )) || null;
         };
 
-        const buildUpdatedWidgetValue = (rowData) => {
-            const downloadedFilename = (rowData.filename || "").trim();
+        const buildUpdatedWidgetValue = (rowData, statusInfo = null) => {
+            const downloadedFilename = (resolveDownloadedFilename(rowData, statusInfo) || rowData.filename || "").trim();
             if (!downloadedFilename) return "";
             const requestedPath = normalizeWorkflowPath(rowData.requestedPath || rowData.originalFilename || "");
             if (!requestedPath) {
+                const selectedFolder = normalizeWorkflowPath(rowData.folderInput?.value || "");
+                const folderParts = selectedFolder.split("/").filter(Boolean);
+                if (folderParts.length > 1) {
+                    const subfolder = folderParts.slice(1).join("/");
+                    return `${subfolder}/${downloadedFilename}`;
+                }
                 return downloadedFilename;
             }
             const dir = getPathDirname(requestedPath);
             return dir ? `${dir}/${downloadedFilename}` : downloadedFilename;
         };
 
-        const applyDownloadedReferenceToWorkflow = (rowData) => {
+        const applyDownloadedReferenceToWorkflow = (rowData, statusInfo = null) => {
             if (!rowData || rowData.nodeId === undefined || rowData.nodeId === null) return false;
             const node = app.graph.getNodeById(rowData.nodeId);
             if (!node) return false;
@@ -396,12 +430,13 @@ app.registerExtension({
             const widget = findModelWidgetInNode(node, rowData);
             if (!widget || typeof widget.value !== "string") return false;
 
-            const nextValue = buildUpdatedWidgetValue(rowData);
+            const nextValue = buildUpdatedWidgetValue(rowData, statusInfo);
             if (!nextValue) return false;
             if (normalizeWorkflowPath(widget.value) === normalizeWorkflowPath(nextValue)) return false;
 
             widget.value = nextValue;
             rowData.initialWidgetValue = nextValue;
+            rowData.requestedPath = nextValue;
             node.setDirtyCanvas(true);
             return true;
         };
@@ -992,7 +1027,7 @@ app.registerExtension({
                                     if (effectiveFilename) {
                                         syncRowFilename(row, effectiveFilename);
                                     }
-                                    if (applyDownloadedReferenceToWorkflow(row)) {
+                                    if (applyDownloadedReferenceToWorkflow(row, info)) {
                                         updatedRefs += 1;
                                     }
                                 }
