@@ -54,6 +54,57 @@ app.registerExtension({
     display: none;
     content: "";
 }
+#backup-hf-dialog .hf-tree-root {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+#backup-hf-dialog .hf-tree-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+#backup-hf-dialog .hf-tree-block + .hf-tree-block {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #2a2f3a;
+}
+#backup-hf-dialog .hf-tree-block-title {
+    color: #8f97a5;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0 4px 2px;
+}
+#backup-hf-dialog .hf-tree-empty {
+    color: #727a88;
+    font-size: 11px;
+    padding: 4px 6px;
+}
+#backup-hf-dialog .hf-tree-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+#backup-hf-dialog .hf-tree-row {
+    border-radius: 4px;
+    transition: background-color 120ms ease;
+}
+#backup-hf-dialog .hf-tree-row:hover {
+    background: rgba(115, 133, 165, 0.11);
+}
+#backup-hf-dialog details[open] > summary.hf-tree-summary > .hf-tree-row {
+    background: rgba(96, 115, 148, 0.14);
+}
+#backup-hf-dialog .hf-tree-expander {
+    color: #b8c0cf;
+}
+#backup-hf-dialog .hf-backup-action-btn.p-button {
+    min-height: 26px;
+    padding: 0.22rem 0.62rem;
+    font-size: 11px;
+    border-radius: 6px;
+}
 `;
             document.head.appendChild(style);
         };
@@ -84,7 +135,7 @@ app.registerExtension({
             const button = document.createElement("button");
             button.type = "button";
             button.textContent = label;
-            button.className = "p-button p-component";
+            button.className = "p-button p-component hf-backup-action-btn";
             if (tone === "success") {
                 button.classList.add("p-button-success");
             } else if (tone === "danger") {
@@ -288,6 +339,40 @@ app.registerExtension({
             state.defaultCheckedIds.clear();
         };
 
+        const normalizeSectionKey = (label) => (label || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "_")
+            .replace(/^_+|_+$/g, "");
+
+        const groupTopLevelNodes = (nodes) => {
+            const groups = {
+                core: [],
+                custom: [],
+                models: [],
+                io: [],
+            };
+
+            for (const node of nodes || []) {
+                const key = normalizeSectionKey(node.label);
+                if (["settings", "workflows", "subgraphs"].includes(key)) {
+                    groups.core.push(node);
+                } else if (key === "custom_nodes") {
+                    groups.custom.push(node);
+                } else if (["input", "output"].includes(key)) {
+                    groups.io.push(node);
+                } else {
+                    groups.models.push(node);
+                }
+            }
+
+            return [
+                { id: "core", title: "Settings / Workflows", nodes: groups.core },
+                { id: "custom", title: "Custom Nodes", nodes: groups.custom },
+                { id: "models", title: "Models", nodes: groups.models },
+                { id: "io", title: "Input / Output", nodes: groups.io },
+            ];
+        };
+
         const getSelectedItems = (state) => {
             const dedup = new Map();
             for (const action of state.selected.values()) {
@@ -301,14 +386,15 @@ app.registerExtension({
         const makeNodeRow = (node, state, onSelectionChange, opts = {}) => {
             const { hasChildren = false, isOpen = false } = opts;
             const row = document.createElement("div");
+            row.className = "hf-tree-row";
             Object.assign(row.style, {
                 display: "grid",
                 gridTemplateColumns: "16px 22px minmax(0,1fr)",
                 alignItems: "center",
                 gap: "8px",
-                padding: "4px 6px",
+                padding: "3px 6px",
                 color: node.selectable ? "#ececec" : "#9aa0a6",
-                minHeight: "24px",
+                minHeight: "22px",
                 minWidth: "0",
             });
 
@@ -353,7 +439,7 @@ app.registerExtension({
 
             const label = document.createElement("span");
             label.textContent = node.label;
-            label.style.fontSize = "13px";
+            label.style.fontSize = "12px";
             label.style.flex = "1";
             label.style.minWidth = "0";
             label.style.overflowWrap = "anywhere";
@@ -364,10 +450,11 @@ app.registerExtension({
 
         const renderNodes = (nodes, mount, state, onSelectionChange, depth = 0, parentId = null) => {
             const list = document.createElement("div");
+            list.className = "hf-tree-list";
             Object.assign(list.style, {
                 display: "flex",
                 flexDirection: "column",
-                gap: "2px",
+                gap: "1px",
                 marginLeft: depth === 0 ? "0" : "14px",
             });
 
@@ -416,6 +503,36 @@ app.registerExtension({
             });
 
             mount.appendChild(list);
+        };
+
+        const renderGroupedTree = (nodes, mount, state, onSelectionChange) => {
+            const root = document.createElement("div");
+            root.className = "hf-tree-root";
+
+            const groups = groupTopLevelNodes(nodes || []);
+            for (const group of groups) {
+                const block = document.createElement("section");
+                block.className = "hf-tree-block";
+                block.dataset.group = group.id;
+
+                const blockTitle = document.createElement("div");
+                blockTitle.className = "hf-tree-block-title";
+                blockTitle.textContent = group.title;
+                block.appendChild(blockTitle);
+
+                if (group.nodes.length) {
+                    renderNodes(group.nodes, block, state, onSelectionChange, 0, null);
+                } else {
+                    const empty = document.createElement("div");
+                    empty.className = "hf-tree-empty";
+                    empty.textContent = "No entries";
+                    block.appendChild(empty);
+                }
+
+                root.appendChild(block);
+            }
+
+            mount.appendChild(root);
         };
 
         let currentDialog = null;
@@ -473,18 +590,18 @@ app.registerExtension({
                 borderRadius: "12px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
-                padding: "20px",
+                padding: "16px",
                 boxShadow: "0 0 24px rgba(0,0,0,0.7)",
                 display: "flex",
                 flexDirection: "column",
-                gap: "14px",
+                gap: "10px",
                 overflow: "hidden",
             });
 
             const header = document.createElement("div");
             header.textContent = "Backup Manager: compare Hugging Face backup (left) with local ComfyUI install (right).";
-            header.style.fontSize = "14px";
-            header.style.color = "#d5d5d5";
+            header.style.fontSize = "13px";
+            header.style.color = "#cfd4de";
             panel.appendChild(header);
 
             const body = document.createElement("div");
@@ -508,27 +625,28 @@ app.registerExtension({
             const makePanel = (title, subtitle) => {
                 const root = document.createElement("div");
                 Object.assign(root.style, {
-                    background: "#1f2128",
-                    border: "1px solid #3c3c3c",
+                    background: "#1b1f28",
+                    border: "1px solid #323845",
                     borderRadius: "8px",
-                    padding: "10px",
+                    padding: "8px",
                     minWidth: "0",
                     minHeight: "420px",
                     display: "flex",
                     flexDirection: "column",
-                    gap: "8px",
+                    gap: "6px",
                 });
 
                 const titleEl = document.createElement("div");
                 titleEl.textContent = title;
-                titleEl.style.fontSize = "13px";
+                titleEl.style.fontSize = "12px";
                 titleEl.style.fontWeight = "600";
+                titleEl.style.color = "#e1e6ef";
                 root.appendChild(titleEl);
 
                 const subEl = document.createElement("div");
                 subEl.textContent = subtitle;
-                subEl.style.fontSize = "11px";
-                subEl.style.color = "#9aa0a6";
+                subEl.style.fontSize = "10px";
+                subEl.style.color = "#8f97a5";
                 root.appendChild(subEl);
 
                 const errorEl = document.createElement("div");
@@ -545,10 +663,10 @@ app.registerExtension({
                     flex: "1",
                     minHeight: "260px",
                     overflowY: "auto",
-                    border: "1px solid #2d3039",
+                    border: "1px solid #2f3440",
                     borderRadius: "6px",
                     padding: "6px",
-                    background: "#181b22",
+                    background: "#171b24",
                 });
                 tree.textContent = "Loading...";
                 root.appendChild(tree);
@@ -557,7 +675,7 @@ app.registerExtension({
                 Object.assign(actions.style, {
                     display: "flex",
                     flexWrap: "wrap",
-                    gap: "8px",
+                    gap: "6px",
                 });
                 root.appendChild(actions);
 
@@ -657,8 +775,8 @@ app.registerExtension({
                 backupPanel.tree.innerHTML = "";
                 localPanel.tree.innerHTML = "";
 
-                renderNodes(payload.backup || [], backupPanel.tree, backupState, updateActions, 0);
-                renderNodes(payload.local || [], localPanel.tree, localState, updateActions, 0);
+                renderGroupedTree(payload.backup || [], backupPanel.tree, backupState, updateActions);
+                renderGroupedTree(payload.local || [], localPanel.tree, localState, updateActions);
                 initializeDefaultSelections(backupState);
                 initializeDefaultSelections(localState);
 
