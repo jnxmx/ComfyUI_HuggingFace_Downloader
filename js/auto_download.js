@@ -483,7 +483,8 @@ app.registerExtension({
         };
 
         /* Show loading dialog immediately */
-        const showLoadingDialog = (onCancel, onSkip) => {
+        const showLoadingDialog = (onCancel, onSkip, options = {}) => {
+            const skipModeActive = Boolean(options.skipModeActive);
             const existing = document.getElementById("auto-download-dialog");
             if (existing) existing.remove();
 
@@ -498,66 +499,96 @@ app.registerExtension({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: "rgba(0,0,0,0.6)",
+                background: "rgba(8,10,16,0.72)",
                 zIndex: 9000
             });
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "#17191f",
+                background: "linear-gradient(180deg, #191d28 0%, #161b27 100%)",
                 color: "#fff",
-                padding: "40px",
-                borderRadius: "12px",
-                textAlign: "center",
-                fontSize: "18px",
-                border: "1px solid #3c3c3c"
+                padding: "26px 28px",
+                borderRadius: "14px",
+                textAlign: "left",
+                width: "520px",
+                maxWidth: "92vw",
+                border: "1px solid #394562",
+                boxShadow: "0 18px 44px rgba(0, 0, 0, 0.55)"
+            });
+
+            const titleEl = document.createElement("div");
+            titleEl.textContent = "Looking for links";
+            Object.assign(titleEl.style, {
+                fontSize: "15px",
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: "#9aa6c9",
+                marginBottom: "8px"
             });
 
             const statusEl = document.createElement("div");
-            statusEl.textContent = "🔍 Looking for links...";
+            statusEl.textContent = "Preparing scan...";
+            Object.assign(statusEl.style, {
+                fontSize: "34px",
+                lineHeight: "1.15",
+                fontWeight: "600",
+                letterSpacing: "-0.01em"
+            });
 
             const detailEl = document.createElement("div");
-            detailEl.style.fontSize = "12px";
-            detailEl.style.color = "#aaa";
-            detailEl.style.marginTop = "8px";
-            detailEl.textContent = "Waiting for status...";
+            detailEl.textContent = "Preparing workflow scan...";
+            Object.assign(detailEl.style, {
+                fontSize: "13px",
+                color: "#a2aec8",
+                marginTop: "10px",
+                minHeight: "18px"
+            });
+
+            const actionsEl = document.createElement("div");
+            Object.assign(actionsEl.style, {
+                display: "flex",
+                gap: "10px",
+                marginTop: "18px",
+                justifyContent: "flex-start"
+            });
+
+            const buttonBaseStyle = {
+                padding: "8px 14px",
+                borderRadius: "8px",
+                cursor: "pointer",
+                fontSize: "13px",
+                fontWeight: "600"
+            };
 
             const cancelBtn = document.createElement("button");
             cancelBtn.textContent = "Cancel";
             Object.assign(cancelBtn.style, {
-                marginTop: "16px",
-                padding: "6px 14px",
-                background: "#2b2f3a",
-                color: "#ddd",
-                border: "1px solid #444",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px"
+                ...buttonBaseStyle,
+                background: "#2a3143",
+                color: "#dce6ff",
+                border: "1px solid #41516f"
             });
 
             const skipBtn = document.createElement("button");
-            skipBtn.textContent = "Skip Current";
+            skipBtn.textContent = skipModeActive ? "Skipping unresolved..." : "Skip unresolved";
             Object.assign(skipBtn.style, {
-                marginTop: "16px",
-                marginLeft: "10px",
-                padding: "6px 14px",
-                background: "#2b2f3a",
-                color: "#ddd",
-                border: "1px solid #444",
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "12px",
-                opacity: "0.6"
+                ...buttonBaseStyle,
+                background: "#343946",
+                color: "#ced6eb",
+                border: "1px solid #4a5267",
+                opacity: skipModeActive ? "0.65" : "1"
             });
-            skipBtn.disabled = true;
+            skipBtn.disabled = skipModeActive;
 
             let cancelled = false;
             cancelBtn.onclick = () => {
                 if (!cancelled) {
                     cancelled = true;
-                    statusEl.textContent = "Cancelled.";
+                    statusEl.textContent = "Cancelling...";
+                    detailEl.textContent = "Stopping current scan.";
                     cancelBtn.textContent = "Close";
-                    clearInterval(timer);
+                    skipBtn.disabled = true;
+                    skipBtn.style.opacity = "0.65";
                     if (onCancel) onCancel();
                 } else {
                     if (dlg.parentElement) dlg.remove();
@@ -569,10 +600,12 @@ app.registerExtension({
                 if (onSkip) onSkip();
             };
 
+            panel.appendChild(titleEl);
             panel.appendChild(statusEl);
             panel.appendChild(detailEl);
-            panel.appendChild(cancelBtn);
-            panel.appendChild(skipBtn);
+            actionsEl.appendChild(cancelBtn);
+            actionsEl.appendChild(skipBtn);
+            panel.appendChild(actionsEl);
 
             dlg.appendChild(panel);
             document.body.appendChild(dlg);
@@ -580,9 +613,20 @@ app.registerExtension({
                 dlg,
                 setStatus: (text) => { statusEl.textContent = text; },
                 setDetail: (text) => { detailEl.textContent = text; },
-                setSkippable: (canSkip) => {
-                    skipBtn.disabled = !canSkip;
-                    skipBtn.style.opacity = canSkip ? "1" : "0.6";
+                setSkipMode: (active) => {
+                    skipBtn.disabled = Boolean(active);
+                    skipBtn.textContent = active ? "Skipping unresolved..." : "Skip unresolved";
+                    skipBtn.style.opacity = active ? "0.65" : "1";
+                },
+                setCancelState: (closing) => {
+                    if (!cancelled) {
+                        cancelled = true;
+                    }
+                    if (closing) {
+                        cancelBtn.textContent = "Close";
+                        skipBtn.disabled = true;
+                        skipBtn.style.opacity = "0.65";
+                    }
                 },
                 cleanup: () => {},
                 remove: () => { if (dlg.parentElement) dlg.remove(); }
@@ -1313,11 +1357,10 @@ app.registerExtension({
             }, 0);
         };
 
-        const runAutoDownload = async (skippedFilenames = new Set()) => {
+        const runAutoDownload = async (skippedFilenames = new Set(), skipAllUnresolved = false) => {
             let loadingDlg = null;
             let aborted = false;
             let skipRequested = false;
-            let currentFilename = "";
             let statusTimer = null;
             try {
                 // Show loading dialog immediately
@@ -1330,16 +1373,25 @@ app.registerExtension({
                     }
                     controller.abort();
                 }, () => {
-                    if (!currentFilename) return;
-                    skippedFilenames.add(currentFilename.toLowerCase());
                     skipRequested = true;
                     aborted = true;
+                    loadingDlg.setSkipMode(true);
+                    loadingDlg.setStatus("Skipping unresolved models...");
+                    loadingDlg.setDetail("Restarting scan without Hugging Face lookups.");
                     if (statusTimer) {
                         clearInterval(statusTimer);
                         statusTimer = null;
                     }
                     controller.abort();
-                });
+                }, { skipModeActive: skipAllUnresolved });
+
+                if (skipAllUnresolved) {
+                    loadingDlg.setStatus("Skipping unresolved models...");
+                    loadingDlg.setDetail("Running fast scan with available links.");
+                } else {
+                    loadingDlg.setStatus("Looking for links...");
+                    loadingDlg.setDetail("Preparing workflow scan...");
+                }
 
                 const requestId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
@@ -1364,22 +1416,52 @@ app.registerExtension({
 
                 const pollStatus = async () => {
                     try {
-                        const statusResp = await doFetch(`/search_status?request_id=${encodeURIComponent(requestId)}`);
+                        const statusResp = await doFetch(`/search_status?request_id=${encodeURIComponent(requestId)}&_t=${Date.now()}`, {
+                            cache: "no-store"
+                        });
                         if (statusResp.status !== 200) return;
                         const statusData = await statusResp.json();
                         const status = statusData.status || {};
-                        const detailRaw = status.detail || "";
-                        let message = status.message || "🔍 Looking for links...";
-                        const type = status.source || "search";
-                        const filename = status.filename || "";
-                        currentFilename = filename || "";
-                        if (detailRaw && type.startsWith("huggingface_") && !/searching/i.test(message)) {
-                            message = `Searching ${detailRaw}`;
+                        const source = String(status.source || "").trim();
+                        const filename = String(status.filename || "").trim();
+                        const detailRaw = String(status.detail || "").trim();
+                        let message = String(status.message || "").trim();
+
+                        const sourceLabelMap = {
+                            workflow: "Scanning workflow",
+                            popular_models: "Checking curated model list",
+                            manager_cache: "Checking manager cache",
+                            huggingface_search: "Searching Hugging Face",
+                            huggingface_priority_authors: "Searching priority authors",
+                            huggingface_priority_repos: "Searching priority repos",
+                            huggingface_skip: "Skipping unresolved Hugging Face lookups",
+                            complete: "Scan complete"
+                        };
+
+                        const sourceLabel = sourceLabelMap[source] || (
+                            source
+                                ? source.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+                                : ""
+                        );
+
+                        if (!message) {
+                            message = sourceLabel || "Looking for links...";
                         }
-                        const detail = filename ? `${type}:${filename}` : type;
+
+                        const detailParts = [];
+                        if (filename) {
+                            detailParts.push(filename);
+                        }
+                        if (detailRaw) {
+                            detailParts.push(detailRaw);
+                        }
+                        if (sourceLabel && !message.toLowerCase().includes(sourceLabel.toLowerCase())) {
+                            detailParts.push(sourceLabel);
+                        }
+
+                        const detail = detailParts.length ? detailParts.join(" • ") : "Working...";
                         loadingDlg.setStatus(message);
                         loadingDlg.setDetail(detail);
-                        loadingDlg.setSkippable(Boolean(currentFilename));
                     } catch (e) {
                         // Ignore polling errors during search
                     }
@@ -1394,7 +1476,12 @@ app.registerExtension({
                 const resp = await doFetch("/check_missing_models", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ...workflow, request_id: requestId, skip_filenames: Array.from(skippedFilenames) }),
+                    body: JSON.stringify({
+                        ...workflow,
+                        request_id: requestId,
+                        skip_filenames: Array.from(skippedFilenames),
+                        skip_hf_search: skipAllUnresolved
+                    }),
                     signal: controller.signal
                 });
 
@@ -1433,17 +1520,19 @@ app.registerExtension({
                     }
                     loadingDlg.cleanup();
                     if (aborted || (e && e.name === "AbortError")) {
-                        if (skipRequested) {
+                        if (skipRequested && !skipAllUnresolved) {
                             skipRequested = false;
                             aborted = false;
-                            currentFilename = "";
-                            // Restart scan with updated skip list
+                            loadingDlg.remove();
+                            // Restart scan and skip unresolved Hugging Face lookups.
                             setTimeout(() => {
-                                runAutoDownload(skippedFilenames);
+                                runAutoDownload(skippedFilenames, true);
                             }, 0);
                             return;
                         }
                         loadingDlg.setStatus("Cancelled.");
+                        loadingDlg.setDetail("Auto scan was stopped.");
+                        loadingDlg.setCancelState(true);
                         return;
                     }
                     loadingDlg.remove();

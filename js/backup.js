@@ -109,7 +109,8 @@ app.registerExtension({
 #backup-hf-dialog .hf-repo-link {
     color: #7cb3ff;
     text-decoration: none;
-    font-size: 12px;
+    font-size: inherit;
+    font-weight: inherit;
 }
 #backup-hf-dialog .hf-repo-link:hover {
     text-decoration: underline;
@@ -614,21 +615,48 @@ app.registerExtension({
             const headerWrap = document.createElement("div");
             Object.assign(headerWrap.style, {
                 display: "flex",
-                flexDirection: "column",
-                gap: "2px",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "10px",
             });
 
             const header = document.createElement("div");
             header.textContent = "Backup Manager";
-            header.style.fontSize = "15px";
-            header.style.fontWeight = "600";
-            header.style.color = "#e5ebf7";
+            header.style.fontSize = "22px";
+            header.style.fontWeight = "700";
+            header.style.letterSpacing = "-0.01em";
+            header.style.color = "#eef3fb";
             headerWrap.appendChild(header);
 
-            const headerMeta = document.createElement("div");
-            headerMeta.className = "hf-header-meta";
-            headerMeta.textContent = "";
-            headerWrap.appendChild(headerMeta);
+            const closeIconButton = document.createElement("button");
+            closeIconButton.type = "button";
+            closeIconButton.textContent = "×";
+            Object.assign(closeIconButton.style, {
+                width: "34px",
+                height: "34px",
+                borderRadius: "8px",
+                border: "none",
+                background: "transparent",
+                color: "#a9b2c2",
+                fontSize: "34px",
+                lineHeight: "1",
+                cursor: "pointer",
+                padding: "0",
+                display: "grid",
+                placeItems: "center",
+            });
+            closeIconButton.onmouseenter = () => {
+                closeIconButton.style.background = "rgba(113, 126, 150, 0.2)";
+                closeIconButton.style.color = "#e7edf9";
+            };
+            closeIconButton.onmouseleave = () => {
+                closeIconButton.style.background = "transparent";
+                closeIconButton.style.color = "#a9b2c2";
+            };
+            closeIconButton.onclick = () => {
+                closeDialog();
+            };
+            headerWrap.appendChild(closeIconButton);
             panel.appendChild(headerWrap);
 
             const body = document.createElement("div");
@@ -652,10 +680,10 @@ app.registerExtension({
             const makePanel = (title) => {
                 const root = document.createElement("div");
                 Object.assign(root.style, {
-                    background: "#1b1f28",
-                    border: "1px solid #323845",
-                    borderRadius: "8px",
-                    padding: "8px",
+                    background: "transparent",
+                    border: "none",
+                    borderRadius: "0",
+                    padding: "0",
                     minWidth: "0",
                     minHeight: "420px",
                     display: "flex",
@@ -663,17 +691,27 @@ app.registerExtension({
                     gap: "6px",
                 });
 
+                const titleRow = document.createElement("div");
+                Object.assign(titleRow.style, {
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: "8px",
+                    flexWrap: "wrap",
+                });
                 const titleEl = document.createElement("div");
                 titleEl.textContent = title;
                 titleEl.style.fontSize = "12px";
                 titleEl.style.fontWeight = "600";
                 titleEl.style.color = "#e1e6ef";
-                root.appendChild(titleEl);
+                titleRow.appendChild(titleEl);
 
                 const metaEl = document.createElement("div");
                 metaEl.className = "hf-header-meta";
                 metaEl.style.display = "none";
-                root.appendChild(metaEl);
+                metaEl.style.fontSize = "12px";
+                metaEl.style.fontWeight = "600";
+                titleRow.appendChild(metaEl);
+                root.appendChild(titleRow);
 
                 const errorEl = document.createElement("div");
                 Object.assign(errorEl.style, {
@@ -710,6 +748,7 @@ app.registerExtension({
 
             const localPanel = makePanel("Local Install (ComfyUI)");
             const backupPanel = makePanel("Backup (Hugging Face)");
+            localPanel.tree.style.background = "#000000";
 
             body.appendChild(localPanel.root);
             body.appendChild(backupPanel.root);
@@ -718,15 +757,9 @@ app.registerExtension({
             const footer = document.createElement("div");
             Object.assign(footer.style, {
                 display: "flex",
-                justifyContent: "space-between",
+                justifyContent: "flex-start",
                 gap: "8px",
             });
-
-            const closeButton = createButton("Close", "secondary");
-            closeButton.onclick = () => {
-                closeDialog();
-            };
-            footer.appendChild(closeButton);
 
             const status = document.createElement("div");
             status.style.fontSize = "12px";
@@ -773,11 +806,9 @@ app.registerExtension({
                 const backupUrl = repoName ? `https://huggingface.co/${repoName}` : "";
                 const sizeLabel = formatSizeGb(sizeBytes);
 
-                headerMeta.innerHTML = "";
                 backupPanel.metaEl.innerHTML = "";
 
                 if (!repoName) {
-                    headerMeta.textContent = "No backup repository configured.";
                     backupPanel.metaEl.style.display = "none";
                     return;
                 }
@@ -791,14 +822,6 @@ app.registerExtension({
                     link.textContent = repoName;
                     return link;
                 };
-
-                const headerLink = makeLink();
-                headerMeta.appendChild(headerLink);
-                if (sizeLabel) {
-                    const size = document.createElement("span");
-                    size.textContent = ` \u00b7 ${sizeLabel}`;
-                    headerMeta.appendChild(size);
-                }
 
                 const panelLink = makeLink();
                 backupPanel.metaEl.appendChild(panelLink);
@@ -820,7 +843,9 @@ app.registerExtension({
                 backupDeleteSelectedBtn.disabled = busy || backupItems.length === 0;
                 backupClearSelectionBtn.disabled = busy || backupItems.length === 0;
                 localAddSelectedBtn.disabled = busy || localItems.length === 0;
-                closeButton.disabled = busy;
+                closeIconButton.disabled = busy;
+                closeIconButton.style.opacity = busy ? "0.5" : "1";
+                closeIconButton.style.cursor = busy ? "default" : "pointer";
             };
 
             const clearBackupSelection = () => {

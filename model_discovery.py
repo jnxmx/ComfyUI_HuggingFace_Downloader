@@ -2050,6 +2050,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         missing_models = load_comfyui_manager_cache(missing_models, status_cb=status_cb)
 
     token = get_token()
+    skip_hf_search_all = bool(workflow_json.get("skip_hf_search"))
 
     skip_filenames = {
         (f or "").lower()
@@ -2058,13 +2059,39 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     }
 
     def _skip_hf_search(model: dict) -> bool:
+        if skip_hf_search_all:
+            return True
         name = (model.get("filename") or "").lower()
         return name in skip_filenames
+
+    if missing_models and skip_hf_search_all:
+        reused_cache_hits = 0
+        for model in missing_models:
+            if model.get("url"):
+                continue
+            key = _normalize_hf_search_key(model.get("filename") or "")
+            cached = _hf_search_cache.get(key)
+            if not isinstance(cached, dict):
+                continue
+            cached_url = cached.get("url")
+            if not cached_url:
+                continue
+            model["url"] = cached_url
+            model["hf_repo"] = cached.get("hf_repo")
+            model["hf_path"] = cached.get("hf_path")
+            model["source"] = "huggingface_cache"
+            reused_cache_hits += 1
+        if status_cb:
+            status_cb({
+                "message": "Skipping unresolved Hugging Face lookups",
+                "source": "huggingface_skip",
+                "detail": f"Reused {reused_cache_hits} cached link(s)"
+            })
 
     # 5. Search HF for remaining missing models (that didn't have URL from registry/manager)
     priority_author_repos: dict[str, list[str]] | None = None
     api = None
-    if missing_models:
+    if missing_models and not skip_hf_search_all:
         priority_author_repos = {}
         try:
             api = HfApi(token=token)
@@ -2080,7 +2107,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             priority_author_repos = None
 
     priority_tokens: list[str] = []
-    if missing_models:
+    if missing_models and not skip_hf_search_all:
         for model in missing_models:
             if model.get("url"):
                 continue
@@ -2236,7 +2263,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                 }
                 print(f"[DEBUG] Found {model.get('filename')} in repo {repo_id} (priority repo scan)")
 
-    if missing_models and priority_author_repos:
+    if missing_models and priority_author_repos and not skip_hf_search_all:
         _reset_hf_search_budget()
         _scan_priority_repos_for_missing()
 
@@ -2275,7 +2302,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                 m["hf_path"] = result.get("hf_path")
                 m["source"] = "huggingface_search"
 
-    if missing_models:
+    if missing_models and not skip_hf_search_all:
         _run_hf_stage("basic", "basic")
         if priority_author_repos is None:
             _run_hf_stage("priority", "priority")
