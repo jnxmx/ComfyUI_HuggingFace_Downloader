@@ -21,6 +21,8 @@ search_status = {}
 search_status_lock = threading.Lock()
 pending_verifications = []
 pending_verifications_lock = threading.Lock()
+cancel_requests = set()
+cancel_requests_lock = threading.Lock()
 
 # Defer verification until the download queue is empty (default on).
 VERIFY_AFTER_QUEUE = True
@@ -33,6 +35,18 @@ def _touch_queue_activity():
     global last_queue_activity
     with last_queue_activity_lock:
         last_queue_activity = time.time()
+
+def _request_cancel(download_id: str):
+    with cancel_requests_lock:
+        cancel_requests.add(download_id)
+
+def _is_cancel_requested(download_id: str) -> bool:
+    with cancel_requests_lock:
+        return download_id in cancel_requests
+
+def _clear_cancel_request(download_id: str):
+    with cancel_requests_lock:
+        cancel_requests.discard(download_id)
 
 def _build_parsed_download_info(model: dict) -> dict:
     """Build parsed download info for run_download using HF repo/path if provided."""
@@ -97,6 +111,14 @@ def _download_worker():
                         expected_sha = entry.get("expected_sha")
                         if not download_id or not dest_path:
                             continue
+                        if _is_cancel_requested(download_id):
+                            _set_download_status(download_id, {
+                                "status": "cancelled",
+                                "message": "Cancelled",
+                                "finished_at": time.time()
+                            })
+                            _clear_cancel_request(download_id)
+                            continue
                         _set_download_status(download_id, {
                             "status": "verifying",
                             "updated_at": time.time()
@@ -125,6 +147,14 @@ def _download_worker():
             continue
 
         download_id = item["download_id"]
+        if _is_cancel_requested(download_id):
+            _set_download_status(download_id, {
+                "status": "cancelled",
+                "message": "Cancelled before download started",
+                "finished_at": time.time()
+            })
+            _clear_cancel_request(download_id)
+            continue
         _set_download_status(download_id, {"status": "downloading", "started_at": time.time()})
 
         stop_event = None
@@ -264,6 +294,20 @@ def _download_worker():
                     return_info=True,
                     status_cb=status_cb
                 )
+                if _is_cancel_requested(download_id):
+                    try:
+                        if path and os.path.exists(path):
+                            os.remove(path)
+                    except Exception:
+                        pass
+                    _set_download_status(download_id, {
+                        "status": "cancelled",
+                        "message": "Cancelled",
+                        "finished_at": time.time()
+                    })
+                    _clear_cancel_request(download_id)
+                    _touch_queue_activity()
+                    continue
                 _set_download_status(download_id, {
                     "status": "downloaded",
                     "message": msg,
@@ -281,6 +325,20 @@ def _download_worker():
                     })
             else:
                 msg, path = run_download(parsed, item["folder"], sync=True, overwrite=overwrite, status_cb=status_cb)
+                if _is_cancel_requested(download_id):
+                    try:
+                        if path and os.path.exists(path):
+                            os.remove(path)
+                    except Exception:
+                        pass
+                    _set_download_status(download_id, {
+                        "status": "cancelled",
+                        "message": "Cancelled",
+                        "finished_at": time.time()
+                    })
+                    _clear_cancel_request(download_id)
+                    _touch_queue_activity()
+                    continue
                 _set_download_status(download_id, {
                     "status": "completed",
                     "message": msg,
@@ -289,6 +347,14 @@ def _download_worker():
                 })
                 _touch_queue_activity()
         except Exception as e:
+            if _is_cancel_requested(download_id):
+                _set_download_status(download_id, {
+                    "status": "cancelled",
+                    "message": "Cancelled",
+                    "finished_at": time.time()
+                })
+                _clear_cancel_request(download_id)
+                continue
             _set_download_status(download_id, {
                 "status": "failed",
                 "error": str(e),
@@ -455,6 +521,78 @@ def setup(app):
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
+    async def cancel_download(request):
+        """Cancel a queued download or request cancellation for an active one."""
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        download_id = (data.get("download_id") or "").strip()
+        if not download_id:
+            return web.json_response({"error": "download_id is required"}, status=400)
+
+        _request_cancel(download_id)
+
+        removed_from_queue = False
+        with download_queue_lock:
+            if download_queue:
+                kept = []
+                for item in download_queue:
+                    if item.get("download_id") == download_id:
+                        removed_from_queue = True
+                        continue
+                    kept.append(item)
+                if removed_from_queue:
+                    download_queue[:] = kept
+
+        if removed_from_queue:
+            _set_download_status(download_id, {
+                "status": "cancelled",
+                "message": "Cancelled before download started",
+                "finished_at": time.time()
+            })
+            _clear_cancel_request(download_id)
+            return web.json_response({"status": "cancelled", "download_id": download_id})
+
+        with pending_verifications_lock:
+            before = len(pending_verifications)
+            pending_verifications[:] = [
+                entry for entry in pending_verifications
+                if entry.get("download_id") != download_id
+            ]
+            removed_from_verify = len(pending_verifications) < before
+        if removed_from_verify:
+            _set_download_status(download_id, {
+                "status": "cancelled",
+                "message": "Cancelled before verification",
+                "finished_at": time.time()
+            })
+            _clear_cancel_request(download_id)
+            return web.json_response({"status": "cancelled", "download_id": download_id})
+
+        with download_status_lock:
+            current = dict(download_status.get(download_id, {}))
+        current_status = current.get("status")
+        if current_status in ("cancelled", "failed", "completed"):
+            _clear_cancel_request(download_id)
+            return web.json_response({"status": current_status, "download_id": download_id})
+
+        if current_status in ("downloading", "copying", "cleaning_cache", "finalizing", "verifying", "downloaded"):
+            _set_download_status(download_id, {
+                "status": "cancelling",
+                "updated_at": time.time()
+            })
+            return web.json_response({"status": "cancelling", "download_id": download_id})
+
+        # Fallback when status entry is missing or still queued in race window.
+        _set_download_status(download_id, {
+            "status": "cancelled",
+            "message": "Cancelled",
+            "finished_at": time.time()
+        })
+        _clear_cancel_request(download_id)
+        return web.json_response({"status": "cancelled", "download_id": download_id})
+
     async def download_status_endpoint(request):
         """Get current status of downloads."""
         ids_param = request.query.get("ids", "")
@@ -487,5 +625,6 @@ def setup(app):
         
     app.router.add_post("/restart", restart)
     app.router.add_post("/queue_download", queue_download)
+    app.router.add_post("/cancel_download", cancel_download)
     app.router.add_get("/download_status", download_status_endpoint)
     app.router.add_get("/search_status", search_status_endpoint)

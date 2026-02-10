@@ -6,23 +6,83 @@ app.registerExtension({
         const PANEL_ID = "hf-downloader-panel";
         const STYLE_ID = "hf-downloader-panel-styles";
         const POLL_INTERVAL_MS = 1000;
-        const FINISHED_TTL_MS = 3000;
-        const MAX_ATTACH_ATTEMPTS = 120;
-        const QUEUE_ANCHOR_SELECTORS = [
-            "#queue-panel",
-            "#queue",
-            ".queue-panel",
-            ".queue-view",
-            ".comfyui-queue",
-            ".comfy-queue",
-            "[data-testid='queue']"
-        ];
+        const TERMINAL_TTL_MS = 120000;
+
+        const RUNNING_STATUSES = new Set([
+            "queued",
+            "downloading",
+            "copying",
+            "cleaning_cache",
+            "finalizing",
+            "cancelling"
+        ]);
+        const CAN_CANCEL_STATUSES = new Set([
+            "queued",
+            "downloading",
+            "copying",
+            "cleaning_cache",
+            "finalizing",
+            "cancelling"
+        ]);
+        const SUCCESS_STATUSES = new Set(["downloaded", "completed", "verifying"]);
 
         let panel = null;
         let listBody = null;
         let countBadge = null;
-        let anchorEl = null;
-        let attachAttempts = 0;
+        let refreshBtn = null;
+        let refreshBusy = false;
+        let bootstrapDone = false;
+        const dismissedSuccessIds = new Set();
+
+        const toUiStatus = (status) => {
+            if (status === "verifying" || status === "completed") return "downloaded";
+            return status || "queued";
+        };
+
+        const statusLabel = (status) => {
+            switch (status) {
+                case "queued":
+                    return "Queued";
+                case "downloading":
+                    return "Downloading";
+                case "copying":
+                    return "Copying";
+                case "cleaning_cache":
+                    return "Finalizing";
+                case "finalizing":
+                    return "Finalizing";
+                case "downloaded":
+                    return "Downloaded";
+                case "failed":
+                    return "Failed";
+                case "cancelled":
+                    return "Cancelled";
+                case "cancelling":
+                    return "Cancelling";
+                default:
+                    return "Queued";
+            }
+        };
+
+        const statusColor = (status) => {
+            switch (status) {
+                case "downloading":
+                    return "#4aa3ff";
+                case "copying":
+                case "cleaning_cache":
+                case "finalizing":
+                    return "#9ad6ff";
+                case "downloaded":
+                    return "#5bd98c";
+                case "failed":
+                    return "#ff6b6b";
+                case "cancelled":
+                case "cancelling":
+                    return "#f5b14c";
+                default:
+                    return "#9aa1ad";
+            }
+        };
 
         const ensureStyles = () => {
             if (document.getElementById(STYLE_ID)) return;
@@ -31,14 +91,14 @@ app.registerExtension({
             style.textContent = `
                 #${PANEL_ID} {
                     position: fixed;
-                    top: 64px;
-                    right: 12px;
-                    width: 320px;
-                    max-height: 50vh;
+                    right: 16px;
+                    bottom: 16px;
+                    width: 360px;
+                    max-height: 55vh;
                     background: #1f2128;
                     border: 1px solid #3c3c3c;
-                    border-radius: 8px;
-                    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+                    border-radius: 10px;
+                    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
                     color: #ddd;
                     font-size: 12px;
                     z-index: 10000;
@@ -63,15 +123,10 @@ app.registerExtension({
                 }
                 #${PANEL_ID} .hf-downloader-body {
                     overflow-y: auto;
-                    padding: 6px 8px 8px;
+                    padding: 8px;
                     display: flex;
                     flex-direction: column;
                     gap: 6px;
-                }
-                #${PANEL_ID} .hf-downloader-empty {
-                    color: #8f96a3;
-                    font-style: italic;
-                    padding: 6px 0;
                 }
                 #${PANEL_ID} .hf-downloader-item {
                     background: #1a1c22;
@@ -97,10 +152,28 @@ app.registerExtension({
                     white-space: nowrap;
                     flex: 1;
                 }
-                #${PANEL_ID} .hf-downloader-status {
-                    font-size: 11px;
-                    text-transform: uppercase;
-                    letter-spacing: 0.4px;
+                #${PANEL_ID} .hf-downloader-cancel {
+                    border: none;
+                    background: #3a1f26;
+                    color: #ff9da8;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 50%;
+                    line-height: 18px;
+                    font-size: 12px;
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 0;
+                }
+                #${PANEL_ID} .hf-downloader-cancel:hover {
+                    background: #4d2730;
+                    color: #ffc1c8;
+                }
+                #${PANEL_ID} .hf-downloader-cancel:disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
                 }
                 #${PANEL_ID} .hf-downloader-progress {
                     display: flex;
@@ -132,6 +205,11 @@ app.registerExtension({
                     justify-content: space-between;
                     gap: 8px;
                 }
+                #${PANEL_ID} .hf-downloader-status-lower {
+                    text-transform: uppercase;
+                    letter-spacing: 0.3px;
+                    font-weight: 600;
+                }
                 #${PANEL_ID} .hf-downloader-error {
                     color: #ff6b6b;
                     font-size: 11px;
@@ -139,30 +217,32 @@ app.registerExtension({
                     text-overflow: ellipsis;
                     white-space: nowrap;
                 }
+                #${PANEL_ID} .hf-downloader-footer {
+                    display: flex;
+                    justify-content: flex-end;
+                    padding: 8px 10px;
+                    border-top: 1px solid #333;
+                    background: #20222a;
+                }
+                #${PANEL_ID} .hf-downloader-refresh {
+                    border: 1px solid #3f8d4d;
+                    background: #38a84f;
+                    color: #fff;
+                    border-radius: 6px;
+                    padding: 6px 10px;
+                    font-size: 12px;
+                    cursor: pointer;
+                    font-weight: 600;
+                }
+                #${PANEL_ID} .hf-downloader-refresh:hover {
+                    background: #43b95c;
+                }
+                #${PANEL_ID} .hf-downloader-refresh:disabled {
+                    opacity: 0.7;
+                    cursor: not-allowed;
+                }
             `;
             document.head.appendChild(style);
-        };
-
-        const findQueueAnchor = () => {
-            for (const selector of QUEUE_ANCHOR_SELECTORS) {
-                const el = document.querySelector(selector);
-                if (el) return el;
-            }
-            return null;
-        };
-
-        const positionPanel = () => {
-            if (!panel) return;
-            const rect = anchorEl?.getBoundingClientRect();
-            if (rect && rect.width) {
-                const top = Math.round(rect.bottom + 8);
-                const right = Math.max(8, Math.round(window.innerWidth - rect.right));
-                panel.style.top = `${top}px`;
-                panel.style.right = `${right}px`;
-                return;
-            }
-            panel.style.top = "64px";
-            panel.style.right = "12px";
         };
 
         const ensurePanel = () => {
@@ -184,13 +264,23 @@ app.registerExtension({
             listBody = document.createElement("div");
             listBody.className = "hf-downloader-body";
 
+            const footer = document.createElement("div");
+            footer.className = "hf-downloader-footer";
+
+            refreshBtn = document.createElement("button");
+            refreshBtn.className = "hf-downloader-refresh";
+            refreshBtn.textContent = "Refresh ComfyUI";
+            refreshBtn.style.display = "none";
+            refreshBtn.addEventListener("click", () => {
+                void handleRefresh();
+            });
+            footer.appendChild(refreshBtn);
+
             panel.appendChild(header);
             panel.appendChild(listBody);
+            panel.appendChild(footer);
             panel.style.display = "none";
             document.body.appendChild(panel);
-
-            positionPanel();
-            window.addEventListener("resize", positionPanel);
 
             return panel;
         };
@@ -208,85 +298,135 @@ app.registerExtension({
             return `${size.toFixed(decimals)} ${units[unitIndex]}`;
         };
 
-        const formatSpeed = (bps) => {
-            if (!bps || !Number.isFinite(bps)) return "--";
-            return `${formatBytes(bps)}/s`;
-        };
-
-        const statusColor = (status) => {
-            switch (status) {
-                case "downloading":
-                    return "#4aa3ff";
-                case "copying":
-                case "cleaning_cache":
-                case "downloaded":
-                case "finalizing":
-                    return "#9ad6ff";
-                case "verifying":
-                    return "#ffd166";
-                case "completed":
-                    return "#5bd98c";
-                case "failed":
-                    return "#ff6b6b";
-                default:
-                    return "#9aa1ad";
+        const cancelDownload = async (downloadId) => {
+            if (!downloadId) return;
+            try {
+                await fetch("/cancel_download", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ download_id: downloadId })
+                });
+            } catch (err) {
+                console.warn("[HF Downloader] Failed to cancel download:", err);
             }
         };
 
-        const shouldDisplay = (info, now) => {
-            if (!info) return false;
-            if ((info.status === "completed" || info.status === "failed") && info.finished_at) {
-                return (now - info.finished_at * 1000) <= FINISHED_TTL_MS;
+        const isDismissedSuccess = (entry) => {
+            if (!dismissedSuccessIds.has(entry.id)) return false;
+            return SUCCESS_STATUSES.has(entry.status);
+        };
+
+        const handleRefresh = async () => {
+            if (refreshBusy || !refreshBtn) return;
+            refreshBusy = true;
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = "Refreshing...";
+
+            // Hide all current successful entries; failed ones still reappear if verification fails later.
+            if (listBody) {
+                const cards = listBody.querySelectorAll("[data-download-id]");
+                for (const card of cards) {
+                    const id = card.getAttribute("data-download-id");
+                    if (!id) continue;
+                    dismissedSuccessIds.add(id);
+                }
             }
-            return true;
+            if (panel) {
+                panel.style.display = "none";
+            }
+
+            try {
+                if (typeof app?.refreshComboInNodes === "function") {
+                    const maybePromise = app.refreshComboInNodes();
+                    if (maybePromise && typeof maybePromise.then === "function") {
+                        await maybePromise;
+                    }
+                }
+                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                    app.graph.setDirtyCanvas(true, true);
+                }
+            } catch (err) {
+                console.warn("[HF Downloader] Comfy refresh hook failed:", err);
+            } finally {
+                // Force refresh to reload node definitions from backend.
+                window.location.reload();
+            }
         };
 
         const renderList = (downloads) => {
             const now = Date.now();
+            const rawEntries = Object.entries(downloads || {}).map(([id, info]) => ({
+                id,
+                ...(info || {})
+            }));
 
-            const entries = Object.entries(downloads)
-                .map(([id, info]) => ({ id, ...info }))
-                .filter((entry) => shouldDisplay(entry, now));
+            for (const entry of rawEntries) {
+                entry.status = toUiStatus(entry.status);
+                if (entry.status === "failed" || entry.status === "cancelled") {
+                    const ts = (entry.finished_at || entry.updated_at || entry.started_at || 0) * 1000;
+                    if (ts && (now - ts) > TERMINAL_TTL_MS) {
+                        entry._expired = true;
+                    }
+                }
+                if (entry.status === "failed") {
+                    dismissedSuccessIds.delete(entry.id);
+                }
+            }
+
+            if (!bootstrapDone) {
+                const hasActiveOrFailed = rawEntries.some((entry) => (
+                    RUNNING_STATUSES.has(entry.status) || entry.status === "failed"
+                ));
+                if (!hasActiveOrFailed) {
+                    for (const entry of rawEntries) {
+                        if (SUCCESS_STATUSES.has(entry.status)) {
+                            dismissedSuccessIds.add(entry.id);
+                        }
+                    }
+                }
+                bootstrapDone = true;
+            }
+
+            const entries = rawEntries.filter((entry) => !entry._expired && !isDismissedSuccess(entry));
 
             if (!entries.length) {
-                if (panel) {
-                    panel.style.display = "none";
-                }
+                if (panel) panel.style.display = "none";
                 return;
             }
 
             ensurePanel();
             panel.style.display = "flex";
-
-            const activeStatuses = new Set([
-                "queued",
-                "downloading",
-                "copying",
-                "cleaning_cache",
-                "verifying",
-                "downloaded",
-                "finalizing"
-            ]);
-            const activeCount = entries.filter((entry) => activeStatuses.has(entry.status)).length;
-            countBadge.textContent = String(activeCount);
-
             listBody.innerHTML = "";
 
+            const runningCount = entries.filter((entry) => RUNNING_STATUSES.has(entry.status)).length;
+            countBadge.textContent = String(runningCount);
+
+            const hasFailed = entries.some((entry) => entry.status === "failed");
+            const hasRunning = entries.some((entry) => RUNNING_STATUSES.has(entry.status));
+            const hasSuccess = entries.some((entry) => SUCCESS_STATUSES.has(entry.status));
+
+            refreshBtn.style.display = (!hasRunning && !hasFailed && hasSuccess) ? "inline-flex" : "none";
+            if (refreshBtn.style.display === "none") {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = "Refresh ComfyUI";
+                refreshBusy = false;
+            }
+
             const order = {
-                downloading: 0,
-                copying: 1,
-                cleaning_cache: 2,
-                verifying: 3,
-                downloaded: 4,
-                finalizing: 5,
-                queued: 6,
-                failed: 7,
-                completed: 8
+                failed: 0,
+                downloading: 1,
+                copying: 2,
+                cleaning_cache: 3,
+                finalizing: 4,
+                queued: 5,
+                cancelling: 6,
+                downloaded: 7,
+                cancelled: 8
             };
 
             entries.sort((a, b) => {
-                const aOrder = order[a.status] ?? 9;
-                const bOrder = order[b.status] ?? 9;
+                const aOrder = order[a.status] ?? 99;
+                const bOrder = order[b.status] ?? 99;
                 if (aOrder !== bOrder) return aOrder - bOrder;
                 const aTime = a.started_at || a.queued_at || 0;
                 const bTime = b.started_at || b.queued_at || 0;
@@ -296,6 +436,7 @@ app.registerExtension({
             for (const info of entries) {
                 const item = document.createElement("div");
                 item.className = "hf-downloader-item";
+                item.setAttribute("data-download-id", info.id);
 
                 const row = document.createElement("div");
                 row.className = "hf-downloader-row";
@@ -304,27 +445,32 @@ app.registerExtension({
                 name.className = "hf-downloader-name";
                 name.textContent = info.filename || info.id || "unknown";
                 name.title = name.textContent;
-
-                const status = document.createElement("div");
-                status.className = "hf-downloader-status";
-                status.textContent = info.status || "queued";
-                status.style.color = statusColor(info.status);
-
                 row.appendChild(name);
-                row.appendChild(status);
+
+                if (CAN_CANCEL_STATUSES.has(info.status)) {
+                    const cancelBtn = document.createElement("button");
+                    cancelBtn.className = "hf-downloader-cancel";
+                    cancelBtn.textContent = "x";
+                    cancelBtn.title = "Cancel download";
+                    cancelBtn.addEventListener("click", (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        cancelBtn.disabled = true;
+                        void cancelDownload(info.id);
+                    });
+                    row.appendChild(cancelBtn);
+                }
 
                 const progress = document.createElement("div");
                 progress.className = "hf-downloader-progress";
 
                 const spinner = document.createElement("div");
                 spinner.className = "hf-downloader-spinner";
-                if (info.status === "queued" || info.status === "downloaded") {
+                if (info.status === "queued" || info.status === "downloaded" || info.status === "cancelled") {
                     spinner.classList.add("hidden");
-                } else if (info.status === "completed" || info.status === "failed") {
+                } else if (info.status === "failed") {
                     spinner.classList.add("idle");
-                    spinner.style.borderTopColor = info.status === "failed" ? "#ff6b6b" : "#5bd98c";
-                } else if (info.status === "verifying") {
-                    spinner.style.borderTopColor = "#ffd166";
+                    spinner.style.borderTopColor = "#ff6b6b";
                 }
                 progress.appendChild(spinner);
 
@@ -337,15 +483,13 @@ app.registerExtension({
                     ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
                     : formatBytes(downloadedBytes);
 
-                const speedText = info.status === "downloading"
-                    ? formatSpeed(info.speed_bps)
-                    : "--";
-
                 const leftMeta = document.createElement("div");
                 leftMeta.textContent = sizeText;
 
                 const rightMeta = document.createElement("div");
-                rightMeta.textContent = speedText;
+                rightMeta.className = "hf-downloader-status-lower";
+                rightMeta.textContent = statusLabel(info.status);
+                rightMeta.style.color = statusColor(info.status);
 
                 meta.appendChild(leftMeta);
                 meta.appendChild(rightMeta);
@@ -377,21 +521,7 @@ app.registerExtension({
             }
         };
 
-        const startPolling = () => {
-            pollStatus();
-            return setInterval(pollStatus, POLL_INTERVAL_MS);
-        };
-
-        const attachTimer = setInterval(() => {
-            attachAttempts += 1;
-            anchorEl = findQueueAnchor();
-            if (anchorEl || attachAttempts >= MAX_ATTACH_ATTEMPTS) {
-                clearInterval(attachTimer);
-            }
-            positionPanel();
-        }, 500);
-
         pollStatus();
-        startPolling();
+        setInterval(pollStatus, POLL_INTERVAL_MS);
     }
 });

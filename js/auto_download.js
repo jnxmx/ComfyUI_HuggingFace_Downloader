@@ -277,9 +277,33 @@ app.registerExtension({
 
         const parseFilenameFromUrl = (url) => {
             if (!url || typeof url !== "string") return null;
-            const clean = url.split("?")[0].split("#")[0];
-            const parts = clean.split("/").filter(Boolean);
-            return parts.length ? parts[parts.length - 1] : null;
+            const value = url.trim();
+            if (!value) return null;
+
+            const extract = (candidate) => {
+                const clean = String(candidate || "").split("?")[0].split("#")[0];
+                const parts = clean.split("/").filter(Boolean);
+                if (!parts.length) return null;
+                const tail = parts[parts.length - 1];
+                if (!tail) return null;
+                try {
+                    return decodeURIComponent(tail);
+                } catch {
+                    return tail;
+                }
+            };
+
+            try {
+                if (value.includes("://")) {
+                    const parsed = new URL(value);
+                    const fromPath = extract(parsed.pathname);
+                    if (fromPath) return fromPath;
+                }
+            } catch {
+                // Fall through to raw parsing below.
+            }
+
+            return extract(value);
         };
 
         const normalizeWorkflowPath = (value) => String(value || "").replace(/\\/g, "/").trim();
@@ -296,6 +320,31 @@ app.registerExtension({
             if (!normalized) return "";
             const idx = normalized.lastIndexOf("/");
             return idx === -1 ? "" : normalized.slice(0, idx);
+        };
+
+        const resolveDownloadedFilename = (rowData, statusInfo = null) => {
+            const fromStatusPath = getPathBasename(statusInfo?.path || "");
+            if (fromStatusPath) return fromStatusPath;
+
+            const fromInputUrl = parseFilenameFromUrl(rowData?.urlInput?.value || "");
+            if (fromInputUrl) return fromInputUrl;
+
+            const fromResolvedUrl = parseFilenameFromUrl(rowData?.resolvedUrl || "");
+            if (fromResolvedUrl) return fromResolvedUrl;
+
+            const fallback = String(rowData?.filename || "").trim();
+            return fallback || null;
+        };
+
+        const syncRowFilename = (rowData, filename) => {
+            const next = String(filename || "").trim();
+            if (!next) return;
+            if (rowData.filename !== next) {
+                rowData.filename = next;
+                if (rowData.nameEl) {
+                    rowData.nameEl.textContent = next;
+                }
+            }
         };
 
         const findModelWidgetInNode = (node, rowData) => {
@@ -701,6 +750,7 @@ app.registerExtension({
                         originalFilename: m.filename,
                         requestedPath: m.requested_path || m.filename,
                         initialWidgetValue: m.requested_path || m.filename,
+                        resolvedUrl: m.url || "",
                         urlInput: urlInput,
                         folderInput: folderPicker.input,
                         nameEl: nameEl,
@@ -766,6 +816,7 @@ app.registerExtension({
                                 rowData.filename = alt.filename || rowData.filename;
                                 if (alt.url) {
                                     rowData.urlInput.value = alt.url;
+                                    rowData.resolvedUrl = alt.url;
                                     cb.checked = true;
                                 }
                                 if (alt.suggested_folder) {
@@ -858,6 +909,12 @@ app.registerExtension({
                         setStatus(`Skipped ${item.filename} (missing URL).`, "#f5b14c");
                         continue;
                     }
+                    const effectiveFilename = resolveDownloadedFilename(row);
+                    if (effectiveFilename) {
+                        item.filename = effectiveFilename;
+                        syncRowFilename(row, effectiveFilename);
+                    }
+                    row.resolvedUrl = item.url;
                     queueable.push(item);
                     queueRows.push(row);
                 }
@@ -914,20 +971,24 @@ app.registerExtension({
                                         setStatus(`Failed: ${name}`, "#ff6b6b");
                                     }
                                 }
-                                if (info.status === "completed" || info.status === "failed") {
+                                if (info.status === "downloaded" || info.status === "completed" || info.status === "failed" || info.status === "cancelled") {
                                     pending.delete(id);
                                 }
                             }
 
                             if (pending.size === 0) {
                                 stopPolling();
-                                const failures = downloadIds.filter((id) => downloads[id]?.status === "failed").length;
+                                const failures = downloadIds.filter((id) => downloads[id]?.status === "failed" || downloads[id]?.status === "cancelled").length;
                                 let updatedRefs = 0;
                                 for (const id of downloadIds) {
                                     const info = downloads[id];
-                                    if (info?.status !== "completed") continue;
+                                    if (!info || (info.status !== "downloaded" && info.status !== "completed")) continue;
                                     const row = queueRowsById.get(id);
                                     if (!row) continue;
+                                    const effectiveFilename = resolveDownloadedFilename(row, info);
+                                    if (effectiveFilename) {
+                                        syncRowFilename(row, effectiveFilename);
+                                    }
                                     if (applyDownloadedReferenceToWorkflow(row)) {
                                         updatedRefs += 1;
                                     }
@@ -1136,7 +1197,7 @@ app.registerExtension({
                                     statusMap[id] = info.status;
                                     const name = info.filename || id;
                                 }
-                                if (info.status === "completed" || info.status === "failed") {
+                                if (info.status === "downloaded" || info.status === "completed" || info.status === "failed" || info.status === "cancelled") {
                                     pending.delete(id);
                                 }
                             }
