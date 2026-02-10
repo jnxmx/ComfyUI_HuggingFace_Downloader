@@ -1887,13 +1887,15 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
 
     required_models = coalesced_models
 
-    # Collapse duplicates by filename, preferring entries with richer path/folder info.
+    # Collapse duplicates within the same node+filename scope, preferring entries
+    # with richer path/folder info. Do not collapse across different nodes.
     grouped_by_name = {}
     for model in required_models:
         filename = (model.get("filename") or "").lower()
         if not filename:
             continue
-        grouped_by_name.setdefault(filename, []).append(model)
+        node_id = model.get("node_id")
+        grouped_by_name.setdefault((node_id, filename), []).append(model)
 
     deduped = []
     for _, models in grouped_by_name.items():

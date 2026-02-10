@@ -362,21 +362,29 @@ app.registerExtension({
             }
         };
 
-        const findModelWidgetInNode = (node, rowData) => {
-            if (!node || !Array.isArray(node.widgets)) return null;
+        const collectModelWidgetsInNode = (node, rowData) => {
+            if (!node || !Array.isArray(node.widgets)) return [];
             const candidates = [
                 rowData.requestedPath,
                 rowData.originalFilename,
                 rowData.initialWidgetValue
             ].filter(Boolean);
+            if (!candidates.length) return [];
 
-            for (const candidate of candidates) {
-                const widget = node.widgets.find((w) => (
-                    typeof w?.value === "string" &&
-                    normalizeWorkflowPath(w.value) === normalizeWorkflowPath(candidate)
-                ));
-                if (widget) return widget;
-            }
+            const matches = [];
+            const seenWidgets = new Set();
+            const addMatches = (predicate) => {
+                for (const widget of node.widgets) {
+                    if (typeof widget?.value !== "string") continue;
+                    if (!predicate(widget.value)) continue;
+                    if (seenWidgets.has(widget)) continue;
+                    seenWidgets.add(widget);
+                    matches.push(widget);
+                }
+            };
+
+            const exactCandidates = new Set(candidates.map(normalizeWorkflowPath).filter(Boolean));
+            addMatches((value) => exactCandidates.has(normalizeWorkflowPath(value)));
 
             const candidateBasenames = new Set(
                 candidates
@@ -385,11 +393,7 @@ app.registerExtension({
                     .map((x) => x.toLowerCase())
             );
             if (candidateBasenames.size) {
-                const basenameMatch = node.widgets.find((w) => (
-                    typeof w?.value === "string" &&
-                    candidateBasenames.has(getPathBasename(w.value).toLowerCase())
-                ));
-                if (basenameMatch) return basenameMatch;
+                addMatches((value) => candidateBasenames.has(getPathBasename(value).toLowerCase()));
             }
 
             const candidateCanonical = new Set(
@@ -397,12 +401,33 @@ app.registerExtension({
                     .map(canonicalizeModelBasename)
                     .filter(Boolean)
             );
-            if (!candidateCanonical.size) return null;
+            if (candidateCanonical.size) {
+                addMatches((value) => candidateCanonical.has(canonicalizeModelBasename(value)));
+            }
 
-            return node.widgets.find((w) => (
-                typeof w?.value === "string" &&
-                candidateCanonical.has(canonicalizeModelBasename(w.value))
-            )) || null;
+            return matches;
+        };
+
+        const isLocalModelLoaderNode = (node) => {
+            if (!node) return false;
+            const typeLower = String(node.type || "").toLowerCase();
+            if (!typeLower) return false;
+
+            // Never rewrite link/download nodes (they are metadata sources, not local model loaders).
+            if (
+                typeLower.includes("hugging face download model") ||
+                typeLower.includes("huggingface download model") ||
+                typeLower.includes("hugging face download folder") ||
+                typeLower.includes("huggingface download folder")
+            ) {
+                return false;
+            }
+
+            const props = node.properties || {};
+            const hasModelMetadata = Array.isArray(props.models) && props.models.length > 0;
+            const looksLikeLoader = typeLower.includes("loader");
+
+            return hasModelMetadata || looksLikeLoader;
         };
 
         const buildUpdatedWidgetValue = (rowData, statusInfo = null) => {
@@ -423,22 +448,38 @@ app.registerExtension({
         };
 
         const applyDownloadedReferenceToWorkflow = (rowData, statusInfo = null) => {
-            if (!rowData || rowData.nodeId === undefined || rowData.nodeId === null) return false;
-            const node = app.graph.getNodeById(rowData.nodeId);
-            if (!node) return false;
-
-            const widget = findModelWidgetInNode(node, rowData);
-            if (!widget || typeof widget.value !== "string") return false;
-
+            if (!rowData) return 0;
             const nextValue = buildUpdatedWidgetValue(rowData, statusInfo);
-            if (!nextValue) return false;
-            if (normalizeWorkflowPath(widget.value) === normalizeWorkflowPath(nextValue)) return false;
+            if (!nextValue) return 0;
 
-            widget.value = nextValue;
-            rowData.initialWidgetValue = nextValue;
-            rowData.requestedPath = nextValue;
-            node.setDirtyCanvas(true);
-            return true;
+            const graphNodes = Array.isArray(app?.graph?._nodes) ? app.graph._nodes : [];
+            let updatedRefs = 0;
+
+            for (const node of graphNodes) {
+                if (!isLocalModelLoaderNode(node)) continue;
+                const widgets = collectModelWidgetsInNode(node, rowData);
+                if (!widgets.length) continue;
+
+                let nodeChanged = false;
+                for (const widget of widgets) {
+                    if (normalizeWorkflowPath(widget.value) === normalizeWorkflowPath(nextValue)) {
+                        continue;
+                    }
+                    widget.value = nextValue;
+                    updatedRefs += 1;
+                    nodeChanged = true;
+                }
+
+                if (nodeChanged) {
+                    node.setDirtyCanvas(true);
+                }
+            }
+
+            if (updatedRefs > 0) {
+                rowData.initialWidgetValue = nextValue;
+                rowData.requestedPath = nextValue;
+            }
+            return updatedRefs;
         };
 
         /* Show loading dialog immediately */
@@ -1027,9 +1068,7 @@ app.registerExtension({
                                     if (effectiveFilename) {
                                         syncRowFilename(row, effectiveFilename);
                                     }
-                                    if (applyDownloadedReferenceToWorkflow(row, info)) {
-                                        updatedRefs += 1;
-                                    }
+                                    updatedRefs += applyDownloadedReferenceToWorkflow(row, info);
                                 }
 
                                 let statusMessage;
