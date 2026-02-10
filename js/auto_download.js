@@ -948,6 +948,9 @@ app.registerExtension({
                     }
 
                     setStatus(`Queued ${queued.length} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
+                    if (dlg.parentElement) {
+                        dlg.remove();
+                    }
 
                     const statusMap = {};
                     const pending = new Set(downloadIds);

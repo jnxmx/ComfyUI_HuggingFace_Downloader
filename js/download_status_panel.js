@@ -33,6 +33,8 @@ app.registerExtension({
         let refreshBusy = false;
         let bootstrapDone = false;
         const dismissedSuccessIds = new Set();
+        const PANEL_RIGHT_MARGIN = 16;
+        const PANEL_TOP_MARGIN = 10;
 
         const toUiStatus = (status) => {
             if (status === "verifying" || status === "completed") return "downloaded";
@@ -92,7 +94,7 @@ app.registerExtension({
                 #${PANEL_ID} {
                     position: fixed;
                     right: 16px;
-                    bottom: 16px;
+                    top: 16px;
                     width: 360px;
                     max-height: 55vh;
                     background: #1f2128;
@@ -245,6 +247,44 @@ app.registerExtension({
             document.head.appendChild(style);
         };
 
+        const getTopAnchor = () => {
+            const appAnchor = app?.menu?.settingsGroup?.element?.parentElement;
+            if (appAnchor?.getBoundingClientRect) return appAnchor;
+
+            const selectors = [
+                ".comfyui-menu-bar",
+                ".comfyui-menu",
+                ".comfyui-header",
+                ".p-menubar",
+                "header"
+            ];
+            for (const selector of selectors) {
+                const el = document.querySelector(selector);
+                if (el?.getBoundingClientRect) return el;
+            }
+
+            return null;
+        };
+
+        const updatePanelPosition = () => {
+            if (!panel) return;
+
+            const anchor = getTopAnchor();
+            let top = 16;
+            if (anchor) {
+                const rect = anchor.getBoundingClientRect();
+                if (Number.isFinite(rect.bottom)) {
+                    top = Math.max(8, Math.round(rect.bottom + PANEL_TOP_MARGIN));
+                }
+            }
+
+            panel.style.top = `${top}px`;
+            panel.style.right = `${PANEL_RIGHT_MARGIN}px`;
+            panel.style.bottom = "auto";
+            panel.style.left = "auto";
+            panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
+        };
+
         const ensurePanel = () => {
             if (panel) return panel;
             ensureStyles();
@@ -281,6 +321,7 @@ app.registerExtension({
             panel.appendChild(footer);
             panel.style.display = "none";
             document.body.appendChild(panel);
+            updatePanelPosition();
 
             return panel;
         };
@@ -322,19 +363,17 @@ app.registerExtension({
             refreshBtn.disabled = true;
             refreshBtn.textContent = "Refreshing...";
 
-            // Hide all current successful entries; failed ones still reappear if verification fails later.
+            const justCompletedIds = [];
             if (listBody) {
                 const cards = listBody.querySelectorAll("[data-download-id]");
                 for (const card of cards) {
                     const id = card.getAttribute("data-download-id");
                     if (!id) continue;
-                    dismissedSuccessIds.add(id);
+                    justCompletedIds.push(id);
                 }
             }
-            if (panel) {
-                panel.style.display = "none";
-            }
 
+            let refreshSucceeded = false;
             try {
                 if (typeof app?.refreshComboInNodes === "function") {
                     const maybePromise = app.refreshComboInNodes();
@@ -345,11 +384,23 @@ app.registerExtension({
                 if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
                     app.graph.setDirtyCanvas(true, true);
                 }
+                refreshSucceeded = true;
             } catch (err) {
                 console.warn("[HF Downloader] Comfy refresh hook failed:", err);
             } finally {
-                // Force refresh to reload node definitions from backend.
-                window.location.reload();
+                if (refreshSucceeded) {
+                    for (const id of justCompletedIds) {
+                        dismissedSuccessIds.add(id);
+                    }
+                    if (panel) {
+                        panel.style.display = "none";
+                    }
+                }
+                refreshBusy = false;
+                if (refreshBtn) {
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = "Refresh ComfyUI";
+                }
             }
         };
 
@@ -395,6 +446,7 @@ app.registerExtension({
             }
 
             ensurePanel();
+            updatePanelPosition();
             panel.style.display = "flex";
             listBody.innerHTML = "";
 
@@ -523,5 +575,7 @@ app.registerExtension({
 
         pollStatus();
         setInterval(pollStatus, POLL_INTERVAL_MS);
+        window.addEventListener("resize", updatePanelPosition, { passive: true });
+        window.addEventListener("scroll", updatePanelPosition, { passive: true });
     }
 });
