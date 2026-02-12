@@ -34,19 +34,19 @@ app.registerExtension({
         const applyNativeButtonStyle = (btn, variant = "secondary") => {
             const palette = {
                 primary: {
-                    bg: "var(--primary-background, #1f9cf0)",
-                    hover: "var(--primary-background-hover, #2b83f6)",
-                    fg: "var(--base-foreground, #ffffff)",
+                    bg: "var(--primary-background)",
+                    hover: "var(--primary-background-hover)",
+                    fg: "var(--base-foreground)",
                 },
                 secondary: {
-                    bg: "var(--secondary-background, #353944)",
-                    hover: "var(--secondary-background-hover, #444b58)",
-                    fg: "var(--base-foreground, #ffffff)",
+                    bg: "var(--secondary-background)",
+                    hover: "var(--secondary-background-hover)",
+                    fg: "var(--base-foreground)",
                 },
                 destructive: {
-                    bg: "var(--destructive-background, #b74755)",
-                    hover: "var(--destructive-background-hover, #c74e5f)",
-                    fg: "var(--base-foreground, #ffffff)",
+                    bg: "var(--destructive-background)",
+                    hover: "var(--destructive-background-hover)",
+                    fg: "var(--base-foreground)",
                 },
             };
             const selected = palette[variant] || palette.secondary;
@@ -83,9 +83,9 @@ app.registerExtension({
             inp.value = value || "";
             inp.placeholder = placeholder || "";
             Object.assign(inp.style, {
-                background: "var(--comfy-input-bg, #222)",
-                border: "1px solid var(--border-color, #4e4e4e)",
-                color: "var(--input-text, #ddd)",
+                background: "var(--comfy-input-bg)",
+                border: "1px solid var(--border-default)",
+                color: "var(--input-text)",
                 padding: "8px 12px",
                 borderRadius: "8px",
                 width: "100%",
@@ -97,16 +97,16 @@ app.registerExtension({
             });
 
             if (!value && placeholder && placeholder.includes("URL")) {
-                inp.style.borderColor = "#7a4750";
-                inp.style.background = "#2a1e24";
+                inp.style.borderColor = "color-mix(in srgb, var(--destructive-background) 50%, var(--border-default) 50%)";
+                inp.style.background = "color-mix(in srgb, var(--comfy-input-bg) 88%, var(--destructive-background) 12%)";
 
                 inp.addEventListener("input", () => {
                     if (inp.value.trim()) {
-                        inp.style.borderColor = "var(--border-color, #4e4e4e)";
-                        inp.style.background = "var(--comfy-input-bg, #222)";
+                        inp.style.borderColor = "var(--border-default)";
+                        inp.style.background = "var(--comfy-input-bg)";
                     } else {
-                        inp.style.borderColor = "#7a4750";
-                        inp.style.background = "#2a1e24";
+                        inp.style.borderColor = "color-mix(in srgb, var(--destructive-background) 50%, var(--border-default) 50%)";
+                        inp.style.background = "color-mix(in srgb, var(--comfy-input-bg) 88%, var(--destructive-background) 12%)";
                     }
                 });
             }
@@ -281,8 +281,8 @@ app.registerExtension({
                 top: "100%",
                 left: 0,
                 right: 0,
-                background: "var(--comfy-menu-bg, #202020)",
-                border: "1px solid var(--border-color, #4e4e4e)",
+                background: "var(--comfy-menu-bg)",
+                border: "1px solid var(--border-default)",
                 borderTop: "none",
                 maxHeight: "180px",
                 overflowY: "auto",
@@ -307,12 +307,12 @@ app.registerExtension({
                     Object.assign(item.style, {
                         padding: "7px 10px",
                         cursor: "pointer",
-                        color: "var(--input-text, #ddd)",
+                        color: "var(--input-text)",
                         fontSize: "13px",
                         fontFamily: "var(--font-inter, Inter, sans-serif)",
                     });
                     item.addEventListener("mouseenter", () => {
-                        item.style.background = "var(--secondary-background-hover, #313235)";
+                        item.style.background = "var(--secondary-background-hover)";
                     });
                     item.addEventListener("mouseleave", () => {
                         item.style.background = "transparent";
@@ -597,8 +597,8 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "var(--comfy-menu-bg, #202020)",
-                color: "var(--input-text, #ddd)",
+                background: "var(--comfy-menu-bg)",
+                color: "var(--input-text)",
                 padding: "20px 22px",
                 borderRadius: "16px",
                 textAlign: "left",
@@ -687,8 +687,8 @@ app.registerExtension({
                 height: "40px",
                 borderRadius: "10px",
                 border: "1px solid transparent",
-                background: "var(--comfy-input-bg, #222)",
-                color: "var(--input-text, #ddd)",
+                background: "var(--comfy-input-bg)",
+                color: "var(--input-text)",
                 fontSize: "14px",
                 lineHeight: "1",
                 cursor: "pointer",
@@ -697,13 +697,21 @@ app.registerExtension({
                 placeItems: "center",
                 fontFamily: "var(--font-inter, Inter, sans-serif)",
                 transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
+                flex: "0 0 40px",
+                marginLeft: "auto",
+                alignSelf: "center",
             });
+            const closeIconGlyph = closeIconButton.querySelector("i");
+            if (closeIconGlyph) {
+                closeIconGlyph.style.fontSize = "18px";
+                closeIconGlyph.style.lineHeight = "1";
+            }
             closeIconButton.onmouseenter = () => {
-                closeIconButton.style.background = "var(--secondary-background-hover, #313235)";
+                closeIconButton.style.background = "var(--secondary-background-hover)";
                 closeIconButton.style.borderColor = "var(--border-default)";
             };
             closeIconButton.onmouseleave = () => {
-                closeIconButton.style.background = "var(--comfy-input-bg, #222)";
+                closeIconButton.style.background = "var(--comfy-input-bg)";
                 closeIconButton.style.borderColor = "transparent";
             };
             closeIconButton.onclick = () => {
@@ -763,8 +771,8 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "var(--comfy-menu-bg, #202020)",
-                color: "var(--input-text, #ddd)",
+                background: "var(--comfy-menu-bg)",
+                color: "var(--input-text)",
                 border: "1px solid var(--border-default)",
                 borderRadius: "16px",
                 width: "min(1220px, 100%)",
@@ -800,7 +808,7 @@ app.registerExtension({
             titleEl.textContent = "Auto-Download Models";
             Object.assign(titleEl.style, {
                 letterSpacing: "0",
-                color: "var(--input-text, #ddd)",
+                color: "var(--input-text)",
             });
             titleEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
             titleEl.style.setProperty("font-size", "14px", "important");
@@ -886,7 +894,7 @@ app.registerExtension({
                     gridTemplateColumns: "24px minmax(190px, 1.1fr) minmax(260px, 1.2fr) minmax(160px, 0.8fr)",
                     alignItems: "center",
                     gap: "12px",
-                    background: "var(--secondary-background-selected, var(--secondary-background))",
+                    background: "color-mix(in srgb, var(--comfy-menu-bg) 82%, var(--base-foreground) 18%)",
                     borderRadius: "10px",
                     padding: "10px 12px",
                 });
@@ -932,7 +940,7 @@ app.registerExtension({
                         fontSize: "13px",
                         lineHeight: "1.2",
                         wordBreak: "break-word",
-                        color: "var(--input-text, #ddd)",
+                        color: "var(--input-text)",
                     });
                     nameEl.textContent = m.filename || "Unknown model";
 
@@ -993,9 +1001,9 @@ app.registerExtension({
                             alignSelf: "flex-start",
                             fontSize: "12px",
                             padding: "6px 9px",
-                            background: "var(--comfy-input-bg, #222)",
-                            color: "var(--input-text, #ddd)",
-                            border: "1px solid var(--border-color, #4e4e4e)",
+                            background: "var(--comfy-input-bg)",
+                            color: "var(--input-text)",
+                            border: "1px solid var(--border-default)",
                             borderRadius: "7px",
                             cursor: "pointer",
                             fontWeight: "600",
@@ -1004,8 +1012,8 @@ app.registerExtension({
                         const altList = document.createElement("div");
                         Object.assign(altList.style, {
                             display: "none",
-                            background: "var(--comfy-input-bg, #222)",
-                            border: "1px solid var(--border-color, #4e4e4e)",
+                            background: "var(--comfy-input-bg)",
+                            border: "1px solid var(--border-default)",
                             padding: "8px",
                             borderRadius: "8px",
                         });
@@ -1018,7 +1026,7 @@ app.registerExtension({
                                 alignItems: "center",
                                 gap: "10px",
                                 padding: "7px 0",
-                                borderBottom: "1px solid var(--border-color, #4e4e4e)",
+                                borderBottom: "1px solid var(--border-default)",
                             });
 
                             const altLabel = document.createElement("div");
@@ -1030,9 +1038,9 @@ app.registerExtension({
                             useBtn.textContent = "Use";
                             Object.assign(useBtn.style, {
                                 padding: "5px 10px",
-                                background: "var(--comfy-input-bg, #222)",
-                                color: "var(--input-text, #ddd)",
-                                border: "1px solid var(--border-color, #4e4e4e)",
+                                background: "var(--comfy-input-bg)",
+                                color: "var(--input-text)",
+                                border: "1px solid var(--border-default)",
                                 borderRadius: "6px",
                                 cursor: "pointer",
                                 fontSize: "12px",
@@ -1106,7 +1114,7 @@ app.registerExtension({
                         fontSize: "13px",
                         lineHeight: "1.2",
                         wordBreak: "break-word",
-                        color: "var(--input-text, #ddd)",
+                        color: "var(--input-text)",
                     });
 
                     const metaEl = document.createElement("div");
@@ -1125,7 +1133,7 @@ app.registerExtension({
                     Object.assign(pathEl.style, {
                         minWidth: "0",
                         fontSize: "13px",
-                        color: "var(--input-text, #ddd)",
+                        color: "var(--input-text)",
                         wordBreak: "break-word",
                     });
 
@@ -1429,8 +1437,8 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "var(--comfy-menu-bg, #202020)",
-                color: "var(--input-text, #ddd)",
+                background: "var(--comfy-menu-bg)",
+                color: "var(--input-text)",
                 padding: "0",
                 borderRadius: "16px",
                 width: "min(820px, 100%)",
@@ -1467,7 +1475,7 @@ app.registerExtension({
             titleEl.textContent = "Download New Model";
             Object.assign(titleEl.style, {
                 letterSpacing: "0",
-                color: "var(--input-text, #ddd)",
+                color: "var(--input-text)",
             });
             titleEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
             titleEl.style.setProperty("font-size", "14px", "important");

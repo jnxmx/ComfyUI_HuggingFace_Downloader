@@ -67,17 +67,17 @@ app.registerExtension({
 #backup-hf-dialog .hf-tree-block + .hf-tree-block {
     margin-top: 8px;
     padding-top: 8px;
-    border-top: 1px solid #2a2f3a;
+    border-top: 1px solid var(--border-default);
 }
 #backup-hf-dialog .hf-tree-block-title {
-    color: #8f97a5;
-    font-size: 10px;
+    color: var(--descrip-text, #999);
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     padding: 0 4px 2px;
 }
 #backup-hf-dialog .hf-tree-empty {
-    color: #727a88;
+    color: var(--descrip-text, #999);
     font-size: 11px;
     padding: 4px 6px;
 }
@@ -91,13 +91,14 @@ app.registerExtension({
     transition: background-color 120ms ease;
 }
 #backup-hf-dialog .hf-tree-row:hover {
-    background: rgba(115, 133, 165, 0.11);
+    background: var(--secondary-background-hover);
 }
 #backup-hf-dialog details[open] > summary.hf-tree-summary > .hf-tree-row {
-    background: rgba(96, 115, 148, 0.14);
+    background: var(--secondary-background);
 }
 #backup-hf-dialog .hf-tree-expander {
-    color: #b8c0cf;
+    color: var(--input-text);
+    opacity: 0.85;
 }
 .hf-backup-action-btn.p-button {
     min-height: 40px;
@@ -108,36 +109,36 @@ app.registerExtension({
     border-radius: 10px;
     border: none !important;
     box-shadow: none !important;
-    background: var(--secondary-background, #353944) !important;
-    color: var(--base-foreground, #fff) !important;
+    background: var(--secondary-background) !important;
+    color: var(--base-foreground) !important;
     transition: background-color 120ms ease, opacity 120ms ease;
 }
 .hf-backup-action-btn.p-button:hover {
-    background: var(--secondary-background-hover, #444b58) !important;
+    background: var(--secondary-background-hover) !important;
 }
 .hf-backup-action-btn.p-button.p-button-success {
-    background: #43c06b !important;
+    background: var(--success-background, #43c06b) !important;
 }
 .hf-backup-action-btn.p-button.p-button-success:hover {
-    background: #55d17c !important;
+    background: var(--success-background-hover, #55d17c) !important;
 }
 .hf-backup-action-btn.p-button.hf-btn-primary {
-    background: var(--primary-background, #1f9cf0) !important;
+    background: var(--primary-background) !important;
 }
 .hf-backup-action-btn.p-button.hf-btn-primary:hover {
-    background: var(--primary-background-hover, #2b83f6) !important;
+    background: var(--primary-background-hover) !important;
 }
 .hf-backup-action-btn.p-button.p-button-danger {
-    background: var(--destructive-background, #b74755) !important;
+    background: var(--destructive-background) !important;
 }
 .hf-backup-action-btn.p-button.p-button-danger:hover {
-    background: var(--destructive-background-hover, #c74e5f) !important;
+    background: var(--destructive-background-hover) !important;
 }
 .hf-backup-action-btn.p-button:disabled {
     opacity: 0.6;
 }
 #backup-hf-dialog .hf-repo-link {
-    color: #7cb3ff;
+    color: var(--primary-color, var(--primary-background));
     text-decoration: none;
     font-size: inherit;
     font-weight: inherit;
@@ -146,7 +147,7 @@ app.registerExtension({
     text-decoration: underline;
 }
 #backup-hf-dialog .hf-header-meta {
-    color: #9aa4b6;
+    color: var(--descrip-text, #999);
     font-family: Inter, Arial, sans-serif;
     font-size: 14px;
     font-weight: 400;
@@ -158,11 +159,11 @@ app.registerExtension({
     top: 16px;
     width: 360px;
     max-width: calc(100vw - 32px);
-    background: var(--comfy-menu-bg, #202020);
+    background: var(--comfy-menu-bg);
     border: 1px solid var(--border-default);
     border-radius: 16px;
     box-shadow: 1px 1px 8px rgba(0, 0, 0, 0.4);
-    color: var(--input-text, #ddd);
+    color: var(--input-text);
     font-size: 12px;
     z-index: 10002;
     display: none;
@@ -224,7 +225,7 @@ app.registerExtension({
     justify-content: flex-end;
     padding: 8px 10px;
     border-top: 1px solid var(--border-default);
-    background: var(--comfy-menu-bg, #202020);
+    background: var(--comfy-menu-bg);
 }
 #hf-backup-op-panel .hf-backup-op-refresh {
     border: 1px solid #3f8d4d;
@@ -529,7 +530,7 @@ app.registerExtension({
                 alignItems: "center",
                 gap: "8px",
                 padding: "3px 6px",
-                color: node.selectable ? "#ececec" : "#9aa0a6",
+                color: node.selectable ? "var(--input-text)" : "var(--descrip-text, #999)",
                 minHeight: "22px",
                 minWidth: "0",
             });
@@ -540,9 +541,10 @@ app.registerExtension({
             Object.assign(expander.style, {
                 width: "16px",
                 textAlign: "center",
-                color: "#cfd6df",
+                color: "var(--input-text)",
                 fontSize: "12px",
                 userSelect: "none",
+                opacity: "0.85",
             });
             row.appendChild(expander);
 
@@ -889,8 +891,8 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "var(--comfy-menu-bg, #202020)",
-                color: "var(--input-text, #ddd)",
+                background: "var(--comfy-menu-bg)",
+                color: "var(--input-text)",
                 border: "1px solid var(--border-default)",
                 borderRadius: "16px",
                 width: "min(1220px, 100%)",
@@ -912,12 +914,13 @@ app.registerExtension({
                 gap: "8px",
                 height: "72px",
                 padding: "0 24px",
+                flexShrink: "0",
             });
 
             const header = document.createElement("div");
             header.textContent = "Backup Manager";
             header.style.letterSpacing = "0";
-            header.style.color = "var(--input-text, #ddd)";
+            header.style.color = "var(--input-text)";
             header.style.flex = "1";
             header.style.minWidth = "0";
             header.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
@@ -934,8 +937,8 @@ app.registerExtension({
                 height: "40px",
                 borderRadius: "10px",
                 border: "1px solid transparent",
-                background: "var(--comfy-input-bg, #222)",
-                color: "var(--input-text, #ddd)",
+                background: "var(--comfy-input-bg)",
+                color: "var(--input-text)",
                 fontSize: "14px",
                 lineHeight: "1",
                 cursor: "pointer",
@@ -944,13 +947,21 @@ app.registerExtension({
                 placeItems: "center",
                 transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
                 flexShrink: "0",
+                flex: "0 0 40px",
+                marginLeft: "auto",
+                alignSelf: "center",
             });
+            const closeIconGlyph = closeIconButton.querySelector("i");
+            if (closeIconGlyph) {
+                closeIconGlyph.style.fontSize = "18px";
+                closeIconGlyph.style.lineHeight = "1";
+            }
             closeIconButton.onmouseenter = () => {
-                closeIconButton.style.background = "var(--secondary-background-hover, #313235)";
+                closeIconButton.style.background = "var(--secondary-background-hover)";
                 closeIconButton.style.borderColor = "var(--border-default)";
             };
             closeIconButton.onmouseleave = () => {
-                closeIconButton.style.background = "var(--comfy-input-bg, #222)";
+                closeIconButton.style.background = "var(--comfy-input-bg)";
                 closeIconButton.style.borderColor = "transparent";
             };
             closeIconButton.onclick = () => {
@@ -1006,7 +1017,7 @@ app.registerExtension({
                 titleEl.style.setProperty("font-size", "14px", "important");
                 titleEl.style.setProperty("font-weight", "400", "important");
                 titleEl.style.setProperty("line-height", "20px", "important");
-                titleEl.style.color = "var(--input-text, #ddd)";
+                titleEl.style.color = "var(--input-text)";
                 titleRow.appendChild(titleEl);
 
                 const metaEl = document.createElement("div");
@@ -1036,7 +1047,7 @@ app.registerExtension({
                     border: "1px solid var(--border-default)",
                     borderRadius: "10px",
                     padding: "6px",
-                    background: "var(--comfy-input-bg, #222)",
+                    background: "var(--comfy-input-bg)",
                 });
                 tree.textContent = "Loading...";
                 root.appendChild(tree);
@@ -1070,7 +1081,7 @@ app.registerExtension({
 
             const status = document.createElement("div");
             status.style.fontSize = "12px";
-            status.style.color = "#9aa0a6";
+            status.style.color = "var(--descrip-text, #999)";
             status.textContent = "";
             footer.appendChild(status);
 
