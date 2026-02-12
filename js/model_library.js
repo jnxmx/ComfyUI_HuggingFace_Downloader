@@ -52,6 +52,7 @@ const MODEL_LIBRARY_DOWNLOADING_LABEL = "Downloading...";
 const MODEL_LIBRARY_DOWNLOAD_BY_LINK_LABEL = "Download by link";
 const MODEL_LIBRARY_IMPORT_BUTTON_PATCH_MARKER = "hfModelLibraryImportButtonPatched";
 const MODEL_LIBRARY_HEADER_BUTTON_ID = "hf-model-library-download-by-link-button";
+const MODEL_LIBRARY_HEADER_FLOATING_RIGHT_PX = 132;
 const FALLBACK_NODE_TYPE_TO_CATEGORY = {
   CheckpointLoaderSimple: "checkpoints",
   ImageOnlyCheckpointLoader: "checkpoints",
@@ -310,11 +311,6 @@ const ensureModelLibraryHeaderDownloadButton = () => {
     return;
   }
 
-  const container = findModelLibraryHeaderActionContainer(modal);
-  if (!container) {
-    return;
-  }
-
   const existing = modal.querySelector(`#${MODEL_LIBRARY_HEADER_BUTTON_ID}`);
   if (existing) {
     return;
@@ -335,6 +331,8 @@ const ensureModelLibraryHeaderDownloadButton = () => {
       text === MODEL_LIBRARY_DOWNLOAD_BY_LINK_LABEL.toLowerCase()
     );
   });
+
+  const container = findModelLibraryHeaderActionContainer(modal);
 
   if (importLikeButton) {
     button.className = importLikeButton.className;
@@ -371,6 +369,32 @@ const ensureModelLibraryHeaderDownloadButton = () => {
     },
     true
   );
+
+  // If native Import is missing in this UI build, top-right icon groups can
+  // hide extra controls due to constrained layout. Use a floating fallback.
+  if (!importLikeButton || !container) {
+    let host = modal;
+    if (!(host instanceof HTMLElement)) {
+      return;
+    }
+    try {
+      const hostComputed = window.getComputedStyle(host);
+      if (!hostComputed || hostComputed.position === "static") {
+        host.style.position = "relative";
+      }
+    } catch (_) {
+      host.style.position = "relative";
+    }
+    Object.assign(button.style, {
+      position: "absolute",
+      top: "16px",
+      right: `${MODEL_LIBRARY_HEADER_FLOATING_RIGHT_PX}px`,
+      zIndex: "6",
+      whiteSpace: "nowrap",
+    });
+    host.appendChild(button);
+    return;
+  }
 
   container.insertBefore(button, container.firstChild || null);
 };
