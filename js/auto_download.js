@@ -790,7 +790,7 @@ app.registerExtension({
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "10px",
-                height: "72px",
+                height: "88px",
                 padding: "0 24px",
                 flexShrink: "0",
             });
@@ -799,7 +799,7 @@ app.registerExtension({
             Object.assign(titleWrap.style, {
                 display: "flex",
                 flexDirection: "column",
-                gap: "2px",
+                gap: "0",
             });
 
             const titleEl = document.createElement("div");
@@ -809,19 +809,11 @@ app.registerExtension({
                 color: "var(--input-text)",
             });
             titleEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
-            titleEl.style.setProperty("font-size", "16px", "important");
-            titleEl.style.setProperty("font-weight", "700", "important");
-            titleEl.style.setProperty("line-height", "20px", "important");
-
-            const subtitleEl = document.createElement("div");
-            subtitleEl.textContent = "Detected missing models and valid URLs.";
-            Object.assign(subtitleEl.style, {
-                fontSize: "13px",
-                color: "var(--descrip-text, #999)",
-            });
+            titleEl.style.setProperty("font-size", "24px", "important");
+            titleEl.style.setProperty("font-weight", "600", "important");
+            titleEl.style.setProperty("line-height", "32px", "important");
 
             titleWrap.appendChild(titleEl);
-            titleWrap.appendChild(subtitleEl);
             headerWrap.appendChild(titleWrap);
             headerWrap.appendChild(createDialogCloseIconButton(closeDialog));
             panel.appendChild(headerWrap);
@@ -1457,7 +1449,7 @@ app.registerExtension({
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "10px",
-                height: "72px",
+                height: "88px",
                 padding: "0 24px",
                 flexShrink: "0",
             });
@@ -1466,7 +1458,7 @@ app.registerExtension({
             Object.assign(titleWrap.style, {
                 display: "flex",
                 flexDirection: "column",
-                gap: "2px",
+                gap: "0",
             });
 
             const titleEl = document.createElement("div");
@@ -1476,19 +1468,11 @@ app.registerExtension({
                 color: "var(--input-text)",
             });
             titleEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
-            titleEl.style.setProperty("font-size", "16px", "important");
-            titleEl.style.setProperty("font-weight", "700", "important");
-            titleEl.style.setProperty("line-height", "20px", "important");
-
-            const subtitleEl = document.createElement("div");
-            subtitleEl.textContent = "Paste a direct Hugging Face file URL and choose a folder.";
-            Object.assign(subtitleEl.style, {
-                fontSize: "13px",
-                color: "var(--descrip-text, #999)",
-            });
+            titleEl.style.setProperty("font-size", "24px", "important");
+            titleEl.style.setProperty("font-weight", "600", "important");
+            titleEl.style.setProperty("line-height", "32px", "important");
 
             titleWrap.appendChild(titleEl);
-            titleWrap.appendChild(subtitleEl);
             headerWrap.appendChild(titleWrap);
             headerWrap.appendChild(createDialogCloseIconButton(closeDialog));
             panel.appendChild(headerWrap);

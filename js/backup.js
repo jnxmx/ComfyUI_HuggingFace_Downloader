@@ -149,9 +149,9 @@ app.registerExtension({
 #backup-hf-dialog .hf-header-meta {
     color: var(--descrip-text, #999);
     font-family: Inter, Arial, sans-serif;
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 20px;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 24px;
 }
 #hf-backup-op-panel {
     position: fixed;
@@ -912,7 +912,7 @@ app.registerExtension({
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "8px",
-                height: "72px",
+                height: "88px",
                 padding: "0 24px",
                 flexShrink: "0",
             });
@@ -924,9 +924,9 @@ app.registerExtension({
             header.style.flex = "1";
             header.style.minWidth = "0";
             header.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
-            header.style.setProperty("font-size", "16px", "important");
-            header.style.setProperty("font-weight", "700", "important");
-            header.style.setProperty("line-height", "20px", "important");
+            header.style.setProperty("font-size", "24px", "important");
+            header.style.setProperty("font-weight", "600", "important");
+            header.style.setProperty("line-height", "32px", "important");
             headerWrap.appendChild(header);
 
             const closeIconButton = document.createElement("button");
@@ -976,7 +976,7 @@ app.registerExtension({
                 gap: "14px",
                 minHeight: "420px",
                 overflow: "auto",
-                padding: "12px 20px 0",
+                padding: "16px 24px 0",
             });
 
             const updatePanelColumns = () => {
@@ -1005,16 +1005,16 @@ app.registerExtension({
                 const titleRow = document.createElement("div");
                 Object.assign(titleRow.style, {
                     display: "flex",
-                    alignItems: "baseline",
-                    gap: "8px",
+                    alignItems: "center",
+                    gap: "10px",
                     flexWrap: "wrap",
                 });
                 const titleEl = document.createElement("div");
                 titleEl.textContent = title;
                 titleEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
                 titleEl.style.setProperty("font-size", "16px", "important");
-                titleEl.style.setProperty("font-weight", "700", "important");
-                titleEl.style.setProperty("line-height", "20px", "important");
+                titleEl.style.setProperty("font-weight", "600", "important");
+                titleEl.style.setProperty("line-height", "24px", "important");
                 titleEl.style.color = "var(--input-text)";
                 titleRow.appendChild(titleEl);
 
@@ -1022,9 +1022,9 @@ app.registerExtension({
                 metaEl.className = "hf-header-meta";
                 metaEl.style.display = "none";
                 metaEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
-                metaEl.style.setProperty("font-size", "14px", "important");
-                metaEl.style.setProperty("font-weight", "400", "important");
-                metaEl.style.setProperty("line-height", "20px", "important");
+                metaEl.style.setProperty("font-size", "16px", "important");
+                metaEl.style.setProperty("font-weight", "600", "important");
+                metaEl.style.setProperty("line-height", "24px", "important");
                 titleRow.appendChild(metaEl);
                 root.appendChild(titleRow);
 
@@ -1074,7 +1074,7 @@ app.registerExtension({
                 display: "flex",
                 justifyContent: "flex-start",
                 gap: "8px",
-                padding: "8px 20px 16px",
+                padding: "8px 24px 16px",
             });
 
             const status = document.createElement("div");
