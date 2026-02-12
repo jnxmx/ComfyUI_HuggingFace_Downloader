@@ -156,7 +156,7 @@ app.registerExtension({
     width: 360px;
     max-width: calc(100vw - 32px);
     background: var(--comfy-menu-bg, #202020);
-    border: 1px solid var(--border-default, var(--border-color, #4e4e4e));
+    border: 1px solid var(--border-default);
     border-radius: 16px;
     box-shadow: 1px 1px 8px rgba(0, 0, 0, 0.4);
     color: var(--input-text, #ddd);
@@ -174,7 +174,7 @@ app.registerExtension({
 }
 #hf-backup-op-panel .hf-backup-op-item {
     background: var(--comfy-input-bg, #222);
-    border: 1px solid var(--border-default, var(--border-color, #4e4e4e));
+    border: 1px solid var(--border-default);
     border-radius: 6px;
     padding: 8px;
     display: flex;
@@ -220,7 +220,7 @@ app.registerExtension({
     display: none;
     justify-content: flex-end;
     padding: 8px 10px;
-    border-top: 1px solid var(--border-default, var(--border-color, #4e4e4e));
+    border-top: 1px solid var(--border-default);
     background: var(--comfy-menu-bg, #202020);
 }
 #hf-backup-op-panel .hf-backup-op-refresh {
@@ -888,7 +888,7 @@ app.registerExtension({
             Object.assign(panel.style, {
                 background: "var(--comfy-menu-bg, #202020)",
                 color: "var(--input-text, #ddd)",
-                border: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
+                border: "1px solid var(--border-default)",
                 borderRadius: "16px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
@@ -907,9 +907,7 @@ app.registerExtension({
                 alignItems: "center",
                 justifyContent: "flex-start",
                 height: "72px",
-                padding: "0 24px",
-                borderBottom: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
-                position: "relative",
+                padding: "0 28px 0 24px",
             });
 
             const header = document.createElement("div");
@@ -918,7 +916,6 @@ app.registerExtension({
             header.style.fontWeight = "600";
             header.style.letterSpacing = "0";
             header.style.color = "var(--input-text, #ddd)";
-            header.style.paddingRight = "72px";
             headerWrap.appendChild(header);
 
             const closeIconButton = document.createElement("button");
@@ -938,14 +935,13 @@ app.registerExtension({
                 display: "grid",
                 placeItems: "center",
                 transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
-                position: "absolute",
-                right: "24px",
-                top: "50%",
-                transform: "translateY(-50%)",
+                marginLeft: "auto",
+                marginRight: "4px",
+                flexShrink: "0",
             });
             closeIconButton.onmouseenter = () => {
                 closeIconButton.style.background = "var(--secondary-background-hover, #313235)";
-                closeIconButton.style.borderColor = "var(--border-default, var(--border-color, #4e4e4e))";
+                closeIconButton.style.borderColor = "var(--border-default)";
             };
             closeIconButton.onmouseleave = () => {
                 closeIconButton.style.background = "var(--comfy-input-bg, #222)";
@@ -1027,7 +1023,7 @@ app.registerExtension({
                     flex: "1",
                     minHeight: "260px",
                     overflowY: "auto",
-                    border: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
+                    border: "1px solid var(--border-default)",
                     borderRadius: "10px",
                     padding: "6px",
                     background: "var(--comfy-input-bg, #222)",
