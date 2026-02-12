@@ -906,8 +906,10 @@ app.registerExtension({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "flex-start",
-                height: "72px",
-                padding: "0 28px 0 24px",
+                minHeight: "72px",
+                padding: "16px 28px 16px 24px",
+                boxSizing: "border-box",
+                position: "relative",
             });
 
             const header = document.createElement("div");
@@ -916,6 +918,7 @@ app.registerExtension({
             header.style.fontWeight = "600";
             header.style.letterSpacing = "0";
             header.style.color = "var(--input-text, #ddd)";
+            header.style.paddingRight = "72px";
             headerWrap.appendChild(header);
 
             const closeIconButton = document.createElement("button");
@@ -935,8 +938,9 @@ app.registerExtension({
                 display: "grid",
                 placeItems: "center",
                 transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
-                marginLeft: "auto",
-                marginRight: "4px",
+                position: "absolute",
+                right: "28px",
+                top: "16px",
                 flexShrink: "0",
             });
             closeIconButton.onmouseenter = () => {

@@ -4,6 +4,14 @@ import { api } from "../../../scripts/api.js";
 app.registerExtension({
     name: "autoDownloadModels",
     setup() {
+        const RUN_MISSING_GUARD_SETTING_ID = "downloader.auto_open_missing_models_on_run";
+        const RUN_QUEUE_COMMAND_IDS = ["Comfy.QueuePrompt", "Comfy.QueuePromptFront"];
+        const RUN_COMMAND_OVERRIDE_MARKER = "__hfAutoDownloadRunGuardOverride";
+        const RUN_COMMAND_ORIGINAL_FN = "__hfAutoDownloadRunGuardOriginalFn";
+        const RUN_COMMAND_OVERRIDE_RETRY_MS = 500;
+        const RUN_COMMAND_OVERRIDE_MAX_ATTEMPTS = 40;
+        const RUN_GUARD_REQUEST_TIMEOUT_MS = 20000;
+
         /* ──────────────── Helper Functions ──────────────── */
         const createButton = (text, className, onClick) => {
             const btn = document.createElement("button");
@@ -209,6 +217,14 @@ app.registerExtension({
                 window.hfDownloader = {};
             }
             window.hfDownloader[name] = action;
+        };
+
+        const getRunMissingGuardEnabled = () => {
+            const settingsUi = app?.ui?.settings;
+            if (!settingsUi?.getSettingValue) {
+                return true;
+            }
+            return settingsUi.getSettingValue(RUN_MISSING_GUARD_SETTING_ID) !== false;
         };
 
         let availableFolders = [
@@ -1923,8 +1939,144 @@ app.registerExtension({
             setTimeout(() => injectButtonsIntoMissingModelsDialogs(document), 1000);
         };
 
+        let runGuardCheckInFlight = null;
+        const hasBlockingMissingModels = async () => {
+            if (runGuardCheckInFlight) {
+                return runGuardCheckInFlight;
+            }
+            runGuardCheckInFlight = (async () => {
+                try {
+                    if (!app?.graph?.serialize) {
+                        return false;
+                    }
+                    const workflow = app.graph.serialize();
+                    if (!workflow || typeof workflow !== "object") {
+                        return false;
+                    }
+
+                    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+                    let timeout = null;
+                    if (controller) {
+                        timeout = setTimeout(() => controller.abort(), RUN_GUARD_REQUEST_TIMEOUT_MS);
+                    }
+
+                    try {
+                        const resp = await fetch("/check_missing_models", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                ...workflow,
+                                skip_hf_search: true
+                            }),
+                            signal: controller?.signal
+                        });
+                        if (resp.status !== 200) {
+                            return false;
+                        }
+                        const data = await resp.json();
+                        const missing = Array.isArray(data?.missing) ? data.missing : [];
+                        return missing.length > 0;
+                    } finally {
+                        if (timeout) {
+                            clearTimeout(timeout);
+                        }
+                    }
+                } catch (err) {
+                    console.warn("[AutoDownload] Run guard missing-model check failed:", err);
+                    return false;
+                }
+            })();
+
+            try {
+                return await runGuardCheckInFlight;
+            } finally {
+                runGuardCheckInFlight = null;
+            }
+        };
+
+        const installRunQueueCommandGuards = () => {
+            let attempts = 0;
+            let timer = null;
+
+            const applyOverride = (commandId) => {
+                const commands = app?.extensionManager?.command?.commands;
+                if (!Array.isArray(commands)) {
+                    return false;
+                }
+                const command = commands.find((entry) => entry?.id === commandId);
+                if (!command || typeof command.function !== "function") {
+                    return false;
+                }
+                if (command[RUN_COMMAND_OVERRIDE_MARKER]) {
+                    return true;
+                }
+
+                const originalFn = command.function;
+                command[RUN_COMMAND_ORIGINAL_FN] = originalFn;
+                command.function = async (metadata) => {
+                    if (!getRunMissingGuardEnabled()) {
+                        const fallback = command[RUN_COMMAND_ORIGINAL_FN];
+                        return typeof fallback === "function" ? await fallback(metadata) : undefined;
+                    }
+
+                    const hasMissing = await hasBlockingMissingModels();
+                    if (hasMissing) {
+                        const runAction = window?.hfDownloader?.runAutoDownload;
+                        if (typeof runAction === "function") {
+                            runAction();
+                            showToast({
+                                severity: "info",
+                                summary: "Missing models detected",
+                                detail: "Opened auto-download to resolve missing models before running.",
+                                life: 4000
+                            });
+                        } else {
+                            showToast({
+                                severity: "warn",
+                                summary: "Missing models detected",
+                                detail: "Auto-download tool is not ready yet."
+                            });
+                        }
+                        return;
+                    }
+
+                    const fallback = command[RUN_COMMAND_ORIGINAL_FN];
+                    return typeof fallback === "function" ? await fallback(metadata) : undefined;
+                };
+                command[RUN_COMMAND_OVERRIDE_MARKER] = true;
+                return true;
+            };
+
+            const runAttempt = () => {
+                attempts += 1;
+                let allApplied = true;
+                for (const commandId of RUN_QUEUE_COMMAND_IDS) {
+                    if (!applyOverride(commandId)) {
+                        allApplied = false;
+                    }
+                }
+
+                if (allApplied || attempts >= RUN_COMMAND_OVERRIDE_MAX_ATTEMPTS) {
+                    if (timer) {
+                        clearInterval(timer);
+                        timer = null;
+                    }
+                    if (!allApplied) {
+                        console.warn("[AutoDownload] Could not override all run queue commands.");
+                    }
+                }
+                return allApplied;
+            };
+
+            const firstApplied = runAttempt();
+            if (!firstApplied && attempts < RUN_COMMAND_OVERRIDE_MAX_ATTEMPTS) {
+                timer = setInterval(runAttempt, RUN_COMMAND_OVERRIDE_RETRY_MS);
+            }
+        };
+
         registerGlobalAction("runAutoDownload", runAutoDownload);
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
         setupMissingModelsDialogObserver();
+        installRunQueueCommandGuards();
     }
 });

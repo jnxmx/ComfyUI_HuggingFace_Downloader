@@ -24,6 +24,18 @@ app.registerExtension({
       },
     },
     {
+      id: "downloader.auto_open_missing_models_on_run",
+      category: ["Hugging Face downloader", "Auto download", "Auto-open on Run when models are missing"],
+      name: "Auto-open on Run when models are missing",
+      type: "boolean",
+      defaultValue: true,
+      tooltip:
+        "Before queueing Run, check for missing models and open Auto-download dialog when workflow is missing required models.",
+      onChange: (newValue) => {
+        console.log(`[HF Downloader] Auto-open missing models on Run: ${Boolean(newValue)}`);
+      },
+    },
+    {
       id: "downloaderbackup.repo_name",
       category: ["Hugging Face downloader", "Backup", "Hugging Face Repo for Backup"],
       name: "Hugging Face Repo for Backup",
