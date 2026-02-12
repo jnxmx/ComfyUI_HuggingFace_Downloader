@@ -19,15 +19,15 @@ app.registerExtension({
             inp.value = value || "";
             inp.placeholder = placeholder || "";
             Object.assign(inp.style, {
-                background: "#2f3647",
-                border: "1px solid #454e62",
-                color: "#eef2fb",
+                background: "#222",
+                border: "1px solid #494a50",
+                color: "#ddd",
                 padding: "8px 12px",
-                borderRadius: "12px",
+                borderRadius: "8px",
                 width: "100%",
                 boxSizing: "border-box",
                 minHeight: "40px",
-                fontSize: "16px",
+                fontSize: "14px",
                 lineHeight: "1.3"
             });
 
@@ -37,8 +37,8 @@ app.registerExtension({
 
                 inp.addEventListener("input", () => {
                     if (inp.value.trim()) {
-                        inp.style.borderColor = "#454e62";
-                        inp.style.background = "#2f3647";
+                        inp.style.borderColor = "#494a50";
+                        inp.style.background = "#222";
                     } else {
                         inp.style.borderColor = "#7a4750";
                         inp.style.background = "#221720";
@@ -208,8 +208,8 @@ app.registerExtension({
                 top: "100%",
                 left: 0,
                 right: 0,
-                background: "#131923",
-                border: "1px solid #3a4354",
+                background: "#171718",
+                border: "1px solid #494a50",
                 borderTop: "none",
                 maxHeight: "180px",
                 overflowY: "auto",
@@ -234,11 +234,11 @@ app.registerExtension({
                     Object.assign(item.style, {
                         padding: "7px 10px",
                         cursor: "pointer",
-                        color: "#d8dfec",
+                        color: "#fff",
                         fontSize: "13px"
                     });
                     item.addEventListener("mouseenter", () => {
-                        item.style.background = "#252d3c";
+                        item.style.background = "#313235";
                     });
                     item.addEventListener("mouseleave", () => {
                         item.style.background = "transparent";
@@ -609,13 +609,13 @@ app.registerExtension({
             closeIconButton.type = "button";
             closeIconButton.textContent = "×";
             Object.assign(closeIconButton.style, {
-                width: "46px",
-                height: "46px",
-                borderRadius: "12px",
-                border: "1px solid #3b4254",
-                background: "#1f2531",
-                color: "#dce4f6",
-                fontSize: "34px",
+                width: "40px",
+                height: "40px",
+                borderRadius: "8px",
+                border: "none",
+                background: "#262729",
+                color: "#fff",
+                fontSize: "26px",
                 lineHeight: "1",
                 cursor: "pointer",
                 padding: "0",
@@ -623,14 +623,10 @@ app.registerExtension({
                 placeItems: "center",
             });
             closeIconButton.onmouseenter = () => {
-                closeIconButton.style.background = "#293243";
-                closeIconButton.style.color = "#f3f7ff";
-                closeIconButton.style.borderColor = "#4a546a";
+                closeIconButton.style.background = "#313235";
             };
             closeIconButton.onmouseleave = () => {
-                closeIconButton.style.background = "#1f2531";
-                closeIconButton.style.color = "#dce4f6";
-                closeIconButton.style.borderColor = "#3b4254";
+                closeIconButton.style.background = "#262729";
             };
             closeIconButton.onclick = () => {
                 if (typeof onClose === "function") {
@@ -689,17 +685,17 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "#12161f",
+                background: "#171718",
                 color: "#fff",
-                border: "1px solid #2f3747",
+                border: "1px solid #494a50",
                 borderRadius: "16px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
-                padding: "20px",
+                padding: "16px",
                 boxShadow: "0 16px 42px rgba(0,0,0,0.55)",
                 display: "flex",
                 flexDirection: "column",
-                gap: "14px",
+                gap: "10px",
                 overflow: "hidden",
             });
 
@@ -721,7 +717,7 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Auto-Download Models";
             Object.assign(titleEl.style, {
-                fontSize: "34px",
+                fontSize: "22px",
                 fontWeight: "700",
                 letterSpacing: "-0.01em",
                 color: "#f0f4fc",
@@ -731,8 +727,8 @@ app.registerExtension({
             const subtitleEl = document.createElement("div");
             subtitleEl.textContent = "Detected missing models and valid URLs.";
             Object.assign(subtitleEl.style, {
-                fontSize: "16px",
-                color: "#aeb7ca",
+                fontSize: "13px",
+                color: "#8a8a8a",
             });
 
             titleWrap.appendChild(titleEl);
@@ -757,17 +753,17 @@ app.registerExtension({
                 display: "flex",
                 flexWrap: "wrap",
                 gap: "10px",
-                fontSize: "14px",
-                color: "#9ca7bc",
+                fontSize: "12px",
+                color: "#a0a0a0",
             });
             summaryRow.textContent = `Missing: ${missingModels.length} • Found: ${foundModels.length} • Mismatches: ${mismatchModels.length}`;
             panel.appendChild(summaryRow);
 
             const listFrame = document.createElement("div");
             Object.assign(listFrame.style, {
-                border: "1px solid #2c3342",
+                border: "1px solid #3c3d42",
                 borderRadius: "14px",
-                background: "#0f131a",
+                background: "#171718",
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
@@ -781,7 +777,7 @@ app.registerExtension({
                 display: "flex",
                 flexDirection: "column",
                 gap: "8px",
-                padding: "14px",
+                padding: "12px",
             });
             loadFolderList();
 
@@ -790,10 +786,10 @@ app.registerExtension({
                 sectionTitle.textContent = text;
                 Object.assign(sectionTitle.style, {
                     color,
-                    fontSize: "15px",
+                    fontSize: "12px",
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
-                    padding: "4px 2px",
+                    padding: "4px 2px 2px",
                     fontWeight: "600",
                 });
                 return sectionTitle;
@@ -807,7 +803,7 @@ app.registerExtension({
                     gap: "12px",
                     flexWrap: "wrap",
                     background: "transparent",
-                    borderBottom: "1px solid #242b37",
+                    borderBottom: "1px solid #3c3d42",
                     padding: "12px 4px",
                 });
                 return row;
@@ -822,7 +818,7 @@ app.registerExtension({
                 Object.assign(noMissing.style, {
                     padding: "12px 10px 16px",
                     color: "#58d58c",
-                    fontSize: "22px",
+                    fontSize: "16px",
                     lineHeight: "1.15",
                 });
                 content.appendChild(noMissing);
@@ -837,10 +833,10 @@ app.registerExtension({
 
                     const row = makeBaseRow();
                     Object.assign(row.style, {
-                        background: "#171d28",
-                        border: "1px solid #2e3646",
-                        borderRadius: "12px",
-                        padding: "12px",
+                        background: "#262729",
+                        border: "1px solid #3c3d42",
+                        borderRadius: "10px",
+                        padding: "10px",
                     });
 
                     const cb = document.createElement("input");
@@ -856,7 +852,7 @@ app.registerExtension({
                     const nameEl = document.createElement("div");
                     Object.assign(nameEl.style, {
                         fontWeight: "600",
-                        fontSize: "17px",
+                        fontSize: "14px",
                         lineHeight: "1.2",
                         wordBreak: "break-word",
                         color: "#edf2fb",
@@ -866,7 +862,7 @@ app.registerExtension({
                     const metaEl = document.createElement("div");
                     Object.assign(metaEl.style, {
                         fontSize: "12px",
-                        color: "#99a5bb",
+                        color: "#8a8a8a",
                         marginTop: "3px",
                     });
                     metaEl.textContent = `${m.node_title || "Unknown Node"}${m.source ? " • " + m.source : ""}`;
@@ -877,7 +873,7 @@ app.registerExtension({
                     Object.assign(urlInput.style, {
                         flex: "2 1 320px",
                         minWidth: "220px",
-                        fontSize: "15px",
+                        fontSize: "14px",
                         minHeight: "40px",
                     });
 
@@ -887,7 +883,7 @@ app.registerExtension({
                         minWidth: "140px",
                     });
                     Object.assign(folderPicker.input.style, {
-                        fontSize: "15px",
+                        fontSize: "14px",
                         minHeight: "40px",
                     });
 
@@ -920,9 +916,9 @@ app.registerExtension({
                             alignSelf: "flex-start",
                             fontSize: "12px",
                             padding: "6px 9px",
-                            background: "#2a3140",
+                            background: "#313235",
                             color: "#d9e2f3",
-                            border: "1px solid #3c4558",
+                            border: "1px solid #494a50",
                             borderRadius: "7px",
                             cursor: "pointer",
                             fontWeight: "600",
@@ -931,8 +927,8 @@ app.registerExtension({
                         const altList = document.createElement("div");
                         Object.assign(altList.style, {
                             display: "none",
-                            background: "#151b25",
-                            border: "1px solid #2d3443",
+                            background: "#202121",
+                            border: "1px solid #3c3d42",
                             padding: "8px",
                             borderRadius: "8px",
                         });
@@ -945,7 +941,7 @@ app.registerExtension({
                                 alignItems: "center",
                                 gap: "10px",
                                 padding: "7px 0",
-                                borderBottom: "1px solid #242b38",
+                                borderBottom: "1px solid #3c3d42",
                             });
 
                             const altLabel = document.createElement("div");
@@ -957,9 +953,9 @@ app.registerExtension({
                             useBtn.textContent = "Use";
                             Object.assign(useBtn.style, {
                                 padding: "5px 10px",
-                                background: "#304059",
+                                background: "#313235",
                                 color: "#e9f1ff",
-                                border: "1px solid #3f5270",
+                                border: "1px solid #494a50",
                                 borderRadius: "6px",
                                 cursor: "pointer",
                                 fontSize: "12px",
@@ -1015,7 +1011,7 @@ app.registerExtension({
                     marker.textContent = "●";
                     Object.assign(marker.style, {
                         color: "#56d78f",
-                        fontSize: "12px",
+                        fontSize: "10px",
                         fontWeight: "700",
                         width: "12px",
                         textAlign: "center",
@@ -1031,7 +1027,7 @@ app.registerExtension({
                     nameEl.textContent = m.filename || "Unknown model";
                     Object.assign(nameEl.style, {
                         fontWeight: "600",
-                        fontSize: "16px",
+                        fontSize: "14px",
                         lineHeight: "1.2",
                         wordBreak: "break-word",
                         color: "#edf2fb",
@@ -1041,7 +1037,7 @@ app.registerExtension({
                     metaEl.textContent = `${m.source || "exact_match"} • already installed`;
                     Object.assign(metaEl.style, {
                         fontSize: "12px",
-                        color: "#99a5bb",
+                        color: "#8a8a8a",
                         marginTop: "3px",
                     });
 
@@ -1053,7 +1049,7 @@ app.registerExtension({
                     Object.assign(pathEl.style, {
                         flex: "2 1 360px",
                         minWidth: "220px",
-                        fontSize: "14px",
+                        fontSize: "13px",
                         color: "#cfd8ea",
                         wordBreak: "break-word",
                     });
@@ -1070,10 +1066,10 @@ app.registerExtension({
                 mismatchModels.forEach((m) => {
                     const row = makeBaseRow();
                     Object.assign(row.style, {
-                        background: "#171d28",
-                        border: "1px solid #2e3646",
-                        borderRadius: "12px",
-                        padding: "12px",
+                        background: "#262729",
+                        border: "1px solid #3c3d42",
+                        borderRadius: "10px",
+                        padding: "10px",
                     });
                     const left = document.createElement("div");
                     Object.assign(left.style, {
@@ -1086,10 +1082,10 @@ app.registerExtension({
                     const fixBtn = document.createElement("button");
                     fixBtn.textContent = "Fix Path";
                     Object.assign(fixBtn.style, {
-                        padding: "8px 12px",
+                        padding: "7px 10px",
                         background: "#2f84da",
                         color: "white",
-                        border: "1px solid #3f9af7",
+                        border: "none",
                         borderRadius: "8px",
                         cursor: "pointer",
                         fontWeight: "600",
@@ -1127,7 +1123,7 @@ app.registerExtension({
             const statusLine = document.createElement("div");
             Object.assign(statusLine.style, {
                 fontSize: "13px",
-                color: "#9ba8be",
+                color: "#8a8a8a",
                 minHeight: "20px",
             });
             panel.appendChild(statusLine);
@@ -1293,11 +1289,11 @@ app.registerExtension({
                 downloadBtn.disabled = true;
             }
             Object.assign(downloadBtn.style, {
-                minHeight: "48px",
-                padding: "0.55rem 1.2rem",
-                fontSize: "16px",
+                minHeight: "40px",
+                padding: "0.45rem 1rem",
+                fontSize: "14px",
                 fontWeight: "600",
-                borderRadius: "12px",
+                borderRadius: "8px",
             });
 
             footer.appendChild(downloadBtn);
@@ -1356,18 +1352,18 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "#12161f",
+                background: "#171718",
                 color: "#fff",
-                padding: "20px",
+                padding: "16px",
                 borderRadius: "16px",
                 width: "min(820px, 100%)",
                 maxWidth: "92vw",
                 maxHeight: "92vh",
                 display: "flex",
                 flexDirection: "column",
-                gap: "14px",
+                gap: "10px",
                 boxShadow: "0 16px 42px rgba(0,0,0,0.55)",
-                border: "1px solid #2f3747",
+                border: "1px solid #494a50",
                 overflow: "hidden",
             });
 
@@ -1389,7 +1385,7 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Download New Model";
             Object.assign(titleEl.style, {
-                fontSize: "32px",
+                fontSize: "22px",
                 fontWeight: "700",
                 letterSpacing: "-0.01em",
                 color: "#f0f4fc",
@@ -1399,8 +1395,8 @@ app.registerExtension({
             const subtitleEl = document.createElement("div");
             subtitleEl.textContent = "Paste a direct Hugging Face file URL and choose a folder.";
             Object.assign(subtitleEl.style, {
-                fontSize: "16px",
-                color: "#aeb7ca",
+                fontSize: "13px",
+                color: "#8a8a8a",
             });
 
             titleWrap.appendChild(titleEl);
@@ -1414,39 +1410,39 @@ app.registerExtension({
                 display: "flex",
                 flexDirection: "column",
                 gap: "10px",
-                background: "#0f131a",
-                border: "1px solid #2c3342",
+                background: "#171718",
+                border: "1px solid #3c3d42",
                 borderRadius: "14px",
-                padding: "14px",
+                padding: "12px",
             });
 
             const urlLabel = document.createElement("div");
             urlLabel.textContent = "Hugging Face URL";
             Object.assign(urlLabel.style, {
-                fontSize: "15px",
-                color: "#99a5ba",
+                fontSize: "12px",
+                color: "#8a8a8a",
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",
                 fontWeight: "600",
             });
             const urlInput = createInput("", "HuggingFace URL...");
             Object.assign(urlInput.style, {
-                fontSize: "15px",
+                fontSize: "14px",
                 minHeight: "40px",
             });
 
             const folderLabel = document.createElement("div");
             folderLabel.textContent = "Folder";
             Object.assign(folderLabel.style, {
-                fontSize: "15px",
-                color: "#99a5ba",
+                fontSize: "12px",
+                color: "#8a8a8a",
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",
                 fontWeight: "600",
             });
             const folderPicker = createFolderPicker("loras", "Folder");
             Object.assign(folderPicker.input.style, {
-                fontSize: "15px",
+                fontSize: "14px",
                 minHeight: "40px",
             });
 
@@ -1466,7 +1462,7 @@ app.registerExtension({
             const statusLine = document.createElement("div");
             Object.assign(statusLine.style, {
                 fontSize: "13px",
-                color: "#9ba8be",
+                color: "#8a8a8a",
                 minHeight: "20px",
             });
             panel.appendChild(statusLine);
@@ -1572,11 +1568,11 @@ app.registerExtension({
                 }
             });
             Object.assign(downloadBtn.style, {
-                minHeight: "48px",
-                padding: "0.55rem 1.2rem",
-                fontSize: "16px",
+                minHeight: "40px",
+                padding: "0.45rem 1rem",
+                fontSize: "14px",
                 fontWeight: "600",
-                borderRadius: "12px",
+                borderRadius: "8px",
             });
 
             footer.appendChild(downloadBtn);
