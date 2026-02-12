@@ -501,6 +501,19 @@ const includeTagsContainModels = (query) => {
     .includes("models");
 };
 
+const normalizeModelsListQuery = (path, query) => {
+  if (path !== ASSETS_ROUTE_PREFIX) {
+    return query;
+  }
+  if (!includeTagsContainModels(query)) {
+    return query;
+  }
+  const params = new URLSearchParams(query || "");
+  // Keep cloud/marketplace assets visible even if caller asks for imported-only.
+  params.set("include_public", "true");
+  return params.toString();
+};
+
 const isAssetDetailPath = (path) => /^\/assets\/[^/]+$/.test(path);
 const isAssetTagsPath = (path) => /^\/assets\/[^/]+\/tags$/.test(path);
 
@@ -552,16 +565,17 @@ const installFetchApiOverride = () => {
   api.fetchApi = async (route, options = {}) => {
     const method = getMethod(options);
     const { path, query } = splitRoute(route);
+    const normalizedQuery = normalizeModelsListQuery(path, query);
 
     if (!getBackendSettingEnabled()) {
       return originalFetchApi(normalizeRoute(route), options);
     }
 
-    if (!shouldInterceptRoute(path, query, method)) {
+    if (!shouldInterceptRoute(path, normalizedQuery, method)) {
       return originalFetchApi(normalizeRoute(route), options);
     }
 
-    const rewrittenRoute = rewriteRoute(path, query);
+    const rewrittenRoute = rewriteRoute(path, normalizedQuery);
     let response = await originalFetchApi(rewrittenRoute, options);
 
     if (

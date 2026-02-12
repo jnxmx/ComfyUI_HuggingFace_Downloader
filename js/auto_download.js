@@ -2012,6 +2012,84 @@ app.registerExtension({
             return match ? String(match[1] || "").trim() : "";
         };
 
+        const getWidgetAllowedValues = (widget, node) => {
+            const options = widget?.options || {};
+            let values = options?.values;
+            if (typeof values === "function") {
+                try {
+                    values = values(widget, node);
+                } catch (_) {
+                    values = [];
+                }
+            }
+            if (Array.isArray(values)) {
+                return values
+                    .map((value) => {
+                        if (Array.isArray(value)) return String(value[0] ?? "").trim();
+                        return String(value ?? "").trim();
+                    })
+                    .filter(Boolean);
+            }
+            if (values && typeof values === "object") {
+                return Object.keys(values)
+                    .map((value) => String(value || "").trim())
+                    .filter(Boolean);
+            }
+            return [];
+        };
+
+        const getPreRunModelValidationFailuresFromGraph = () => {
+            const graphNodes = Array.isArray(app?.graph?._nodes) ? app.graph._nodes : [];
+            if (!graphNodes.length) {
+                return [];
+            }
+
+            const failures = [];
+            for (const node of graphNodes) {
+                const classType = String(node?.type || "");
+                const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
+                if (!widgets.length) continue;
+
+                for (const widget of widgets) {
+                    const widgetName = String(widget?.name || "");
+                    const widgetNameLower = widgetName.toLowerCase();
+                    const widgetValue = String(widget?.value ?? "").trim();
+                    if (!widgetValue) continue;
+
+                    const isExplicitModelField =
+                        widgetNameLower !== "name" &&
+                        MODEL_VALIDATION_INPUT_NAMES.has(widgetNameLower);
+                    const isCandidateInput =
+                        isExplicitModelField ||
+                        (widgetNameLower === "name" && isLikelyModelLoaderClass(classType)) ||
+                        (widgetNameLower.endsWith("_name") && isLikelyModelLoaderClass(classType));
+                    if (!isCandidateInput) {
+                        continue;
+                    }
+
+                    const allowedValues = getWidgetAllowedValues(widget, node);
+                    if (!allowedValues.length) {
+                        continue;
+                    }
+
+                    const allowedSet = new Set(
+                        allowedValues.map((value) => String(value || "").trim())
+                    );
+                    if (allowedSet.has(widgetValue)) {
+                        continue;
+                    }
+
+                    failures.push({
+                        classType,
+                        inputName: widgetName,
+                        missingValue: widgetValue,
+                        details: `Widget value '${widgetValue}' not in allowed options (${allowedValues.length}).`
+                    });
+                }
+            }
+            return failures;
+        };
+
         const isLikelyModelLoaderClass = (classType) => {
             const value = String(classType || "").toLowerCase();
             if (!value) return false;
@@ -2264,6 +2342,14 @@ app.registerExtension({
                     const hadDialogBeforeRun = hasNativeMissingModelsDialog();
                     const hadValidationDialogBeforeRun = hasNativePromptValidationDialog();
                     const beforeNodeErrorSignature = getNodeErrorsSignature(getNodeErrorsSnapshot());
+
+                    if (hookEnabled) {
+                        const preRunFailures = getPreRunModelValidationFailuresFromGraph();
+                        if (preRunFailures.length) {
+                            triggerAutoDownloadFromRunHook("model-validation", preRunFailures);
+                            return false;
+                        }
+                    }
 
                     let result;
                     let error;
