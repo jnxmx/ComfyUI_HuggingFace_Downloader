@@ -2021,6 +2021,9 @@ app.registerExtension({
 
                     const hasMissing = await hasBlockingMissingModels();
                     if (hasMissing) {
+                        if (document.getElementById("auto-download-dialog")) {
+                            return;
+                        }
                         const runAction = window?.hfDownloader?.runAutoDownload;
                         if (typeof runAction === "function") {
                             runAction();
