@@ -581,11 +581,11 @@ def _resolve_model_library_category(entry: dict) -> str | None:
     directory = _normalize_rel_path(str(entry.get("directory", "") or "").strip())
     if manager_type:
         candidates.append(manager_type)
-    if model_type:
-        candidates.append(model_type)
     if directory:
         candidates.append(directory)
         candidates.append(directory.split("/", 1)[0])
+    if model_type:
+        candidates.append(model_type)
 
     for candidate in candidates:
         category = _canonical_model_library_category(candidate)

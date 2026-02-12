@@ -2117,8 +2117,54 @@ app.registerExtension({
             return Array.from(uniqueByKey.values());
         };
 
-        const getPreRunMissingModelsNativeLike = async () => {
-            const graphData = app?.graph?.serialize?.();
+        const getRegisteredNodeTypesMap = () => {
+            const candidates = [
+                globalThis?.LiteGraph?.registered_node_types,
+                window?.LiteGraph?.registered_node_types,
+            ];
+            for (const candidate of candidates) {
+                if (candidate && typeof candidate === "object") {
+                    return candidate;
+                }
+            }
+            return null;
+        };
+
+        const getMissingNodeTypesNativeLike = (graphData) => {
+            if (!graphData || typeof graphData !== "object") {
+                return [];
+            }
+            const registeredNodeTypes = getRegisteredNodeTypesMap();
+            if (!registeredNodeTypes) {
+                return [];
+            }
+
+            const missing = new Set();
+            const collectFromNodes = (nodes) => {
+                if (!Array.isArray(nodes)) return;
+                for (const node of nodes) {
+                    const nodeType = String(node?.type || "").trim();
+                    if (!nodeType) continue;
+                    if (!(nodeType in registeredNodeTypes)) {
+                        missing.add(nodeType);
+                    }
+                }
+            };
+
+            collectFromNodes(graphData?.nodes);
+            const subgraphs = graphData?.definitions?.subgraphs;
+            if (Array.isArray(subgraphs)) {
+                for (const subgraph of subgraphs) {
+                    collectFromNodes(subgraph?.nodes);
+                }
+            }
+            return Array.from(missing);
+        };
+
+        const getPreRunMissingModelsNativeLike = async (graphData = null) => {
+            if (!graphData || typeof graphData !== "object") {
+                graphData = app?.graph?.serialize?.();
+            }
             if (!graphData || typeof graphData !== "object") {
                 return [];
             }
@@ -2433,12 +2479,15 @@ app.registerExtension({
                     }
 
                     const hookEnabled = getRunHookEnabled();
+                    const graphData = app?.graph?.serialize?.();
+                    const missingNodeTypes = getMissingNodeTypesNativeLike(graphData);
+                    const hasMissingNodes = missingNodeTypes.length > 0;
                     const hadDialogBeforeRun = hasNativeMissingModelsDialog();
                     const hadValidationDialogBeforeRun = hasNativePromptValidationDialog();
                     const beforeNodeErrorSignature = getNodeErrorsSignature(getNodeErrorsSnapshot());
 
-                    if (hookEnabled) {
-                        const preRunMissingModels = await getPreRunMissingModelsNativeLike();
+                    if (hookEnabled && !hasMissingNodes) {
+                        const preRunMissingModels = await getPreRunMissingModelsNativeLike(graphData);
                         if (preRunMissingModels.length) {
                             const preRunFailures = preRunMissingModels.map((model) => ({
                                 classType: "",
@@ -2446,8 +2495,9 @@ app.registerExtension({
                                 missingValue: String(model?.name || "").trim(),
                                 details: `${String(model?.directory || "").trim()}/${String(model?.name || "").trim()}`
                             }));
-                            triggerAutoDownloadFromRunHook("native-missing-models", preRunFailures);
-                            return false;
+                            if (triggerAutoDownloadFromRunHook("native-missing-models", preRunFailures)) {
+                                return false;
+                            }
                         }
                     }
 
@@ -2459,7 +2509,7 @@ app.registerExtension({
                         error = err;
                     }
 
-                    if (hookEnabled) {
+                    if (hookEnabled && !hasMissingNodes) {
                         const immediateHasDialog = !hadDialogBeforeRun && hasNativeMissingModelsDialog();
                         const immediateValidationFailures = getImmediateValidationFailures({
                             beforeSignature: beforeNodeErrorSignature,
