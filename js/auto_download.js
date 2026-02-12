@@ -586,6 +586,40 @@ app.registerExtension({
             };
         };
 
+        const createDialogCloseIconButton = (onClose) => {
+            const closeIconButton = document.createElement("button");
+            closeIconButton.type = "button";
+            closeIconButton.textContent = "×";
+            Object.assign(closeIconButton.style, {
+                width: "34px",
+                height: "34px",
+                borderRadius: "8px",
+                border: "none",
+                background: "transparent",
+                color: "#a9b2c2",
+                fontSize: "34px",
+                lineHeight: "1",
+                cursor: "pointer",
+                padding: "0",
+                display: "grid",
+                placeItems: "center",
+            });
+            closeIconButton.onmouseenter = () => {
+                closeIconButton.style.background = "rgba(113, 126, 150, 0.2)";
+                closeIconButton.style.color = "#e7edf9";
+            };
+            closeIconButton.onmouseleave = () => {
+                closeIconButton.style.background = "transparent";
+                closeIconButton.style.color = "#a9b2c2";
+            };
+            closeIconButton.onclick = () => {
+                if (typeof onClose === "function") {
+                    onClose();
+                }
+            };
+            return closeIconButton;
+        };
+
         /* ──────────────── UI Components ──────────────── */
         const showResultsDialog = (data) => {
             let pollTimer = null;
@@ -596,11 +630,9 @@ app.registerExtension({
                 }
             };
 
-            // Remove existing dialog if any
             const existing = document.getElementById("auto-download-dialog");
             if (existing) existing.remove();
 
-            // Overlay
             const dlg = document.createElement("div");
             dlg.id = "auto-download-dialog";
             Object.assign(dlg.style, {
@@ -612,209 +644,260 @@ app.registerExtension({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: "rgba(0,0,0,0.6)",
-                zIndex: 9000
+                background: "rgba(0,0,0,0.5)",
+                zIndex: 9000,
+                padding: "16px",
+                boxSizing: "border-box",
             });
 
-            // Panel
+            let content = null;
+            let updateScrollHint = () => {};
+            let uiCleaned = false;
+            const cleanupUi = () => {
+                if (uiCleaned) return;
+                uiCleaned = true;
+                if (content) {
+                    content.removeEventListener("scroll", updateScrollHint);
+                }
+                window.removeEventListener("resize", updateScrollHint);
+            };
+
+            const closeDialog = () => {
+                stopPolling();
+                cleanupUi();
+                if (dlg.parentElement) {
+                    dlg.remove();
+                }
+            };
+
+            dlg.addEventListener("click", (e) => {
+                if (e.target === dlg) {
+                    closeDialog();
+                }
+            });
+
             const panel = document.createElement("div");
             Object.assign(panel.style, {
                 background: "#17191f",
                 color: "#fff",
-                padding: "20px",
+                border: "1px solid #3c3c3c",
                 borderRadius: "12px",
-                width: "800px",
-                maxWidth: "90vw",
-                maxHeight: "85vh",
-                display: "flex",
-                flexDirection: "column",
-                gap: "16px",
-                boxShadow: "0 0 20px rgba(0,0,0,0.8)",
-                border: "1px solid #3c3c3c"
-            });
-
-            /* Header */
-            const header = document.createElement("div");
-            header.innerHTML = `<h3>Auto-Download Models</h3><p style="font-size:12px;color:#aaa">Detected missing models and valid URLs.</p>`;
-            panel.appendChild(header);
-
-            /* Content Area (Scrollable) */
-            const content = document.createElement("div");
-            Object.assign(content.style, {
-                flex: "1",
-                overflowY: "auto",
+                width: "min(1220px, 100%)",
+                maxHeight: "92vh",
+                padding: "16px",
+                boxShadow: "0 0 24px rgba(0,0,0,0.7)",
                 display: "flex",
                 flexDirection: "column",
                 gap: "10px",
-                paddingRight: "5px"
-            });
-            loadFolderList();
-
-            /* Content Area */
-            Object.assign(content.style, {
-                marginTop: "15px",
-                maxHeight: "400px",
-                overflowY: "auto"
+                overflow: "hidden",
             });
 
-            // 2. Found Models sections
-            // A. Exact Matches (Information Only)
-            if (data.found && data.found.length > 0) {
-                const foundSection = document.createElement("div");
-                foundSection.innerHTML = "<h4 style='margin:10px 0 5px'>Found Local Models</h4>";
-                const ul = document.createElement("ul");
-                ul.style.fontSize = "12px";
-                ul.style.color = "#ccc";
-                data.found.forEach(m => {
-                    const li = document.createElement("li");
-                    li.textContent = `${m.filename} -> ${m.found_path} (Exact Match)`;
-                    ul.appendChild(li);
-                });
-                foundSection.appendChild(ul);
-                content.appendChild(foundSection);
-            }
+            const headerWrap = document.createElement("div");
+            Object.assign(headerWrap.style, {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "10px",
+            });
 
-            // B. Mismatches (Actionable)
-            if (data.mismatches && data.mismatches.length > 0) {
-                const mismatchSection = document.createElement("div");
-                mismatchSection.innerHTML = "<h4 style='margin:10px 0 5px; color: #ff9800'>Path Mismatches (Action Required)</h4>";
+            const titleWrap = document.createElement("div");
+            Object.assign(titleWrap.style, {
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px",
+            });
 
-                const ul = document.createElement("ul");
-                ul.style.listStyle = "none";
-                ul.style.padding = "0";
+            const titleEl = document.createElement("div");
+            titleEl.textContent = "Auto-Download Models";
+            Object.assign(titleEl.style, {
+                fontSize: "22px",
+                fontWeight: "700",
+                letterSpacing: "-0.01em",
+                color: "#eef3fb",
+            });
 
-                data.mismatches.forEach(m => {
-                    const li = document.createElement("li");
-                    li.style.background = "#2a2d35";
-                    li.style.marginBottom = "5px";
-                    li.style.padding = "8px";
-                    li.style.borderRadius = "4px";
-                    li.style.display = "flex";
-                    li.style.justifyContent = "space-between";
-                    li.style.alignItems = "center";
+            const subtitleEl = document.createElement("div");
+            subtitleEl.textContent = "Detected missing models and valid URLs.";
+            Object.assign(subtitleEl.style, {
+                fontSize: "13px",
+                color: "#9aa4b6",
+            });
 
-                    const left = document.createElement("div");
-                    const currentLabel = m.requested_path || m.filename;
-                    left.innerHTML = `<div style="color:#aaa; font-size:11px">Current: ${currentLabel}</div><div style="color:#4caf50; font-weight:bold; font-size:12px">Found: ${m.clean_path}</div>`;
+            titleWrap.appendChild(titleEl);
+            titleWrap.appendChild(subtitleEl);
+            headerWrap.appendChild(titleWrap);
+            headerWrap.appendChild(createDialogCloseIconButton(closeDialog));
+            panel.appendChild(headerWrap);
 
-                    const fixBtn = document.createElement("button");
-                    fixBtn.textContent = "Fix Path";
-                    fixBtn.style.padding = "4px 8px";
-                    fixBtn.style.background = "#2196F3";
-                    fixBtn.style.color = "white";
-                    fixBtn.style.border = "none";
-                    fixBtn.style.borderRadius = "4px";
-                    fixBtn.style.cursor = "pointer";
-
-                    fixBtn.onclick = () => {
-                        const node = app.graph.getNodeById(m.node_id);
-                        if (node) {
-                            // Find widget with the old value
-                            const targetValue = m.requested_path || m.filename;
-                            const widget = node.widgets.find(w => w.value === targetValue || w.value === m.filename);
-                            if (widget) {
-                                widget.value = m.clean_path;
-                                node.setDirtyCanvas(true);
-                                fixBtn.textContent = "Fixed!";
-                                fixBtn.style.background = "#4caf50";
-                                fixBtn.disabled = true;
-                            } else {
-                                alert("Could not find matching widget value on node.");
-                            }
-                        } else {
-                            alert("Node not found.");
-                        }
-                    };
-
-                    li.appendChild(left);
-                    li.appendChild(fixBtn);
-                    ul.appendChild(li);
-                });
-
-                mismatchSection.appendChild(ul);
-                content.appendChild(mismatchSection);
-            }
-
-            // 3. Missing Models Table
-            const missingModels = data.missing || [];
+            const missingModels = Array.isArray(data.missing) ? [...data.missing] : [];
             missingModels.sort((a, b) => {
                 const aMissing = a.url ? 0 : 1;
                 const bMissing = b.url ? 0 : 1;
                 if (aMissing !== bMissing) return bMissing - aMissing;
                 return (a.filename || "").localeCompare(b.filename || "");
             });
-            // Container for rows
-            const rowsContainer = document.createElement("div");
-            Object.assign(rowsContainer.style, {
+
+            const foundModels = Array.isArray(data.found) ? data.found : [];
+            const mismatchModels = Array.isArray(data.mismatches) ? data.mismatches : [];
+
+            const summaryRow = document.createElement("div");
+            Object.assign(summaryRow.style, {
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "10px",
+                fontSize: "12px",
+                color: "#9aa4b6",
+            });
+            summaryRow.textContent = `Missing: ${missingModels.length} • Found: ${foundModels.length} • Mismatches: ${mismatchModels.length}`;
+            panel.appendChild(summaryRow);
+
+            const listFrame = document.createElement("div");
+            Object.assign(listFrame.style, {
+                border: "1px solid #2f3440",
+                borderRadius: "8px",
+                background: "#171b24",
                 display: "flex",
                 flexDirection: "column",
-                gap: "8px"
+                overflow: "hidden",
+                minHeight: "280px",
+                maxHeight: "56vh",
             });
 
-            const rowInputs = []; // To store references to data for downloading
+            content = document.createElement("div");
+            Object.assign(content.style, {
+                overflowY: "auto",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                padding: "10px",
+            });
+            loadFolderList();
 
-            if (missingModels.length === 0) {
+            const scrollHint = document.createElement("div");
+            scrollHint.textContent = "Scroll for more";
+            Object.assign(scrollHint.style, {
+                display: "none",
+                fontSize: "11px",
+                color: "#8f97a5",
+                textAlign: "center",
+                borderTop: "1px solid #2a2f3a",
+                padding: "5px 8px",
+                background: "#161b25",
+                letterSpacing: "0.03em",
+                textTransform: "uppercase",
+            });
+
+            updateScrollHint = () => {
+                const hasOverflow = content.scrollHeight > content.clientHeight + 4;
+                const atBottom = content.scrollTop + content.clientHeight >= content.scrollHeight - 4;
+                scrollHint.style.display = hasOverflow && !atBottom ? "block" : "none";
+            };
+            content.addEventListener("scroll", updateScrollHint);
+            window.addEventListener("resize", updateScrollHint);
+
+            const makeSectionTitle = (text, color = "#9aa4b6") => {
+                const sectionTitle = document.createElement("div");
+                sectionTitle.textContent = text;
+                Object.assign(sectionTitle.style, {
+                    color,
+                    fontSize: "11px",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    padding: "2px 2px 4px",
+                });
+                return sectionTitle;
+            };
+
+            const makeBaseRow = () => {
+                const row = document.createElement("div");
+                Object.assign(row.style, {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    flexWrap: "wrap",
+                    background: "#1f2128",
+                    border: "1px solid #2d3340",
+                    padding: "10px",
+                    borderRadius: "6px",
+                });
+                return row;
+            };
+
+            const rowInputs = [];
+
+            content.appendChild(makeSectionTitle("Missing Models"));
+            if (!missingModels.length) {
                 const noMissing = document.createElement("div");
-                noMissing.textContent = "No missing models detected!";
-                noMissing.style.padding = "20px";
-                noMissing.style.textAlign = "center";
-                noMissing.style.color = "#4caf50";
+                noMissing.textContent = "No missing models detected.";
+                Object.assign(noMissing.style, {
+                    padding: "12px",
+                    color: "#5bd98c",
+                    fontSize: "13px",
+                });
                 content.appendChild(noMissing);
             } else {
-                missingModels.forEach((m, idx) => {
+                missingModels.forEach((m) => {
                     const rowWrapper = document.createElement("div");
                     Object.assign(rowWrapper.style, {
                         display: "flex",
                         flexDirection: "column",
-                        gap: "6px"
+                        gap: "6px",
                     });
 
-                    const row = document.createElement("div");
-                    Object.assign(row.style, {
-                        display: "grid",
-                        gridTemplateColumns: "30px 1fr 2fr 1fr",
-                        gap: "10px",
-                        alignItems: "center",
-                        background: "#1f2128",
-                        padding: "10px",
-                        borderRadius: "6px"
-                    });
+                    const row = makeBaseRow();
 
-                    // Checkbox
                     const cb = document.createElement("input");
                     cb.type = "checkbox";
-                    cb.checked = true; // Default selected
+                    cb.checked = Boolean(m.url);
+                    cb.style.marginTop = "2px";
 
-                    // Should be unchecked if no URL?
-                    if (!m.url) cb.checked = false;
-
-                    // Info
                     const infoDiv = document.createElement("div");
+                    Object.assign(infoDiv.style, {
+                        flex: "1 1 220px",
+                        minWidth: "180px",
+                    });
                     const nameEl = document.createElement("div");
-                    nameEl.style.fontWeight = "bold";
-                    nameEl.style.fontSize = "12px";
-                    nameEl.style.wordBreak = "break-all";
-                    nameEl.textContent = m.filename;
+                    Object.assign(nameEl.style, {
+                        fontWeight: "600",
+                        fontSize: "14px",
+                        lineHeight: "1.2",
+                        wordBreak: "break-word",
+                        color: "#e5ebf7",
+                    });
+                    nameEl.textContent = m.filename || "Unknown model";
 
                     const metaEl = document.createElement("div");
-                    metaEl.style.fontSize = "10px";
-                    metaEl.style.color = "#888";
+                    Object.assign(metaEl.style, {
+                        fontSize: "11px",
+                        color: "#8892a5",
+                        marginTop: "2px",
+                    });
                     metaEl.textContent = `${m.node_title || "Unknown Node"}${m.source ? " • " + m.source : ""}`;
-
                     infoDiv.appendChild(nameEl);
                     infoDiv.appendChild(metaEl);
 
-                    // URL Input
                     const urlInput = createInput(m.url, "HuggingFace URL...");
+                    Object.assign(urlInput.style, {
+                        flex: "2 1 320px",
+                        minWidth: "220px",
+                        fontSize: "13px",
+                        minHeight: "34px",
+                    });
 
-                    // Folder (can be editable)
                     const folderPicker = createFolderPicker(m.suggested_folder || "checkpoints", "Folder");
+                    Object.assign(folderPicker.wrapper.style, {
+                        flex: "0 0 180px",
+                        minWidth: "140px",
+                    });
+                    Object.assign(folderPicker.input.style, {
+                        fontSize: "13px",
+                        minHeight: "34px",
+                    });
 
                     row.appendChild(cb);
                     row.appendChild(infoDiv);
                     row.appendChild(urlInput);
                     row.appendChild(folderPicker.wrapper);
-
                     rowWrapper.appendChild(row);
 
                     const rowData = {
@@ -829,7 +912,7 @@ app.registerExtension({
                         nameEl: nameEl,
                         metaEl: metaEl,
                         nodeTitle: m.node_title || "Unknown Node",
-                        nodeId: m.node_id
+                        nodeId: m.node_id,
                     };
                     rowInputs.push(rowData);
 
@@ -837,16 +920,15 @@ app.registerExtension({
                         const altToggle = document.createElement("button");
                         altToggle.textContent = `Alternatives (${m.alternatives.length})`;
                         Object.assign(altToggle.style, {
-                            marginTop: "6px",
+                            alignSelf: "flex-start",
                             fontSize: "11px",
-                            padding: "4px 6px",
+                            padding: "4px 8px",
                             background: "#2b2f3a",
                             color: "#ddd",
                             border: "1px solid #444",
                             borderRadius: "4px",
-                            cursor: "pointer"
+                            cursor: "pointer",
                         });
-                        infoDiv.appendChild(altToggle);
 
                         const altList = document.createElement("div");
                         Object.assign(altList.style, {
@@ -854,7 +936,7 @@ app.registerExtension({
                             background: "#17191f",
                             border: "1px solid #333",
                             padding: "8px",
-                            borderRadius: "6px"
+                            borderRadius: "6px",
                         });
 
                         m.alternatives.forEach((alt) => {
@@ -865,7 +947,7 @@ app.registerExtension({
                                 alignItems: "center",
                                 gap: "10px",
                                 padding: "4px 0",
-                                borderBottom: "1px solid #222"
+                                borderBottom: "1px solid #222",
                             });
 
                             const altLabel = document.createElement("div");
@@ -882,7 +964,7 @@ app.registerExtension({
                                 border: "none",
                                 borderRadius: "4px",
                                 cursor: "pointer",
-                                fontSize: "11px"
+                                fontSize: "11px",
                             });
 
                             useBtn.onclick = () => {
@@ -906,46 +988,158 @@ app.registerExtension({
 
                         altToggle.onclick = () => {
                             altList.style.display = altList.style.display === "none" ? "block" : "none";
+                            updateScrollHint();
                         };
 
+                        rowWrapper.appendChild(altToggle);
                         rowWrapper.appendChild(altList);
                     }
 
-                    rowsContainer.appendChild(rowWrapper);
+                    content.appendChild(rowWrapper);
                 });
-                content.appendChild(rowsContainer);
             }
 
-            panel.appendChild(content);
+            content.appendChild(makeSectionTitle("Found Local Models"));
+            if (!foundModels.length) {
+                const noneFound = document.createElement("div");
+                noneFound.textContent = "No already-installed models matched this workflow.";
+                Object.assign(noneFound.style, {
+                    padding: "10px 12px",
+                    color: "#8d96a8",
+                    fontSize: "12px",
+                });
+                content.appendChild(noneFound);
+            } else {
+                foundModels.forEach((m) => {
+                    const row = makeBaseRow();
+
+                    const marker = document.createElement("div");
+                    marker.textContent = "✓";
+                    Object.assign(marker.style, {
+                        color: "#5bd98c",
+                        fontSize: "15px",
+                        fontWeight: "700",
+                        width: "14px",
+                        textAlign: "center",
+                    });
+
+                    const infoDiv = document.createElement("div");
+                    Object.assign(infoDiv.style, {
+                        flex: "1 1 240px",
+                        minWidth: "200px",
+                    });
+
+                    const nameEl = document.createElement("div");
+                    nameEl.textContent = m.filename || "Unknown model";
+                    Object.assign(nameEl.style, {
+                        fontWeight: "600",
+                        fontSize: "14px",
+                        lineHeight: "1.2",
+                        wordBreak: "break-word",
+                        color: "#e5ebf7",
+                    });
+
+                    const metaEl = document.createElement("div");
+                    metaEl.textContent = `${m.source || "exact_match"} • already installed`;
+                    Object.assign(metaEl.style, {
+                        fontSize: "11px",
+                        color: "#8892a5",
+                        marginTop: "2px",
+                    });
+
+                    infoDiv.appendChild(nameEl);
+                    infoDiv.appendChild(metaEl);
+
+                    const pathEl = document.createElement("div");
+                    pathEl.textContent = m.found_path || "";
+                    Object.assign(pathEl.style, {
+                        flex: "2 1 360px",
+                        minWidth: "220px",
+                        fontSize: "12px",
+                        color: "#c6cfde",
+                        wordBreak: "break-all",
+                    });
+
+                    row.appendChild(marker);
+                    row.appendChild(infoDiv);
+                    row.appendChild(pathEl);
+                    content.appendChild(row);
+                });
+            }
+
+            if (mismatchModels.length > 0) {
+                content.appendChild(makeSectionTitle("Path Mismatches", "#ffb35c"));
+                mismatchModels.forEach((m) => {
+                    const row = makeBaseRow();
+                    const left = document.createElement("div");
+                    Object.assign(left.style, {
+                        flex: "1 1 260px",
+                        minWidth: "220px",
+                    });
+                    const currentLabel = m.requested_path || m.filename;
+                    left.innerHTML = `<div style="color:#aaa; font-size:11px">Current: ${currentLabel}</div><div style="color:#4caf50; font-weight:600; font-size:12px; margin-top:2px;">Found: ${m.clean_path}</div>`;
+
+                    const fixBtn = document.createElement("button");
+                    fixBtn.textContent = "Fix Path";
+                    Object.assign(fixBtn.style, {
+                        padding: "6px 10px",
+                        background: "#2196F3",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "5px",
+                        cursor: "pointer",
+                        fontWeight: "600",
+                        fontSize: "12px",
+                    });
+
+                    fixBtn.onclick = () => {
+                        const node = app.graph.getNodeById(m.node_id);
+                        if (!node) {
+                            alert("Node not found.");
+                            return;
+                        }
+                        const targetValue = m.requested_path || m.filename;
+                        const widget = node.widgets.find((w) => w.value === targetValue || w.value === m.filename);
+                        if (!widget) {
+                            alert("Could not find matching widget value on node.");
+                            return;
+                        }
+                        widget.value = m.clean_path;
+                        node.setDirtyCanvas(true);
+                        fixBtn.textContent = "Fixed";
+                        fixBtn.style.background = "#4caf50";
+                        fixBtn.disabled = true;
+                    };
+
+                    row.appendChild(left);
+                    row.appendChild(fixBtn);
+                    content.appendChild(row);
+                });
+            }
+
+            listFrame.appendChild(content);
+            listFrame.appendChild(scrollHint);
+            panel.appendChild(listFrame);
 
             const statusLine = document.createElement("div");
             Object.assign(statusLine.style, {
                 fontSize: "12px",
-                color: "#aaa",
-                minHeight: "16px"
+                color: "#9aa4b6",
+                minHeight: "16px",
             });
             panel.appendChild(statusLine);
 
-            const refreshHint = document.createElement("div");
-            Object.assign(refreshHint.style, {
-                color: "yellow",
-                marginTop: "6px",
-                display: "none"
-            });
-            panel.appendChild(refreshHint);
+            const setStatus = (msg, color = "#9aa4b6") => {
+                statusLine.textContent = msg || "";
+                statusLine.style.color = color;
+            };
 
-            /* Buttons */
             const footer = document.createElement("div");
             Object.assign(footer.style, {
                 display: "flex",
                 justifyContent: "flex-end",
                 gap: "10px",
-                marginTop: "10px"
-            });
-
-            const closeBtn = createButton("Close", "p-button p-component p-button-secondary", () => {
-                stopPolling();
-                dlg.remove();
+                marginTop: "4px",
             });
 
             const downloadBtn = createButton("Download Selected", "p-button p-component p-button-success", async () => {
@@ -953,7 +1147,7 @@ app.registerExtension({
                 const toDownload = selectedRows.map((r) => ({
                     filename: r.filename,
                     url: r.urlInput.value.trim(),
-                    folder: r.folderInput.value.trim()
+                    folder: r.folderInput.value.trim(),
                 }));
 
                 if (toDownload.length === 0) {
@@ -961,15 +1155,7 @@ app.registerExtension({
                     return;
                 }
 
-                const setStatus = (msg, color = "#aaa") => {
-                    statusLine.textContent = msg || "";
-                    statusLine.style.color = color;
-                };
-
-                refreshHint.style.display = "none";
-                setStatus("Queuing downloads...");
-
-                // Switch UI to downloading state
+                setStatus("Queuing downloads...", "#9ad6ff");
                 downloadBtn.disabled = true;
                 downloadBtn.textContent = "Queued";
 
@@ -991,26 +1177,26 @@ app.registerExtension({
                     queueable.push(item);
                     queueRows.push(row);
                 }
-                if (queueable.length === 0) {
+
+                if (!queueable.length) {
                     setStatus("No valid URLs to queue.", "#f5b14c");
                     downloadBtn.disabled = false;
                     downloadBtn.textContent = "Download Selected";
                     return;
                 }
-                setStatus(`Queued ${queueable.length} model(s). Track progress in the Downloads panel.`, "#9ad6ff");
 
                 try {
                     const resp = await fetch("/queue_download", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ models: queueable })
+                        body: JSON.stringify({ models: queueable }),
                     });
                     if (resp.status !== 200) {
                         throw new Error("Server returned " + resp.status + " " + resp.statusText);
                     }
                     const res = await resp.json();
                     const queued = res.queued || [];
-                    const downloadIds = queued.map(q => q.download_id);
+                    const downloadIds = queued.map((q) => q.download_id).filter(Boolean);
                     const queueRowsById = new Map();
                     for (let i = 0; i < queued.length; i += 1) {
                         const q = queued[i];
@@ -1021,6 +1207,7 @@ app.registerExtension({
                     }
 
                     setStatus(`Queued ${queued.length} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
+                    cleanupUi();
                     if (dlg.parentElement) {
                         dlg.remove();
                     }
@@ -1029,7 +1216,7 @@ app.registerExtension({
                     const pending = new Set(downloadIds);
 
                     const poll = async () => {
-                        if (downloadIds.length === 0) return;
+                        if (!downloadIds.length) return;
                         try {
                             const statusResp = await fetch(`/download_status?ids=${encodeURIComponent(downloadIds.join(","))}`);
                             if (statusResp.status !== 200) return;
@@ -1042,10 +1229,6 @@ app.registerExtension({
                                 const last = statusMap[id];
                                 if (last !== info.status) {
                                     statusMap[id] = info.status;
-                                    const name = info.filename || id;
-                                    if (info.status === "failed") {
-                                        setStatus(`Failed: ${name}`, "#ff6b6b");
-                                    }
                                 }
                                 if (info.status === "downloaded" || info.status === "completed" || info.status === "failed" || info.status === "cancelled") {
                                     pending.delete(id);
@@ -1068,34 +1251,29 @@ app.registerExtension({
                                     updatedRefs += applyDownloadedReferenceToWorkflow(row, info);
                                 }
 
-                                let statusMessage;
-                                let statusColor;
                                 if (failures) {
-                                    statusMessage = `Finished with ${failures} error(s). See Downloads panel for details.`;
-                                    statusColor = "#ff6b6b";
+                                    showToast({
+                                        severity: failures === downloadIds.length ? "error" : "warn",
+                                        summary: "Downloads finished with errors",
+                                        detail: `${downloadIds.length - failures} succeeded, ${failures} failed or cancelled.`,
+                                    });
                                 } else {
-                                    statusMessage = "All downloads finished.";
-                                    statusColor = "#5bd98c";
+                                    showToast({
+                                        severity: "success",
+                                        summary: "Downloads queued",
+                                        detail: `${downloadIds.length} model(s) completed.`,
+                                    });
                                 }
                                 if (updatedRefs > 0) {
-                                    statusMessage += ` Updated ${updatedRefs} workflow reference${updatedRefs === 1 ? "" : "s"} to downloaded filename${updatedRefs === 1 ? "" : "s"}.`;
                                     showToast({
                                         severity: "success",
                                         summary: "Workflow updated",
-                                        detail: `Updated ${updatedRefs} model reference${updatedRefs === 1 ? "" : "s"} automatically.`
+                                        detail: `Updated ${updatedRefs} model reference${updatedRefs === 1 ? "" : "s"} automatically.`,
                                     });
                                 }
-                                setStatus(statusMessage, statusColor);
-                                downloadBtn.style.display = "none";
-                                closeBtn.textContent = "Finish";
-                                closeBtn.className = "p-button p-component p-button-success";
-                                closeBtn.style.display = "inline-block";
-
-                                refreshHint.textContent = "Please refresh ComfyUI (Press 'R' or F5) to load new models.";
-                                refreshHint.style.display = "block";
                             }
                         } catch (e) {
-                            setStatus(`Status polling error: ${e}`, "#ff6b6b");
+                            // Status panel already tracks final errors; avoid noisy alerts here.
                         }
                     };
 
@@ -1108,16 +1286,24 @@ app.registerExtension({
                 }
             });
 
-            // If no models to download, disable download button
-            if (missingModels.length === 0) downloadBtn.disabled = true;
+            if (!missingModels.length) {
+                downloadBtn.disabled = true;
+            }
+            Object.assign(downloadBtn.style, {
+                minHeight: "32px",
+                padding: "0.34rem 0.9rem",
+                fontSize: "13px",
+                fontWeight: "600",
+                borderRadius: "6px",
+            });
 
-            footer.appendChild(closeBtn);
             footer.appendChild(downloadBtn);
             panel.appendChild(footer);
 
             dlg.appendChild(panel);
             document.body.appendChild(dlg);
             setTimeout(() => {
+                updateScrollHint();
                 const firstUrlInput = dlg.querySelector("input[placeholder='HuggingFace URL...']");
                 if (firstUrlInput) {
                     firstUrlInput.focus();
@@ -1153,43 +1339,111 @@ app.registerExtension({
                 zIndex: 9000
             });
 
+            const closeDialog = () => {
+                stopPolling();
+                if (dlg.parentElement) {
+                    dlg.remove();
+                }
+            };
+
+            dlg.addEventListener("click", (e) => {
+                if (e.target === dlg) {
+                    closeDialog();
+                }
+            });
+
             const panel = document.createElement("div");
             Object.assign(panel.style, {
                 background: "#17191f",
                 color: "#fff",
-                padding: "20px",
+                padding: "16px",
                 borderRadius: "12px",
-                width: "520px",
-                maxWidth: "90vw",
+                width: "min(820px, 100%)",
+                maxWidth: "92vw",
+                maxHeight: "92vh",
                 display: "flex",
                 flexDirection: "column",
-                gap: "16px",
-                boxShadow: "0 0 20px rgba(0,0,0,0.8)",
-                border: "1px solid #3c3c3c"
+                gap: "10px",
+                boxShadow: "0 0 24px rgba(0,0,0,0.7)",
+                border: "1px solid #3c3c3c",
+                overflow: "hidden",
             });
 
-            const header = document.createElement("div");
-            header.innerHTML = `<h3>Download New Model</h3><p style="font-size:12px;color:#aaa">Paste a direct Hugging Face file URL and choose a folder.</p>`;
-            panel.appendChild(header);
+            const headerWrap = document.createElement("div");
+            Object.assign(headerWrap.style, {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "10px",
+            });
+
+            const titleWrap = document.createElement("div");
+            Object.assign(titleWrap.style, {
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px",
+            });
+
+            const titleEl = document.createElement("div");
+            titleEl.textContent = "Download New Model";
+            Object.assign(titleEl.style, {
+                fontSize: "22px",
+                fontWeight: "700",
+                letterSpacing: "-0.01em",
+                color: "#eef3fb",
+            });
+
+            const subtitleEl = document.createElement("div");
+            subtitleEl.textContent = "Paste a direct Hugging Face file URL and choose a folder.";
+            Object.assign(subtitleEl.style, {
+                fontSize: "13px",
+                color: "#9aa4b6",
+            });
+
+            titleWrap.appendChild(titleEl);
+            titleWrap.appendChild(subtitleEl);
+            headerWrap.appendChild(titleWrap);
+            headerWrap.appendChild(createDialogCloseIconButton(closeDialog));
+            panel.appendChild(headerWrap);
 
             const content = document.createElement("div");
             Object.assign(content.style, {
                 display: "flex",
                 flexDirection: "column",
-                gap: "10px"
+                gap: "10px",
+                background: "#171b24",
+                border: "1px solid #2f3440",
+                borderRadius: "8px",
+                padding: "12px",
             });
 
             const urlLabel = document.createElement("div");
-            urlLabel.textContent = "HuggingFace URL";
-            urlLabel.style.fontSize = "12px";
-            urlLabel.style.color = "#aaa";
+            urlLabel.textContent = "Hugging Face URL";
+            Object.assign(urlLabel.style, {
+                fontSize: "11px",
+                color: "#8f97a5",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+            });
             const urlInput = createInput("", "HuggingFace URL...");
+            Object.assign(urlInput.style, {
+                fontSize: "14px",
+                minHeight: "36px",
+            });
 
             const folderLabel = document.createElement("div");
             folderLabel.textContent = "Folder";
-            folderLabel.style.fontSize = "12px";
-            folderLabel.style.color = "#aaa";
+            Object.assign(folderLabel.style, {
+                fontSize: "11px",
+                color: "#8f97a5",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+            });
             const folderPicker = createFolderPicker("loras", "Folder");
+            Object.assign(folderPicker.input.style, {
+                fontSize: "14px",
+                minHeight: "36px",
+            });
 
             content.appendChild(urlLabel);
             content.appendChild(urlInput);
@@ -1201,13 +1455,21 @@ app.registerExtension({
             Object.assign(footer.style, {
                 display: "flex",
                 justifyContent: "flex-end",
-                gap: "10px"
+                gap: "10px",
             });
 
-            const closeBtn = createButton("Close", "p-button p-component p-button-secondary", () => {
-                stopPolling();
-                dlg.remove();
+            const statusLine = document.createElement("div");
+            Object.assign(statusLine.style, {
+                fontSize: "12px",
+                color: "#9aa4b6",
+                minHeight: "16px",
             });
+            panel.appendChild(statusLine);
+
+            const setStatus = (msg, color = "#9aa4b6") => {
+                statusLine.textContent = msg || "";
+                statusLine.style.color = color;
+            };
 
             const downloadBtn = createButton("Download", "p-button p-component p-button-success", async () => {
                 const url = urlInput.value.trim();
@@ -1225,6 +1487,7 @@ app.registerExtension({
 
                 downloadBtn.disabled = true;
                 downloadBtn.textContent = "Queued";
+                setStatus("Queuing download...", "#9ad6ff");
 
                 try {
                     const resp = await fetch("/queue_download", {
@@ -1250,9 +1513,11 @@ app.registerExtension({
                         showToast({ severity: "warn", summary: "Queue empty", detail: "No download was queued." });
                         downloadBtn.disabled = false;
                         downloadBtn.textContent = "Download";
+                        setStatus("No download queued.", "#f5b14c");
                         return;
                     }
 
+                    setStatus(`Queued ${downloadIds.length} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
                     const statusMap = {};
                     const pending = new Set(downloadIds);
 
@@ -1269,7 +1534,6 @@ app.registerExtension({
                                 const last = statusMap[id];
                                 if (last !== info.status) {
                                     statusMap[id] = info.status;
-                                    const name = info.filename || id;
                                 }
                                 if (info.status === "downloaded" || info.status === "completed" || info.status === "failed" || info.status === "cancelled") {
                                     pending.delete(id);
@@ -1278,11 +1542,18 @@ app.registerExtension({
 
                             if (pending.size === 0) {
                                 stopPolling();
+                                const failures = downloadIds.filter((id) => downloads[id]?.status === "failed" || downloads[id]?.status === "cancelled").length;
                                 downloadBtn.disabled = false;
                                 downloadBtn.textContent = "Download";
+                                if (failures) {
+                                    setStatus(`Finished with ${failures} error(s).`, "#ff6b6b");
+                                } else {
+                                    setStatus("Download completed.", "#5bd98c");
+                                }
                             }
                         } catch (e) {
                             showToast({ severity: "error", summary: "Status error", detail: String(e) });
+                            setStatus("Status polling error.", "#ff6b6b");
                         }
                     };
 
@@ -1292,10 +1563,17 @@ app.registerExtension({
                     showToast({ severity: "error", summary: "Queue error", detail: String(e) });
                     downloadBtn.disabled = false;
                     downloadBtn.textContent = "Download";
+                    setStatus(`Queue error: ${String(e)}`, "#ff6b6b");
                 }
             });
+            Object.assign(downloadBtn.style, {
+                minHeight: "32px",
+                padding: "0.34rem 0.9rem",
+                fontSize: "13px",
+                fontWeight: "600",
+                borderRadius: "6px",
+            });
 
-            footer.appendChild(closeBtn);
             footer.appendChild(downloadBtn);
             panel.appendChild(footer);
 
