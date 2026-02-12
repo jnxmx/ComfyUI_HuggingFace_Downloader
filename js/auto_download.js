@@ -615,7 +615,7 @@ app.registerExtension({
                 border: "none",
                 background: "#262729",
                 color: "#fff",
-                fontSize: "26px",
+                fontSize: "20px",
                 lineHeight: "1",
                 cursor: "pointer",
                 padding: "0",
@@ -691,12 +691,13 @@ app.registerExtension({
                 borderRadius: "16px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
-                padding: "16px",
-                boxShadow: "0 16px 42px rgba(0,0,0,0.55)",
+                padding: "0",
+                boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
                 display: "flex",
                 flexDirection: "column",
-                gap: "10px",
+                gap: "0",
                 overflow: "hidden",
+                fontFamily: "Inter, sans-serif",
             });
 
             const headerWrap = document.createElement("div");
@@ -705,13 +706,17 @@ app.registerExtension({
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "10px",
+                height: "56px",
+                padding: "0 16px",
+                borderBottom: "1px solid #494a50",
+                flexShrink: "0",
             });
 
             const titleWrap = document.createElement("div");
             Object.assign(titleWrap.style, {
                 display: "flex",
                 flexDirection: "column",
-                gap: "4px",
+                gap: "2px",
             });
 
             const titleEl = document.createElement("div");
@@ -752,18 +757,19 @@ app.registerExtension({
             Object.assign(summaryRow.style, {
                 display: "flex",
                 flexWrap: "wrap",
-                gap: "10px",
+                gap: "8px",
                 fontSize: "12px",
                 color: "#a0a0a0",
+                padding: "10px 16px 0",
             });
             summaryRow.textContent = `Missing: ${missingModels.length} • Found: ${foundModels.length} • Mismatches: ${mismatchModels.length}`;
             panel.appendChild(summaryRow);
 
             const listFrame = document.createElement("div");
             Object.assign(listFrame.style, {
-                border: "1px solid #3c3d42",
-                borderRadius: "14px",
-                background: "#171718",
+                border: "none",
+                borderRadius: "0",
+                background: "transparent",
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
@@ -776,8 +782,8 @@ app.registerExtension({
                 overflowY: "auto",
                 display: "flex",
                 flexDirection: "column",
-                gap: "8px",
-                padding: "12px",
+                gap: "6px",
+                padding: "8px 16px 12px",
             });
             loadFolderList();
 
@@ -786,10 +792,10 @@ app.registerExtension({
                 sectionTitle.textContent = text;
                 Object.assign(sectionTitle.style, {
                     color,
-                    fontSize: "12px",
+                    fontSize: "11px",
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
-                    padding: "4px 2px 2px",
+                    padding: "4px 2px 0",
                     fontWeight: "600",
                 });
                 return sectionTitle;
@@ -803,8 +809,8 @@ app.registerExtension({
                     gap: "12px",
                     flexWrap: "wrap",
                     background: "transparent",
-                    borderBottom: "1px solid #3c3d42",
-                    padding: "12px 4px",
+                    borderBottom: "1px solid #313235",
+                    padding: "10px 0",
                 });
                 return row;
             };
@@ -818,7 +824,7 @@ app.registerExtension({
                 Object.assign(noMissing.style, {
                     padding: "12px 10px 16px",
                     color: "#58d58c",
-                    fontSize: "16px",
+                    fontSize: "14px",
                     lineHeight: "1.15",
                 });
                 content.appendChild(noMissing);
@@ -833,8 +839,8 @@ app.registerExtension({
 
                     const row = makeBaseRow();
                     Object.assign(row.style, {
-                        background: "#262729",
-                        border: "1px solid #3c3d42",
+                        background: "#202121",
+                        border: "1px solid #313235",
                         borderRadius: "10px",
                         padding: "10px",
                     });
@@ -861,7 +867,7 @@ app.registerExtension({
 
                     const metaEl = document.createElement("div");
                     Object.assign(metaEl.style, {
-                        fontSize: "12px",
+                        fontSize: "11px",
                         color: "#8a8a8a",
                         marginTop: "3px",
                     });
@@ -1049,8 +1055,8 @@ app.registerExtension({
                     Object.assign(pathEl.style, {
                         flex: "2 1 360px",
                         minWidth: "220px",
-                        fontSize: "13px",
-                        color: "#cfd8ea",
+                        fontSize: "12px",
+                        color: "#bfc8d8",
                         wordBreak: "break-word",
                     });
 
@@ -1066,8 +1072,8 @@ app.registerExtension({
                 mismatchModels.forEach((m) => {
                     const row = makeBaseRow();
                     Object.assign(row.style, {
-                        background: "#262729",
-                        border: "1px solid #3c3d42",
+                        background: "#202121",
+                        border: "1px solid #313235",
                         borderRadius: "10px",
                         padding: "10px",
                     });
@@ -1125,6 +1131,7 @@ app.registerExtension({
                 fontSize: "13px",
                 color: "#8a8a8a",
                 minHeight: "20px",
+                padding: "0 16px",
             });
             panel.appendChild(statusLine);
 
@@ -1139,6 +1146,7 @@ app.registerExtension({
                 justifyContent: "flex-end",
                 gap: "12px",
                 marginTop: "2px",
+                padding: "0 16px 16px",
             });
 
             const downloadBtn = createButton("Download Selected", "p-button p-component p-button-success", async () => {
@@ -1354,17 +1362,18 @@ app.registerExtension({
             Object.assign(panel.style, {
                 background: "#171718",
                 color: "#fff",
-                padding: "16px",
+                padding: "0",
                 borderRadius: "16px",
                 width: "min(820px, 100%)",
                 maxWidth: "92vw",
                 maxHeight: "92vh",
                 display: "flex",
                 flexDirection: "column",
-                gap: "10px",
-                boxShadow: "0 16px 42px rgba(0,0,0,0.55)",
+                gap: "0",
+                boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
                 border: "1px solid #494a50",
                 overflow: "hidden",
+                fontFamily: "Inter, sans-serif",
             });
 
             const headerWrap = document.createElement("div");
@@ -1373,13 +1382,17 @@ app.registerExtension({
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "10px",
+                height: "56px",
+                padding: "0 16px",
+                borderBottom: "1px solid #494a50",
+                flexShrink: "0",
             });
 
             const titleWrap = document.createElement("div");
             Object.assign(titleWrap.style, {
                 display: "flex",
                 flexDirection: "column",
-                gap: "4px",
+                gap: "2px",
             });
 
             const titleEl = document.createElement("div");
@@ -1410,10 +1423,10 @@ app.registerExtension({
                 display: "flex",
                 flexDirection: "column",
                 gap: "10px",
-                background: "#171718",
-                border: "1px solid #3c3d42",
-                borderRadius: "14px",
-                padding: "12px",
+                background: "transparent",
+                border: "none",
+                borderRadius: "0",
+                padding: "12px 16px",
             });
 
             const urlLabel = document.createElement("div");
@@ -1457,6 +1470,7 @@ app.registerExtension({
                 display: "flex",
                 justifyContent: "flex-end",
                 gap: "10px",
+                padding: "0 16px 16px",
             });
 
             const statusLine = document.createElement("div");
@@ -1464,6 +1478,7 @@ app.registerExtension({
                 fontSize: "13px",
                 color: "#8a8a8a",
                 minHeight: "20px",
+                padding: "0 16px",
             });
             panel.appendChild(statusLine);
 
