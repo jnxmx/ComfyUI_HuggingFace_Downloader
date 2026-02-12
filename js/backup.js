@@ -116,9 +116,15 @@ app.registerExtension({
     background: var(--secondary-background-hover, #444b58) !important;
 }
 .hf-backup-action-btn.p-button.p-button-success {
-    background: var(--primary-background, #1f9cf0) !important;
+    background: #43c06b !important;
 }
 .hf-backup-action-btn.p-button.p-button-success:hover {
+    background: #55d17c !important;
+}
+.hf-backup-action-btn.p-button.hf-btn-primary {
+    background: var(--primary-background, #1f9cf0) !important;
+}
+.hf-backup-action-btn.p-button.hf-btn-primary:hover {
     background: var(--primary-background-hover, #2b83f6) !important;
 }
 .hf-backup-action-btn.p-button.p-button-danger {
@@ -150,7 +156,7 @@ app.registerExtension({
     width: 360px;
     max-width: calc(100vw - 32px);
     background: var(--comfy-menu-bg, #202020);
-    border: 1px solid var(--border-color, #4e4e4e);
+    border: 1px solid var(--border-subtle, var(--border-default, #3f434c));
     border-radius: 16px;
     box-shadow: 1px 1px 8px rgba(0, 0, 0, 0.4);
     color: var(--input-text, #ddd);
@@ -168,7 +174,7 @@ app.registerExtension({
 }
 #hf-backup-op-panel .hf-backup-op-item {
     background: var(--comfy-input-bg, #222);
-    border: 1px solid var(--border-color, #4e4e4e);
+    border: 1px solid var(--border-subtle, var(--border-default, #3f434c));
     border-radius: 6px;
     padding: 8px;
     display: flex;
@@ -214,7 +220,7 @@ app.registerExtension({
     display: none;
     justify-content: flex-end;
     padding: 8px 10px;
-    border-top: 1px solid var(--border-color, #4e4e4e);
+    border-top: 1px solid var(--border-subtle, var(--border-default, #3f434c));
     background: var(--comfy-menu-bg, #202020);
 }
 #hf-backup-op-panel .hf-backup-op-refresh {
@@ -263,6 +269,8 @@ app.registerExtension({
             button.className = "p-button p-component hf-backup-action-btn";
             if (tone === "success") {
                 button.classList.add("p-button-success");
+            } else if (tone === "primary") {
+                button.classList.add("hf-btn-primary");
             } else if (tone === "danger") {
                 button.classList.add("p-button-danger");
             } else if (tone === "secondary") {
@@ -880,7 +888,7 @@ app.registerExtension({
             Object.assign(panel.style, {
                 background: "var(--comfy-menu-bg, #202020)",
                 color: "var(--input-text, #ddd)",
-                border: "1px solid var(--border-color, #4e4e4e)",
+                border: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
                 borderRadius: "16px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
@@ -900,13 +908,13 @@ app.registerExtension({
                 justifyContent: "space-between",
                 gap: "10px",
                 height: "72px",
-                padding: "0 24px",
-                borderBottom: "1px solid var(--border-color, #4e4e4e)",
+                padding: "0 32px 0 24px",
+                borderBottom: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
             });
 
             const header = document.createElement("div");
             header.textContent = "Backup Manager";
-            header.style.fontSize = "16px";
+            header.style.fontSize = "15px";
             header.style.fontWeight = "600";
             header.style.letterSpacing = "0";
             header.style.color = "var(--input-text, #ddd)";
@@ -916,8 +924,8 @@ app.registerExtension({
             closeIconButton.type = "button";
             closeIconButton.innerHTML = "<i class=\"pi pi-times\"></i>";
             Object.assign(closeIconButton.style, {
-                width: "40px",
-                height: "40px",
+                width: "44px",
+                height: "44px",
                 borderRadius: "10px",
                 border: "1px solid transparent",
                 background: "var(--comfy-input-bg, #222)",
@@ -929,10 +937,12 @@ app.registerExtension({
                 display: "grid",
                 placeItems: "center",
                 transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
+                flexShrink: "0",
+                marginLeft: "12px",
             });
             closeIconButton.onmouseenter = () => {
                 closeIconButton.style.background = "var(--secondary-background-hover, #313235)";
-                closeIconButton.style.borderColor = "var(--border-color, #4e4e4e)";
+                closeIconButton.style.borderColor = "var(--border-subtle, var(--border-default, #3f434c))";
             };
             closeIconButton.onmouseleave = () => {
                 closeIconButton.style.background = "var(--comfy-input-bg, #222)";
@@ -1014,7 +1024,7 @@ app.registerExtension({
                     flex: "1",
                     minHeight: "260px",
                     overflowY: "auto",
-                    border: "1px solid var(--border-color, #4e4e4e)",
+                    border: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
                     borderRadius: "10px",
                     padding: "6px",
                     background: "var(--comfy-input-bg, #222)",
@@ -1059,7 +1069,7 @@ app.registerExtension({
             overlay.appendChild(panel);
             document.body.appendChild(overlay);
 
-            const backupDownloadAllBtn = createButton("↓ Download all");
+            const backupDownloadAllBtn = createButton("↓ Download all", "success");
             const backupSelectedRow = document.createElement("div");
             Object.assign(backupSelectedRow.style, {
                 display: "none",
@@ -1076,7 +1086,7 @@ app.registerExtension({
             backupPanel.actions.appendChild(backupDownloadAllBtn);
             backupPanel.actions.appendChild(backupSelectedRow);
 
-            const localAddSelectedBtn = createButton("↑ Upload to backup");
+            const localAddSelectedBtn = createButton("↑ Upload to backup", "primary");
             localPanel.actions.appendChild(localAddSelectedBtn);
 
             const setStatus = (text) => {

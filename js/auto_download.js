@@ -578,7 +578,7 @@ app.registerExtension({
                 textAlign: "left",
                 width: "480px",
                 maxWidth: "92vw",
-                border: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
+                border: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
                 boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
                 fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
@@ -606,7 +606,7 @@ app.registerExtension({
                 display: "flex",
                 gap: "8px",
                 marginTop: "14px",
-                justifyContent: "flex-start"
+                justifyContent: "flex-end"
             });
 
             const buttonBaseStyle = {
@@ -674,7 +674,7 @@ app.registerExtension({
             });
             closeIconButton.onmouseenter = () => {
                 closeIconButton.style.background = "var(--secondary-background-hover, #313235)";
-                closeIconButton.style.borderColor = "var(--border-color, #4e4e4e)";
+                closeIconButton.style.borderColor = "var(--border-subtle, var(--border-default, #3f434c))";
             };
             closeIconButton.onmouseleave = () => {
                 closeIconButton.style.background = "var(--comfy-input-bg, #222)";
@@ -739,7 +739,7 @@ app.registerExtension({
             Object.assign(panel.style, {
                 background: "var(--comfy-menu-bg, #202020)",
                 color: "var(--input-text, #ddd)",
-                border: "1px solid var(--border-color, #4e4e4e)",
+                border: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
                 borderRadius: "16px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
@@ -760,7 +760,7 @@ app.registerExtension({
                 gap: "10px",
                 height: "72px",
                 padding: "0 24px",
-                borderBottom: "1px solid var(--border-color, #4e4e4e)",
+                borderBottom: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
                 flexShrink: "0",
             });
 
@@ -774,7 +774,7 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Auto-Download Models";
             Object.assign(titleEl.style, {
-                fontSize: "16px",
+                fontSize: "15px",
                 fontWeight: "600",
                 letterSpacing: "0",
                 color: "var(--input-text, #ddd)",
@@ -856,13 +856,13 @@ app.registerExtension({
             const makeBaseRow = () => {
                 const row = document.createElement("div");
                 Object.assign(row.style, {
-                    display: "flex",
+                    display: "grid",
+                    gridTemplateColumns: "24px minmax(190px, 1.1fr) minmax(260px, 1.2fr) minmax(160px, 0.8fr)",
                     alignItems: "center",
                     gap: "12px",
-                    flexWrap: "wrap",
-                    background: "transparent",
-                    borderBottom: "1px solid var(--border-color, #4e4e4e)",
-                    padding: "10px 0",
+                    background: "var(--secondary-background-selected, #3a404b)",
+                    borderRadius: "10px",
+                    padding: "10px 12px",
                 });
                 return row;
             };
@@ -890,22 +890,15 @@ app.registerExtension({
                     });
 
                     const row = makeBaseRow();
-                    Object.assign(row.style, {
-                        background: "var(--comfy-input-bg, #222)",
-                        border: "1px solid var(--border-color, #4e4e4e)",
-                        borderRadius: "10px",
-                        padding: "10px",
-                    });
 
                     const cb = document.createElement("input");
                     cb.type = "checkbox";
                     cb.checked = Boolean(m.url);
-                    cb.style.marginTop = "2px";
+                    cb.style.margin = "0";
 
                     const infoDiv = document.createElement("div");
                     Object.assign(infoDiv.style, {
-                        flex: "1 1 220px",
-                        minWidth: "180px",
+                        minWidth: "0",
                     });
                     const nameEl = document.createElement("div");
                     Object.assign(nameEl.style, {
@@ -929,16 +922,16 @@ app.registerExtension({
 
                     const urlInput = createInput(m.url, "HuggingFace URL...");
                     Object.assign(urlInput.style, {
-                        flex: "2 1 320px",
-                        minWidth: "220px",
+                        width: "100%",
+                        minWidth: "0",
                         fontSize: "14px",
                         minHeight: "40px",
                     });
 
                     const folderPicker = createFolderPicker(m.suggested_folder || "checkpoints", "Folder");
                     Object.assign(folderPicker.wrapper.style, {
-                        flex: "0 0 180px",
-                        minWidth: "140px",
+                        width: "100%",
+                        minWidth: "0",
                     });
                     Object.assign(folderPicker.input.style, {
                         fontSize: "14px",
@@ -1071,14 +1064,13 @@ app.registerExtension({
                         color: "#56d78f",
                         fontSize: "10px",
                         fontWeight: "700",
-                        width: "12px",
+                        width: "24px",
                         textAlign: "center",
                     });
 
                     const infoDiv = document.createElement("div");
                     Object.assign(infoDiv.style, {
-                        flex: "1 1 240px",
-                        minWidth: "200px",
+                        minWidth: "0",
                     });
 
                     const nameEl = document.createElement("div");
@@ -1105,16 +1097,25 @@ app.registerExtension({
                     const pathEl = document.createElement("div");
                     pathEl.textContent = formatFoundModelPath(m.found_path || m.clean_path || "");
                     Object.assign(pathEl.style, {
-                        flex: "2 1 360px",
-                        minWidth: "220px",
+                        minWidth: "0",
                         fontSize: "13px",
                         color: "var(--input-text, #ddd)",
                         wordBreak: "break-word",
                     });
 
+                    const installedEl = document.createElement("div");
+                    installedEl.textContent = "Installed";
+                    Object.assign(installedEl.style, {
+                        justifySelf: "end",
+                        fontSize: "12px",
+                        fontWeight: "600",
+                        color: "#56d78f",
+                    });
+
                     row.appendChild(marker);
                     row.appendChild(infoDiv);
                     row.appendChild(pathEl);
+                    row.appendChild(installedEl);
                     content.appendChild(row);
                 });
             }
@@ -1124,14 +1125,10 @@ app.registerExtension({
                 mismatchModels.forEach((m) => {
                     const row = makeBaseRow();
                     Object.assign(row.style, {
-                        background: "var(--comfy-input-bg, #222)",
-                        border: "1px solid var(--border-color, #4e4e4e)",
-                        borderRadius: "10px",
-                        padding: "10px",
+                        gridTemplateColumns: "1fr auto",
                     });
                     const left = document.createElement("div");
                     Object.assign(left.style, {
-                        flex: "1 1 260px",
                         minWidth: "220px",
                     });
                     const currentLabel = m.requested_path || m.filename;
@@ -1417,7 +1414,7 @@ app.registerExtension({
                 flexDirection: "column",
                 gap: "0",
                 boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
-                border: "1px solid var(--border-color, #4e4e4e)",
+                border: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
                 overflow: "hidden",
                 fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
@@ -1430,7 +1427,7 @@ app.registerExtension({
                 gap: "10px",
                 height: "72px",
                 padding: "0 24px",
-                borderBottom: "1px solid var(--border-color, #4e4e4e)",
+                borderBottom: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
                 flexShrink: "0",
             });
 
@@ -1444,7 +1441,7 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Download New Model";
             Object.assign(titleEl.style, {
-                fontSize: "16px",
+                fontSize: "15px",
                 fontWeight: "600",
                 letterSpacing: "0",
                 color: "var(--input-text, #ddd)",
