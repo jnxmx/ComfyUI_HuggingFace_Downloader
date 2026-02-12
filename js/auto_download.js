@@ -13,6 +13,52 @@ app.registerExtension({
             return btn;
         };
 
+        const applyNativeButtonStyle = (btn, variant = "secondary") => {
+            const palette = {
+                primary: {
+                    bg: "var(--primary-background, #1f9cf0)",
+                    hover: "var(--primary-background-hover, #2b83f6)",
+                    fg: "var(--base-foreground, #ffffff)",
+                },
+                secondary: {
+                    bg: "var(--secondary-background, #353944)",
+                    hover: "var(--secondary-background-hover, #444b58)",
+                    fg: "var(--base-foreground, #ffffff)",
+                },
+                destructive: {
+                    bg: "var(--destructive-background, #b74755)",
+                    hover: "var(--destructive-background-hover, #c74e5f)",
+                    fg: "var(--base-foreground, #ffffff)",
+                },
+            };
+            const selected = palette[variant] || palette.secondary;
+
+            Object.assign(btn.style, {
+                minHeight: "40px",
+                padding: "0.45rem 1rem",
+                borderRadius: "10px",
+                border: "none",
+                background: selected.bg,
+                color: selected.fg,
+                fontSize: "14px",
+                fontWeight: "600",
+                fontFamily: "var(--font-inter, Inter, sans-serif)",
+                lineHeight: "1",
+                cursor: "pointer",
+                boxShadow: "none",
+                transition: "background-color 120ms ease, opacity 120ms ease",
+            });
+
+            btn.addEventListener("mouseenter", () => {
+                if (!btn.disabled) {
+                    btn.style.background = selected.hover;
+                }
+            });
+            btn.addEventListener("mouseleave", () => {
+                btn.style.background = selected.bg;
+            });
+        };
+
         const createInput = (value, placeholder) => {
             const inp = document.createElement("input");
             inp.type = "text";
@@ -519,7 +565,7 @@ app.registerExtension({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: "rgba(8,10,16,0.72)",
+                background: "rgba(0, 0, 0, 0.5)",
                 zIndex: 9000
             });
 
@@ -532,7 +578,7 @@ app.registerExtension({
                 textAlign: "left",
                 width: "480px",
                 maxWidth: "92vw",
-                border: "1px solid var(--border-color, #4e4e4e)",
+                border: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
                 boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
                 fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
@@ -574,12 +620,10 @@ app.registerExtension({
 
             const skipBtn = document.createElement("button");
             skipBtn.textContent = "Skip";
+            applyNativeButtonStyle(skipBtn, "secondary");
             Object.assign(skipBtn.style, {
                 ...buttonBaseStyle,
-                background: "var(--comfy-input-bg, #222)",
-                color: "var(--input-text, #ddd)",
-                border: "1px solid var(--border-color, #4e4e4e)",
-                opacity: skipModeActive ? "0.65" : "1"
+                opacity: skipModeActive ? "0.65" : "1",
             });
             skipBtn.disabled = skipModeActive;
 
@@ -1304,13 +1348,7 @@ app.registerExtension({
             if (!missingModels.length) {
                 downloadBtn.disabled = true;
             }
-            Object.assign(downloadBtn.style, {
-                minHeight: "40px",
-                padding: "0.45rem 1rem",
-                fontSize: "14px",
-                fontWeight: "600",
-                borderRadius: "8px",
-            });
+            applyNativeButtonStyle(downloadBtn, "primary");
 
             footer.appendChild(downloadBtn);
             panel.appendChild(footer);
@@ -1590,13 +1628,7 @@ app.registerExtension({
                     setStatus(`Queue error: ${String(e)}`, "#ff6b6b");
                 }
             });
-            Object.assign(downloadBtn.style, {
-                minHeight: "40px",
-                padding: "0.45rem 1rem",
-                fontSize: "14px",
-                fontWeight: "600",
-                borderRadius: "8px",
-            });
+            applyNativeButtonStyle(downloadBtn, "primary");
 
             footer.appendChild(downloadBtn);
             panel.appendChild(footer);

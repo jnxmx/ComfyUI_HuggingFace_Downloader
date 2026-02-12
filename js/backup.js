@@ -99,12 +99,36 @@ app.registerExtension({
 #backup-hf-dialog .hf-tree-expander {
     color: #b8c0cf;
 }
-#backup-hf-dialog .hf-backup-action-btn.p-button {
+.hf-backup-action-btn.p-button {
     min-height: 40px;
     padding: 0.45rem 1rem;
     font-size: 14px;
     font-weight: 600;
-    border-radius: 8px;
+    font-family: var(--font-inter, Inter, sans-serif);
+    border-radius: 10px;
+    border: none !important;
+    box-shadow: none !important;
+    background: var(--secondary-background, #353944) !important;
+    color: var(--base-foreground, #fff) !important;
+    transition: background-color 120ms ease, opacity 120ms ease;
+}
+.hf-backup-action-btn.p-button:hover {
+    background: var(--secondary-background-hover, #444b58) !important;
+}
+.hf-backup-action-btn.p-button.p-button-success {
+    background: var(--primary-background, #1f9cf0) !important;
+}
+.hf-backup-action-btn.p-button.p-button-success:hover {
+    background: var(--primary-background-hover, #2b83f6) !important;
+}
+.hf-backup-action-btn.p-button.p-button-danger {
+    background: var(--destructive-background, #b74755) !important;
+}
+.hf-backup-action-btn.p-button.p-button-danger:hover {
+    background: var(--destructive-background-hover, #c74e5f) !important;
+}
+.hf-backup-action-btn.p-button:disabled {
+    opacity: 0.6;
 }
 #backup-hf-dialog .hf-repo-link {
     color: #7cb3ff;

@@ -6,3 +6,6 @@ __pycache__/model_discovery.cpython-313.pyc
 NODEPACK_FUNCTIONALITY.md
 __pycache__/model_discovery.cpython-313.pyc
 /scripts/__pycache__
+/metadata/marketplace_extract
+scripts/cloud_marketplace_dump_console.js
+scripts/extract_cloud_marketplace_from_har.py
