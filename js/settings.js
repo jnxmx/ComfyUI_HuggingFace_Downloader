@@ -21,6 +21,15 @@ app.registerExtension({
         "Route native Model Library Asset API calls through this node pack backend (HuggingFace-only catalog + local installed-model discovery).",
       onChange: (newValue) => {
         console.log(`[HF Downloader] Model Library backend enabled: ${Boolean(newValue)}`);
+        if (!newValue) return;
+        try {
+          const settingsUi = app?.ui?.settings;
+          if (settingsUi?.setSettingValue) {
+            settingsUi.setSettingValue("Comfy.Assets.UseAssetAPI", true);
+          }
+        } catch (error) {
+          console.warn("[HF Downloader] Failed to force Comfy.Assets.UseAssetAPI:", error);
+        }
       },
     },
     {

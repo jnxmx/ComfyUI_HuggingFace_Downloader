@@ -915,6 +915,7 @@ app.registerExtension({
             const header = document.createElement("div");
             header.textContent = "Backup Manager";
             header.style.font = "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)";
+            header.style.setProperty("font", "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)", "important");
             header.style.letterSpacing = "0";
             header.style.color = "var(--input-text, #ddd)";
             header.style.paddingRight = "72px";
@@ -1000,6 +1001,7 @@ app.registerExtension({
                 const titleEl = document.createElement("div");
                 titleEl.textContent = title;
                 titleEl.style.font = "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)";
+                titleEl.style.setProperty("font", "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)", "important");
                 titleEl.style.color = "var(--input-text, #ddd)";
                 titleRow.appendChild(titleEl);
 
@@ -1007,6 +1009,7 @@ app.registerExtension({
                 metaEl.className = "hf-header-meta";
                 metaEl.style.display = "none";
                 metaEl.style.font = "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)";
+                metaEl.style.setProperty("font", "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)", "important");
                 titleRow.appendChild(metaEl);
                 root.appendChild(titleRow);
 

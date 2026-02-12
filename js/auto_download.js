@@ -794,6 +794,7 @@ app.registerExtension({
                 letterSpacing: "0",
                 color: "var(--input-text, #ddd)",
             });
+            titleEl.style.setProperty("font", "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)", "important");
 
             const subtitleEl = document.createElement("div");
             subtitleEl.textContent = "Detected missing models and valid URLs.";
@@ -1458,6 +1459,7 @@ app.registerExtension({
                 letterSpacing: "0",
                 color: "var(--input-text, #ddd)",
             });
+            titleEl.style.setProperty("font", "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)", "important");
 
             const subtitleEl = document.createElement("div");
             subtitleEl.textContent = "Paste a direct Hugging Face file URL and choose a folder.";
