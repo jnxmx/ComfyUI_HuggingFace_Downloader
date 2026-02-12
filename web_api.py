@@ -5,6 +5,8 @@ import threading
 import time
 import uuid
 import asyncio
+import mimetypes
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 from aiohttp import web
 from .backup import (
@@ -68,6 +70,56 @@ MODEL_LIBRARY_LOCAL_TYPE_MAP = {
     "sam": "sam",
     "depthanything": "depthanything",
 }
+MODEL_LIBRARY_ASSET_ROUTE_BASE = "/api/hf_model_library_assets"
+MODEL_LIBRARY_ASSET_CACHE_TTL_SECONDS = 2.0
+MODEL_LIBRARY_PREVIEW_URL = (
+    "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20320%20320'%3E"
+    "%3Cdefs%3E%3ClinearGradient%20id='g'%20x1='0'%20y1='0'%20x2='1'%20y2='1'%3E"
+    "%3Cstop%20offset='0%25'%20stop-color='%23d6d7dc'/%3E%3Cstop%20offset='100%25'%20stop-color='%2353555f'/%3E"
+    "%3C/linearGradient%3E%3C/defs%3E%3Crect%20width='320'%20height='320'%20fill='url(%23g)'/%3E%3C/svg%3E"
+)
+MODEL_LIBRARY_CATEGORY_CANONICAL = {
+    "checkpoint": "checkpoints",
+    "checkpoints": "checkpoints",
+    "diffusion_model": "diffusion_models",
+    "diffusion_models": "diffusion_models",
+    "lora": "loras",
+    "loras": "loras",
+    "vae": "vae",
+    "controlnet": "controlnet",
+    "upscale": "upscale_models",
+    "upscaler": "upscale_models",
+    "upscale_models": "upscale_models",
+    "style_models": "style_models",
+    "gligen": "gligen",
+    "clip_vision": "clip_vision",
+    "text_encoder": "text_encoders",
+    "text_encoders": "text_encoders",
+    "audio_encoder": "audio_encoders",
+    "audio_encoders": "audio_encoders",
+    "model_patches": "model_patches",
+    "animatediff_models": "animatediff_models",
+    "animatediff_motion_lora": "animatediff_motion_lora",
+    "chatterbox/chatterbox": "chatterbox/chatterbox",
+    "chatterbox/chatterbox_turbo": "chatterbox/chatterbox_turbo",
+    "chatterbox/chatterbox_multilingual": "chatterbox/chatterbox_multilingual",
+    "chatterbox/chatterbox_vc": "chatterbox/chatterbox_vc",
+    "latent_upscale_models": "latent_upscale_models",
+    "sam2": "sam2",
+    "sam": "sams",
+    "sams": "sams",
+    "ultralytics": "ultralytics",
+    "ultralytics/bbox": "ultralytics",
+    "ultralytics/segm": "ultralytics",
+    "depthanything": "depthanything",
+    "ipadapter": "ipadapter",
+    "segformer_b2_clothes": "segformer_b2_clothes",
+    "segformer_b3_clothes": "segformer_b3_clothes",
+    "segformer_b3_fashion": "segformer_b3_fashion",
+    "nlf": "nlf",
+    "flashvsr": "FlashVSR",
+    "flashvsr-v1.1": "FlashVSR-v1.1",
+}
 model_library_catalog_cache = {"mtime": None, "entries": []}
 model_library_catalog_cache_lock = threading.Lock()
 model_library_local_cache = {
@@ -76,6 +128,10 @@ model_library_local_cache = {
     "name_map": {},
 }
 model_library_local_cache_lock = threading.Lock()
+model_library_assets_cache = {"timestamp": 0.0, "assets": [], "id_map": {}}
+model_library_assets_cache_lock = threading.Lock()
+model_library_asset_overrides = {}
+model_library_asset_overrides_lock = threading.Lock()
 settings_cache = {"path": None, "mtime": None, "settings": {}}
 settings_cache_lock = threading.Lock()
 MODEL_LIBRARY_LOCAL_CACHE_TTL_SECONDS = 3.0
@@ -454,6 +510,358 @@ def _build_model_library_items(
 
     items.sort(key=lambda item: str(item.get("filename", "")).lower())
     return items
+
+def _to_iso8601(value) -> str | None:
+    if isinstance(value, (int, float)):
+        try:
+            if float(value) <= 0:
+                return None
+            return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+        except Exception:
+            return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(text).isoformat()
+        except Exception:
+            return None
+    return None
+
+def _canonical_model_library_category(value: str | None) -> str | None:
+    normalized = _normalize_rel_path(value or "").strip("/")
+    if not normalized:
+        return None
+    lowered = normalized.lower()
+    direct = MODEL_LIBRARY_CATEGORY_CANONICAL.get(lowered)
+    if direct:
+        return direct
+    top_level = lowered.split("/", 1)[0]
+    return MODEL_LIBRARY_CATEGORY_CANONICAL.get(top_level)
+
+def _resolve_model_library_category(entry: dict) -> str | None:
+    candidates = []
+    manager_type = str(entry.get("manager_type", "") or "").strip()
+    model_type = str(entry.get("type", "") or "").strip()
+    directory = _normalize_rel_path(str(entry.get("directory", "") or "").strip())
+    if manager_type:
+        candidates.append(manager_type)
+    if model_type:
+        candidates.append(model_type)
+    if directory:
+        candidates.append(directory)
+        candidates.append(directory.split("/", 1)[0])
+
+    for candidate in candidates:
+        category = _canonical_model_library_category(candidate)
+        if category:
+            return category
+    return None
+
+def _split_csv_query(value: str | None) -> list[str]:
+    if not isinstance(value, str):
+        return []
+    parts = [x.strip() for x in value.split(",")]
+    return [x for x in parts if x]
+
+def _guess_mime_type(filename: str) -> str:
+    guessed, _ = mimetypes.guess_type(filename or "")
+    return guessed or "application/octet-stream"
+
+def _strip_category_prefix(path: str, category: str) -> str:
+    normalized = _normalize_rel_path(path)
+    if not normalized:
+        return normalized
+    category_norm = _normalize_rel_path(category)
+    if not category_norm:
+        return normalized
+    normalized_lower = normalized.lower()
+    category_lower = category_norm.lower()
+    if normalized_lower == category_lower:
+        return ""
+    prefix = f"{category_lower}/"
+    if normalized_lower.startswith(prefix):
+        return normalized[len(category_norm) + 1 :]
+    return normalized
+
+def _resolve_model_relative_path(entry: dict, category: str, filename: str) -> str:
+    filename_clean = str(filename or "").strip()
+    if not filename_clean:
+        return ""
+
+    installed_paths = entry.get("installed_paths") or []
+    candidate = ""
+    if isinstance(installed_paths, list):
+        for value in installed_paths:
+            text = _normalize_rel_path(str(value or "").strip())
+            if text:
+                candidate = text
+                break
+    if not candidate:
+        directory = _normalize_rel_path(str(entry.get("directory", "") or "").strip())
+        if directory:
+            candidate = f"{directory}/{filename_clean}"
+        else:
+            candidate = filename_clean
+
+    candidate = _normalize_rel_path(candidate)
+    if candidate:
+        tail = candidate.split("/")[-1].lower()
+        if tail != filename_clean.lower():
+            candidate = f"{candidate.rstrip('/')}/{filename_clean}"
+    else:
+        candidate = filename_clean
+
+    relative = _strip_category_prefix(candidate, category).strip("/")
+    return relative or filename_clean
+
+def _extract_base_models(entry: dict) -> list[str]:
+    raw_values = [
+        entry.get("base_models"),
+        entry.get("base_model"),
+        entry.get("compatible_base_models"),
+    ]
+    values = []
+    for raw in raw_values:
+        if isinstance(raw, str) and raw.strip():
+            values.extend([x.strip() for x in raw.split(",") if x.strip()])
+        elif isinstance(raw, list):
+            values.extend([str(x).strip() for x in raw if str(x).strip()])
+    deduped = []
+    seen = set()
+    for value in values:
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(value)
+    return deduped
+
+def _extract_additional_tags(entry: dict) -> list[str]:
+    raw = entry.get("additional_tags")
+    if isinstance(raw, list):
+        tags = [str(x).strip() for x in raw if str(x).strip()]
+        deduped = []
+        seen = set()
+        for tag in tags:
+            key = tag.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(tag)
+        return deduped
+    return []
+
+def _normalize_asset_tags(raw_tags) -> list[str]:
+    if not isinstance(raw_tags, list):
+        return []
+    tags = []
+    seen = set()
+    for value in raw_tags:
+        tag = str(value or "").strip()
+        if not tag:
+            continue
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        tags.append(tag)
+    return tags
+
+def _apply_model_library_asset_override(asset: dict, override: dict) -> dict:
+    updated = dict(asset)
+    name = override.get("name")
+    if isinstance(name, str) and name.strip():
+        updated["name"] = name.strip()
+
+    tags = _normalize_asset_tags(override.get("tags"))
+    if tags:
+        updated["tags"] = tags
+
+    if isinstance(override.get("user_metadata"), dict):
+        merged_meta = dict(updated.get("user_metadata") or {})
+        merged_meta.update(override.get("user_metadata") or {})
+        updated["user_metadata"] = merged_meta
+
+    updated_at = override.get("updated_at")
+    if isinstance(updated_at, str) and updated_at:
+        updated["updated_at"] = updated_at
+        updated["last_access_time"] = updated_at
+    return updated
+
+def _invalidate_model_library_assets_cache():
+    global model_library_assets_cache
+    with model_library_assets_cache_lock:
+        model_library_assets_cache = {"timestamp": 0.0, "assets": [], "id_map": {}}
+
+def _build_model_library_asset_index() -> tuple[list[dict], dict[str, dict]]:
+    global model_library_assets_cache
+
+    now = time.time()
+    with model_library_assets_cache_lock:
+        cached_ts = float(model_library_assets_cache.get("timestamp", 0.0))
+        if now - cached_ts <= MODEL_LIBRARY_ASSET_CACHE_TTL_SECONDS:
+            return (
+                model_library_assets_cache.get("assets", []),
+                model_library_assets_cache.get("id_map", {}),
+            )
+
+    entries = _build_model_library_items(
+        include_catalog=True,
+        include_local_only=True,
+        hf_only=True,
+        visible_only=True,
+    )
+    with model_library_asset_overrides_lock:
+        overrides = dict(model_library_asset_overrides)
+
+    assets = []
+    id_map = {}
+    for entry in entries:
+        category = _resolve_model_library_category(entry)
+        if not category:
+            continue
+
+        filename = str(entry.get("filename", "") or "").strip()
+        if not filename:
+            continue
+
+        model_rel_path = _resolve_model_relative_path(entry, category, filename)
+        provider = str(entry.get("provider", "") or "").strip()
+        source_url = str(entry.get("url", "") or "").strip() or None
+        installed_size = entry.get("installed_bytes_total")
+        size_value = installed_size if isinstance(installed_size, int) and installed_size >= 0 else None
+
+        local_files = entry.get("local_files") if isinstance(entry.get("local_files"), list) else []
+        local_times = []
+        for file_meta in local_files:
+            if not isinstance(file_meta, dict):
+                continue
+            modified = file_meta.get("modified_at")
+            if isinstance(modified, (int, float)):
+                local_times.append(float(modified))
+        latest_local_ts = max(local_times) if local_times else None
+
+        created_at = _to_iso8601(entry.get("created_at")) or _to_iso8601(latest_local_ts)
+        updated_at = _to_iso8601(entry.get("updated_at")) or _to_iso8601(latest_local_ts)
+
+        user_metadata = {
+            "filename": model_rel_path or filename,
+        }
+        display_name = str(entry.get("name", "") or "").strip()
+        if display_name and display_name != filename:
+            user_metadata["name"] = display_name
+        if source_url:
+            user_metadata["source_url"] = source_url
+        if provider:
+            user_metadata["provider"] = provider
+
+        base_models = _extract_base_models(entry)
+        if base_models:
+            user_metadata["base_model"] = base_models
+        additional_tags = _extract_additional_tags(entry)
+        if additional_tags:
+            user_metadata["additional_tags"] = additional_tags
+
+        description = str(entry.get("description", "") or "").strip()
+        if description:
+            user_metadata["user_description"] = description
+
+        metadata = {
+            "filename": model_rel_path or filename,
+            "model_category": category,
+            "source_kind": str(entry.get("source_kind", "") or ""),
+        }
+        if source_url:
+            metadata["repo_url"] = source_url
+        if provider:
+            metadata["provider"] = provider
+        directory = _normalize_rel_path(str(entry.get("directory", "") or "").strip())
+        if directory:
+            metadata["directory"] = directory
+            user_metadata["directory"] = directory
+
+        seed = "|".join(
+            [
+                str(entry.get("source_kind", "") or ""),
+                category,
+                filename,
+                directory,
+                model_rel_path,
+                source_url or "",
+            ]
+        )
+        asset_id = str(uuid.uuid5(uuid.NAMESPACE_URL, seed))
+
+        asset = {
+            "id": asset_id,
+            "name": filename,
+            "asset_hash": None,
+            "mime_type": _guess_mime_type(filename),
+            "tags": ["models", category],
+            "preview_url": MODEL_LIBRARY_PREVIEW_URL,
+            "is_immutable": True,
+            "metadata": metadata,
+            "user_metadata": user_metadata,
+        }
+        if size_value is not None:
+            asset["size"] = size_value
+        if created_at:
+            asset["created_at"] = created_at
+        if updated_at:
+            asset["updated_at"] = updated_at
+            asset["last_access_time"] = updated_at
+
+        if asset_id in overrides and isinstance(overrides[asset_id], dict):
+            asset = _apply_model_library_asset_override(asset, overrides[asset_id])
+
+        assets.append(asset)
+        id_map[asset_id] = {
+            "asset": asset,
+            "entry": entry,
+            "category": category,
+        }
+
+    assets.sort(key=lambda item: str(item.get("name", "")).lower())
+
+    with model_library_assets_cache_lock:
+        model_library_assets_cache = {
+            "timestamp": now,
+            "assets": assets,
+            "id_map": id_map,
+        }
+    return assets, id_map
+
+def _find_model_library_asset_for_downloaded_file(path: str) -> dict | None:
+    if not path:
+        return None
+    abs_path = os.path.abspath(path)
+    models_root = os.path.abspath(_get_models_root())
+    try:
+        rel_path = _normalize_rel_path(os.path.relpath(abs_path, models_root))
+    except Exception:
+        rel_path = _normalize_rel_path(os.path.basename(abs_path))
+    rel_lower = rel_path.lower()
+
+    _, id_map = _build_model_library_asset_index()
+    for row in id_map.values():
+        asset = row.get("asset") if isinstance(row, dict) else None
+        category = str(row.get("category", "") or "").strip() if isinstance(row, dict) else ""
+        if not isinstance(asset, dict):
+            continue
+        filename_rel = _normalize_rel_path(str((asset.get("user_metadata") or {}).get("filename", "") or ""))
+        combined = f"{category}/{filename_rel}".strip("/") if filename_rel else filename_rel
+        combined_lower = combined.lower()
+        if combined_lower and combined_lower == rel_lower:
+            return asset
+        if filename_rel and filename_rel.lower() == rel_lower:
+            return asset
+        if filename_rel and os.path.basename(filename_rel).lower() == os.path.basename(rel_lower):
+            return asset
+    return None
 
 def _download_worker():
     global download_worker_running
@@ -1231,6 +1639,361 @@ def setup(app):
                 "items": items,
             }
         )
+
+    def _asset_api_error(status: int, code: str, message: str):
+        return web.json_response({"code": code, "message": message}, status=status)
+
+    async def hf_model_library_assets_list(request):
+        if not _is_model_library_backend_enabled():
+            return web.json_response(
+                {
+                    "error": "Model library backend is disabled in settings.",
+                    "setting_id": MODEL_LIBRARY_BACKEND_SETTING,
+                },
+                status=403,
+            )
+
+        include_tags = [x.lower() for x in _split_csv_query(request.query.get("include_tags"))]
+        exclude_tags = [x.lower() for x in _split_csv_query(request.query.get("exclude_tags"))]
+        name_contains = str(request.query.get("name_contains", "") or "").strip().lower()
+        include_public = _coerce_bool(request.query.get("include_public"), default=True)
+        limit = _safe_int(request.query.get("limit"), default=500, minimum=1, maximum=2000)
+        offset = _safe_int(request.query.get("offset"), default=0, minimum=0, maximum=5_000_000)
+
+        assets, _ = _build_model_library_asset_index()
+        filtered = []
+        for asset in assets:
+            tags = [str(x or "").strip() for x in (asset.get("tags") or [])]
+            tags_lower = {x.lower() for x in tags if x}
+            if include_tags and any(tag not in tags_lower for tag in include_tags):
+                continue
+            if exclude_tags and any(tag in tags_lower for tag in exclude_tags):
+                continue
+            if not include_public and bool(asset.get("is_immutable", True)):
+                continue
+            if name_contains and name_contains not in str(asset.get("name", "") or "").lower():
+                display_name = str((asset.get("user_metadata") or {}).get("name", "") or "").lower()
+                if name_contains not in display_name:
+                    continue
+            filtered.append(asset)
+
+        total = len(filtered)
+        page = filtered[offset : offset + limit]
+        return web.json_response(
+            {
+                "assets": page,
+                "total": total,
+                "has_more": (offset + limit) < total,
+            }
+        )
+
+    async def hf_model_library_asset_detail(request):
+        if not _is_model_library_backend_enabled():
+            return web.json_response({"error": "Model library backend disabled."}, status=403)
+        asset_id = str(request.match_info.get("asset_id", "") or "").strip()
+        _, id_map = _build_model_library_asset_index()
+        row = id_map.get(asset_id)
+        if not row:
+            return web.json_response({"error": "Asset not found."}, status=404)
+        return web.json_response(row.get("asset", {}))
+
+    async def hf_model_library_asset_update(request):
+        if not _is_model_library_backend_enabled():
+            return web.json_response({"error": "Model library backend disabled."}, status=403)
+        asset_id = str(request.match_info.get("asset_id", "") or "").strip()
+        _, id_map = _build_model_library_asset_index()
+        row = id_map.get(asset_id)
+        if not row:
+            return web.json_response({"error": "Asset not found."}, status=404)
+
+        try:
+            data = await request.json()
+            if not isinstance(data, dict):
+                data = {}
+        except Exception:
+            data = {}
+
+        current_asset = row.get("asset") if isinstance(row, dict) else {}
+        if not isinstance(current_asset, dict):
+            current_asset = {}
+
+        category = ""
+        tags_now = _normalize_asset_tags(current_asset.get("tags"))
+        if len(tags_now) >= 2:
+            category = str(tags_now[1] or "").strip()
+
+        override = {}
+        with model_library_asset_overrides_lock:
+            existing = model_library_asset_overrides.get(asset_id)
+            if isinstance(existing, dict):
+                override = dict(existing)
+
+            incoming_name = data.get("name")
+            if isinstance(incoming_name, str) and incoming_name.strip():
+                override["name"] = incoming_name.strip()
+
+            incoming_tags = _normalize_asset_tags(data.get("tags"))
+            if incoming_tags:
+                normalized = list(incoming_tags)
+                lower_tags = {x.lower() for x in normalized}
+                if "models" not in lower_tags:
+                    normalized.insert(0, "models")
+                    lower_tags.add("models")
+                if category and category.lower() not in lower_tags:
+                    normalized.append(category)
+                override["tags"] = normalized
+
+            incoming_user_metadata = data.get("user_metadata")
+            if isinstance(incoming_user_metadata, dict):
+                previous_meta = override.get("user_metadata")
+                merged_meta = dict(previous_meta) if isinstance(previous_meta, dict) else {}
+                merged_meta.update(incoming_user_metadata)
+                override["user_metadata"] = merged_meta
+
+            now_iso = datetime.now(tz=timezone.utc).isoformat()
+            override["updated_at"] = now_iso
+            model_library_asset_overrides[asset_id] = override
+
+        _invalidate_model_library_assets_cache()
+        _, id_map = _build_model_library_asset_index()
+        updated = id_map.get(asset_id, {}).get("asset", {})
+        return web.json_response(updated)
+
+    async def hf_model_library_asset_add_tags(request):
+        if not _is_model_library_backend_enabled():
+            return web.json_response({"error": "Model library backend disabled."}, status=403)
+        asset_id = str(request.match_info.get("asset_id", "") or "").strip()
+        _, id_map = _build_model_library_asset_index()
+        row = id_map.get(asset_id)
+        if not row:
+            return web.json_response({"error": "Asset not found."}, status=404)
+        try:
+            data = await request.json()
+            if not isinstance(data, dict):
+                data = {}
+        except Exception:
+            data = {}
+
+        current_asset = row.get("asset") if isinstance(row, dict) else {}
+        current_tags = _normalize_asset_tags((current_asset or {}).get("tags"))
+        requested = _normalize_asset_tags(data.get("tags"))
+
+        lower_existing = {x.lower() for x in current_tags}
+        added = []
+        already_present = []
+        for tag in requested:
+            if tag.lower() in lower_existing:
+                already_present.append(tag)
+                continue
+            current_tags.append(tag)
+            lower_existing.add(tag.lower())
+            added.append(tag)
+
+        with model_library_asset_overrides_lock:
+            existing = model_library_asset_overrides.get(asset_id)
+            override = dict(existing) if isinstance(existing, dict) else {}
+            override["tags"] = current_tags
+            override["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
+            model_library_asset_overrides[asset_id] = override
+
+        _invalidate_model_library_assets_cache()
+        return web.json_response(
+            {
+                "total_tags": current_tags,
+                "added": added,
+                "already_present": already_present,
+            }
+        )
+
+    async def hf_model_library_asset_remove_tags(request):
+        if not _is_model_library_backend_enabled():
+            return web.json_response({"error": "Model library backend disabled."}, status=403)
+        asset_id = str(request.match_info.get("asset_id", "") or "").strip()
+        _, id_map = _build_model_library_asset_index()
+        row = id_map.get(asset_id)
+        if not row:
+            return web.json_response({"error": "Asset not found."}, status=404)
+        try:
+            data = await request.json()
+            if not isinstance(data, dict):
+                data = {}
+        except Exception:
+            data = {}
+
+        current_asset = row.get("asset") if isinstance(row, dict) else {}
+        current_tags = _normalize_asset_tags((current_asset or {}).get("tags"))
+        requested = _normalize_asset_tags(data.get("tags"))
+
+        protected = {"models"}
+        if len(current_tags) >= 2:
+            protected.add(current_tags[1].lower())
+
+        removed = []
+        not_present = []
+        for tag in requested:
+            tag_lower = tag.lower()
+            if tag_lower in protected:
+                not_present.append(tag)
+                continue
+            index = next((i for i, item in enumerate(current_tags) if item.lower() == tag_lower), -1)
+            if index == -1:
+                not_present.append(tag)
+                continue
+            removed.append(current_tags.pop(index))
+
+        with model_library_asset_overrides_lock:
+            existing = model_library_asset_overrides.get(asset_id)
+            override = dict(existing) if isinstance(existing, dict) else {}
+            override["tags"] = current_tags
+            override["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
+            model_library_asset_overrides[asset_id] = override
+
+        _invalidate_model_library_assets_cache()
+        return web.json_response(
+            {
+                "total_tags": current_tags,
+                "removed": removed,
+                "not_present": not_present,
+            }
+        )
+
+    async def hf_model_library_remote_metadata(request):
+        if not _is_model_library_backend_enabled():
+            return _asset_api_error(403, "SERVICE_UNAVAILABLE", "Model library backend disabled.")
+
+        source_url = str(request.query.get("url", "") or "").strip()
+        if not source_url:
+            return _asset_api_error(400, "INVALID_URL", "Missing URL.")
+        if not _is_supported_hf_link(source_url):
+            return _asset_api_error(400, "UNSUPPORTED_SOURCE", "Only Hugging Face URLs are supported.")
+
+        try:
+            parsed = parse_link(source_url)
+        except Exception:
+            return _asset_api_error(400, "INVALID_URL_FORMAT", "Invalid Hugging Face URL.")
+
+        if not parsed.get("repo") or not parsed.get("file"):
+            return _asset_api_error(
+                400,
+                "INVALID_URL_FORMAT",
+                "URL must target a specific Hugging Face file (resolve/blob/file).",
+            )
+
+        remote_filename = parsed["file"]
+        if parsed.get("subfolder"):
+            remote_filename = f"{parsed['subfolder'].strip('/')}/{parsed['file']}"
+        size, _, _ = get_remote_file_metadata(
+            parsed["repo"],
+            remote_filename,
+            revision=parsed.get("revision"),
+            token=get_token() or None,
+        )
+
+        filename = os.path.basename(remote_filename)
+        return web.json_response(
+            {
+                "content_length": int(size) if isinstance(size, int) else 0,
+                "final_url": source_url,
+                "content_type": _guess_mime_type(filename),
+                "filename": filename,
+                "name": filename,
+                "tags": ["models"],
+                "validation": {
+                    "is_valid": True,
+                    "errors": [],
+                    "warnings": [],
+                },
+            }
+        )
+
+    async def hf_model_library_download(request):
+        if not _is_model_library_backend_enabled():
+            return _asset_api_error(403, "SERVICE_UNAVAILABLE", "Model library backend disabled.")
+
+        try:
+            data = await request.json()
+            if not isinstance(data, dict):
+                data = {}
+        except Exception:
+            data = {}
+
+        source_url = str(data.get("source_url", "") or data.get("url", "") or "").strip()
+        if not source_url:
+            return _asset_api_error(400, "INVALID_URL", "Missing source URL.")
+        if not _is_supported_hf_link(source_url):
+            return _asset_api_error(400, "UNSUPPORTED_SOURCE", "Only Hugging Face URLs are supported.")
+
+        tags = _normalize_asset_tags(data.get("tags"))
+        user_metadata = data.get("user_metadata") if isinstance(data.get("user_metadata"), dict) else {}
+
+        requested_category = ""
+        if len(tags) >= 2 and tags[0].lower() == "models":
+            requested_category = tags[1]
+        if not requested_category and isinstance(user_metadata.get("model_type"), str):
+            requested_category = user_metadata.get("model_type", "")
+        if not requested_category and isinstance(user_metadata.get("directory"), str):
+            requested_category = user_metadata.get("directory", "")
+
+        category = _canonical_model_library_category(requested_category) or "checkpoints"
+        model_payload = {
+            "url": source_url,
+            "folder": category,
+        }
+
+        try:
+            parsed = _build_parsed_download_info(model_payload)
+            _, path = run_download(parsed, category, sync=True, overwrite=False)
+        except Exception as e:
+            message = str(e) or "Download failed."
+            if "Invalid credentials" in message or "401" in message:
+                return _asset_api_error(422, "UNAUTHORIZED_SOURCE", message)
+            if "404" in message:
+                return _asset_api_error(422, "RESOURCE_NOT_FOUND", message)
+            if "403" in message:
+                return _asset_api_error(422, "ACCESS_FORBIDDEN", message)
+            return _asset_api_error(500, "INTERNAL_ERROR", message)
+
+        _invalidate_model_library_assets_cache()
+        asset = _find_model_library_asset_for_downloaded_file(path)
+        if not asset:
+            filename = os.path.basename(path or "")
+            now_iso = datetime.now(tz=timezone.utc).isoformat()
+            rel_path = filename
+            try:
+                rel_path = _normalize_rel_path(os.path.relpath(path, _get_models_root()))
+            except Exception:
+                rel_path = filename
+            rel_for_widget = _strip_category_prefix(rel_path, category).strip("/") or filename
+            seed = f"download|{category}|{filename}|{rel_for_widget}"
+            asset = {
+                "id": str(uuid.uuid5(uuid.NAMESPACE_URL, seed)),
+                "name": filename,
+                "asset_hash": None,
+                "mime_type": _guess_mime_type(filename),
+                "tags": ["models", category],
+                "preview_url": MODEL_LIBRARY_PREVIEW_URL,
+                "is_immutable": True,
+                "user_metadata": {
+                    "filename": rel_for_widget,
+                    "source_url": source_url,
+                },
+                "metadata": {
+                    "filename": rel_for_widget,
+                    "model_category": category,
+                    "repo_url": source_url,
+                    "source_kind": "download",
+                },
+                "created_at": now_iso,
+                "updated_at": now_iso,
+                "last_access_time": now_iso,
+            }
+            try:
+                if path and os.path.exists(path):
+                    asset["size"] = int(os.path.getsize(path))
+            except Exception:
+                pass
+
+        return web.json_response(asset, status=200)
     
     async def restart(request):
         """Restart ComfyUI server"""
@@ -1251,3 +2014,10 @@ def setup(app):
     app.router.add_get("/download_status", download_status_endpoint)
     app.router.add_get("/search_status", search_status_endpoint)
     app.router.add_get("/model_library", model_library_endpoint)
+    app.router.add_get(MODEL_LIBRARY_ASSET_ROUTE_BASE, hf_model_library_assets_list)
+    app.router.add_get(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/remote-metadata", hf_model_library_remote_metadata)
+    app.router.add_post(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/download", hf_model_library_download)
+    app.router.add_get(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}", hf_model_library_asset_detail)
+    app.router.add_put(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}", hf_model_library_asset_update)
+    app.router.add_post(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_add_tags)
+    app.router.add_delete(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_remove_tags)

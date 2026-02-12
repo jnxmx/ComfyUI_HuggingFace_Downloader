@@ -18,7 +18,7 @@ app.registerExtension({
       type: "boolean",
       defaultValue: true,
       tooltip:
-        "Use this node pack as backend for the native Model Library button (HuggingFace-only with local installed-model discovery).",
+        "Route native Model Library Asset API calls through this node pack backend (HuggingFace-only catalog + local installed-model discovery).",
       onChange: (newValue) => {
         console.log(`[HF Downloader] Model Library backend enabled: ${Boolean(newValue)}`);
       },

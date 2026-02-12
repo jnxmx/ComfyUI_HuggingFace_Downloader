@@ -789,11 +789,11 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Auto-Download Models";
             Object.assign(titleEl.style, {
-                fontSize: "15px",
-                fontWeight: "600",
+                fontSize: "14px",
+                fontWeight: "400",
                 letterSpacing: "0",
                 color: "var(--input-text, #ddd)",
-                lineHeight: "1.2",
+                lineHeight: "20px",
             });
 
             const subtitleEl = document.createElement("div");
@@ -1455,11 +1455,11 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Download New Model";
             Object.assign(titleEl.style, {
-                fontSize: "15px",
-                fontWeight: "600",
+                fontSize: "14px",
+                fontWeight: "400",
                 letterSpacing: "0",
                 color: "var(--input-text, #ddd)",
-                lineHeight: "1.2",
+                lineHeight: "20px",
             });
 
             const subtitleEl = document.createElement("div");
