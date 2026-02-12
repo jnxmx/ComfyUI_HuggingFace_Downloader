@@ -11,6 +11,7 @@ app.registerExtension({
         const RUN_COMMAND_OVERRIDE_RETRY_MS = 500;
         const RUN_COMMAND_OVERRIDE_MAX_ATTEMPTS = 40;
         const RUN_NATIVE_DIALOG_WAIT_MS = 2200;
+        const RUN_NATIVE_VALIDATION_WAIT_MS = 2400;
         const RUN_HOOK_COOLDOWN_MS = 1800;
 
         /* ──────────────── Helper Functions ──────────────── */
@@ -1945,6 +1946,145 @@ app.registerExtension({
         const hasNativeMissingModelsDialog = () =>
             Boolean(document.querySelector(MISSING_MODELS_LIST_SELECTOR));
 
+        const RUN_ERROR_DIALOG_SELECTOR = ".comfy-error-report";
+        const MODEL_VALIDATION_INPUT_NAMES = new Set([
+            "ckpt_name",
+            "unet_name",
+            "vae_name",
+            "lora_name",
+            "control_net_name",
+            "clip_name",
+            "model_name",
+            "style_model_name",
+            "gligen_name",
+            "audio_encoder_name",
+            "name"
+        ]);
+
+        const getNodeErrorsSnapshot = () => {
+            const value = app?.lastNodeErrors;
+            if (!value || typeof value !== "object") {
+                return null;
+            }
+            return value;
+        };
+
+        const getNodeErrorsSignature = (nodeErrors) => {
+            if (!nodeErrors || typeof nodeErrors !== "object") {
+                return "";
+            }
+            try {
+                const parts = [];
+                for (const nodeError of Object.values(nodeErrors)) {
+                    const classType = String(nodeError?.class_type || "");
+                    const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
+                    for (const reason of reasons) {
+                        parts.push(
+                            [
+                                classType,
+                                String(reason?.type || ""),
+                                String(reason?.message || ""),
+                                String(reason?.details || "")
+                            ].join("|")
+                        );
+                    }
+                }
+                parts.sort();
+                return parts.join("||");
+            } catch (_) {
+                return "";
+            }
+        };
+
+        const parseInputNameFromDetails = (details) => {
+            const text = String(details || "").trim();
+            const match = text.match(/^([a-zA-Z0-9_]+)\s*:/);
+            return match ? match[1] : "";
+        };
+
+        const parseMissingValueFromDetails = (details) => {
+            const text = String(details || "");
+            const match =
+                text.match(/:\s*'([^']+)'\s*not\s+in\s+\[/i) ||
+                text.match(/'([^']+)'\s*not\s+in\s+\[/i);
+            return match ? String(match[1] || "").trim() : "";
+        };
+
+        const isLikelyModelLoaderClass = (classType) => {
+            const value = String(classType || "").toLowerCase();
+            if (!value) return false;
+            return (
+                value.includes("loader") ||
+                value.includes("checkpoint") ||
+                value.includes("controlnet") ||
+                value.includes("lora") ||
+                value.includes("vae") ||
+                value.includes("unet") ||
+                value.includes("clip")
+            );
+        };
+
+        const getNativeModelValidationFailures = (nodeErrors = getNodeErrorsSnapshot()) => {
+            if (!nodeErrors || typeof nodeErrors !== "object") {
+                return [];
+            }
+
+            const failures = [];
+            for (const nodeError of Object.values(nodeErrors)) {
+                const classType = String(nodeError?.class_type || "");
+                const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
+                for (const reason of reasons) {
+                    const type = String(reason?.type || "").toLowerCase();
+                    const message = String(reason?.message || "").toLowerCase();
+                    const details = String(reason?.details || "");
+                    const detailsLower = details.toLowerCase();
+
+                    const isValueNotInList =
+                        message.includes("value not in list") ||
+                        type.includes("value_not_in_list") ||
+                        detailsLower.includes("not in [");
+                    if (!isValueNotInList) {
+                        continue;
+                    }
+
+                    const inputName =
+                        String(reason?.extra_info?.input_name || "").trim() ||
+                        parseInputNameFromDetails(details);
+                    const inputNameLower = inputName.toLowerCase();
+
+                    const looksModelInput = MODEL_VALIDATION_INPUT_NAMES.has(inputNameLower);
+                    const looksModelByClassAndInput =
+                        isLikelyModelLoaderClass(classType) && inputNameLower.endsWith("_name");
+                    const looksModelByClassAndValue =
+                        isLikelyModelLoaderClass(classType) && detailsLower.includes("not in [");
+
+                    if (!(looksModelInput || looksModelByClassAndInput || looksModelByClassAndValue)) {
+                        continue;
+                    }
+
+                    failures.push({
+                        classType,
+                        inputName,
+                        missingValue: parseMissingValueFromDetails(details),
+                        details
+                    });
+                }
+            }
+            return failures;
+        };
+
+        const hasNativePromptValidationDialog = () => {
+            const nodes = document.querySelectorAll(RUN_ERROR_DIALOG_SELECTOR);
+            for (const node of nodes) {
+                const text = String(node?.textContent || "").toLowerCase();
+                if (!text) continue;
+                if (text.includes("prompt execution failed") && text.includes("value not in list")) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
         const waitForNativeMissingModelsDialog = async (timeoutMs) => {
             const start = Date.now();
             while (Date.now() - start <= timeoutMs) {
@@ -1956,7 +2096,33 @@ app.registerExtension({
             return false;
         };
 
-        const triggerAutoDownloadFromNativeDialog = () => {
+        const waitForNativeModelValidationFailure = async ({
+            timeoutMs,
+            beforeSignature,
+            hadValidationDialogBeforeRun
+        }) => {
+            const start = Date.now();
+            while (Date.now() - start <= timeoutMs) {
+                const nodeErrors = getNodeErrorsSnapshot();
+                const signature = getNodeErrorsSignature(nodeErrors);
+                if (signature && signature !== beforeSignature) {
+                    const failures = getNativeModelValidationFailures(nodeErrors);
+                    if (failures.length) {
+                        return failures;
+                    }
+                }
+
+                if (!hadValidationDialogBeforeRun && hasNativePromptValidationDialog()) {
+                    const failures = getNativeModelValidationFailures(nodeErrors);
+                    return failures;
+                }
+
+                await wait(100);
+            }
+            return [];
+        };
+
+        const triggerAutoDownloadFromRunHook = (reason = "missing-dialog", failures = []) => {
             const now = Date.now();
             if (now - runHookLastTriggeredAt < RUN_HOOK_COOLDOWN_MS) {
                 return;
@@ -1968,12 +2134,24 @@ app.registerExtension({
             if (typeof runAction !== "function") {
                 return;
             }
+
             runHookLastTriggeredAt = now;
             runAction();
+
+            const isValidationReason = reason === "model-validation";
+            const firstMissing = failures.find((item) => item?.missingValue)?.missingValue || "";
+            const detail = isValidationReason
+                ? (
+                    firstMissing
+                        ? `Detected run validation mismatch for "${firstMissing}". Opened auto-download.`
+                        : "Detected run validation mismatch for model loaders. Opened auto-download."
+                )
+                : "Opened auto-download from native missing-model check.";
+
             showToast({
                 severity: "info",
                 summary: "Missing models detected",
-                detail: "Opened auto-download from native missing-model check.",
+                detail,
                 life: 3200
             });
         };
@@ -2006,6 +2184,8 @@ app.registerExtension({
 
                     const hookEnabled = getRunHookEnabled();
                     const hadDialogBeforeRun = hasNativeMissingModelsDialog();
+                    const hadValidationDialogBeforeRun = hasNativePromptValidationDialog();
+                    const beforeNodeErrorSignature = getNodeErrorsSignature(getNodeErrorsSnapshot());
 
                     let result;
                     let error;
@@ -2015,15 +2195,30 @@ app.registerExtension({
                         error = err;
                     }
 
-                    if (hookEnabled && !hadDialogBeforeRun) {
-                        try {
-                            const hasDialogNow = await waitForNativeMissingModelsDialog(RUN_NATIVE_DIALOG_WAIT_MS);
-                            if (hasDialogNow) {
-                                triggerAutoDownloadFromNativeDialog();
+                    if (hookEnabled) {
+                        void (async () => {
+                            try {
+                                const [hasDialogNow, validationFailures] = await Promise.all([
+                                    hadDialogBeforeRun
+                                        ? Promise.resolve(false)
+                                        : waitForNativeMissingModelsDialog(RUN_NATIVE_DIALOG_WAIT_MS),
+                                    waitForNativeModelValidationFailure({
+                                        timeoutMs: RUN_NATIVE_VALIDATION_WAIT_MS,
+                                        beforeSignature: beforeNodeErrorSignature,
+                                        hadValidationDialogBeforeRun
+                                    })
+                                ]);
+
+                                if (hasDialogNow) {
+                                    triggerAutoDownloadFromRunHook("missing-dialog");
+                                }
+                                if (validationFailures.length) {
+                                    triggerAutoDownloadFromRunHook("model-validation", validationFailures);
+                                }
+                            } catch (_) {
+                                // No-op: run behavior must remain native even if hook observation fails.
                             }
-                        } catch (_) {
-                            // No-op: run behavior must remain native even if hook observation fails.
-                        }
+                        })();
                     }
 
                     if (error) {

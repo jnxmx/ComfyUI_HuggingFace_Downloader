@@ -34,14 +34,14 @@ app.registerExtension({
     },
     {
       id: "downloader.auto_open_missing_models_on_run",
-      category: ["Hugging Face downloader", "Auto download", "Auto-open on native missing-models dialog"],
-      name: "Auto-open on native missing-models dialog",
+      category: ["Hugging Face downloader", "Auto download", "Auto-open on native run model checks"],
+      name: "Auto-open on native run model checks",
       type: "boolean",
       defaultValue: true,
       tooltip:
-        "After pressing Run, if native ComfyUI opens the missing-models dialog, automatically open Auto-download.",
+        "After pressing Run, if native ComfyUI opens missing-models or reports model value-not-in-list validation errors, automatically open Auto-download.",
       onChange: (newValue) => {
-        console.log(`[HF Downloader] Auto-open on native missing-models dialog: ${Boolean(newValue)}`);
+        console.log(`[HF Downloader] Auto-open on native run model checks: ${Boolean(newValue)}`);
       },
     },
     {
