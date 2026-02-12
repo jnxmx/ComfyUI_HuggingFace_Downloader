@@ -19,29 +19,30 @@ app.registerExtension({
             inp.value = value || "";
             inp.placeholder = placeholder || "";
             Object.assign(inp.style, {
-                background: "#222",
-                border: "1px solid #494a50",
-                color: "#ddd",
+                background: "var(--comfy-input-bg, #222)",
+                border: "1px solid var(--border-color, #4e4e4e)",
+                color: "var(--input-text, #ddd)",
                 padding: "8px 12px",
                 borderRadius: "8px",
                 width: "100%",
                 boxSizing: "border-box",
                 minHeight: "40px",
                 fontSize: "14px",
-                lineHeight: "1.3"
+                lineHeight: "1.3",
+                fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
 
             if (!value && placeholder && placeholder.includes("URL")) {
                 inp.style.borderColor = "#7a4750";
-                inp.style.background = "#221720";
+                inp.style.background = "#2a1e24";
 
                 inp.addEventListener("input", () => {
                     if (inp.value.trim()) {
-                        inp.style.borderColor = "#494a50";
-                        inp.style.background = "#222";
+                        inp.style.borderColor = "var(--border-color, #4e4e4e)";
+                        inp.style.background = "var(--comfy-input-bg, #222)";
                     } else {
                         inp.style.borderColor = "#7a4750";
-                        inp.style.background = "#221720";
+                        inp.style.background = "#2a1e24";
                     }
                 });
             }
@@ -208,8 +209,8 @@ app.registerExtension({
                 top: "100%",
                 left: 0,
                 right: 0,
-                background: "#171718",
-                border: "1px solid #494a50",
+                background: "var(--comfy-menu-bg, #202020)",
+                border: "1px solid var(--border-color, #4e4e4e)",
                 borderTop: "none",
                 maxHeight: "180px",
                 overflowY: "auto",
@@ -234,11 +235,12 @@ app.registerExtension({
                     Object.assign(item.style, {
                         padding: "7px 10px",
                         cursor: "pointer",
-                        color: "#fff",
-                        fontSize: "13px"
+                        color: "var(--input-text, #ddd)",
+                        fontSize: "13px",
+                        fontFamily: "var(--font-inter, Inter, sans-serif)",
                     });
                     item.addEventListener("mouseenter", () => {
-                        item.style.background = "#313235";
+                        item.style.background = "var(--secondary-background-hover, #313235)";
                     });
                     item.addEventListener("mouseleave", () => {
                         item.style.background = "transparent";
@@ -523,21 +525,22 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "#171b24",
-                color: "#fff",
-                padding: "22px 24px",
-                borderRadius: "12px",
+                background: "var(--comfy-menu-bg, #202020)",
+                color: "var(--input-text, #ddd)",
+                padding: "20px 22px",
+                borderRadius: "16px",
                 textAlign: "left",
                 width: "480px",
                 maxWidth: "92vw",
-                border: "1px solid #3a4560",
-                boxShadow: "0 14px 34px rgba(0, 0, 0, 0.5)"
+                border: "1px solid var(--border-color, #4e4e4e)",
+                boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
+                fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
 
             const statusEl = document.createElement("div");
             statusEl.textContent = "Preparing scan...";
             Object.assign(statusEl.style, {
-                fontSize: "18px",
+                fontSize: "16px",
                 lineHeight: "1.25",
                 fontWeight: "600",
                 letterSpacing: "-0.005em"
@@ -546,8 +549,8 @@ app.registerExtension({
             const detailEl = document.createElement("div");
             detailEl.textContent = "Preparing workflow scan...";
             Object.assign(detailEl.style, {
-                fontSize: "12px",
-                color: "#a2aec8",
+                fontSize: "13px",
+                color: "var(--descrip-text, #999)",
                 marginTop: "8px",
                 minHeight: "18px"
             });
@@ -561,20 +564,21 @@ app.registerExtension({
             });
 
             const buttonBaseStyle = {
-                padding: "7px 16px",
-                borderRadius: "7px",
+                padding: "8px 16px",
+                borderRadius: "8px",
                 cursor: "pointer",
-                fontSize: "13px",
-                fontWeight: "600"
+                fontSize: "14px",
+                fontWeight: "600",
+                fontFamily: "var(--font-inter, Inter, sans-serif)",
             };
 
             const skipBtn = document.createElement("button");
             skipBtn.textContent = "Skip";
             Object.assign(skipBtn.style, {
                 ...buttonBaseStyle,
-                background: "#2c3344",
-                color: "#e2e9f8",
-                border: "1px solid #465673",
+                background: "var(--comfy-input-bg, #222)",
+                color: "var(--input-text, #ddd)",
+                border: "1px solid var(--border-color, #4e4e4e)",
                 opacity: skipModeActive ? "0.65" : "1"
             });
             skipBtn.disabled = skipModeActive;
@@ -607,26 +611,30 @@ app.registerExtension({
         const createDialogCloseIconButton = (onClose) => {
             const closeIconButton = document.createElement("button");
             closeIconButton.type = "button";
-            closeIconButton.textContent = "×";
+            closeIconButton.innerHTML = "<i class=\"pi pi-times\"></i>";
             Object.assign(closeIconButton.style, {
                 width: "40px",
                 height: "40px",
-                borderRadius: "8px",
-                border: "none",
-                background: "#262729",
-                color: "#fff",
-                fontSize: "20px",
+                borderRadius: "10px",
+                border: "1px solid transparent",
+                background: "var(--comfy-input-bg, #222)",
+                color: "var(--input-text, #ddd)",
+                fontSize: "14px",
                 lineHeight: "1",
                 cursor: "pointer",
                 padding: "0",
                 display: "grid",
                 placeItems: "center",
+                fontFamily: "var(--font-inter, Inter, sans-serif)",
+                transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
             });
             closeIconButton.onmouseenter = () => {
-                closeIconButton.style.background = "#313235";
+                closeIconButton.style.background = "var(--secondary-background-hover, #313235)";
+                closeIconButton.style.borderColor = "var(--border-color, #4e4e4e)";
             };
             closeIconButton.onmouseleave = () => {
-                closeIconButton.style.background = "#262729";
+                closeIconButton.style.background = "var(--comfy-input-bg, #222)";
+                closeIconButton.style.borderColor = "transparent";
             };
             closeIconButton.onclick = () => {
                 if (typeof onClose === "function") {
@@ -660,7 +668,7 @@ app.registerExtension({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: "rgba(8, 11, 17, 0.72)",
+                background: "rgba(0, 0, 0, 0.5)",
                 zIndex: 9000,
                 padding: "16px",
                 boxSizing: "border-box",
@@ -685,9 +693,9 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "#171718",
-                color: "#fff",
-                border: "1px solid #494a50",
+                background: "var(--comfy-menu-bg, #202020)",
+                color: "var(--input-text, #ddd)",
+                border: "1px solid var(--border-color, #4e4e4e)",
                 borderRadius: "16px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
@@ -697,7 +705,7 @@ app.registerExtension({
                 flexDirection: "column",
                 gap: "0",
                 overflow: "hidden",
-                fontFamily: "Inter, sans-serif",
+                fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
 
             const headerWrap = document.createElement("div");
@@ -706,9 +714,9 @@ app.registerExtension({
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "10px",
-                height: "56px",
-                padding: "0 16px",
-                borderBottom: "1px solid #494a50",
+                height: "72px",
+                padding: "0 24px",
+                borderBottom: "1px solid var(--border-color, #4e4e4e)",
                 flexShrink: "0",
             });
 
@@ -722,18 +730,18 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Auto-Download Models";
             Object.assign(titleEl.style, {
-                fontSize: "22px",
-                fontWeight: "700",
-                letterSpacing: "-0.01em",
-                color: "#f0f4fc",
-                lineHeight: "1.04",
+                fontSize: "16px",
+                fontWeight: "600",
+                letterSpacing: "0",
+                color: "var(--input-text, #ddd)",
+                lineHeight: "1.2",
             });
 
             const subtitleEl = document.createElement("div");
             subtitleEl.textContent = "Detected missing models and valid URLs.";
             Object.assign(subtitleEl.style, {
                 fontSize: "13px",
-                color: "#8a8a8a",
+                color: "var(--descrip-text, #999)",
             });
 
             titleWrap.appendChild(titleEl);
@@ -758,9 +766,9 @@ app.registerExtension({
                 display: "flex",
                 flexWrap: "wrap",
                 gap: "8px",
-                fontSize: "12px",
-                color: "#a0a0a0",
-                padding: "10px 16px 0",
+                fontSize: "13px",
+                color: "var(--descrip-text, #999)",
+                padding: "10px 24px 0",
             });
             summaryRow.textContent = `Missing: ${missingModels.length} • Found: ${foundModels.length} • Mismatches: ${mismatchModels.length}`;
             panel.appendChild(summaryRow);
@@ -783,7 +791,7 @@ app.registerExtension({
                 display: "flex",
                 flexDirection: "column",
                 gap: "6px",
-                padding: "8px 16px 12px",
+                padding: "8px 24px 12px",
             });
             loadFolderList();
 
@@ -795,7 +803,7 @@ app.registerExtension({
                     fontSize: "11px",
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
-                    padding: "4px 2px 0",
+                    padding: "4px 0 0",
                     fontWeight: "600",
                 });
                 return sectionTitle;
@@ -809,7 +817,7 @@ app.registerExtension({
                     gap: "12px",
                     flexWrap: "wrap",
                     background: "transparent",
-                    borderBottom: "1px solid #313235",
+                    borderBottom: "1px solid var(--border-color, #4e4e4e)",
                     padding: "10px 0",
                 });
                 return row;
@@ -839,8 +847,8 @@ app.registerExtension({
 
                     const row = makeBaseRow();
                     Object.assign(row.style, {
-                        background: "#202121",
-                        border: "1px solid #313235",
+                        background: "var(--comfy-input-bg, #222)",
+                        border: "1px solid var(--border-color, #4e4e4e)",
                         borderRadius: "10px",
                         padding: "10px",
                     });
@@ -858,17 +866,17 @@ app.registerExtension({
                     const nameEl = document.createElement("div");
                     Object.assign(nameEl.style, {
                         fontWeight: "600",
-                        fontSize: "14px",
+                        fontSize: "13px",
                         lineHeight: "1.2",
                         wordBreak: "break-word",
-                        color: "#edf2fb",
+                        color: "var(--input-text, #ddd)",
                     });
                     nameEl.textContent = m.filename || "Unknown model";
 
                     const metaEl = document.createElement("div");
                     Object.assign(metaEl.style, {
                         fontSize: "11px",
-                        color: "#8a8a8a",
+                        color: "var(--descrip-text, #999)",
                         marginTop: "3px",
                     });
                     metaEl.textContent = `${m.node_title || "Unknown Node"}${m.source ? " • " + m.source : ""}`;
@@ -922,9 +930,9 @@ app.registerExtension({
                             alignSelf: "flex-start",
                             fontSize: "12px",
                             padding: "6px 9px",
-                            background: "#313235",
-                            color: "#d9e2f3",
-                            border: "1px solid #494a50",
+                            background: "var(--comfy-input-bg, #222)",
+                            color: "var(--input-text, #ddd)",
+                            border: "1px solid var(--border-color, #4e4e4e)",
                             borderRadius: "7px",
                             cursor: "pointer",
                             fontWeight: "600",
@@ -933,8 +941,8 @@ app.registerExtension({
                         const altList = document.createElement("div");
                         Object.assign(altList.style, {
                             display: "none",
-                            background: "#202121",
-                            border: "1px solid #3c3d42",
+                            background: "var(--comfy-input-bg, #222)",
+                            border: "1px solid var(--border-color, #4e4e4e)",
                             padding: "8px",
                             borderRadius: "8px",
                         });
@@ -947,21 +955,21 @@ app.registerExtension({
                                 alignItems: "center",
                                 gap: "10px",
                                 padding: "7px 0",
-                                borderBottom: "1px solid #3c3d42",
+                                borderBottom: "1px solid var(--border-color, #4e4e4e)",
                             });
 
                             const altLabel = document.createElement("div");
                             altLabel.style.fontSize = "12px";
-                            altLabel.style.color = "#b7c1d6";
+                            altLabel.style.color = "var(--descrip-text, #999)";
                             altLabel.textContent = `${alt.filename}${alt.source ? " • " + alt.source : ""}`;
 
                             const useBtn = document.createElement("button");
                             useBtn.textContent = "Use";
                             Object.assign(useBtn.style, {
                                 padding: "5px 10px",
-                                background: "#313235",
-                                color: "#e9f1ff",
-                                border: "1px solid #494a50",
+                                background: "var(--comfy-input-bg, #222)",
+                                color: "var(--input-text, #ddd)",
+                                border: "1px solid var(--border-color, #4e4e4e)",
                                 borderRadius: "6px",
                                 cursor: "pointer",
                                 fontSize: "12px",
@@ -1033,17 +1041,17 @@ app.registerExtension({
                     nameEl.textContent = m.filename || "Unknown model";
                     Object.assign(nameEl.style, {
                         fontWeight: "600",
-                        fontSize: "14px",
+                        fontSize: "13px",
                         lineHeight: "1.2",
                         wordBreak: "break-word",
-                        color: "#edf2fb",
+                        color: "var(--input-text, #ddd)",
                     });
 
                     const metaEl = document.createElement("div");
                     metaEl.textContent = `${m.source || "exact_match"} • already installed`;
                     Object.assign(metaEl.style, {
-                        fontSize: "12px",
-                        color: "#8a8a8a",
+                        fontSize: "11px",
+                        color: "var(--descrip-text, #999)",
                         marginTop: "3px",
                     });
 
@@ -1055,8 +1063,8 @@ app.registerExtension({
                     Object.assign(pathEl.style, {
                         flex: "2 1 360px",
                         minWidth: "220px",
-                        fontSize: "12px",
-                        color: "#bfc8d8",
+                        fontSize: "13px",
+                        color: "var(--input-text, #ddd)",
                         wordBreak: "break-word",
                     });
 
@@ -1072,8 +1080,8 @@ app.registerExtension({
                 mismatchModels.forEach((m) => {
                     const row = makeBaseRow();
                     Object.assign(row.style, {
-                        background: "#202121",
-                        border: "1px solid #313235",
+                        background: "var(--comfy-input-bg, #222)",
+                        border: "1px solid var(--border-color, #4e4e4e)",
                         borderRadius: "10px",
                         padding: "10px",
                     });
@@ -1129,9 +1137,9 @@ app.registerExtension({
             const statusLine = document.createElement("div");
             Object.assign(statusLine.style, {
                 fontSize: "13px",
-                color: "#8a8a8a",
+                color: "var(--descrip-text, #999)",
                 minHeight: "20px",
-                padding: "0 16px",
+                padding: "0 24px",
             });
             panel.appendChild(statusLine);
 
@@ -1146,7 +1154,7 @@ app.registerExtension({
                 justifyContent: "flex-end",
                 gap: "12px",
                 marginTop: "2px",
-                padding: "0 16px 16px",
+                padding: "0 24px 16px",
             });
 
             const downloadBtn = createButton("Download Selected", "p-button p-component p-button-success", async () => {
@@ -1341,7 +1349,7 @@ app.registerExtension({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: "rgba(8, 11, 17, 0.72)",
+                background: "rgba(0, 0, 0, 0.5)",
                 zIndex: 9000
             });
 
@@ -1360,8 +1368,8 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "#171718",
-                color: "#fff",
+                background: "var(--comfy-menu-bg, #202020)",
+                color: "var(--input-text, #ddd)",
                 padding: "0",
                 borderRadius: "16px",
                 width: "min(820px, 100%)",
@@ -1371,9 +1379,9 @@ app.registerExtension({
                 flexDirection: "column",
                 gap: "0",
                 boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
-                border: "1px solid #494a50",
+                border: "1px solid var(--border-color, #4e4e4e)",
                 overflow: "hidden",
-                fontFamily: "Inter, sans-serif",
+                fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
 
             const headerWrap = document.createElement("div");
@@ -1382,9 +1390,9 @@ app.registerExtension({
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "10px",
-                height: "56px",
-                padding: "0 16px",
-                borderBottom: "1px solid #494a50",
+                height: "72px",
+                padding: "0 24px",
+                borderBottom: "1px solid var(--border-color, #4e4e4e)",
                 flexShrink: "0",
             });
 
@@ -1398,18 +1406,18 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Download New Model";
             Object.assign(titleEl.style, {
-                fontSize: "22px",
-                fontWeight: "700",
-                letterSpacing: "-0.01em",
-                color: "#f0f4fc",
-                lineHeight: "1.04",
+                fontSize: "16px",
+                fontWeight: "600",
+                letterSpacing: "0",
+                color: "var(--input-text, #ddd)",
+                lineHeight: "1.2",
             });
 
             const subtitleEl = document.createElement("div");
             subtitleEl.textContent = "Paste a direct Hugging Face file URL and choose a folder.";
             Object.assign(subtitleEl.style, {
                 fontSize: "13px",
-                color: "#8a8a8a",
+                color: "var(--descrip-text, #999)",
             });
 
             titleWrap.appendChild(titleEl);
@@ -1426,14 +1434,14 @@ app.registerExtension({
                 background: "transparent",
                 border: "none",
                 borderRadius: "0",
-                padding: "12px 16px",
+                padding: "12px 24px",
             });
 
             const urlLabel = document.createElement("div");
             urlLabel.textContent = "Hugging Face URL";
             Object.assign(urlLabel.style, {
-                fontSize: "12px",
-                color: "#8a8a8a",
+                fontSize: "11px",
+                color: "var(--descrip-text, #999)",
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",
                 fontWeight: "600",
@@ -1447,8 +1455,8 @@ app.registerExtension({
             const folderLabel = document.createElement("div");
             folderLabel.textContent = "Folder";
             Object.assign(folderLabel.style, {
-                fontSize: "12px",
-                color: "#8a8a8a",
+                fontSize: "11px",
+                color: "var(--descrip-text, #999)",
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",
                 fontWeight: "600",
@@ -1470,15 +1478,15 @@ app.registerExtension({
                 display: "flex",
                 justifyContent: "flex-end",
                 gap: "10px",
-                padding: "0 16px 16px",
+                padding: "0 24px 16px",
             });
 
             const statusLine = document.createElement("div");
             Object.assign(statusLine.style, {
                 fontSize: "13px",
-                color: "#8a8a8a",
+                color: "var(--descrip-text, #999)",
                 minHeight: "20px",
-                padding: "0 16px",
+                padding: "0 24px",
             });
             panel.appendChild(statusLine);
 

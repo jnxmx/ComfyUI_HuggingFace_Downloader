@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 
+const FORCE_MODEL_LIBRARY_ENABLED = false;
 const FORCE_MODEL_LIBRARY_SETTING_ID = "Comfy.Assets.UseAssetAPI";
 const FORCE_MODEL_LIBRARY_MAX_ATTEMPTS = 40;
 const FORCE_MODEL_LIBRARY_RETRY_MS = 500;
@@ -7,6 +8,10 @@ const FORCE_MODEL_LIBRARY_RETRY_MS = 500;
 app.registerExtension({
   name: "ComfyUI_HuggingFace_Downloader",
   setup() {
+    if (!FORCE_MODEL_LIBRARY_ENABLED) {
+      return;
+    }
+
     let attempts = 0;
     let timer = null;
     let modelLibraryLockListenerAttached = false;

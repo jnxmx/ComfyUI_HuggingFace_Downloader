@@ -125,11 +125,11 @@ app.registerExtension({
     top: 16px;
     width: 360px;
     max-width: calc(100vw - 32px);
-    background: #1f2128;
-    border: 1px solid #494a50;
+    background: var(--comfy-menu-bg, #202020);
+    border: 1px solid var(--border-color, #4e4e4e);
     border-radius: 16px;
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
-    color: #ddd;
+    box-shadow: 1px 1px 8px rgba(0, 0, 0, 0.4);
+    color: var(--input-text, #ddd);
     font-size: 12px;
     z-index: 10002;
     display: none;
@@ -143,8 +143,8 @@ app.registerExtension({
     gap: 8px;
 }
 #hf-backup-op-panel .hf-backup-op-item {
-    background: #1a1c22;
-    border: 1px solid #2d2f36;
+    background: var(--comfy-input-bg, #222);
+    border: 1px solid var(--border-color, #4e4e4e);
     border-radius: 6px;
     padding: 8px;
     display: flex;
@@ -190,8 +190,8 @@ app.registerExtension({
     display: none;
     justify-content: flex-end;
     padding: 8px 10px;
-    border-top: 1px solid #333;
-    background: #20222a;
+    border-top: 1px solid var(--border-color, #4e4e4e);
+    background: var(--comfy-menu-bg, #202020);
 }
 #hf-backup-op-panel .hf-backup-op-refresh {
     border: 1px solid #3f8d4d;
@@ -854,18 +854,19 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "#171718",
-                color: "#fff",
-                border: "1px solid #494a50",
+                background: "var(--comfy-menu-bg, #202020)",
+                color: "var(--input-text, #ddd)",
+                border: "1px solid var(--border-color, #4e4e4e)",
                 borderRadius: "16px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
-                padding: "16px",
-                boxShadow: "0 0 24px rgba(0,0,0,0.7)",
+                padding: "0",
+                boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
                 display: "flex",
                 flexDirection: "column",
-                gap: "10px",
+                gap: "0",
                 overflow: "hidden",
+                fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
 
             const headerWrap = document.createElement("div");
@@ -874,38 +875,44 @@ app.registerExtension({
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "10px",
+                height: "72px",
+                padding: "0 24px",
+                borderBottom: "1px solid var(--border-color, #4e4e4e)",
             });
 
             const header = document.createElement("div");
             header.textContent = "Backup Manager";
-            header.style.fontSize = "22px";
-            header.style.fontWeight = "700";
-            header.style.letterSpacing = "-0.01em";
-            header.style.color = "#f0f4fc";
+            header.style.fontSize = "16px";
+            header.style.fontWeight = "600";
+            header.style.letterSpacing = "0";
+            header.style.color = "var(--input-text, #ddd)";
             headerWrap.appendChild(header);
 
             const closeIconButton = document.createElement("button");
             closeIconButton.type = "button";
-            closeIconButton.textContent = "×";
+            closeIconButton.innerHTML = "<i class=\"pi pi-times\"></i>";
             Object.assign(closeIconButton.style, {
                 width: "40px",
                 height: "40px",
-                borderRadius: "8px",
-                border: "none",
-                background: "#262729",
-                color: "#fff",
-                fontSize: "26px",
+                borderRadius: "10px",
+                border: "1px solid transparent",
+                background: "var(--comfy-input-bg, #222)",
+                color: "var(--input-text, #ddd)",
+                fontSize: "14px",
                 lineHeight: "1",
                 cursor: "pointer",
                 padding: "0",
                 display: "grid",
                 placeItems: "center",
+                transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
             });
             closeIconButton.onmouseenter = () => {
-                closeIconButton.style.background = "#313235";
+                closeIconButton.style.background = "var(--secondary-background-hover, #313235)";
+                closeIconButton.style.borderColor = "var(--border-color, #4e4e4e)";
             };
             closeIconButton.onmouseleave = () => {
-                closeIconButton.style.background = "#262729";
+                closeIconButton.style.background = "var(--comfy-input-bg, #222)";
+                closeIconButton.style.borderColor = "transparent";
             };
             closeIconButton.onclick = () => {
                 if (busy) return;
@@ -921,6 +928,7 @@ app.registerExtension({
                 gap: "14px",
                 minHeight: "420px",
                 overflow: "auto",
+                padding: "12px 20px 0",
             });
 
             const updatePanelColumns = () => {
@@ -955,15 +963,15 @@ app.registerExtension({
                 });
                 const titleEl = document.createElement("div");
                 titleEl.textContent = title;
-                titleEl.style.fontSize = "12px";
+                titleEl.style.fontSize = "16px";
                 titleEl.style.fontWeight = "600";
-                titleEl.style.color = "#e1e6ef";
+                titleEl.style.color = "var(--input-text, #ddd)";
                 titleRow.appendChild(titleEl);
 
                 const metaEl = document.createElement("div");
                 metaEl.className = "hf-header-meta";
                 metaEl.style.display = "none";
-                metaEl.style.fontSize = "12px";
+                metaEl.style.fontSize = "16px";
                 metaEl.style.fontWeight = "600";
                 titleRow.appendChild(metaEl);
                 root.appendChild(titleRow);
@@ -982,10 +990,10 @@ app.registerExtension({
                     flex: "1",
                     minHeight: "260px",
                     overflowY: "auto",
-                    border: "1px solid #2f3440",
-                    borderRadius: "6px",
+                    border: "1px solid var(--border-color, #4e4e4e)",
+                    borderRadius: "10px",
                     padding: "6px",
-                    background: "#171b24",
+                    background: "var(--comfy-input-bg, #222)",
                 });
                 tree.textContent = "Loading...";
                 root.appendChild(tree);
@@ -1014,6 +1022,7 @@ app.registerExtension({
                 display: "flex",
                 justifyContent: "flex-start",
                 gap: "8px",
+                padding: "8px 20px 16px",
             });
 
             const status = document.createElement("div");
