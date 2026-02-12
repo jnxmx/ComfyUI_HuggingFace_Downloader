@@ -15,6 +15,12 @@ app.registerExtension({
         const RUN_NATIVE_DIALOG_POLL_MS = 60;
         const RUN_NATIVE_VALIDATION_POLL_MS = 60;
         const RUN_HOOK_COOLDOWN_MS = 1800;
+        const MODEL_STORE_IMPORT_CANDIDATES = [
+            "../../../stores/modelStore.js",
+            "/stores/modelStore.js",
+            "../../../scripts/stores/modelStore.js",
+            "/scripts/stores/modelStore.js"
+        ];
 
         /* ──────────────── Helper Functions ──────────────── */
         const createButton = (text, className, onClick) => {
@@ -2012,82 +2018,164 @@ app.registerExtension({
             return match ? String(match[1] || "").trim() : "";
         };
 
-        const getWidgetAllowedValues = (widget, node) => {
-            const options = widget?.options || {};
-            let values = options?.values;
-            if (typeof values === "function") {
-                try {
-                    values = values(widget, node);
-                } catch (_) {
-                    values = [];
+        let resolvedModelStorePromise = null;
+
+        const resolveModelStore = async () => {
+            if (resolvedModelStorePromise) {
+                return resolvedModelStorePromise;
+            }
+
+            resolvedModelStorePromise = (async () => {
+                for (const candidate of MODEL_STORE_IMPORT_CANDIDATES) {
+                    try {
+                        const module = await import(candidate);
+                        const useModelStore = module?.useModelStore;
+                        if (typeof useModelStore === "function") {
+                            const store = useModelStore();
+                            if (
+                                store &&
+                                typeof store.loadModelFolders === "function" &&
+                                typeof store.getLoadedModelFolder === "function"
+                            ) {
+                                return store;
+                            }
+                        }
+                    } catch (_) {
+                        // Try next import candidate.
+                    }
                 }
-            }
-            if (Array.isArray(values)) {
-                return values
-                    .map((value) => {
-                        if (Array.isArray(value)) return String(value[0] ?? "").trim();
-                        return String(value ?? "").trim();
-                    })
-                    .filter(Boolean);
-            }
-            if (values && typeof values === "object") {
-                return Object.keys(values)
-                    .map((value) => String(value || "").trim())
-                    .filter(Boolean);
-            }
-            return [];
+                return null;
+            })();
+
+            return resolvedModelStorePromise;
         };
 
-        const getPreRunModelValidationFailuresFromGraph = () => {
-            const graphNodes = Array.isArray(app?.graph?._nodes) ? app.graph._nodes : [];
-            if (!graphNodes.length) {
+        const getSelectedModelsMetadataNativeLike = (node) => {
+            try {
+                const models = Array.isArray(node?.properties?.models) ? node.properties.models : [];
+                if (!models.length) return [];
+                const widgetsValuesRaw = node?.widgets_values;
+                if (!widgetsValuesRaw) return [];
+
+                const widgetValues = Array.isArray(widgetsValuesRaw)
+                    ? widgetsValuesRaw
+                    : Object.values(widgetsValuesRaw || {});
+                if (!widgetValues.length) return [];
+
+                const stringWidgetValues = new Set();
+                for (const value of widgetValues) {
+                    if (typeof value === "string" && value.trim()) {
+                        stringWidgetValues.add(value);
+                    }
+                }
+                if (!stringWidgetValues.size) return [];
+
+                return models.filter((model) => {
+                    const modelName = String(model?.name || "").trim();
+                    if (!modelName) return false;
+                    return stringWidgetValues.has(modelName);
+                });
+            } catch (_) {
+                return [];
+            }
+        };
+
+        const collectEmbeddedModelsNativeLike = (graphData) => {
+            const embeddedModels = [];
+
+            const collectFromNodes = (nodes) => {
+                if (!Array.isArray(nodes)) return;
+                for (const node of nodes) {
+                    const selected = getSelectedModelsMetadataNativeLike(node);
+                    if (selected.length) {
+                        embeddedModels.push(...selected);
+                    }
+                }
+            };
+
+            collectFromNodes(graphData?.nodes);
+
+            const subgraphs = graphData?.definitions?.subgraphs;
+            if (Array.isArray(subgraphs)) {
+                for (const subgraph of subgraphs) {
+                    collectFromNodes(subgraph?.nodes);
+                }
+            }
+
+            if (Array.isArray(graphData?.models)) {
+                embeddedModels.push(...graphData.models);
+            }
+
+            const uniqueByKey = new Map();
+            for (const model of embeddedModels) {
+                const key = String(model?.url || model?.hash || "").trim();
+                if (!key) continue; // Native loadGraphData ignores models with no url/hash key.
+                if (!uniqueByKey.has(key)) {
+                    uniqueByKey.set(key, model);
+                }
+            }
+            return Array.from(uniqueByKey.values());
+        };
+
+        const getPreRunMissingModelsNativeLike = async () => {
+            const graphData = app?.graph?.serialize?.();
+            if (!graphData || typeof graphData !== "object") {
                 return [];
             }
 
-            const failures = [];
-            for (const node of graphNodes) {
-                const classType = String(node?.type || "");
-                const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
-                if (!widgets.length) continue;
+            const uniqueModels = collectEmbeddedModelsNativeLike(graphData);
+            if (!uniqueModels.length) {
+                return [];
+            }
 
-                for (const widget of widgets) {
-                    const widgetName = String(widget?.name || "");
-                    const widgetNameLower = widgetName.toLowerCase();
-                    const widgetValue = String(widget?.value ?? "").trim();
-                    if (!widgetValue) continue;
+            const modelStore = await resolveModelStore();
+            if (!modelStore) {
+                return [];
+            }
 
-                    const isExplicitModelField =
-                        widgetNameLower !== "name" &&
-                        MODEL_VALIDATION_INPUT_NAMES.has(widgetNameLower);
-                    const isCandidateInput =
-                        isExplicitModelField ||
-                        (widgetNameLower === "name" && isLikelyModelLoaderClass(classType)) ||
-                        (widgetNameLower.endsWith("_name") && isLikelyModelLoaderClass(classType));
-                    if (!isCandidateInput) {
-                        continue;
+            try {
+                await modelStore.loadModelFolders();
+            } catch (_) {
+                return [];
+            }
+
+            const folderNamesCache = new Map();
+            const missing = [];
+
+            for (const model of uniqueModels) {
+                const directory = String(model?.directory || "").trim();
+                const modelName = String(model?.name || "").trim();
+                if (!directory || !modelName) {
+                    continue;
+                }
+
+                if (!folderNamesCache.has(directory)) {
+                    let nameSet = null;
+                    try {
+                        const folder = await modelStore.getLoadedModelFolder(directory);
+                        const values = folder?.models ? Object.values(folder.models) : [];
+                        if (Array.isArray(values) && values.length) {
+                            nameSet = new Set(
+                                values
+                                    .map((entry) => String(entry?.file_name || "").trim())
+                                    .filter(Boolean)
+                            );
+                        } else {
+                            nameSet = new Set();
+                        }
+                    } catch (_) {
+                        nameSet = null;
                     }
+                    folderNamesCache.set(directory, nameSet);
+                }
 
-                    const allowedValues = getWidgetAllowedValues(widget, node);
-                    if (!allowedValues.length) {
-                        continue;
-                    }
-
-                    const allowedSet = new Set(
-                        allowedValues.map((value) => String(value || "").trim())
-                    );
-                    if (allowedSet.has(widgetValue)) {
-                        continue;
-                    }
-
-                    failures.push({
-                        classType,
-                        inputName: widgetName,
-                        missingValue: widgetValue,
-                        details: `Widget value '${widgetValue}' not in allowed options (${allowedValues.length}).`
-                    });
+                const namesInFolder = folderNamesCache.get(directory);
+                if (!namesInFolder || !namesInFolder.has(modelName)) {
+                    missing.push(model);
                 }
             }
-            return failures;
+
+            return missing;
         };
 
         const isLikelyModelLoaderClass = (classType) => {
@@ -2301,7 +2389,13 @@ app.registerExtension({
                         ? `Detected run validation mismatch for "${firstMissing}". Opened auto-download.`
                         : "Detected run validation mismatch for model loaders. Opened auto-download."
                 )
-                : "Opened auto-download from native missing-model check.";
+                : (reason === "native-missing-models"
+                    ? (
+                        firstMissing
+                            ? `Native missing-model check found "${firstMissing}". Opened auto-download.`
+                            : "Native missing-model check failed. Opened auto-download."
+                    )
+                    : "Opened auto-download from native missing-model check.");
 
             showToast({
                 severity: "info",
@@ -2344,9 +2438,15 @@ app.registerExtension({
                     const beforeNodeErrorSignature = getNodeErrorsSignature(getNodeErrorsSnapshot());
 
                     if (hookEnabled) {
-                        const preRunFailures = getPreRunModelValidationFailuresFromGraph();
-                        if (preRunFailures.length) {
-                            triggerAutoDownloadFromRunHook("model-validation", preRunFailures);
+                        const preRunMissingModels = await getPreRunMissingModelsNativeLike();
+                        if (preRunMissingModels.length) {
+                            const preRunFailures = preRunMissingModels.map((model) => ({
+                                classType: "",
+                                inputName: "",
+                                missingValue: String(model?.name || "").trim(),
+                                details: `${String(model?.directory || "").trim()}/${String(model?.name || "").trim()}`
+                            }));
+                            triggerAutoDownloadFromRunHook("native-missing-models", preRunFailures);
                             return false;
                         }
                     }

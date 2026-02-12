@@ -1672,7 +1672,8 @@ def setup(app):
         include_tags = [x.lower() for x in _split_csv_query(request.query.get("include_tags"))]
         exclude_tags = [x.lower() for x in _split_csv_query(request.query.get("exclude_tags"))]
         name_contains = str(request.query.get("name_contains", "") or "").strip().lower()
-        include_public = _coerce_bool(request.query.get("include_public"), default=True)
+        # Native model library UI expects both marketplace and imported model assets.
+        # Ownership filtering is handled in the frontend via is_immutable.
         limit = _safe_int(request.query.get("limit"), default=500, minimum=1, maximum=2000)
         offset = _safe_int(request.query.get("offset"), default=0, minimum=0, maximum=5_000_000)
 
@@ -1684,8 +1685,6 @@ def setup(app):
             if include_tags and any(tag not in tags_lower for tag in include_tags):
                 continue
             if exclude_tags and any(tag in tags_lower for tag in exclude_tags):
-                continue
-            if not include_public and bool(asset.get("is_immutable", True)):
                 continue
             if name_contains and name_contains not in str(asset.get("name", "") or "").lower():
                 display_name = str((asset.get("user_metadata") or {}).get("name", "") or "").lower()
