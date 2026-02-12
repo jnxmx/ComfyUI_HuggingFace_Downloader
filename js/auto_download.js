@@ -21,6 +21,12 @@ app.registerExtension({
             "../../../scripts/stores/modelStore.js",
             "/scripts/stores/modelStore.js"
         ];
+        const EXECUTION_STORE_IMPORT_CANDIDATES = [
+            "../../../stores/executionStore.js",
+            "/stores/executionStore.js",
+            "../../../scripts/stores/executionStore.js",
+            "/scripts/stores/executionStore.js"
+        ];
 
         /* ──────────────── Helper Functions ──────────────── */
         const createButton = (text, className, onClick) => {
@@ -2013,6 +2019,7 @@ app.registerExtension({
         };
 
         let resolvedModelStorePromise = null;
+        let resolvedExecutionStorePromise = null;
 
         const resolveModelStore = async () => {
             if (resolvedModelStorePromise) {
@@ -2042,6 +2049,32 @@ app.registerExtension({
             })();
 
             return resolvedModelStorePromise;
+        };
+
+        const resolveExecutionStore = async () => {
+            if (resolvedExecutionStorePromise) {
+                return resolvedExecutionStorePromise;
+            }
+
+            resolvedExecutionStorePromise = (async () => {
+                for (const candidate of EXECUTION_STORE_IMPORT_CANDIDATES) {
+                    try {
+                        const module = await import(candidate);
+                        const useExecutionStore = module?.useExecutionStore;
+                        if (typeof useExecutionStore === "function") {
+                            const store = useExecutionStore();
+                            if (store && typeof store === "object" && ("lastNodeErrors" in store)) {
+                                return store;
+                            }
+                        }
+                    } catch (_) {
+                        // Try next import candidate.
+                    }
+                }
+                return null;
+            })();
+
+            return resolvedExecutionStorePromise;
         };
 
         const getSelectedModelsMetadataNativeLike = (node) => {
@@ -2232,6 +2265,34 @@ app.registerExtension({
             );
         };
 
+        const isModelValidationReason = (reason, classType = "") => {
+            const type = String(reason?.type || "").toLowerCase();
+            const message = String(reason?.message || "").toLowerCase();
+            const details = String(reason?.details || "");
+            const detailsLower = details.toLowerCase();
+
+            const isValueNotInList =
+                message.includes("value not in list") ||
+                type.includes("value_not_in_list") ||
+                detailsLower.includes("not in [");
+            if (!isValueNotInList) {
+                return false;
+            }
+
+            const inputName =
+                String(reason?.extra_info?.input_name || "").trim() ||
+                parseInputNameFromDetails(details);
+            const inputNameLower = inputName.toLowerCase();
+
+            const looksModelInput = MODEL_VALIDATION_INPUT_NAMES.has(inputNameLower);
+            const looksModelByClassAndInput =
+                isLikelyModelLoaderClass(classType) && inputNameLower.endsWith("_name");
+            const looksModelByClassAndValue =
+                isLikelyModelLoaderClass(classType) && detailsLower.includes("not in [");
+
+            return looksModelInput || looksModelByClassAndInput || looksModelByClassAndValue;
+        };
+
         const getNativeModelValidationFailures = (nodeErrors = getNodeErrorsSnapshot()) => {
             if (!nodeErrors || typeof nodeErrors !== "object") {
                 return [];
@@ -2242,33 +2303,14 @@ app.registerExtension({
                 const classType = String(nodeError?.class_type || "");
                 const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
                 for (const reason of reasons) {
-                    const type = String(reason?.type || "").toLowerCase();
-                    const message = String(reason?.message || "").toLowerCase();
-                    const details = String(reason?.details || "");
-                    const detailsLower = details.toLowerCase();
-
-                    const isValueNotInList =
-                        message.includes("value not in list") ||
-                        type.includes("value_not_in_list") ||
-                        detailsLower.includes("not in [");
-                    if (!isValueNotInList) {
+                    if (!isModelValidationReason(reason, classType)) {
                         continue;
                     }
 
+                    const details = String(reason?.details || "");
                     const inputName =
                         String(reason?.extra_info?.input_name || "").trim() ||
                         parseInputNameFromDetails(details);
-                    const inputNameLower = inputName.toLowerCase();
-
-                    const looksModelInput = MODEL_VALIDATION_INPUT_NAMES.has(inputNameLower);
-                    const looksModelByClassAndInput =
-                        isLikelyModelLoaderClass(classType) && inputNameLower.endsWith("_name");
-                    const looksModelByClassAndValue =
-                        isLikelyModelLoaderClass(classType) && detailsLower.includes("not in [");
-
-                    if (!(looksModelInput || looksModelByClassAndInput || looksModelByClassAndValue)) {
-                        continue;
-                    }
 
                     failures.push({
                         classType,
@@ -2331,6 +2373,165 @@ app.registerExtension({
                     closeNativePromptValidationDialogs();
                 }, delay);
             });
+        };
+
+        const stripModelValidationErrorsFromNodeErrors = (nodeErrors) => {
+            if (!nodeErrors || typeof nodeErrors !== "object") {
+                return { changed: false, removedCount: 0, nextNodeErrors: nodeErrors };
+            }
+
+            const nextNodeErrors = {};
+            let changed = false;
+            let removedCount = 0;
+
+            for (const [executionId, nodeError] of Object.entries(nodeErrors)) {
+                if (!nodeError || typeof nodeError !== "object") {
+                    nextNodeErrors[executionId] = nodeError;
+                    continue;
+                }
+
+                const classType = String(nodeError?.class_type || "");
+                const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
+                if (!reasons.length) {
+                    nextNodeErrors[executionId] = nodeError;
+                    continue;
+                }
+
+                const kept = [];
+                for (const reason of reasons) {
+                    if (isModelValidationReason(reason, classType)) {
+                        removedCount += 1;
+                        changed = true;
+                        continue;
+                    }
+                    kept.push(reason);
+                }
+
+                if (kept.length) {
+                    nextNodeErrors[executionId] =
+                        kept.length === reasons.length
+                            ? nodeError
+                            : { ...nodeError, errors: kept };
+                } else {
+                    changed = true;
+                }
+            }
+
+            return {
+                changed,
+                removedCount,
+                nextNodeErrors: Object.keys(nextNodeErrors).length ? nextNodeErrors : null,
+            };
+        };
+
+        const replaceNodeErrorsInPlace = (target, nextNodeErrors) => {
+            if (!target || typeof target !== "object") {
+                return false;
+            }
+            try {
+                const next = nextNodeErrors && typeof nextNodeErrors === "object" ? nextNodeErrors : null;
+                for (const key of Object.keys(target)) {
+                    if (!next || !(key in next)) {
+                        delete target[key];
+                    }
+                }
+                if (next) {
+                    for (const [key, value] of Object.entries(next)) {
+                        target[key] = value;
+                    }
+                }
+                return true;
+            } catch (_) {
+                return false;
+            }
+        };
+
+        const forEachGraphNodeRecursive = (graph, callback) => {
+            if (!graph || typeof callback !== "function") return;
+            const nodes = Array.isArray(graph?._nodes) ? graph._nodes : [];
+            for (const node of nodes) {
+                callback(node);
+            }
+            const subgraphs = graph?.subgraphs;
+            if (subgraphs && typeof subgraphs.values === "function") {
+                for (const subgraph of subgraphs.values()) {
+                    forEachGraphNodeRecursive(subgraph, callback);
+                }
+            }
+        };
+
+        const applyNodeErrorsFallback = (nodeErrors) => {
+            forEachGraphNodeRecursive(app?.graph, (node) => {
+                if (!node || typeof node !== "object") return;
+                node.has_errors = false;
+                const inputs = Array.isArray(node.inputs) ? node.inputs : [];
+                for (const slot of inputs) {
+                    if (slot && typeof slot === "object") {
+                        delete slot.hasErrors;
+                    }
+                }
+            });
+
+            if (nodeErrors && typeof nodeErrors === "object") {
+                for (const [executionId, nodeError] of Object.entries(nodeErrors)) {
+                    const idToken = String(executionId || "").split(":").pop();
+                    const numericId = Number(idToken);
+                    if (!Number.isFinite(numericId)) {
+                        continue;
+                    }
+                    const node = app?.graph?.getNodeById?.(numericId);
+                    if (!node) {
+                        continue;
+                    }
+                    node.has_errors = true;
+                    const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
+                    const inputs = Array.isArray(node.inputs) ? node.inputs : [];
+                    for (const reason of reasons) {
+                        const inputName = String(reason?.extra_info?.input_name || "").trim();
+                        if (!inputName || !inputs.length) continue;
+                        const slot = inputs.find((entry) => String(entry?.name || "") === inputName);
+                        if (slot) {
+                            slot.hasErrors = true;
+                        }
+                    }
+                }
+            }
+
+            if (app?.canvas?.setDirty) {
+                app.canvas.setDirty(true, true);
+            } else if (app?.canvas?.draw) {
+                app.canvas.draw(true, true);
+            }
+        };
+
+        const clearModelValidationErrorsFromFrontendState = async () => {
+            const snapshot = getNodeErrorsSnapshot();
+            if (!snapshot) {
+                return false;
+            }
+
+            const stripped = stripModelValidationErrorsFromNodeErrors(snapshot);
+            if (!stripped.changed || stripped.removedCount <= 0) {
+                return false;
+            }
+
+            // Apply in-place immediately to reduce visible red-frame delay.
+            const updatedInPlace = replaceNodeErrorsInPlace(snapshot, stripped.nextNodeErrors);
+            if (updatedInPlace) {
+                applyNodeErrorsFallback(stripped.nextNodeErrors);
+            }
+
+            const executionStore = await resolveExecutionStore();
+            if (executionStore) {
+                try {
+                    executionStore.lastNodeErrors = stripped.nextNodeErrors;
+                    return true;
+                } catch (_) {
+                    // Fall through to in-place update result.
+                }
+            }
+
+            return updatedInPlace;
         };
 
         const waitForNativeModelValidationFailure = async ({
@@ -2401,14 +2602,21 @@ app.registerExtension({
         };
 
         const triggerAutoDownloadFromRunHook = (reason = "missing-dialog", failures = []) => {
+            const isValidationReason = reason === "model-validation";
             const now = Date.now();
             if (now - runHookLastTriggeredAt < RUN_HOOK_COOLDOWN_MS) {
+                if (isValidationReason) {
+                    void clearModelValidationErrorsFromFrontendState();
+                }
                 if (document.getElementById("auto-download-dialog")) {
                     suppressNativePromptValidationDialogsSoon();
                 }
                 return false;
             }
             if (document.getElementById("auto-download-dialog")) {
+                if (isValidationReason) {
+                    void clearModelValidationErrorsFromFrontendState();
+                }
                 suppressNativePromptValidationDialogsSoon();
                 return false;
             }
@@ -2420,8 +2628,10 @@ app.registerExtension({
             runHookLastTriggeredAt = now;
             suppressNativePromptValidationDialogsSoon();
             runAction();
+            if (isValidationReason) {
+                void clearModelValidationErrorsFromFrontendState();
+            }
 
-            const isValidationReason = reason === "model-validation";
             const firstMissing = failures.find((item) => item?.missingValue)?.missingValue || "";
             const detail = isValidationReason
                 ? (
