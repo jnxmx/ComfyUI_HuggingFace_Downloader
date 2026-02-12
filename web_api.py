@@ -38,13 +38,23 @@ pending_verifications_lock = threading.Lock()
 cancel_requests = set()
 cancel_requests_lock = threading.Lock()
 SETTINGS_REL_PATH = os.path.join("user", "default", "comfy.settings.json")
-MODEL_LIBRARY_CATALOG_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "metadata",
-    "marketplace_extract",
-    "from_dump",
-    "cloud_marketplace_models.json",
-)
+MODEL_LIBRARY_CATALOG_PATH_CANDIDATES = [
+    os.path.join(
+        os.path.dirname(__file__),
+        "metadata",
+        "marketplace_extract",
+        "from_dump",
+        "cloud_marketplace_models.json",
+    ),
+    os.path.join(
+        os.path.dirname(__file__),
+        "metadata",
+        "marketplace_extract",
+        "cloud_marketplace_models.json",
+    ),
+    # Fallback for installs that only carry popular-models.json.
+    os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json"),
+]
 MODEL_LIBRARY_BACKEND_SETTING = "downloader.model_library_backend_enabled"
 HUGGINGFACE_HOST = "huggingface.co"
 MODEL_LIBRARY_EXTENSIONS = {
@@ -126,7 +136,7 @@ MODEL_LIBRARY_CATEGORY_CANONICAL = {
     "flashvsr": "FlashVSR",
     "flashvsr-v1.1": "FlashVSR-v1.1",
 }
-model_library_catalog_cache = {"mtime": None, "entries": []}
+model_library_catalog_cache = {"path": None, "mtime": None, "entries": []}
 model_library_catalog_cache_lock = threading.Lock()
 model_library_local_cache = {
     "timestamp": 0.0,
@@ -394,22 +404,30 @@ def _scan_local_models() -> tuple[list[dict], dict[str, list[dict]]]:
         }
     return entries, name_map
 
+def _resolve_model_library_catalog_path() -> str | None:
+    for candidate in MODEL_LIBRARY_CATALOG_PATH_CANDIDATES:
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
 def _load_model_library_catalog_entries() -> list[dict]:
     global model_library_catalog_cache
-    if not os.path.exists(MODEL_LIBRARY_CATALOG_PATH):
+    catalog_path = _resolve_model_library_catalog_path()
+    if not catalog_path:
         return []
 
-    mtime = os.path.getmtime(MODEL_LIBRARY_CATALOG_PATH)
+    mtime = os.path.getmtime(catalog_path)
     with model_library_catalog_cache_lock:
         cached_mtime = model_library_catalog_cache.get("mtime")
-        if cached_mtime == mtime:
+        cached_path = model_library_catalog_cache.get("path")
+        if cached_mtime == mtime and cached_path == catalog_path:
             return model_library_catalog_cache.get("entries", [])
 
     try:
-        with open(MODEL_LIBRARY_CATALOG_PATH, "r", encoding="utf-8") as f:
+        with open(catalog_path, "r", encoding="utf-8") as f:
             payload = json.load(f)
     except Exception as e:
-        print(f"[ERROR] Failed to load model library from {MODEL_LIBRARY_CATALOG_PATH}: {e}")
+        print(f"[ERROR] Failed to load model library from {catalog_path}: {e}")
         return []
 
     models = payload.get("models", {}) if isinstance(payload, dict) else {}
@@ -423,6 +441,10 @@ def _load_model_library_catalog_entries() -> list[dict]:
             continue
         if not isinstance(meta, dict):
             continue
+        source_value = str(meta.get("source", "") or "").strip().lower()
+        # Keep only cloud marketplace rows even when fallback source is popular-models.json.
+        if source_value and source_value != "cloud_marketplace_export":
+            continue
         entry = dict(meta)
         entry["filename"] = filename_clean
         entry["directory"] = _normalize_rel_path(entry.get("directory", ""))
@@ -434,7 +456,7 @@ def _load_model_library_catalog_entries() -> list[dict]:
 
     entries.sort(key=lambda item: str(item.get("filename", "")).lower())
     with model_library_catalog_cache_lock:
-        model_library_catalog_cache = {"mtime": mtime, "entries": entries}
+        model_library_catalog_cache = {"path": catalog_path, "mtime": mtime, "entries": entries}
     return entries
 
 def _build_model_library_items(
@@ -721,7 +743,7 @@ def _build_model_library_asset_index() -> tuple[list[dict], dict[str, dict]]:
 
     entries = _build_model_library_items(
         include_catalog=True,
-        include_local_only=False,
+        include_local_only=True,
         hf_only=True,
         visible_only=True,
     )
