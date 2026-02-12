@@ -1968,6 +1968,23 @@ app.registerExtension({
             "audio_encoder_name",
             "name"
         ]);
+        const RUN_HOOK_FLASHVSR_MARKERS = ["flashvsr", "flash-vsr"];
+        const RUN_HOOK_CLASS_INCLUDE_MARKERS = [
+            "loader",
+            "checkpoint",
+            "controlnet",
+            "lora",
+            "vae",
+            "unet",
+            "clip",
+            "gguf",
+            "nunchaku",
+            "kjnodes",
+            "wanvideowrapper",
+            "wanvideo_wrapper",
+            "wan video wrapper",
+            "wanvideo",
+        ];
 
         const getNodeErrorsSnapshot = () => {
             const value = app?.lastNodeErrors;
@@ -2017,6 +2034,15 @@ app.registerExtension({
                 text.match(/'([^']+)'\s*not\s+in\s+\[/i);
             return match ? String(match[1] || "").trim() : "";
         };
+
+        const textContainsAnyMarker = (value, markers) => {
+            const haystack = String(value || "").toLowerCase();
+            if (!haystack) return false;
+            return markers.some((marker) => marker && haystack.includes(marker));
+        };
+
+        const isFlashVsrFamilyText = (value) =>
+            textContainsAnyMarker(value, RUN_HOOK_FLASHVSR_MARKERS);
 
         let resolvedModelStorePromise = null;
         let resolvedExecutionStorePromise = null;
@@ -2254,15 +2280,10 @@ app.registerExtension({
         const isLikelyModelLoaderClass = (classType) => {
             const value = String(classType || "").toLowerCase();
             if (!value) return false;
-            return (
-                value.includes("loader") ||
-                value.includes("checkpoint") ||
-                value.includes("controlnet") ||
-                value.includes("lora") ||
-                value.includes("vae") ||
-                value.includes("unet") ||
-                value.includes("clip")
-            );
+            if (isFlashVsrFamilyText(value)) {
+                return false;
+            }
+            return textContainsAnyMarker(value, RUN_HOOK_CLASS_INCLUDE_MARKERS);
         };
 
         const isModelValidationReason = (reason, classType = "") => {
@@ -2270,6 +2291,7 @@ app.registerExtension({
             const message = String(reason?.message || "").toLowerCase();
             const details = String(reason?.details || "");
             const detailsLower = details.toLowerCase();
+            const missingValue = parseMissingValueFromDetails(details);
 
             const isValueNotInList =
                 message.includes("value not in list") ||
@@ -2283,6 +2305,14 @@ app.registerExtension({
                 String(reason?.extra_info?.input_name || "").trim() ||
                 parseInputNameFromDetails(details);
             const inputNameLower = inputName.toLowerCase();
+            const flashVsrRelated =
+                isFlashVsrFamilyText(classType) ||
+                isFlashVsrFamilyText(inputNameLower) ||
+                isFlashVsrFamilyText(detailsLower) ||
+                isFlashVsrFamilyText(missingValue);
+            if (flashVsrRelated) {
+                return false;
+            }
 
             const looksModelInput = MODEL_VALIDATION_INPUT_NAMES.has(inputNameLower);
             const looksModelByClassAndInput =
@@ -2291,6 +2321,91 @@ app.registerExtension({
                 isLikelyModelLoaderClass(classType) && detailsLower.includes("not in [");
 
             return looksModelInput || looksModelByClassAndInput || looksModelByClassAndValue;
+        };
+
+        const isFlashVsrModelReference = (model) => {
+            if (!model || typeof model !== "object") return false;
+            const fields = [
+                model?.directory,
+                model?.name,
+                model?.url,
+                model?.type,
+                model?.repo_id,
+                model?.source,
+            ];
+            return fields.some((value) => isFlashVsrFamilyText(value));
+        };
+
+        const filterRunHookEligibleMissingModels = (models) => {
+            if (!Array.isArray(models) || !models.length) {
+                return [];
+            }
+            return models.filter((model) => !isFlashVsrModelReference(model));
+        };
+
+        const getMissingModelsDialogEntries = () => {
+            const entries = [];
+            const addEntry = (value) => {
+                const text = String(value || "").replace(/\s+/g, " ").trim();
+                if (!text) return;
+                entries.push(text);
+            };
+
+            const listboxes = Array.from(
+                document.querySelectorAll(MISSING_MODELS_LIST_SELECTOR)
+            );
+            for (const listbox of listboxes) {
+                const optionNodes = listbox.querySelectorAll(
+                    "[role='option'], .p-listbox-item, li"
+                );
+                if (optionNodes.length) {
+                    optionNodes.forEach((node) => addEntry(node?.textContent));
+                    continue;
+                }
+                const fallbackLines = String(listbox.textContent || "")
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter(Boolean);
+                fallbackLines.forEach(addEntry);
+            }
+
+            return Array.from(new Set(entries));
+        };
+
+        const shouldSuppressMissingDialogTriggerForFlashVsr = () => {
+            const entries = getMissingModelsDialogEntries();
+            if (!entries.length) {
+                // If we cannot determine entries, avoid suppressing.
+                return false;
+            }
+            const hasFlash = entries.some((entry) => isFlashVsrFamilyText(entry));
+            if (!hasFlash) {
+                return false;
+            }
+            const hasNonFlash = entries.some((entry) => !isFlashVsrFamilyText(entry));
+            return !hasNonFlash;
+        };
+
+        const shouldSuppressPromptValidationTriggerForFlashVsr = () => {
+            const dialogs = Array.from(document.querySelectorAll(RUN_ERROR_DIALOG_SELECTOR));
+            if (!dialogs.length) {
+                return false;
+            }
+
+            let hasRelevantDialog = false;
+            let hasNonFlashSignal = false;
+            for (const dialog of dialogs) {
+                const text = String(dialog?.textContent || "").toLowerCase();
+                if (!text.includes("prompt execution failed")) continue;
+                if (!text.includes("value not in list")) continue;
+                hasRelevantDialog = true;
+                if (!isFlashVsrFamilyText(text)) {
+                    hasNonFlashSignal = true;
+                    break;
+                }
+            }
+
+            return hasRelevantDialog && !hasNonFlashSignal;
         };
 
         const getNativeModelValidationFailures = (nodeErrors = getNodeErrorsSnapshot()) => {
@@ -2555,6 +2670,9 @@ app.registerExtension({
                     if (failures.length) {
                         return failures;
                     }
+                    if (shouldSuppressPromptValidationTriggerForFlashVsr()) {
+                        return [];
+                    }
                     return [
                         {
                             classType: "",
@@ -2587,6 +2705,9 @@ app.registerExtension({
                 const failures = getNativeModelValidationFailures(nodeErrors);
                 if (failures.length) {
                     return failures;
+                }
+                if (shouldSuppressPromptValidationTriggerForFlashVsr()) {
+                    return [];
                 }
                 return [
                     {
@@ -2689,11 +2810,14 @@ app.registerExtension({
                     const hadDialogBeforeRun = hasNativeMissingModelsDialog();
                     const hadValidationDialogBeforeRun = hasNativePromptValidationDialog();
                     const beforeNodeErrorSignature = getNodeErrorsSignature(getNodeErrorsSnapshot());
+                    let preRunEligibleMissingModels = [];
 
                     if (hookEnabled && !hasMissingNodes) {
                         const preRunMissingModels = await getPreRunMissingModelsNativeLike(graphData);
-                        if (preRunMissingModels.length) {
-                            const preRunFailures = preRunMissingModels.map((model) => ({
+                        preRunEligibleMissingModels =
+                            filterRunHookEligibleMissingModels(preRunMissingModels);
+                        if (preRunEligibleMissingModels.length) {
+                            const preRunFailures = preRunEligibleMissingModels.map((model) => ({
                                 classType: "",
                                 inputName: "",
                                 missingValue: String(model?.name || "").trim(),
@@ -2722,8 +2846,15 @@ app.registerExtension({
 
                         let triggeredImmediately = false;
                         if (immediateHasDialog) {
-                            triggeredImmediately =
-                                triggerAutoDownloadFromRunHook("missing-dialog") || triggeredImmediately;
+                            const shouldSuppressFlashVsrDialogTrigger =
+                                shouldSuppressMissingDialogTriggerForFlashVsr();
+                            const shouldTriggerMissingDialog =
+                                !shouldSuppressFlashVsrDialogTrigger ||
+                                preRunEligibleMissingModels.length > 0;
+                            if (shouldTriggerMissingDialog) {
+                                triggeredImmediately =
+                                    triggerAutoDownloadFromRunHook("missing-dialog") || triggeredImmediately;
+                            }
                         }
                         if (immediateValidationFailures.length) {
                             triggeredImmediately =
@@ -2746,7 +2877,14 @@ app.registerExtension({
                                     ]);
 
                                     if (hasDialogNow) {
-                                        triggerAutoDownloadFromRunHook("missing-dialog");
+                                        const shouldSuppressFlashVsrDialogTrigger =
+                                            shouldSuppressMissingDialogTriggerForFlashVsr();
+                                        const shouldTriggerMissingDialog =
+                                            !shouldSuppressFlashVsrDialogTrigger ||
+                                            preRunEligibleMissingModels.length > 0;
+                                        if (shouldTriggerMissingDialog) {
+                                            triggerAutoDownloadFromRunHook("missing-dialog");
+                                        }
                                     }
                                     if (validationFailures.length) {
                                         triggerAutoDownloadFromRunHook("model-validation", validationFailures);
