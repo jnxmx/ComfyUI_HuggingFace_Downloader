@@ -100,11 +100,11 @@ app.registerExtension({
     color: #b8c0cf;
 }
 #backup-hf-dialog .hf-backup-action-btn.p-button {
-    min-height: 28px;
-    padding: 0.26rem 0.7rem;
-    font-size: 12px;
+    min-height: 40px;
+    padding: 0.45rem 1rem;
+    font-size: 14px;
     font-weight: 600;
-    border-radius: 6px;
+    border-radius: 8px;
 }
 #backup-hf-dialog .hf-repo-link {
     color: #7cb3ff;
@@ -126,8 +126,8 @@ app.registerExtension({
     width: 360px;
     max-width: calc(100vw - 32px);
     background: #1f2128;
-    border: 1px solid #3c3c3c;
-    border-radius: 10px;
+    border: 1px solid #494a50;
+    border-radius: 16px;
     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
     color: #ddd;
     font-size: 12px;
@@ -854,10 +854,10 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "#17191f",
+                background: "#171718",
                 color: "#fff",
-                border: "1px solid #3c3c3c",
-                borderRadius: "12px",
+                border: "1px solid #494a50",
+                borderRadius: "16px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
                 padding: "16px",
@@ -881,20 +881,20 @@ app.registerExtension({
             header.style.fontSize = "22px";
             header.style.fontWeight = "700";
             header.style.letterSpacing = "-0.01em";
-            header.style.color = "#eef3fb";
+            header.style.color = "#f0f4fc";
             headerWrap.appendChild(header);
 
             const closeIconButton = document.createElement("button");
             closeIconButton.type = "button";
             closeIconButton.textContent = "×";
             Object.assign(closeIconButton.style, {
-                width: "34px",
-                height: "34px",
+                width: "40px",
+                height: "40px",
                 borderRadius: "8px",
                 border: "none",
-                background: "transparent",
-                color: "#a9b2c2",
-                fontSize: "34px",
+                background: "#262729",
+                color: "#fff",
+                fontSize: "26px",
                 lineHeight: "1",
                 cursor: "pointer",
                 padding: "0",
@@ -902,12 +902,10 @@ app.registerExtension({
                 placeItems: "center",
             });
             closeIconButton.onmouseenter = () => {
-                closeIconButton.style.background = "rgba(113, 126, 150, 0.2)";
-                closeIconButton.style.color = "#e7edf9";
+                closeIconButton.style.background = "#313235";
             };
             closeIconButton.onmouseleave = () => {
-                closeIconButton.style.background = "transparent";
-                closeIconButton.style.color = "#a9b2c2";
+                closeIconButton.style.background = "#262729";
             };
             closeIconButton.onclick = () => {
                 if (busy) return;
