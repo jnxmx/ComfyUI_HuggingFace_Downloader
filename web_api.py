@@ -123,7 +123,7 @@ MODEL_LIBRARY_CATEGORY_CANONICAL = {
     "chatterbox/chatterbox_multilingual": "chatterbox/chatterbox_multilingual",
     "chatterbox/chatterbox_vc": "chatterbox/chatterbox_vc",
     "latent_upscale_models": "latent_upscale_models",
-    "sam2": "sam2",
+    "sam2": "sams",
     "sam": "sams",
     "sams": "sams",
     "ultralytics": "ultralytics",
@@ -643,34 +643,39 @@ def _canonical_model_library_category(value: str | None) -> str | None:
     return MODEL_LIBRARY_CATEGORY_CANONICAL.get(top_level)
 
 def _resolve_model_library_category(entry: dict) -> str | None:
-    candidates = []
     manager_type = str(entry.get("manager_type", "") or "").strip()
     model_type = str(entry.get("type", "") or "").strip()
     directory = _normalize_rel_path(str(entry.get("directory", "") or "").strip())
     directory_top_level = directory.split("/", 1)[0] if directory else ""
     manager_category = _canonical_model_library_category(manager_type) if manager_type else None
     manager_is_checkpoint_like = manager_category == "checkpoints"
-
-    # For cloud/priority catalogs many rows are stamped as manager_type=checkpoint
-    # even when directory is a more specific category. In that case, prefer
-    # directory-derived category.
+    # 1) Trust explicit non-checkpoint manager_type first.
     if manager_type and not manager_is_checkpoint_like:
-        candidates.append(manager_type)
-    if directory:
-        candidates.append(directory)
-        candidates.append(directory_top_level)
-    if manager_type and manager_is_checkpoint_like:
-        candidates.append(manager_type)
-    if model_type:
-        candidates.append(model_type)
-
-    for candidate in candidates:
-        category = _canonical_model_library_category(candidate)
+        category = _canonical_model_library_category(manager_type)
         if category:
             return category
 
-    # Keep cloud-specific directory categories (e.g. FlashVSR-v1.1) even if
-    # they are not in the canonical manager vocabulary yet.
+    # 2) Prefer directory category over checkpoint-like type/manager values.
+    if directory:
+        category = _canonical_model_library_category(directory)
+        if category:
+            return category
+        category = _canonical_model_library_category(directory_top_level)
+        if category:
+            return category
+        if directory_top_level and directory_top_level.lower() not in {"checkpoint", "checkpoints"}:
+            return directory_top_level
+
+    # 3) Fall back to manager/type if directory could not classify.
+    if manager_type:
+        category = _canonical_model_library_category(manager_type)
+        if category:
+            return category
+    if model_type:
+        category = _canonical_model_library_category(model_type)
+        if category:
+            return category
+
     if directory_top_level:
         return directory_top_level
     return None
@@ -846,6 +851,7 @@ def _build_model_library_asset_index() -> tuple[list[dict], dict[str, dict]]:
         model_rel_path = _resolve_model_relative_path(entry, category, filename)
         provider = str(entry.get("provider", "") or "").strip()
         source_url = str(entry.get("url", "") or "").strip() or None
+        preview_url = str(entry.get("preview_url", "") or "").strip() or None
         installed_size = entry.get("installed_bytes_total")
         size_value = installed_size if isinstance(installed_size, int) and installed_size >= 0 else None
 
@@ -919,7 +925,7 @@ def _build_model_library_asset_index() -> tuple[list[dict], dict[str, dict]]:
             "asset_hash": None,
             "mime_type": _guess_mime_type(filename),
             "tags": ["models", category],
-            "preview_url": MODEL_LIBRARY_PREVIEW_URL,
+            "preview_url": preview_url or MODEL_LIBRARY_PREVIEW_URL,
             # Native Asset API treats non-immutable assets as "Imported".
             # Locally-installed files should be visible there.
             "is_immutable": not installed,
