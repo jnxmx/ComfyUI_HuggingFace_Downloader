@@ -19,26 +19,29 @@ app.registerExtension({
             inp.value = value || "";
             inp.placeholder = placeholder || "";
             Object.assign(inp.style, {
-                background: "#333",
-                border: "1px solid #555",
-                color: "#fff",
-                padding: "4px",
-                borderRadius: "4px",
+                background: "#0f131a",
+                border: "1px solid #414857",
+                color: "#e8edf8",
+                padding: "7px 10px",
+                borderRadius: "9px",
                 width: "100%",
-                boxSizing: "border-box"
+                boxSizing: "border-box",
+                minHeight: "36px",
+                fontSize: "14px",
+                lineHeight: "1.3"
             });
 
             if (!value && placeholder && placeholder.includes("URL")) {
-                inp.style.borderColor = "#ff4444";
-                inp.style.background = "#3a2a2a";
+                inp.style.borderColor = "#7a4750";
+                inp.style.background = "#221720";
 
                 inp.addEventListener("input", () => {
                     if (inp.value.trim()) {
-                        inp.style.borderColor = "#555";
-                        inp.style.background = "#333";
+                        inp.style.borderColor = "#414857";
+                        inp.style.background = "#0f131a";
                     } else {
-                        inp.style.borderColor = "#ff4444";
-                        inp.style.background = "#3a2a2a";
+                        inp.style.borderColor = "#7a4750";
+                        inp.style.background = "#221720";
                     }
                 });
             }
@@ -205,13 +208,14 @@ app.registerExtension({
                 top: "100%",
                 left: 0,
                 right: 0,
-                background: "#1f2128",
-                border: "1px solid #444",
+                background: "#131923",
+                border: "1px solid #3a4354",
                 borderTop: "none",
                 maxHeight: "180px",
                 overflowY: "auto",
                 zIndex: 10,
-                display: "none"
+                display: "none",
+                borderRadius: "0 0 8px 8px"
             });
 
             const buildList = () => {
@@ -228,12 +232,13 @@ app.registerExtension({
                     const item = document.createElement("div");
                     item.textContent = folder;
                     Object.assign(item.style, {
-                        padding: "6px 8px",
+                        padding: "7px 10px",
                         cursor: "pointer",
-                        color: "#ddd"
+                        color: "#d8dfec",
+                        fontSize: "13px"
                     });
                     item.addEventListener("mouseenter", () => {
-                        item.style.background = "#2b2f3a";
+                        item.style.background = "#252d3c";
                     });
                     item.addEventListener("mouseleave", () => {
                         item.style.background = "transparent";
@@ -320,6 +325,19 @@ app.registerExtension({
             if (!normalized) return "";
             const idx = normalized.lastIndexOf("/");
             return idx === -1 ? "" : normalized.slice(0, idx);
+        };
+
+        const formatFoundModelPath = (value) => {
+            const normalized = normalizeWorkflowPath(value).replace(/^\/+/, "");
+            if (!normalized) return "";
+            const parts = normalized.split("/").filter(Boolean);
+            if (!parts.length) return normalized;
+            for (let i = parts.length - 1; i >= 0; i -= 1) {
+                if (parts[i].toLowerCase() === "models" && i < parts.length - 1) {
+                    return parts.slice(i + 1).join("/");
+                }
+            }
+            return normalized;
         };
 
         const canonicalizeModelBasename = (value) => {
@@ -644,23 +662,14 @@ app.registerExtension({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: "rgba(0,0,0,0.5)",
+                background: "rgba(8, 11, 17, 0.72)",
                 zIndex: 9000,
                 padding: "16px",
                 boxSizing: "border-box",
             });
 
             let content = null;
-            let updateScrollHint = () => {};
-            let uiCleaned = false;
-            const cleanupUi = () => {
-                if (uiCleaned) return;
-                uiCleaned = true;
-                if (content) {
-                    content.removeEventListener("scroll", updateScrollHint);
-                }
-                window.removeEventListener("resize", updateScrollHint);
-            };
+            const cleanupUi = () => {};
 
             const closeDialog = () => {
                 stopPolling();
@@ -678,17 +687,17 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "#17191f",
+                background: "#141922",
                 color: "#fff",
-                border: "1px solid #3c3c3c",
-                borderRadius: "12px",
+                border: "1px solid #303746",
+                borderRadius: "14px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
-                padding: "16px",
-                boxShadow: "0 0 24px rgba(0,0,0,0.7)",
+                padding: "18px",
+                boxShadow: "0 16px 42px rgba(0,0,0,0.55)",
                 display: "flex",
                 flexDirection: "column",
-                gap: "10px",
+                gap: "12px",
                 overflow: "hidden",
             });
 
@@ -710,17 +719,17 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Auto-Download Models";
             Object.assign(titleEl.style, {
-                fontSize: "22px",
+                fontSize: "24px",
                 fontWeight: "700",
                 letterSpacing: "-0.01em",
-                color: "#eef3fb",
+                color: "#f0f4fc",
             });
 
             const subtitleEl = document.createElement("div");
             subtitleEl.textContent = "Detected missing models and valid URLs.";
             Object.assign(subtitleEl.style, {
-                fontSize: "13px",
-                color: "#9aa4b6",
+                fontSize: "14px",
+                color: "#a4adbe",
             });
 
             titleWrap.appendChild(titleEl);
@@ -745,17 +754,17 @@ app.registerExtension({
                 display: "flex",
                 flexWrap: "wrap",
                 gap: "10px",
-                fontSize: "12px",
-                color: "#9aa4b6",
+                fontSize: "13px",
+                color: "#93a0b8",
             });
             summaryRow.textContent = `Missing: ${missingModels.length} • Found: ${foundModels.length} • Mismatches: ${mismatchModels.length}`;
             panel.appendChild(summaryRow);
 
             const listFrame = document.createElement("div");
             Object.assign(listFrame.style, {
-                border: "1px solid #2f3440",
-                borderRadius: "8px",
-                background: "#171b24",
+                border: "1px solid #313848",
+                borderRadius: "10px",
+                background: "#111720",
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
@@ -768,42 +777,21 @@ app.registerExtension({
                 overflowY: "auto",
                 display: "flex",
                 flexDirection: "column",
-                gap: "8px",
-                padding: "10px",
+                gap: "10px",
+                padding: "12px",
             });
             loadFolderList();
-
-            const scrollHint = document.createElement("div");
-            scrollHint.textContent = "Scroll for more";
-            Object.assign(scrollHint.style, {
-                display: "none",
-                fontSize: "11px",
-                color: "#8f97a5",
-                textAlign: "center",
-                borderTop: "1px solid #2a2f3a",
-                padding: "5px 8px",
-                background: "#161b25",
-                letterSpacing: "0.03em",
-                textTransform: "uppercase",
-            });
-
-            updateScrollHint = () => {
-                const hasOverflow = content.scrollHeight > content.clientHeight + 4;
-                const atBottom = content.scrollTop + content.clientHeight >= content.scrollHeight - 4;
-                scrollHint.style.display = hasOverflow && !atBottom ? "block" : "none";
-            };
-            content.addEventListener("scroll", updateScrollHint);
-            window.addEventListener("resize", updateScrollHint);
 
             const makeSectionTitle = (text, color = "#9aa4b6") => {
                 const sectionTitle = document.createElement("div");
                 sectionTitle.textContent = text;
                 Object.assign(sectionTitle.style, {
                     color,
-                    fontSize: "11px",
+                    fontSize: "12px",
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
-                    padding: "2px 2px 4px",
+                    padding: "2px 2px 2px",
+                    fontWeight: "600",
                 });
                 return sectionTitle;
             };
@@ -815,10 +803,10 @@ app.registerExtension({
                     alignItems: "center",
                     gap: "10px",
                     flexWrap: "wrap",
-                    background: "#1f2128",
-                    border: "1px solid #2d3340",
-                    padding: "10px",
-                    borderRadius: "6px",
+                    background: "#1a202b",
+                    border: "1px solid #2f3646",
+                    padding: "11px",
+                    borderRadius: "8px",
                 });
                 return row;
             };
@@ -832,7 +820,7 @@ app.registerExtension({
                 Object.assign(noMissing.style, {
                     padding: "12px",
                     color: "#5bd98c",
-                    fontSize: "13px",
+                    fontSize: "14px",
                 });
                 content.appendChild(noMissing);
             } else {
@@ -859,18 +847,18 @@ app.registerExtension({
                     const nameEl = document.createElement("div");
                     Object.assign(nameEl.style, {
                         fontWeight: "600",
-                        fontSize: "14px",
+                        fontSize: "16px",
                         lineHeight: "1.2",
                         wordBreak: "break-word",
-                        color: "#e5ebf7",
+                        color: "#edf2fb",
                     });
                     nameEl.textContent = m.filename || "Unknown model";
 
                     const metaEl = document.createElement("div");
                     Object.assign(metaEl.style, {
-                        fontSize: "11px",
-                        color: "#8892a5",
-                        marginTop: "2px",
+                        fontSize: "12px",
+                        color: "#99a5bb",
+                        marginTop: "3px",
                     });
                     metaEl.textContent = `${m.node_title || "Unknown Node"}${m.source ? " • " + m.source : ""}`;
                     infoDiv.appendChild(nameEl);
@@ -880,8 +868,8 @@ app.registerExtension({
                     Object.assign(urlInput.style, {
                         flex: "2 1 320px",
                         minWidth: "220px",
-                        fontSize: "13px",
-                        minHeight: "34px",
+                        fontSize: "14px",
+                        minHeight: "36px",
                     });
 
                     const folderPicker = createFolderPicker(m.suggested_folder || "checkpoints", "Folder");
@@ -890,8 +878,8 @@ app.registerExtension({
                         minWidth: "140px",
                     });
                     Object.assign(folderPicker.input.style, {
-                        fontSize: "13px",
-                        minHeight: "34px",
+                        fontSize: "14px",
+                        minHeight: "36px",
                     });
 
                     row.appendChild(cb);
@@ -921,22 +909,23 @@ app.registerExtension({
                         altToggle.textContent = `Alternatives (${m.alternatives.length})`;
                         Object.assign(altToggle.style, {
                             alignSelf: "flex-start",
-                            fontSize: "11px",
-                            padding: "4px 8px",
-                            background: "#2b2f3a",
-                            color: "#ddd",
-                            border: "1px solid #444",
-                            borderRadius: "4px",
+                            fontSize: "12px",
+                            padding: "6px 9px",
+                            background: "#2a3140",
+                            color: "#d9e2f3",
+                            border: "1px solid #3c4558",
+                            borderRadius: "7px",
                             cursor: "pointer",
+                            fontWeight: "600",
                         });
 
                         const altList = document.createElement("div");
                         Object.assign(altList.style, {
                             display: "none",
-                            background: "#17191f",
-                            border: "1px solid #333",
+                            background: "#151b25",
+                            border: "1px solid #2d3443",
                             padding: "8px",
-                            borderRadius: "6px",
+                            borderRadius: "8px",
                         });
 
                         m.alternatives.forEach((alt) => {
@@ -946,25 +935,26 @@ app.registerExtension({
                                 justifyContent: "space-between",
                                 alignItems: "center",
                                 gap: "10px",
-                                padding: "4px 0",
-                                borderBottom: "1px solid #222",
+                                padding: "5px 0",
+                                borderBottom: "1px solid #242b38",
                             });
 
                             const altLabel = document.createElement("div");
-                            altLabel.style.fontSize = "11px";
-                            altLabel.style.color = "#bbb";
+                            altLabel.style.fontSize = "12px";
+                            altLabel.style.color = "#b7c1d6";
                             altLabel.textContent = `${alt.filename}${alt.source ? " • " + alt.source : ""}`;
 
                             const useBtn = document.createElement("button");
                             useBtn.textContent = "Use";
                             Object.assign(useBtn.style, {
-                                padding: "4px 8px",
-                                background: "#3a3f4b",
-                                color: "#fff",
-                                border: "none",
-                                borderRadius: "4px",
+                                padding: "5px 10px",
+                                background: "#304059",
+                                color: "#e9f1ff",
+                                border: "1px solid #3f5270",
+                                borderRadius: "6px",
                                 cursor: "pointer",
-                                fontSize: "11px",
+                                fontSize: "12px",
+                                fontWeight: "600",
                             });
 
                             useBtn.onclick = () => {
@@ -988,7 +978,6 @@ app.registerExtension({
 
                         altToggle.onclick = () => {
                             altList.style.display = altList.style.display === "none" ? "block" : "none";
-                            updateScrollHint();
                         };
 
                         rowWrapper.appendChild(altToggle);
@@ -1005,8 +994,8 @@ app.registerExtension({
                 noneFound.textContent = "No already-installed models matched this workflow.";
                 Object.assign(noneFound.style, {
                     padding: "10px 12px",
-                    color: "#8d96a8",
-                    fontSize: "12px",
+                    color: "#99a3b8",
+                    fontSize: "13px",
                 });
                 content.appendChild(noneFound);
             } else {
@@ -1017,7 +1006,7 @@ app.registerExtension({
                     marker.textContent = "✓";
                     Object.assign(marker.style, {
                         color: "#5bd98c",
-                        fontSize: "15px",
+                        fontSize: "16px",
                         fontWeight: "700",
                         width: "14px",
                         textAlign: "center",
@@ -1033,31 +1022,31 @@ app.registerExtension({
                     nameEl.textContent = m.filename || "Unknown model";
                     Object.assign(nameEl.style, {
                         fontWeight: "600",
-                        fontSize: "14px",
+                        fontSize: "15px",
                         lineHeight: "1.2",
                         wordBreak: "break-word",
-                        color: "#e5ebf7",
+                        color: "#edf2fb",
                     });
 
                     const metaEl = document.createElement("div");
                     metaEl.textContent = `${m.source || "exact_match"} • already installed`;
                     Object.assign(metaEl.style, {
-                        fontSize: "11px",
-                        color: "#8892a5",
-                        marginTop: "2px",
+                        fontSize: "12px",
+                        color: "#99a5bb",
+                        marginTop: "3px",
                     });
 
                     infoDiv.appendChild(nameEl);
                     infoDiv.appendChild(metaEl);
 
                     const pathEl = document.createElement("div");
-                    pathEl.textContent = m.found_path || "";
+                    pathEl.textContent = formatFoundModelPath(m.found_path || m.clean_path || "");
                     Object.assign(pathEl.style, {
                         flex: "2 1 360px",
                         minWidth: "220px",
-                        fontSize: "12px",
-                        color: "#c6cfde",
-                        wordBreak: "break-all",
+                        fontSize: "13px",
+                        color: "#cfd8ea",
+                        wordBreak: "break-word",
                     });
 
                     row.appendChild(marker);
@@ -1068,7 +1057,7 @@ app.registerExtension({
             }
 
             if (mismatchModels.length > 0) {
-                content.appendChild(makeSectionTitle("Path Mismatches", "#ffb35c"));
+                content.appendChild(makeSectionTitle("Path Mismatches", "#f7b96a"));
                 mismatchModels.forEach((m) => {
                     const row = makeBaseRow();
                     const left = document.createElement("div");
@@ -1082,14 +1071,14 @@ app.registerExtension({
                     const fixBtn = document.createElement("button");
                     fixBtn.textContent = "Fix Path";
                     Object.assign(fixBtn.style, {
-                        padding: "6px 10px",
-                        background: "#2196F3",
+                        padding: "6px 11px",
+                        background: "#2f84da",
                         color: "white",
-                        border: "none",
-                        borderRadius: "5px",
+                        border: "1px solid #3f9af7",
+                        borderRadius: "6px",
                         cursor: "pointer",
                         fontWeight: "600",
-                        fontSize: "12px",
+                        fontSize: "13px",
                     });
 
                     fixBtn.onclick = () => {
@@ -1118,14 +1107,13 @@ app.registerExtension({
             }
 
             listFrame.appendChild(content);
-            listFrame.appendChild(scrollHint);
             panel.appendChild(listFrame);
 
             const statusLine = document.createElement("div");
             Object.assign(statusLine.style, {
-                fontSize: "12px",
-                color: "#9aa4b6",
-                minHeight: "16px",
+                fontSize: "13px",
+                color: "#9ba8be",
+                minHeight: "17px",
             });
             panel.appendChild(statusLine);
 
@@ -1290,11 +1278,11 @@ app.registerExtension({
                 downloadBtn.disabled = true;
             }
             Object.assign(downloadBtn.style, {
-                minHeight: "32px",
-                padding: "0.34rem 0.9rem",
-                fontSize: "13px",
+                minHeight: "36px",
+                padding: "0.42rem 0.95rem",
+                fontSize: "14px",
                 fontWeight: "600",
-                borderRadius: "6px",
+                borderRadius: "8px",
             });
 
             footer.appendChild(downloadBtn);
@@ -1303,7 +1291,6 @@ app.registerExtension({
             dlg.appendChild(panel);
             document.body.appendChild(dlg);
             setTimeout(() => {
-                updateScrollHint();
                 const firstUrlInput = dlg.querySelector("input[placeholder='HuggingFace URL...']");
                 if (firstUrlInput) {
                     firstUrlInput.focus();
@@ -1335,7 +1322,7 @@ app.registerExtension({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: "rgba(0,0,0,0.6)",
+                background: "rgba(8, 11, 17, 0.72)",
                 zIndex: 9000
             });
 
@@ -1354,18 +1341,18 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "#17191f",
+                background: "#141922",
                 color: "#fff",
-                padding: "16px",
-                borderRadius: "12px",
+                padding: "18px",
+                borderRadius: "14px",
                 width: "min(820px, 100%)",
                 maxWidth: "92vw",
                 maxHeight: "92vh",
                 display: "flex",
                 flexDirection: "column",
-                gap: "10px",
-                boxShadow: "0 0 24px rgba(0,0,0,0.7)",
-                border: "1px solid #3c3c3c",
+                gap: "12px",
+                boxShadow: "0 16px 42px rgba(0,0,0,0.55)",
+                border: "1px solid #303746",
                 overflow: "hidden",
             });
 
@@ -1387,17 +1374,17 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Download New Model";
             Object.assign(titleEl.style, {
-                fontSize: "22px",
+                fontSize: "24px",
                 fontWeight: "700",
                 letterSpacing: "-0.01em",
-                color: "#eef3fb",
+                color: "#f0f4fc",
             });
 
             const subtitleEl = document.createElement("div");
             subtitleEl.textContent = "Paste a direct Hugging Face file URL and choose a folder.";
             Object.assign(subtitleEl.style, {
-                fontSize: "13px",
-                color: "#9aa4b6",
+                fontSize: "14px",
+                color: "#a4adbe",
             });
 
             titleWrap.appendChild(titleEl);
@@ -1411,38 +1398,40 @@ app.registerExtension({
                 display: "flex",
                 flexDirection: "column",
                 gap: "10px",
-                background: "#171b24",
-                border: "1px solid #2f3440",
-                borderRadius: "8px",
+                background: "#111720",
+                border: "1px solid #313848",
+                borderRadius: "10px",
                 padding: "12px",
             });
 
             const urlLabel = document.createElement("div");
             urlLabel.textContent = "Hugging Face URL";
             Object.assign(urlLabel.style, {
-                fontSize: "11px",
-                color: "#8f97a5",
+                fontSize: "12px",
+                color: "#99a5ba",
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",
+                fontWeight: "600",
             });
             const urlInput = createInput("", "HuggingFace URL...");
             Object.assign(urlInput.style, {
-                fontSize: "14px",
-                minHeight: "36px",
+                fontSize: "15px",
+                minHeight: "38px",
             });
 
             const folderLabel = document.createElement("div");
             folderLabel.textContent = "Folder";
             Object.assign(folderLabel.style, {
-                fontSize: "11px",
-                color: "#8f97a5",
+                fontSize: "12px",
+                color: "#99a5ba",
                 textTransform: "uppercase",
                 letterSpacing: "0.05em",
+                fontWeight: "600",
             });
             const folderPicker = createFolderPicker("loras", "Folder");
             Object.assign(folderPicker.input.style, {
-                fontSize: "14px",
-                minHeight: "36px",
+                fontSize: "15px",
+                minHeight: "38px",
             });
 
             content.appendChild(urlLabel);
@@ -1460,9 +1449,9 @@ app.registerExtension({
 
             const statusLine = document.createElement("div");
             Object.assign(statusLine.style, {
-                fontSize: "12px",
-                color: "#9aa4b6",
-                minHeight: "16px",
+                fontSize: "13px",
+                color: "#9ba8be",
+                minHeight: "17px",
             });
             panel.appendChild(statusLine);
 
@@ -1567,11 +1556,11 @@ app.registerExtension({
                 }
             });
             Object.assign(downloadBtn.style, {
-                minHeight: "32px",
-                padding: "0.34rem 0.9rem",
-                fontSize: "13px",
+                minHeight: "36px",
+                padding: "0.42rem 0.95rem",
+                fontSize: "14px",
                 fontWeight: "600",
-                borderRadius: "6px",
+                borderRadius: "8px",
             });
 
             footer.appendChild(downloadBtn);
