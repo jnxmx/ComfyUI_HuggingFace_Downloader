@@ -799,11 +799,13 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Auto-Download Models";
             Object.assign(titleEl.style, {
-                font: "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)",
                 letterSpacing: "0",
                 color: "var(--input-text, #ddd)",
             });
-            titleEl.style.setProperty("font", "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)", "important");
+            titleEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
+            titleEl.style.setProperty("font-size", "14px", "important");
+            titleEl.style.setProperty("font-weight", "400", "important");
+            titleEl.style.setProperty("line-height", "20px", "important");
 
             const subtitleEl = document.createElement("div");
             subtitleEl.textContent = "Detected missing models and valid URLs.";
@@ -884,7 +886,7 @@ app.registerExtension({
                     gridTemplateColumns: "24px minmax(190px, 1.1fr) minmax(260px, 1.2fr) minmax(160px, 0.8fr)",
                     alignItems: "center",
                     gap: "12px",
-                    background: "color-mix(in srgb, var(--comfy-menu-bg) 88%, var(--base-foreground) 12%)",
+                    background: "var(--secondary-background-selected, var(--secondary-background))",
                     borderRadius: "10px",
                     padding: "10px 12px",
                 });
@@ -1464,11 +1466,13 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Download New Model";
             Object.assign(titleEl.style, {
-                font: "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)",
                 letterSpacing: "0",
                 color: "var(--input-text, #ddd)",
             });
-            titleEl.style.setProperty("font", "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)", "important");
+            titleEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
+            titleEl.style.setProperty("font-size", "14px", "important");
+            titleEl.style.setProperty("font-weight", "400", "important");
+            titleEl.style.setProperty("line-height", "20px", "important");
 
             const subtitleEl = document.createElement("div");
             subtitleEl.textContent = "Paste a direct Hugging Face file URL and choose a folder.";

@@ -147,7 +147,10 @@ app.registerExtension({
 }
 #backup-hf-dialog .hf-header-meta {
     color: #9aa4b6;
-    font: 400 14px/20px var(--font-inter, Inter, Arial, sans-serif);
+    font-family: Inter, Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 20px;
 }
 #hf-backup-op-panel {
     position: fixed;
@@ -905,20 +908,22 @@ app.registerExtension({
             Object.assign(headerWrap.style, {
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "flex-start",
-                minHeight: "72px",
-                padding: "16px 28px 16px 24px",
-                boxSizing: "border-box",
-                position: "relative",
+                justifyContent: "space-between",
+                gap: "8px",
+                height: "72px",
+                padding: "0 24px",
             });
 
             const header = document.createElement("div");
             header.textContent = "Backup Manager";
-            header.style.font = "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)";
-            header.style.setProperty("font", "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)", "important");
             header.style.letterSpacing = "0";
             header.style.color = "var(--input-text, #ddd)";
-            header.style.paddingRight = "72px";
+            header.style.flex = "1";
+            header.style.minWidth = "0";
+            header.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
+            header.style.setProperty("font-size", "14px", "important");
+            header.style.setProperty("font-weight", "400", "important");
+            header.style.setProperty("line-height", "20px", "important");
             headerWrap.appendChild(header);
 
             const closeIconButton = document.createElement("button");
@@ -938,9 +943,6 @@ app.registerExtension({
                 display: "grid",
                 placeItems: "center",
                 transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
-                position: "absolute",
-                right: "28px",
-                top: "16px",
                 flexShrink: "0",
             });
             closeIconButton.onmouseenter = () => {
@@ -1000,16 +1002,20 @@ app.registerExtension({
                 });
                 const titleEl = document.createElement("div");
                 titleEl.textContent = title;
-                titleEl.style.font = "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)";
-                titleEl.style.setProperty("font", "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)", "important");
+                titleEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
+                titleEl.style.setProperty("font-size", "14px", "important");
+                titleEl.style.setProperty("font-weight", "400", "important");
+                titleEl.style.setProperty("line-height", "20px", "important");
                 titleEl.style.color = "var(--input-text, #ddd)";
                 titleRow.appendChild(titleEl);
 
                 const metaEl = document.createElement("div");
                 metaEl.className = "hf-header-meta";
                 metaEl.style.display = "none";
-                metaEl.style.font = "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)";
-                metaEl.style.setProperty("font", "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)", "important");
+                metaEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
+                metaEl.style.setProperty("font-size", "14px", "important");
+                metaEl.style.setProperty("font-weight", "400", "important");
+                metaEl.style.setProperty("line-height", "20px", "important");
                 titleRow.appendChild(metaEl);
                 root.appendChild(titleRow);
 
