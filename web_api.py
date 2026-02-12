@@ -796,6 +796,8 @@ def _build_model_library_asset_index() -> tuple[list[dict], dict[str, dict]]:
         )
         asset_id = str(uuid.uuid5(uuid.NAMESPACE_URL, seed))
 
+        installed = bool(entry.get("installed"))
+
         asset = {
             "id": asset_id,
             "name": filename,
@@ -803,7 +805,9 @@ def _build_model_library_asset_index() -> tuple[list[dict], dict[str, dict]]:
             "mime_type": _guess_mime_type(filename),
             "tags": ["models", category],
             "preview_url": MODEL_LIBRARY_PREVIEW_URL,
-            "is_immutable": True,
+            # Native Asset API treats non-immutable assets as "Imported".
+            # Locally-installed files should be visible there.
+            "is_immutable": not installed,
             "metadata": metadata,
             "user_metadata": user_metadata,
         }
@@ -1972,7 +1976,7 @@ def setup(app):
                 "mime_type": _guess_mime_type(filename),
                 "tags": ["models", category],
                 "preview_url": MODEL_LIBRARY_PREVIEW_URL,
-                "is_immutable": True,
+                "is_immutable": False,
                 "user_metadata": {
                     "filename": rel_for_widget,
                     "source_url": source_url,
