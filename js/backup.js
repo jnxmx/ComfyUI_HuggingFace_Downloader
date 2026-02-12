@@ -924,8 +924,8 @@ app.registerExtension({
             header.style.flex = "1";
             header.style.minWidth = "0";
             header.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
-            header.style.setProperty("font-size", "14px", "important");
-            header.style.setProperty("font-weight", "400", "important");
+            header.style.setProperty("font-size", "16px", "important");
+            header.style.setProperty("font-weight", "700", "important");
             header.style.setProperty("line-height", "20px", "important");
             headerWrap.appendChild(header);
 
@@ -936,7 +936,7 @@ app.registerExtension({
                 width: "40px",
                 height: "40px",
                 borderRadius: "10px",
-                border: "1px solid transparent",
+                border: "none",
                 background: "var(--comfy-input-bg)",
                 color: "var(--input-text)",
                 fontSize: "14px",
@@ -945,7 +945,7 @@ app.registerExtension({
                 padding: "0",
                 display: "grid",
                 placeItems: "center",
-                transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
+                transition: "background-color 120ms ease, color 120ms ease",
                 flexShrink: "0",
                 flex: "0 0 40px",
                 marginLeft: "auto",
@@ -958,11 +958,9 @@ app.registerExtension({
             }
             closeIconButton.onmouseenter = () => {
                 closeIconButton.style.background = "var(--secondary-background-hover)";
-                closeIconButton.style.borderColor = "var(--border-default)";
             };
             closeIconButton.onmouseleave = () => {
                 closeIconButton.style.background = "var(--comfy-input-bg)";
-                closeIconButton.style.borderColor = "transparent";
             };
             closeIconButton.onclick = () => {
                 if (busy) return;
@@ -1014,8 +1012,8 @@ app.registerExtension({
                 const titleEl = document.createElement("div");
                 titleEl.textContent = title;
                 titleEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
-                titleEl.style.setProperty("font-size", "14px", "important");
-                titleEl.style.setProperty("font-weight", "400", "important");
+                titleEl.style.setProperty("font-size", "16px", "important");
+                titleEl.style.setProperty("font-weight", "700", "important");
                 titleEl.style.setProperty("line-height", "20px", "important");
                 titleEl.style.color = "var(--input-text)";
                 titleRow.appendChild(titleEl);
