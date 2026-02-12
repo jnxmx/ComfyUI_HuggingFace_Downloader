@@ -648,11 +648,19 @@ def _resolve_model_library_category(entry: dict) -> str | None:
     model_type = str(entry.get("type", "") or "").strip()
     directory = _normalize_rel_path(str(entry.get("directory", "") or "").strip())
     directory_top_level = directory.split("/", 1)[0] if directory else ""
-    if manager_type:
+    manager_category = _canonical_model_library_category(manager_type) if manager_type else None
+    manager_is_checkpoint_like = manager_category == "checkpoints"
+
+    # For cloud/priority catalogs many rows are stamped as manager_type=checkpoint
+    # even when directory is a more specific category. In that case, prefer
+    # directory-derived category.
+    if manager_type and not manager_is_checkpoint_like:
         candidates.append(manager_type)
     if directory:
         candidates.append(directory)
         candidates.append(directory_top_level)
+    if manager_type and manager_is_checkpoint_like:
+        candidates.append(manager_type)
     if model_type:
         candidates.append(model_type)
 
