@@ -38,7 +38,7 @@ pending_verifications_lock = threading.Lock()
 cancel_requests = set()
 cancel_requests_lock = threading.Lock()
 SETTINGS_REL_PATH = os.path.join("user", "default", "comfy.settings.json")
-MODEL_LIBRARY_CATALOG_PATH_CANDIDATES = [
+MODEL_LIBRARY_CLOUD_CATALOG_PATH_CANDIDATES = [
     os.path.join(
         os.path.dirname(__file__),
         "metadata",
@@ -52,9 +52,10 @@ MODEL_LIBRARY_CATALOG_PATH_CANDIDATES = [
         "marketplace_extract",
         "cloud_marketplace_models.json",
     ),
-    # Fallback for installs that only carry popular-models.json.
-    os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json"),
 ]
+MODEL_LIBRARY_PRIORITY_CATALOG_PATH = os.path.join(
+    os.path.dirname(__file__), "metadata", "popular-models.json"
+)
 MODEL_LIBRARY_BACKEND_SETTING = "downloader.model_library_backend_enabled"
 HUGGINGFACE_HOST = "huggingface.co"
 MODEL_LIBRARY_EXTENSIONS = {
@@ -109,6 +110,7 @@ MODEL_LIBRARY_CATEGORY_CANONICAL = {
     "style_models": "style_models",
     "gligen": "gligen",
     "clip_vision": "clip_vision",
+    "clip": "text_encoders",
     "text_encoder": "text_encoders",
     "text_encoders": "text_encoders",
     "audio_encoder": "audio_encoders",
@@ -136,7 +138,7 @@ MODEL_LIBRARY_CATEGORY_CANONICAL = {
     "flashvsr": "FlashVSR",
     "flashvsr-v1.1": "FlashVSR-v1.1",
 }
-model_library_catalog_cache = {"path": None, "mtime": None, "entries": []}
+model_library_catalog_cache = {"signature": None, "entries": []}
 model_library_catalog_cache_lock = threading.Lock()
 model_library_local_cache = {
     "timestamp": 0.0,
@@ -404,59 +406,125 @@ def _scan_local_models() -> tuple[list[dict], dict[str, list[dict]]]:
         }
     return entries, name_map
 
-def _resolve_model_library_catalog_path() -> str | None:
-    for candidate in MODEL_LIBRARY_CATALOG_PATH_CANDIDATES:
+def _resolve_model_library_cloud_catalog_path() -> str | None:
+    for candidate in MODEL_LIBRARY_CLOUD_CATALOG_PATH_CANDIDATES:
         if os.path.exists(candidate):
             return candidate
+    # Fallback for installs that only carry popular-models.json.
+    if os.path.exists(MODEL_LIBRARY_PRIORITY_CATALOG_PATH):
+        return MODEL_LIBRARY_PRIORITY_CATALOG_PATH
     return None
 
-def _load_model_library_catalog_entries() -> list[dict]:
-    global model_library_catalog_cache
-    catalog_path = _resolve_model_library_catalog_path()
-    if not catalog_path:
-        return []
+def _resolve_model_library_priority_catalog_path() -> str | None:
+    if os.path.exists(MODEL_LIBRARY_PRIORITY_CATALOG_PATH):
+        return MODEL_LIBRARY_PRIORITY_CATALOG_PATH
+    return None
 
-    mtime = os.path.getmtime(catalog_path)
-    with model_library_catalog_cache_lock:
-        cached_mtime = model_library_catalog_cache.get("mtime")
-        cached_path = model_library_catalog_cache.get("path")
-        if cached_mtime == mtime and cached_path == catalog_path:
-            return model_library_catalog_cache.get("entries", [])
-
+def _safe_mtime(path: str | None) -> float | None:
+    if not path:
+        return None
     try:
-        with open(catalog_path, "r", encoding="utf-8") as f:
+        return os.path.getmtime(path)
+    except Exception:
+        return None
+
+def _load_models_dict_from_catalog_path(path: str | None) -> dict:
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
     except Exception as e:
-        print(f"[ERROR] Failed to load model library from {catalog_path}: {e}")
-        return []
+        print(f"[ERROR] Failed to load model library from {path}: {e}")
+        return {}
 
     models = payload.get("models", {}) if isinstance(payload, dict) else {}
     if not isinstance(models, dict):
+        return {}
+    return models
+
+def _build_model_library_catalog_entry(filename: str, meta: dict) -> dict | None:
+    filename_clean = str(filename or "").strip()
+    if not filename_clean:
+        return None
+    if not isinstance(meta, dict):
+        return None
+
+    entry = dict(meta)
+    entry["filename"] = filename_clean
+    entry["directory"] = _normalize_rel_path(entry.get("directory", ""))
+    entry["provider"] = _extract_provider(entry)
+    # Cloud export entries do not include library_visible, so default to visible.
+    entry["library_visible"] = bool(entry.get("library_visible", True))
+    entry["is_huggingface_url"] = _is_huggingface_url(entry.get("url"))
+    return entry
+
+def _load_model_library_catalog_entries() -> list[dict]:
+    global model_library_catalog_cache
+    cloud_catalog_path = _resolve_model_library_cloud_catalog_path()
+    priority_catalog_path = _resolve_model_library_priority_catalog_path()
+    if not cloud_catalog_path and not priority_catalog_path:
         return []
 
-    entries = []
-    for filename, meta in models.items():
-        filename_clean = str(filename or "").strip()
-        if not filename_clean:
-            continue
+    cache_signature = (
+        cloud_catalog_path or "",
+        _safe_mtime(cloud_catalog_path),
+        priority_catalog_path or "",
+        _safe_mtime(priority_catalog_path),
+    )
+    with model_library_catalog_cache_lock:
+        if model_library_catalog_cache.get("signature") == cache_signature:
+            return model_library_catalog_cache.get("entries", [])
+
+    cloud_models = _load_models_dict_from_catalog_path(cloud_catalog_path)
+    if priority_catalog_path and priority_catalog_path == cloud_catalog_path:
+        priority_models = cloud_models
+    else:
+        priority_models = _load_models_dict_from_catalog_path(priority_catalog_path)
+
+    entries_by_filename: dict[str, dict] = {}
+
+    # Cloud entries are authoritative and win conflicts by filename.
+    for filename, meta in cloud_models.items():
         if not isinstance(meta, dict):
             continue
         source_value = str(meta.get("source", "") or "").strip().lower()
-        # Keep only cloud marketplace rows even when fallback source is popular-models.json.
         if source_value and source_value != "cloud_marketplace_export":
             continue
-        entry = dict(meta)
-        entry["filename"] = filename_clean
-        entry["directory"] = _normalize_rel_path(entry.get("directory", ""))
-        entry["provider"] = _extract_provider(entry)
-        # Cloud export entries do not include library_visible, so default to visible.
-        entry["library_visible"] = bool(entry.get("library_visible", True))
-        entry["is_huggingface_url"] = _is_huggingface_url(entry.get("url"))
-        entries.append(entry)
+        entry = _build_model_library_catalog_entry(filename, meta)
+        if not entry:
+            continue
+        filename_key = str(entry.get("filename", "")).lower()
+        if not filename_key:
+            continue
+        entries_by_filename[filename_key] = entry
+
+    # Add only non-checkpoint categories from the priority list if cloud does
+    # not already provide the filename.
+    for filename, meta in priority_models.items():
+        if not isinstance(meta, dict):
+            continue
+        filename_key = str(filename or "").strip().lower()
+        if not filename_key or filename_key in entries_by_filename:
+            continue
+        source_value = str(meta.get("source", "") or "").strip().lower()
+        if source_value == "cloud_marketplace_export":
+            continue
+        if source_value != "priority_repo_scrape":
+            continue
+        entry = _build_model_library_catalog_entry(filename, meta)
+        if not entry:
+            continue
+        category = _resolve_model_library_category(entry)
+        if not category or str(category).lower() == "checkpoints":
+            continue
+        entries_by_filename[filename_key] = entry
+
+    entries = list(entries_by_filename.values())
 
     entries.sort(key=lambda item: str(item.get("filename", "")).lower())
     with model_library_catalog_cache_lock:
-        model_library_catalog_cache = {"path": catalog_path, "mtime": mtime, "entries": entries}
+        model_library_catalog_cache = {"signature": cache_signature, "entries": entries}
     return entries
 
 def _build_model_library_items(
@@ -579,11 +647,12 @@ def _resolve_model_library_category(entry: dict) -> str | None:
     manager_type = str(entry.get("manager_type", "") or "").strip()
     model_type = str(entry.get("type", "") or "").strip()
     directory = _normalize_rel_path(str(entry.get("directory", "") or "").strip())
+    directory_top_level = directory.split("/", 1)[0] if directory else ""
     if manager_type:
         candidates.append(manager_type)
     if directory:
         candidates.append(directory)
-        candidates.append(directory.split("/", 1)[0])
+        candidates.append(directory_top_level)
     if model_type:
         candidates.append(model_type)
 
@@ -591,6 +660,11 @@ def _resolve_model_library_category(entry: dict) -> str | None:
         category = _canonical_model_library_category(candidate)
         if category:
             return category
+
+    # Keep cloud-specific directory categories (e.g. FlashVSR-v1.1) even if
+    # they are not in the canonical manager vocabulary yet.
+    if directory_top_level:
+        return directory_top_level
     return None
 
 def _split_csv_query(value: str | None) -> list[str]:
@@ -1971,7 +2045,12 @@ def setup(app):
         if not requested_category and isinstance(user_metadata.get("directory"), str):
             requested_category = user_metadata.get("directory", "")
 
-        category = _canonical_model_library_category(requested_category) or "checkpoints"
+        normalized_requested_category = _normalize_rel_path(requested_category).split("/", 1)[0]
+        category = (
+            _canonical_model_library_category(requested_category)
+            or normalized_requested_category
+            or "checkpoints"
+        )
         model_payload = {
             "url": source_url,
             "folder": category,

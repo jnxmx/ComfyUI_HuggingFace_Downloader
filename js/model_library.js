@@ -49,6 +49,8 @@ const MODEL_LIBRARY_ACTION_BUTTON_SELECTOR = "button.shrink-0";
 const MODEL_LIBRARY_USE_LABEL = "Use";
 const MODEL_LIBRARY_DOWNLOAD_AND_USE_LABEL = "Download & Use";
 const MODEL_LIBRARY_DOWNLOADING_LABEL = "Downloading...";
+const MODEL_LIBRARY_DOWNLOAD_BY_LINK_LABEL = "Download by link";
+const MODEL_LIBRARY_IMPORT_BUTTON_PATCH_MARKER = "hfModelLibraryImportButtonPatched";
 const FALLBACK_NODE_TYPE_TO_CATEGORY = {
   CheckpointLoaderSimple: "checkpoints",
   ImageOnlyCheckpointLoader: "checkpoints",
@@ -171,6 +173,7 @@ const requestUiRefresh = () => {
   const run = () => {
     modelLibraryUiRefreshScheduled = false;
     refreshModelLibraryActionButtons();
+    patchModelLibraryImportButtons();
   };
   if (typeof requestAnimationFrame === "function") {
     requestAnimationFrame(run);
@@ -207,6 +210,100 @@ const setButtonLabel = (button, label) => {
   } else {
     textNode.nodeValue = label;
   }
+};
+
+const setButtonVisibleLabel = (button, label) => {
+  if (!button) return;
+
+  const explicitLabel = button.querySelector(
+    ".p-button-label, .button-label, [data-pc-section='label']"
+  );
+  if (explicitLabel) {
+    explicitLabel.textContent = label;
+    return;
+  }
+
+  const candidateSpans = Array.from(button.querySelectorAll("span")).filter((node) => {
+    const text = String(node?.textContent || "").trim();
+    if (!text) {
+      return false;
+    }
+    const className = String(node?.className || "").toLowerCase();
+    return !className.includes("icon");
+  });
+  if (candidateSpans.length) {
+    candidateSpans[0].textContent = label;
+    return;
+  }
+
+  setButtonLabel(button, label);
+};
+
+const openManualDownloadDialog = () => {
+  const action =
+    globalThis?.hfDownloader?.showManualDownloadDialog ||
+    window?.hfDownloader?.showManualDownloadDialog;
+  if (typeof action !== "function") {
+    return false;
+  }
+  action();
+  return true;
+};
+
+const patchModelLibraryImportButtons = () => {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const modal = document.querySelector(MODEL_LIBRARY_MODAL_SELECTOR);
+  if (!modal) {
+    return;
+  }
+
+  const buttons = modal.querySelectorAll("button");
+  buttons.forEach((button) => {
+    if (button.closest(MODEL_LIBRARY_CARD_SELECTOR)) {
+      return;
+    }
+
+    const text = String(button.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    if (!text) {
+      return;
+    }
+    if (
+      text !== "import" &&
+      text !== MODEL_LIBRARY_DOWNLOAD_BY_LINK_LABEL.toLowerCase()
+    ) {
+      return;
+    }
+
+    setButtonVisibleLabel(button, MODEL_LIBRARY_DOWNLOAD_BY_LINK_LABEL);
+    button.setAttribute("aria-label", MODEL_LIBRARY_DOWNLOAD_BY_LINK_LABEL);
+
+    if (button.dataset[MODEL_LIBRARY_IMPORT_BUTTON_PATCH_MARKER] === "1") {
+      return;
+    }
+    button.dataset[MODEL_LIBRARY_IMPORT_BUTTON_PATCH_MARKER] = "1";
+    button.addEventListener(
+      "click",
+      (event) => {
+        if (!getBackendSettingEnabled()) {
+          return;
+        }
+        if (!openManualDownloadDialog()) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === "function") {
+          event.stopImmediatePropagation();
+        }
+      },
+      true
+    );
+  });
 };
 
 const getActionButtonFromCard = (card) => {
