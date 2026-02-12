@@ -43,6 +43,12 @@ const STORE_BRIDGE_IMPORT_CANDIDATES = [
 ];
 const MODEL_FETCH_PAGE_SIZE = 500;
 const MODEL_FETCH_MAX_PAGES = 20;
+const MODEL_LIBRARY_MODAL_SELECTOR = '[data-component-id="AssetBrowserModal"]';
+const MODEL_LIBRARY_CARD_SELECTOR = '[data-component-id="AssetCard"][data-asset-id]';
+const MODEL_LIBRARY_ACTION_BUTTON_SELECTOR = "button.shrink-0";
+const MODEL_LIBRARY_USE_LABEL = "Use";
+const MODEL_LIBRARY_DOWNLOAD_AND_USE_LABEL = "Download & Use";
+const MODEL_LIBRARY_DOWNLOADING_LABEL = "Downloading...";
 const FALLBACK_NODE_TYPE_TO_CATEGORY = {
   CheckpointLoaderSimple: "checkpoints",
   ImageOnlyCheckpointLoader: "checkpoints",
@@ -68,6 +74,354 @@ const FALLBACK_NODE_TYPE_TO_CATEGORY = {
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const modelLibraryAssetById = new Map();
+const modelLibraryInstalledById = new Map();
+const modelLibraryDownloadInProgress = new Set();
+const modelLibraryBypassClickOnce = new Set();
+let modelLibraryUiObserverInstalled = false;
+let modelLibraryUiListenerInstalled = false;
+let modelLibraryUiRefreshScheduled = false;
+const TEXT_NODE_TYPE = typeof Node !== "undefined" ? Node.TEXT_NODE : 3;
+
+const isPlainObject = (value) =>
+  Boolean(value && typeof value === "object" && !Array.isArray(value));
+
+const asStringArray = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => String(item || "").trim())
+    .filter((item) => Boolean(item));
+};
+
+const resolveAssetId = (asset) => {
+  const assetId = String(asset?.id || "").trim();
+  return assetId || null;
+};
+
+const resolveInstalledState = (asset) => {
+  if (!asset || typeof asset !== "object") {
+    return null;
+  }
+
+  const userInstalled = asset?.user_metadata?.installed;
+  if (typeof userInstalled === "boolean") {
+    return userInstalled;
+  }
+  const metadataInstalled = asset?.metadata?.installed;
+  if (typeof metadataInstalled === "boolean") {
+    return metadataInstalled;
+  }
+  if (typeof asset?.is_immutable === "boolean") {
+    return !asset.is_immutable;
+  }
+  return null;
+};
+
+const rememberModelLibraryAsset = (asset) => {
+  const assetId = resolveAssetId(asset);
+  if (!assetId) {
+    return;
+  }
+  modelLibraryAssetById.set(assetId, asset);
+
+  const installed = resolveInstalledState(asset);
+  if (typeof installed === "boolean") {
+    modelLibraryInstalledById.set(assetId, installed);
+  }
+};
+
+const rememberModelLibraryAssetsFromPayload = (payload) => {
+  if (Array.isArray(payload?.assets)) {
+    payload.assets.forEach(rememberModelLibraryAsset);
+    return;
+  }
+  if (isPlainObject(payload) && resolveAssetId(payload)) {
+    rememberModelLibraryAsset(payload);
+  }
+};
+
+const readJsonResponse = async (response) => {
+  try {
+    return await response.json();
+  } catch (_) {
+    return null;
+  }
+};
+
+const shouldTrackAssetStateFromRoute = (path, method) => {
+  if (path === ASSETS_ROUTE_PREFIX && method === "GET") {
+    return true;
+  }
+  if (path === `${ASSETS_ROUTE_PREFIX}/download` && method === "POST") {
+    return true;
+  }
+  if (isAssetDetailPath(path) && (method === "GET" || method === "PUT")) {
+    return true;
+  }
+  return false;
+};
+
+const requestUiRefresh = () => {
+  if (modelLibraryUiRefreshScheduled) {
+    return;
+  }
+  modelLibraryUiRefreshScheduled = true;
+  const run = () => {
+    modelLibraryUiRefreshScheduled = false;
+    refreshModelLibraryActionButtons();
+  };
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(run);
+    return;
+  }
+  setTimeout(run, 0);
+};
+
+const trackModelLibraryAssetStateFromResponse = async (path, method, response) => {
+  if (!response?.ok) {
+    return;
+  }
+  if (!shouldTrackAssetStateFromRoute(path, method)) {
+    return;
+  }
+  const payload = await readJsonResponse(response.clone());
+  rememberModelLibraryAssetsFromPayload(payload);
+  requestUiRefresh();
+};
+
+const setButtonLabel = (button, label) => {
+  if (!button) return;
+
+  let textNode = null;
+  for (const child of Array.from(button.childNodes || [])) {
+    if (child?.nodeType === TEXT_NODE_TYPE && String(child.nodeValue || "").trim()) {
+      textNode = child;
+      break;
+    }
+  }
+  if (!textNode) {
+    textNode = document.createTextNode(label);
+    button.insertBefore(textNode, button.firstChild || null);
+  } else {
+    textNode.nodeValue = label;
+  }
+};
+
+const getActionButtonFromCard = (card) => {
+  if (!card || typeof card.querySelector !== "function") {
+    return null;
+  }
+  return card.querySelector(MODEL_LIBRARY_ACTION_BUTTON_SELECTOR);
+};
+
+function refreshModelLibraryActionButtons() {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const cards = document.querySelectorAll(
+    `${MODEL_LIBRARY_MODAL_SELECTOR} ${MODEL_LIBRARY_CARD_SELECTOR}`
+  );
+  cards.forEach((card) => {
+    const assetId = String(card.getAttribute("data-asset-id") || "").trim();
+    if (!assetId) {
+      return;
+    }
+    const button = getActionButtonFromCard(card);
+    if (!button) {
+      return;
+    }
+
+    const installed = modelLibraryInstalledById.get(assetId);
+    const downloading = modelLibraryDownloadInProgress.has(assetId);
+    let label = MODEL_LIBRARY_USE_LABEL;
+    if (downloading) {
+      label = MODEL_LIBRARY_DOWNLOADING_LABEL;
+    } else if (installed === false) {
+      label = MODEL_LIBRARY_DOWNLOAD_AND_USE_LABEL;
+    }
+
+    button.disabled = downloading;
+    button.dataset.hfModelLibraryAction = installed === false ? "download-and-use" : "use";
+    setButtonLabel(button, label);
+  });
+}
+
+const installModelLibraryUiObserver = () => {
+  if (modelLibraryUiObserverInstalled || typeof document === "undefined") {
+    return;
+  }
+  const root = document.body;
+  if (!root || typeof MutationObserver === "undefined") {
+    return;
+  }
+
+  const observer = new MutationObserver(() => {
+    requestUiRefresh();
+  });
+  observer.observe(root, { childList: true, subtree: true });
+  modelLibraryUiObserverInstalled = true;
+  requestUiRefresh();
+};
+
+const getAssetSourceUrl = (asset) => {
+  const candidates = [
+    asset?.user_metadata?.source_url,
+    asset?.metadata?.repo_url,
+    asset?.url,
+  ];
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+};
+
+const buildDownloadPayload = (asset) => {
+  const sourceUrl = getAssetSourceUrl(asset);
+  if (!sourceUrl) {
+    return null;
+  }
+  const tags = asStringArray(asset?.tags);
+  const userMetadata = isPlainObject(asset?.user_metadata)
+    ? { ...asset.user_metadata }
+    : {};
+  if (!userMetadata.source_url) {
+    userMetadata.source_url = sourceUrl;
+  }
+  return {
+    source_url: sourceUrl,
+    tags,
+    user_metadata: userMetadata,
+  };
+};
+
+const dispatchUseActionClick = (button) => {
+  if (!button) {
+    return;
+  }
+  const event = new MouseEvent("click", {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  });
+  button.dispatchEvent(event);
+};
+
+const downloadAndUseModelAsset = async (assetId, button) => {
+  if (!assetId || modelLibraryDownloadInProgress.has(assetId)) {
+    return;
+  }
+  const sourceAsset = modelLibraryAssetById.get(assetId);
+  const payload = buildDownloadPayload(sourceAsset);
+  if (!payload) {
+    console.warn(`[HF Model Library] Missing source URL for asset ${assetId}.`);
+    return;
+  }
+
+  modelLibraryDownloadInProgress.add(assetId);
+  requestUiRefresh();
+  try {
+    const response = await api.fetchApi("/assets/download", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response?.ok) {
+      const errorPayload = await readJsonResponse(response.clone());
+      const message = errorPayload?.message || errorPayload?.error || `HTTP ${response.status}`;
+      throw new Error(String(message));
+    }
+
+    const downloadedAsset = await readJsonResponse(response.clone());
+    rememberModelLibraryAssetsFromPayload(downloadedAsset);
+    modelLibraryInstalledById.set(assetId, true);
+    modelLibraryBypassClickOnce.add(assetId);
+    modelLibraryDownloadInProgress.delete(assetId);
+    requestUiRefresh();
+    dispatchUseActionClick(button);
+  } catch (error) {
+    console.error(`[HF Model Library] Download failed for asset ${assetId}:`, error);
+  } finally {
+    modelLibraryDownloadInProgress.delete(assetId);
+    requestUiRefresh();
+  }
+};
+
+const getModelLibraryCardFromEventTarget = (target) => {
+  if (!(target instanceof Element)) {
+    return null;
+  }
+  const button = target.closest(MODEL_LIBRARY_ACTION_BUTTON_SELECTOR);
+  if (!button) {
+    return null;
+  }
+  const card = button.closest(MODEL_LIBRARY_CARD_SELECTOR);
+  if (!card) {
+    return null;
+  }
+  const modal = card.closest(MODEL_LIBRARY_MODAL_SELECTOR);
+  if (!modal) {
+    return null;
+  }
+  const assetId = String(card.getAttribute("data-asset-id") || "").trim();
+  if (!assetId) {
+    return null;
+  }
+  return { assetId, button };
+};
+
+const handleModelLibraryActionEvent = (event) => {
+  if (!getBackendSettingEnabled()) {
+    return;
+  }
+
+  const context = getModelLibraryCardFromEventTarget(event.target);
+  if (!context) {
+    return;
+  }
+
+  const { assetId, button } = context;
+
+  if (modelLibraryBypassClickOnce.has(assetId)) {
+    modelLibraryBypassClickOnce.delete(assetId);
+    return;
+  }
+
+  if (modelLibraryInstalledById.get(assetId) !== false) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  if (typeof event.stopImmediatePropagation === "function") {
+    event.stopImmediatePropagation();
+  }
+  void downloadAndUseModelAsset(assetId, button);
+};
+
+const handleModelLibraryActionKeydown = (event) => {
+  if (event?.key !== "Enter" && event?.key !== " ") {
+    return;
+  }
+  handleModelLibraryActionEvent(event);
+};
+
+const installModelLibraryActionInterceptors = () => {
+  if (modelLibraryUiListenerInstalled || typeof document === "undefined") {
+    return;
+  }
+  document.addEventListener("click", handleModelLibraryActionEvent, true);
+  document.addEventListener("keydown", handleModelLibraryActionKeydown, true);
+  modelLibraryUiListenerInstalled = true;
+};
 
 const getBackendSettingEnabled = () => {
   const settingsUi = app?.ui?.settings;
@@ -208,15 +562,16 @@ const installFetchApiOverride = () => {
     }
 
     const rewrittenRoute = rewriteRoute(path, query);
-    const response = await originalFetchApi(rewrittenRoute, options);
+    let response = await originalFetchApi(rewrittenRoute, options);
 
     if (
       response?.status === 404 &&
       shouldFallbackToNativeAssets(path)
     ) {
-      return originalFetchApi(normalizeRoute(route), options);
+      response = await originalFetchApi(normalizeRoute(route), options);
     }
 
+    void trackModelLibraryAssetStateFromResponse(path, method, response);
     return response;
   };
 
@@ -687,6 +1042,8 @@ app.registerExtension({
     installFetchApiOverride();
     installNativeModelLibraryCommandOverrides();
     installLocalAssetsStoreBridge();
+    installModelLibraryUiObserver();
+    installModelLibraryActionInterceptors();
     await ensureAssetApiEnabledForNativeLibrary();
   },
 });

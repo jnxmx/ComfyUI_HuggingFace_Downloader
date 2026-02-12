@@ -10,8 +10,10 @@ app.registerExtension({
         const RUN_COMMAND_ORIGINAL_FN = "__hfAutoDownloadRunHookNativeAwareOriginalFn";
         const RUN_COMMAND_OVERRIDE_RETRY_MS = 500;
         const RUN_COMMAND_OVERRIDE_MAX_ATTEMPTS = 40;
-        const RUN_NATIVE_DIALOG_WAIT_MS = 2200;
-        const RUN_NATIVE_VALIDATION_WAIT_MS = 2400;
+        const RUN_NATIVE_DIALOG_WAIT_MS = 1200;
+        const RUN_NATIVE_VALIDATION_WAIT_MS = 1200;
+        const RUN_NATIVE_DIALOG_POLL_MS = 60;
+        const RUN_NATIVE_VALIDATION_POLL_MS = 60;
         const RUN_HOOK_COOLDOWN_MS = 1800;
 
         /* ──────────────── Helper Functions ──────────────── */
@@ -2091,9 +2093,38 @@ app.registerExtension({
                 if (hasNativeMissingModelsDialog()) {
                     return true;
                 }
-                await wait(100);
+                await wait(RUN_NATIVE_DIALOG_POLL_MS);
             }
             return false;
+        };
+
+        const closeNativePromptValidationDialogs = () => {
+            let removed = 0;
+            const nodes = document.querySelectorAll(RUN_ERROR_DIALOG_SELECTOR);
+            for (const node of nodes) {
+                const text = String(node?.textContent || "").toLowerCase();
+                if (!text.includes("prompt execution failed")) continue;
+                if (!text.includes("value not in list")) continue;
+
+                const container =
+                    node.closest(".p-dialog-mask") ||
+                    node.closest(".p-dialog") ||
+                    node;
+                if (container && container.parentElement) {
+                    container.remove();
+                    removed += 1;
+                }
+            }
+            return removed;
+        };
+
+        const suppressNativePromptValidationDialogsSoon = () => {
+            closeNativePromptValidationDialogs();
+            [70, 160, 320, 620].forEach((delay) => {
+                setTimeout(() => {
+                    closeNativePromptValidationDialogs();
+                }, delay);
+            });
         };
 
         const waitForNativeModelValidationFailure = async ({
@@ -2114,28 +2145,74 @@ app.registerExtension({
 
                 if (!hadValidationDialogBeforeRun && hasNativePromptValidationDialog()) {
                     const failures = getNativeModelValidationFailures(nodeErrors);
-                    return failures;
+                    if (failures.length) {
+                        return failures;
+                    }
+                    return [
+                        {
+                            classType: "",
+                            inputName: "",
+                            missingValue: "",
+                            details: "Prompt execution failed"
+                        }
+                    ];
                 }
 
-                await wait(100);
+                await wait(RUN_NATIVE_VALIDATION_POLL_MS);
             }
+            return [];
+        };
+
+        const getImmediateValidationFailures = ({
+            beforeSignature,
+            hadValidationDialogBeforeRun
+        }) => {
+            const nodeErrors = getNodeErrorsSnapshot();
+            const signature = getNodeErrorsSignature(nodeErrors);
+            if (signature && signature !== beforeSignature) {
+                const failures = getNativeModelValidationFailures(nodeErrors);
+                if (failures.length) {
+                    return failures;
+                }
+            }
+
+            if (!hadValidationDialogBeforeRun && hasNativePromptValidationDialog()) {
+                const failures = getNativeModelValidationFailures(nodeErrors);
+                if (failures.length) {
+                    return failures;
+                }
+                return [
+                    {
+                        classType: "",
+                        inputName: "",
+                        missingValue: "",
+                        details: "Prompt execution failed"
+                    }
+                ];
+            }
+
             return [];
         };
 
         const triggerAutoDownloadFromRunHook = (reason = "missing-dialog", failures = []) => {
             const now = Date.now();
             if (now - runHookLastTriggeredAt < RUN_HOOK_COOLDOWN_MS) {
-                return;
+                if (document.getElementById("auto-download-dialog")) {
+                    suppressNativePromptValidationDialogsSoon();
+                }
+                return false;
             }
             if (document.getElementById("auto-download-dialog")) {
-                return;
+                suppressNativePromptValidationDialogsSoon();
+                return false;
             }
             const runAction = window?.hfDownloader?.runAutoDownload;
             if (typeof runAction !== "function") {
-                return;
+                return false;
             }
 
             runHookLastTriggeredAt = now;
+            suppressNativePromptValidationDialogsSoon();
             runAction();
 
             const isValidationReason = reason === "model-validation";
@@ -2154,6 +2231,7 @@ app.registerExtension({
                 detail,
                 life: 3200
             });
+            return true;
         };
 
         const installRunQueueCommandHooksNativeAware = () => {
@@ -2196,29 +2274,48 @@ app.registerExtension({
                     }
 
                     if (hookEnabled) {
-                        void (async () => {
-                            try {
-                                const [hasDialogNow, validationFailures] = await Promise.all([
-                                    hadDialogBeforeRun
-                                        ? Promise.resolve(false)
-                                        : waitForNativeMissingModelsDialog(RUN_NATIVE_DIALOG_WAIT_MS),
-                                    waitForNativeModelValidationFailure({
-                                        timeoutMs: RUN_NATIVE_VALIDATION_WAIT_MS,
-                                        beforeSignature: beforeNodeErrorSignature,
-                                        hadValidationDialogBeforeRun
-                                    })
-                                ]);
+                        const immediateHasDialog = !hadDialogBeforeRun && hasNativeMissingModelsDialog();
+                        const immediateValidationFailures = getImmediateValidationFailures({
+                            beforeSignature: beforeNodeErrorSignature,
+                            hadValidationDialogBeforeRun
+                        });
 
-                                if (hasDialogNow) {
-                                    triggerAutoDownloadFromRunHook("missing-dialog");
+                        let triggeredImmediately = false;
+                        if (immediateHasDialog) {
+                            triggeredImmediately =
+                                triggerAutoDownloadFromRunHook("missing-dialog") || triggeredImmediately;
+                        }
+                        if (immediateValidationFailures.length) {
+                            triggeredImmediately =
+                                triggerAutoDownloadFromRunHook("model-validation", immediateValidationFailures) ||
+                                triggeredImmediately;
+                        }
+
+                        if (!triggeredImmediately) {
+                            void (async () => {
+                                try {
+                                    const [hasDialogNow, validationFailures] = await Promise.all([
+                                        hadDialogBeforeRun
+                                            ? Promise.resolve(false)
+                                            : waitForNativeMissingModelsDialog(RUN_NATIVE_DIALOG_WAIT_MS),
+                                        waitForNativeModelValidationFailure({
+                                            timeoutMs: RUN_NATIVE_VALIDATION_WAIT_MS,
+                                            beforeSignature: beforeNodeErrorSignature,
+                                            hadValidationDialogBeforeRun
+                                        })
+                                    ]);
+
+                                    if (hasDialogNow) {
+                                        triggerAutoDownloadFromRunHook("missing-dialog");
+                                    }
+                                    if (validationFailures.length) {
+                                        triggerAutoDownloadFromRunHook("model-validation", validationFailures);
+                                    }
+                                } catch (_) {
+                                    // No-op: run behavior must remain native even if hook observation fails.
                                 }
-                                if (validationFailures.length) {
-                                    triggerAutoDownloadFromRunHook("model-validation", validationFailures);
-                                }
-                            } catch (_) {
-                                // No-op: run behavior must remain native even if hook observation fails.
-                            }
-                        })();
+                            })();
+                        }
                     }
 
                     if (error) {

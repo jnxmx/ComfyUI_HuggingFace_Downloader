@@ -38,7 +38,13 @@ pending_verifications_lock = threading.Lock()
 cancel_requests = set()
 cancel_requests_lock = threading.Lock()
 SETTINGS_REL_PATH = os.path.join("user", "default", "comfy.settings.json")
-POPULAR_MODELS_PATH = os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json")
+MODEL_LIBRARY_CATALOG_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "metadata",
+    "marketplace_extract",
+    "from_dump",
+    "cloud_marketplace_models.json",
+)
 MODEL_LIBRARY_BACKEND_SETTING = "downloader.model_library_backend_enabled"
 HUGGINGFACE_HOST = "huggingface.co"
 MODEL_LIBRARY_EXTENSIONS = {
@@ -390,20 +396,20 @@ def _scan_local_models() -> tuple[list[dict], dict[str, list[dict]]]:
 
 def _load_model_library_catalog_entries() -> list[dict]:
     global model_library_catalog_cache
-    if not os.path.exists(POPULAR_MODELS_PATH):
+    if not os.path.exists(MODEL_LIBRARY_CATALOG_PATH):
         return []
 
-    mtime = os.path.getmtime(POPULAR_MODELS_PATH)
+    mtime = os.path.getmtime(MODEL_LIBRARY_CATALOG_PATH)
     with model_library_catalog_cache_lock:
         cached_mtime = model_library_catalog_cache.get("mtime")
         if cached_mtime == mtime:
             return model_library_catalog_cache.get("entries", [])
 
     try:
-        with open(POPULAR_MODELS_PATH, "r", encoding="utf-8") as f:
+        with open(MODEL_LIBRARY_CATALOG_PATH, "r", encoding="utf-8") as f:
             payload = json.load(f)
     except Exception as e:
-        print(f"[ERROR] Failed to load model library from {POPULAR_MODELS_PATH}: {e}")
+        print(f"[ERROR] Failed to load model library from {MODEL_LIBRARY_CATALOG_PATH}: {e}")
         return []
 
     models = payload.get("models", {}) if isinstance(payload, dict) else {}
@@ -412,13 +418,17 @@ def _load_model_library_catalog_entries() -> list[dict]:
 
     entries = []
     for filename, meta in models.items():
+        filename_clean = str(filename or "").strip()
+        if not filename_clean:
+            continue
         if not isinstance(meta, dict):
             continue
         entry = dict(meta)
-        entry["filename"] = filename
+        entry["filename"] = filename_clean
         entry["directory"] = _normalize_rel_path(entry.get("directory", ""))
         entry["provider"] = _extract_provider(entry)
-        entry["library_visible"] = bool(entry.get("library_visible", False))
+        # Cloud export entries do not include library_visible, so default to visible.
+        entry["library_visible"] = bool(entry.get("library_visible", True))
         entry["is_huggingface_url"] = _is_huggingface_url(entry.get("url"))
         entries.append(entry)
 
@@ -711,7 +721,7 @@ def _build_model_library_asset_index() -> tuple[list[dict], dict[str, dict]]:
 
     entries = _build_model_library_items(
         include_catalog=True,
-        include_local_only=True,
+        include_local_only=False,
         hf_only=True,
         visible_only=True,
     )
@@ -770,10 +780,13 @@ def _build_model_library_asset_index() -> tuple[list[dict], dict[str, dict]]:
         if description:
             user_metadata["user_description"] = description
 
+        installed = bool(entry.get("installed"))
+
         metadata = {
             "filename": model_rel_path or filename,
             "model_category": category,
             "source_kind": str(entry.get("source_kind", "") or ""),
+            "installed": installed,
         }
         if source_url:
             metadata["repo_url"] = source_url
@@ -796,8 +809,6 @@ def _build_model_library_asset_index() -> tuple[list[dict], dict[str, dict]]:
         )
         asset_id = str(uuid.uuid5(uuid.NAMESPACE_URL, seed))
 
-        installed = bool(entry.get("installed"))
-
         asset = {
             "id": asset_id,
             "name": filename,
@@ -811,6 +822,7 @@ def _build_model_library_asset_index() -> tuple[list[dict], dict[str, dict]]:
             "metadata": metadata,
             "user_metadata": user_metadata,
         }
+        asset["user_metadata"]["installed"] = installed
         if size_value is not None:
             asset["size"] = size_value
         if created_at:
