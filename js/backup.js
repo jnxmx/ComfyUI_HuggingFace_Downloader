@@ -147,9 +147,7 @@ app.registerExtension({
 }
 #backup-hf-dialog .hf-header-meta {
     color: #9aa4b6;
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 20px;
+    font: 400 14px/20px var(--font-inter, Inter, Arial, sans-serif);
 }
 #hf-backup-op-panel {
     position: fixed;
@@ -916,11 +914,9 @@ app.registerExtension({
 
             const header = document.createElement("div");
             header.textContent = "Backup Manager";
-            header.style.fontSize = "14px";
-            header.style.fontWeight = "400";
+            header.style.font = "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)";
             header.style.letterSpacing = "0";
             header.style.color = "var(--input-text, #ddd)";
-            header.style.lineHeight = "20px";
             header.style.paddingRight = "72px";
             headerWrap.appendChild(header);
 
@@ -1003,18 +999,14 @@ app.registerExtension({
                 });
                 const titleEl = document.createElement("div");
                 titleEl.textContent = title;
-                titleEl.style.fontSize = "14px";
-                titleEl.style.fontWeight = "400";
-                titleEl.style.lineHeight = "20px";
+                titleEl.style.font = "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)";
                 titleEl.style.color = "var(--input-text, #ddd)";
                 titleRow.appendChild(titleEl);
 
                 const metaEl = document.createElement("div");
                 metaEl.className = "hf-header-meta";
                 metaEl.style.display = "none";
-                metaEl.style.fontSize = "14px";
-                metaEl.style.fontWeight = "400";
-                metaEl.style.lineHeight = "20px";
+                metaEl.style.font = "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)";
                 titleRow.appendChild(metaEl);
                 root.appendChild(titleRow);
 

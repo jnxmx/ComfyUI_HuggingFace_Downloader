@@ -4,13 +4,14 @@ import { api } from "../../../scripts/api.js";
 app.registerExtension({
     name: "autoDownloadModels",
     setup() {
-        const RUN_MISSING_GUARD_SETTING_ID = "downloader.auto_open_missing_models_on_run";
+        const RUN_HOOK_SETTING_ID = "downloader.auto_open_missing_models_on_run";
         const RUN_QUEUE_COMMAND_IDS = ["Comfy.QueuePrompt", "Comfy.QueuePromptFront"];
-        const RUN_COMMAND_OVERRIDE_MARKER = "__hfAutoDownloadRunGuardOverride";
-        const RUN_COMMAND_ORIGINAL_FN = "__hfAutoDownloadRunGuardOriginalFn";
+        const RUN_COMMAND_OVERRIDE_MARKER = "__hfAutoDownloadRunHookNativeAwareOverride";
+        const RUN_COMMAND_ORIGINAL_FN = "__hfAutoDownloadRunHookNativeAwareOriginalFn";
         const RUN_COMMAND_OVERRIDE_RETRY_MS = 500;
         const RUN_COMMAND_OVERRIDE_MAX_ATTEMPTS = 40;
-        const RUN_GUARD_REQUEST_TIMEOUT_MS = 20000;
+        const RUN_NATIVE_DIALOG_WAIT_MS = 2200;
+        const RUN_HOOK_COOLDOWN_MS = 1800;
 
         /* ──────────────── Helper Functions ──────────────── */
         const createButton = (text, className, onClick) => {
@@ -219,12 +220,12 @@ app.registerExtension({
             window.hfDownloader[name] = action;
         };
 
-        const getRunMissingGuardEnabled = () => {
+        const getRunHookEnabled = () => {
             const settingsUi = app?.ui?.settings;
             if (!settingsUi?.getSettingValue) {
                 return true;
             }
-            return settingsUi.getSettingValue(RUN_MISSING_GUARD_SETTING_ID) !== false;
+            return settingsUi.getSettingValue(RUN_HOOK_SETTING_ID) !== false;
         };
 
         let availableFolders = [
@@ -789,11 +790,9 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Auto-Download Models";
             Object.assign(titleEl.style, {
-                fontSize: "14px",
-                fontWeight: "400",
+                font: "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)",
                 letterSpacing: "0",
                 color: "var(--input-text, #ddd)",
-                lineHeight: "20px",
             });
 
             const subtitleEl = document.createElement("div");
@@ -1455,11 +1454,9 @@ app.registerExtension({
             const titleEl = document.createElement("div");
             titleEl.textContent = "Download New Model";
             Object.assign(titleEl.style, {
-                fontSize: "14px",
-                fontWeight: "400",
+                font: "400 14px/20px var(--font-inter, Inter, Arial, sans-serif)",
                 letterSpacing: "0",
                 color: "var(--input-text, #ddd)",
-                lineHeight: "20px",
             });
 
             const subtitleEl = document.createElement("div");
@@ -1939,62 +1936,47 @@ app.registerExtension({
             setTimeout(() => injectButtonsIntoMissingModelsDialogs(document), 1000);
         };
 
-        let runGuardCheckInFlight = null;
-        const hasBlockingMissingModels = async () => {
-            if (runGuardCheckInFlight) {
-                return runGuardCheckInFlight;
-            }
-            runGuardCheckInFlight = (async () => {
-                try {
-                    if (!app?.graph?.serialize) {
-                        return false;
-                    }
-                    const workflow = app.graph.serialize();
-                    if (!workflow || typeof workflow !== "object") {
-                        return false;
-                    }
+        let runHookLastTriggeredAt = 0;
 
-                    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-                    let timeout = null;
-                    if (controller) {
-                        timeout = setTimeout(() => controller.abort(), RUN_GUARD_REQUEST_TIMEOUT_MS);
-                    }
+        const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-                    try {
-                        const resp = await fetch("/check_missing_models", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                                ...workflow,
-                                skip_hf_search: true
-                            }),
-                            signal: controller?.signal
-                        });
-                        if (resp.status !== 200) {
-                            return false;
-                        }
-                        const data = await resp.json();
-                        const missing = Array.isArray(data?.missing) ? data.missing : [];
-                        return missing.length > 0;
-                    } finally {
-                        if (timeout) {
-                            clearTimeout(timeout);
-                        }
-                    }
-                } catch (err) {
-                    console.warn("[AutoDownload] Run guard missing-model check failed:", err);
-                    return false;
+        const hasNativeMissingModelsDialog = () =>
+            Boolean(document.querySelector(MISSING_MODELS_LIST_SELECTOR));
+
+        const waitForNativeMissingModelsDialog = async (timeoutMs) => {
+            const start = Date.now();
+            while (Date.now() - start <= timeoutMs) {
+                if (hasNativeMissingModelsDialog()) {
+                    return true;
                 }
-            })();
-
-            try {
-                return await runGuardCheckInFlight;
-            } finally {
-                runGuardCheckInFlight = null;
+                await wait(100);
             }
+            return false;
         };
 
-        const installRunQueueCommandGuards = () => {
+        const triggerAutoDownloadFromNativeDialog = () => {
+            const now = Date.now();
+            if (now - runHookLastTriggeredAt < RUN_HOOK_COOLDOWN_MS) {
+                return;
+            }
+            if (document.getElementById("auto-download-dialog")) {
+                return;
+            }
+            const runAction = window?.hfDownloader?.runAutoDownload;
+            if (typeof runAction !== "function") {
+                return;
+            }
+            runHookLastTriggeredAt = now;
+            runAction();
+            showToast({
+                severity: "info",
+                summary: "Missing models detected",
+                detail: "Opened auto-download from native missing-model check.",
+                life: 3200
+            });
+        };
+
+        const installRunQueueCommandHooksNativeAware = () => {
             let attempts = 0;
             let timer = null;
 
@@ -2013,39 +1995,41 @@ app.registerExtension({
 
                 const originalFn = command.function;
                 command[RUN_COMMAND_ORIGINAL_FN] = originalFn;
+
                 command.function = async (metadata) => {
-                    if (!getRunMissingGuardEnabled()) {
-                        const fallback = command[RUN_COMMAND_ORIGINAL_FN];
-                        return typeof fallback === "function" ? await fallback(metadata) : undefined;
-                    }
-
-                    const hasMissing = await hasBlockingMissingModels();
-                    if (hasMissing) {
-                        if (document.getElementById("auto-download-dialog")) {
-                            return;
-                        }
-                        const runAction = window?.hfDownloader?.runAutoDownload;
-                        if (typeof runAction === "function") {
-                            runAction();
-                            showToast({
-                                severity: "info",
-                                summary: "Missing models detected",
-                                detail: "Opened auto-download to resolve missing models before running.",
-                                life: 4000
-                            });
-                        } else {
-                            showToast({
-                                severity: "warn",
-                                summary: "Missing models detected",
-                                detail: "Auto-download tool is not ready yet."
-                            });
-                        }
-                        return;
-                    }
-
                     const fallback = command[RUN_COMMAND_ORIGINAL_FN];
-                    return typeof fallback === "function" ? await fallback(metadata) : undefined;
+                    if (typeof fallback !== "function") {
+                        return undefined;
+                    }
+
+                    const hookEnabled = getRunHookEnabled();
+                    const hadDialogBeforeRun = hasNativeMissingModelsDialog();
+
+                    let result;
+                    let error;
+                    try {
+                        result = await fallback(metadata);
+                    } catch (err) {
+                        error = err;
+                    }
+
+                    if (hookEnabled && !hadDialogBeforeRun) {
+                        try {
+                            const hasDialogNow = await waitForNativeMissingModelsDialog(RUN_NATIVE_DIALOG_WAIT_MS);
+                            if (hasDialogNow) {
+                                triggerAutoDownloadFromNativeDialog();
+                            }
+                        } catch (_) {
+                            // No-op: run behavior must remain native even if hook observation fails.
+                        }
+                    }
+
+                    if (error) {
+                        throw error;
+                    }
+                    return result;
                 };
+
                 command[RUN_COMMAND_OVERRIDE_MARKER] = true;
                 return true;
             };
@@ -2065,7 +2049,7 @@ app.registerExtension({
                         timer = null;
                     }
                     if (!allApplied) {
-                        console.warn("[AutoDownload] Could not override all run queue commands.");
+                        console.warn("[AutoDownload] Could not hook all Run commands.");
                     }
                 }
                 return allApplied;
@@ -2080,6 +2064,6 @@ app.registerExtension({
         registerGlobalAction("runAutoDownload", runAutoDownload);
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
         setupMissingModelsDialogObserver();
-        installRunQueueCommandGuards();
+        installRunQueueCommandHooksNativeAware();
     }
 });

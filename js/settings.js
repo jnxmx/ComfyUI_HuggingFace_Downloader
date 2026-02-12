@@ -25,14 +25,14 @@ app.registerExtension({
     },
     {
       id: "downloader.auto_open_missing_models_on_run",
-      category: ["Hugging Face downloader", "Auto download", "Auto-open on Run when models are missing"],
-      name: "Auto-open on Run when models are missing",
+      category: ["Hugging Face downloader", "Auto download", "Auto-open on native missing-models dialog"],
+      name: "Auto-open on native missing-models dialog",
       type: "boolean",
       defaultValue: true,
       tooltip:
-        "Before queueing Run, check for missing models and open Auto-download dialog when workflow is missing required models.",
+        "After pressing Run, if native ComfyUI opens the missing-models dialog, automatically open Auto-download.",
       onChange: (newValue) => {
-        console.log(`[HF Downloader] Auto-open missing models on Run: ${Boolean(newValue)}`);
+        console.log(`[HF Downloader] Auto-open on native missing-models dialog: ${Boolean(newValue)}`);
       },
     },
     {
