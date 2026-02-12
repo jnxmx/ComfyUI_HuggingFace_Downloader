@@ -42,7 +42,7 @@ const STORE_BRIDGE_IMPORT_CANDIDATES = [
   },
 ];
 const MODEL_FETCH_PAGE_SIZE = 500;
-const MODEL_FETCH_MAX_PAGES = 20;
+const MODEL_FETCH_MAX_PAGES = 500;
 const MODEL_LIBRARY_MODAL_SELECTOR = '[data-component-id="AssetBrowserModal"]';
 const MODEL_LIBRARY_CARD_SELECTOR = '[data-component-id="AssetCard"][data-asset-id]';
 const MODEL_LIBRARY_ACTION_BUTTON_SELECTOR = "button.shrink-0";
@@ -51,6 +51,7 @@ const MODEL_LIBRARY_DOWNLOAD_AND_USE_LABEL = "Download & Use";
 const MODEL_LIBRARY_DOWNLOADING_LABEL = "Downloading...";
 const MODEL_LIBRARY_DOWNLOAD_BY_LINK_LABEL = "Download by link";
 const MODEL_LIBRARY_IMPORT_BUTTON_PATCH_MARKER = "hfModelLibraryImportButtonPatched";
+const MODEL_LIBRARY_HEADER_BUTTON_ID = "hf-model-library-download-by-link-button";
 const FALLBACK_NODE_TYPE_TO_CATEGORY = {
   CheckpointLoaderSimple: "checkpoints",
   ImageOnlyCheckpointLoader: "checkpoints",
@@ -250,6 +251,130 @@ const openManualDownloadDialog = () => {
   return true;
 };
 
+const findModelLibraryHeaderActionContainer = (modal) => {
+  if (!modal) return null;
+  const closeButton = modal.querySelector(
+    "button[aria-label='Close'], button[aria-label='close'], button[aria-label='Dismiss']"
+  );
+  if (closeButton?.parentElement) {
+    return closeButton.parentElement;
+  }
+
+  const topRowButtons = Array.from(modal.querySelectorAll("button")).filter((button) => {
+    if (button.closest(MODEL_LIBRARY_CARD_SELECTOR)) {
+      return false;
+    }
+    const text = String(button.textContent || "").trim().toLowerCase();
+    return (
+      text === "import" ||
+      text === MODEL_LIBRARY_DOWNLOAD_BY_LINK_LABEL.toLowerCase() ||
+      button.getAttribute("aria-label")?.toLowerCase() === "close"
+    );
+  });
+  if (topRowButtons.length) {
+    return topRowButtons[0].parentElement || null;
+  }
+
+  const nonCardButtons = Array.from(modal.querySelectorAll("button")).filter((button) => {
+    return !button.closest(MODEL_LIBRARY_CARD_SELECTOR);
+  });
+  if (nonCardButtons.length) {
+    let best = null;
+    nonCardButtons.forEach((button) => {
+      const rect = button.getBoundingClientRect();
+      if (!best) {
+        best = { button, top: rect.top, right: rect.right };
+        return;
+      }
+      if (rect.top < best.top - 1) {
+        best = { button, top: rect.top, right: rect.right };
+        return;
+      }
+      if (Math.abs(rect.top - best.top) <= 1 && rect.right > best.right) {
+        best = { button, top: rect.top, right: rect.right };
+      }
+    });
+    if (best?.button?.parentElement) {
+      return best.button.parentElement;
+    }
+  }
+  return null;
+};
+
+const ensureModelLibraryHeaderDownloadButton = () => {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const modal = document.querySelector(MODEL_LIBRARY_MODAL_SELECTOR);
+  if (!modal) {
+    return;
+  }
+
+  const container = findModelLibraryHeaderActionContainer(modal);
+  if (!container) {
+    return;
+  }
+
+  const existing = modal.querySelector(`#${MODEL_LIBRARY_HEADER_BUTTON_ID}`);
+  if (existing) {
+    return;
+  }
+
+  const button = document.createElement("button");
+  button.id = MODEL_LIBRARY_HEADER_BUTTON_ID;
+  button.type = "button";
+  button.textContent = MODEL_LIBRARY_DOWNLOAD_BY_LINK_LABEL;
+
+  const importLikeButton = Array.from(modal.querySelectorAll("button")).find((candidate) => {
+    if (candidate.closest(MODEL_LIBRARY_CARD_SELECTOR)) {
+      return false;
+    }
+    const text = String(candidate.textContent || "").trim().toLowerCase();
+    return (
+      text === "import" ||
+      text === MODEL_LIBRARY_DOWNLOAD_BY_LINK_LABEL.toLowerCase()
+    );
+  });
+
+  if (importLikeButton) {
+    button.className = importLikeButton.className;
+    button.style.cssText = importLikeButton.style.cssText;
+  } else {
+    button.className = "p-button p-component";
+    Object.assign(button.style, {
+      minHeight: "40px",
+      padding: "0.45rem 1rem",
+      borderRadius: "10px",
+      border: "none",
+      background: "var(--primary-background, #1f9cf0)",
+      color: "var(--base-foreground, #ffffff)",
+      fontSize: "14px",
+      fontWeight: "600",
+      cursor: "pointer",
+    });
+  }
+  button.setAttribute("aria-label", MODEL_LIBRARY_DOWNLOAD_BY_LINK_LABEL);
+  button.addEventListener(
+    "click",
+    (event) => {
+      if (!getBackendSettingEnabled()) {
+        return;
+      }
+      if (!openManualDownloadDialog()) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      }
+    },
+    true
+  );
+
+  container.insertBefore(button, container.firstChild || null);
+};
+
 const patchModelLibraryImportButtons = () => {
   if (typeof document === "undefined") {
     return;
@@ -304,6 +429,7 @@ const patchModelLibraryImportButtons = () => {
       true
     );
   });
+  ensureModelLibraryHeaderDownloadButton();
 };
 
 const getActionButtonFromCard = (card) => {
@@ -947,6 +1073,12 @@ const installLocalAssetsStoreBridgeOnStores = (
       if (!assets.length) {
         keepGoing = false;
       }
+    }
+
+    if (keepGoing && page >= MODEL_FETCH_MAX_PAGES) {
+      console.warn(
+        `[HF Model Library] Reached pagination safety cap (${MODEL_FETCH_MAX_PAGES} pages) while fetching tags: ${tags.join(",")}`
+      );
     }
 
     return Array.from(merged.values());

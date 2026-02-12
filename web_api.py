@@ -138,6 +138,91 @@ MODEL_LIBRARY_CATEGORY_CANONICAL = {
     "flashvsr": "FlashVSR",
     "flashvsr-v1.1": "FlashVSR-v1.1",
 }
+PRIORITY_RECLASS_CATEGORY_UNKNOWN = "unknown"
+PRIORITY_RECLASS_LORA_MARKERS = (
+    " lora",
+    "_lora",
+    "-lora",
+    "loras",
+    "lycoris",
+    "locon",
+)
+PRIORITY_RECLASS_VAE_MARKERS = (
+    "vae",
+    "tae",
+    "taesd",
+    "vae_approx",
+)
+PRIORITY_RECLASS_CONTROLNET_MARKERS = (
+    "controlnet",
+    "control-net",
+    "t2i-adapter",
+    "t2iadapter",
+    "scribble",
+    "lineart",
+    "openpose",
+    "depth-control",
+    "canny-control",
+    "pose-control",
+)
+PRIORITY_RECLASS_TEXT_ENCODER_MARKERS = (
+    "text_encoder",
+    "text-encoder",
+    "text enc",
+    "tokenizer",
+    "embedder",
+    "embeddings_connector",
+    "clip_l",
+    "clip_g",
+    "umt5",
+    "t5xxl",
+)
+PRIORITY_RECLASS_CLIP_VISION_MARKERS = (
+    "clip_vision",
+    "clipvision",
+    "image_encoder",
+    "vision_encoder",
+)
+PRIORITY_RECLASS_IPADAPTER_MARKERS = (
+    "ipadapter",
+    "ip-adapter",
+    "ip_adapter",
+)
+PRIORITY_RECLASS_SAM_MARKERS = (
+    "sam2",
+    "segment-anything",
+    "segment_anything",
+    "mobile_sam",
+    "sam_hiera",
+    "hiera_",
+)
+PRIORITY_RECLASS_UPSCALE_MARKERS = (
+    "upscale",
+    "upscaler",
+    "esrgan",
+    "realesrgan",
+    "swinir",
+)
+PRIORITY_RECLASS_DIFFUSION_MARKERS = (
+    "diffusion",
+    "unet",
+    "transformer_only",
+    "flux",
+    "klein",
+    "sdxl",
+    "stable-diffusion",
+    "sd3",
+    "wan",
+    "hunyuan",
+    "qwen-image",
+    "qwen_image",
+    "ltx",
+    "pixart",
+    "kolors",
+    "cogview",
+    "svd",
+    "zero123",
+)
 model_library_catalog_cache = {"signature": None, "entries": []}
 model_library_catalog_cache_lock = threading.Lock()
 model_library_local_cache = {
@@ -459,6 +544,57 @@ def _build_model_library_catalog_entry(filename: str, meta: dict) -> dict | None
     entry["is_huggingface_url"] = _is_huggingface_url(entry.get("url"))
     return entry
 
+def _contains_any_marker(signal: str, markers: tuple[str, ...]) -> bool:
+    if not signal:
+        return False
+    for marker in markers:
+        if marker and marker in signal:
+            return True
+    return False
+
+def _build_priority_reclass_signal(entry: dict) -> str:
+    fields = [
+        entry.get("filename"),
+        entry.get("name"),
+        entry.get("url"),
+        entry.get("repo_id"),
+        entry.get("directory"),
+        entry.get("type"),
+        entry.get("manager_type"),
+        entry.get("provider"),
+    ]
+    lowered = [
+        str(value or "").strip().lower()
+        for value in fields
+        if str(value or "").strip()
+    ]
+    return " | ".join(lowered)
+
+def _smart_reclass_priority_checkpoint_entry(entry: dict) -> str:
+    signal = _build_priority_reclass_signal(entry)
+    if not signal:
+        return PRIORITY_RECLASS_CATEGORY_UNKNOWN
+
+    if _contains_any_marker(signal, PRIORITY_RECLASS_LORA_MARKERS):
+        return "loras"
+    if _contains_any_marker(signal, PRIORITY_RECLASS_VAE_MARKERS):
+        return "vae"
+    if _contains_any_marker(signal, PRIORITY_RECLASS_CONTROLNET_MARKERS):
+        return "controlnet"
+    if _contains_any_marker(signal, PRIORITY_RECLASS_TEXT_ENCODER_MARKERS):
+        return "text_encoders"
+    if _contains_any_marker(signal, PRIORITY_RECLASS_CLIP_VISION_MARKERS):
+        return "clip_vision"
+    if _contains_any_marker(signal, PRIORITY_RECLASS_IPADAPTER_MARKERS):
+        return "ipadapter"
+    if _contains_any_marker(signal, PRIORITY_RECLASS_SAM_MARKERS):
+        return "sams"
+    if _contains_any_marker(signal, PRIORITY_RECLASS_UPSCALE_MARKERS):
+        return "upscale_models"
+    if _contains_any_marker(signal, PRIORITY_RECLASS_DIFFUSION_MARKERS):
+        return "diffusion_models"
+    return PRIORITY_RECLASS_CATEGORY_UNKNOWN
+
 def _load_model_library_catalog_entries() -> list[dict]:
     global model_library_catalog_cache
     cloud_catalog_path = _resolve_model_library_cloud_catalog_path()
@@ -499,8 +635,8 @@ def _load_model_library_catalog_entries() -> list[dict]:
             continue
         entries_by_filename[filename_key] = entry
 
-    # Add only non-checkpoint categories from the priority list if cloud does
-    # not already provide the filename.
+    # Add non-cloud entries from merged priority DB if cloud does not already
+    # provide the filename. For priority checkpoint rows, run smart reclass.
     for filename, meta in priority_models.items():
         if not isinstance(meta, dict):
             continue
@@ -510,13 +646,27 @@ def _load_model_library_catalog_entries() -> list[dict]:
         source_value = str(meta.get("source", "") or "").strip().lower()
         if source_value == "cloud_marketplace_export":
             continue
-        if source_value != "priority_repo_scrape":
-            continue
         entry = _build_model_library_catalog_entry(filename, meta)
         if not entry:
             continue
+
         category = _resolve_model_library_category(entry)
-        if not category or str(category).lower() == "checkpoints":
+
+        # Only smart-reclass checkpoint rows from priority source.
+        if source_value == "priority_repo_scrape" and (
+            not category or str(category).lower() == "checkpoints"
+        ):
+            reclassed = _smart_reclass_priority_checkpoint_entry(entry)
+            if reclassed == PRIORITY_RECLASS_CATEGORY_UNKNOWN:
+                entry["library_visible"] = False
+                entry["_resolved_category"] = PRIORITY_RECLASS_CATEGORY_UNKNOWN
+                continue
+            entry["_resolved_category"] = reclassed
+            category = reclassed
+
+        if not category:
+            continue
+        if str(category).lower() in {"checkpoints", PRIORITY_RECLASS_CATEGORY_UNKNOWN}:
             continue
         entries_by_filename[filename_key] = entry
 
@@ -643,6 +793,12 @@ def _canonical_model_library_category(value: str | None) -> str | None:
     return MODEL_LIBRARY_CATEGORY_CANONICAL.get(top_level)
 
 def _resolve_model_library_category(entry: dict) -> str | None:
+    resolved_override = str(
+        entry.get("_resolved_category", "") or entry.get("resolved_category", "")
+    ).strip()
+    if resolved_override:
+        return resolved_override
+
     manager_type = str(entry.get("manager_type", "") or "").strip()
     model_type = str(entry.get("type", "") or "").strip()
     directory = _normalize_rel_path(str(entry.get("directory", "") or "").strip())
@@ -841,7 +997,7 @@ def _build_model_library_asset_index() -> tuple[list[dict], dict[str, dict]]:
     id_map = {}
     for entry in entries:
         category = _resolve_model_library_category(entry)
-        if not category:
+        if not category or str(category).lower() == PRIORITY_RECLASS_CATEGORY_UNKNOWN:
             continue
 
         filename = str(entry.get("filename", "") or "").strip()
