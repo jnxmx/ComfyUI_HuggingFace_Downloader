@@ -5,6 +5,7 @@ import threading
 import time
 import uuid
 import asyncio
+from urllib.parse import urlparse
 from aiohttp import web
 from .backup import (
     backup_to_huggingface,
@@ -30,6 +31,9 @@ pending_verifications = []
 pending_verifications_lock = threading.Lock()
 cancel_requests = set()
 cancel_requests_lock = threading.Lock()
+POPULAR_MODELS_PATH = os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json")
+model_library_cache = {"mtime": None, "entries": []}
+model_library_cache_lock = threading.Lock()
 
 # Defer verification until the download queue is empty (default on).
 VERIFY_AFTER_QUEUE = True
@@ -95,6 +99,76 @@ def _set_search_status(request_id: str, fields: dict):
         existing.update(fields)
         existing["updated_at"] = time.time()
         search_status[request_id] = existing
+
+def _coerce_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    return default
+
+def _safe_int(value: str | None, default: int, minimum: int = 0, maximum: int = 2000) -> int:
+    try:
+        number = int(value) if value is not None else default
+    except Exception:
+        number = default
+    if number < minimum:
+        number = minimum
+    if number > maximum:
+        number = maximum
+    return number
+
+def _extract_provider(entry: dict) -> str:
+    provider = entry.get("provider")
+    if isinstance(provider, str) and provider.strip():
+        return provider.strip().lower()
+    url = entry.get("url")
+    if isinstance(url, str) and url.startswith("http"):
+        try:
+            return urlparse(url).netloc.lower()
+        except Exception:
+            return ""
+    return ""
+
+def _load_model_library_entries() -> list[dict]:
+    global model_library_cache
+    if not os.path.exists(POPULAR_MODELS_PATH):
+        return []
+
+    mtime = os.path.getmtime(POPULAR_MODELS_PATH)
+    with model_library_cache_lock:
+        cached_mtime = model_library_cache.get("mtime")
+        if cached_mtime == mtime:
+            return model_library_cache.get("entries", [])
+
+    try:
+        with open(POPULAR_MODELS_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception as e:
+        print(f"[ERROR] Failed to load model library from {POPULAR_MODELS_PATH}: {e}")
+        return []
+
+    models = payload.get("models", {}) if isinstance(payload, dict) else {}
+    if not isinstance(models, dict):
+        return []
+
+    entries = []
+    for filename, meta in models.items():
+        if not isinstance(meta, dict):
+            continue
+        entry = dict(meta)
+        entry["filename"] = filename
+        entry["provider"] = _extract_provider(entry)
+        entry["library_visible"] = bool(entry.get("library_visible", False))
+        entries.append(entry)
+
+    entries.sort(key=lambda item: str(item.get("filename", "")).lower())
+    with model_library_cache_lock:
+        model_library_cache = {"mtime": mtime, "entries": entries}
+    return entries
 
 def _download_worker():
     global download_worker_running
@@ -688,6 +762,74 @@ def setup(app):
         with search_status_lock:
             status = search_status.get(request_id, {}) if request_id else {}
         return web.json_response({"status": status})
+
+    async def model_library_endpoint(request):
+        """
+        Return merged model-library items from metadata/popular-models.json.
+        By default only returns entries marked library_visible=true.
+        Query params:
+        - visible_only: true|false (default: true)
+        - q: substring search over filename/url/type/directory/provider
+        - type: exact match against manager_type OR type
+        - directory: exact directory match
+        - provider: exact provider host match (e.g. huggingface.co)
+        - offset: pagination offset (default 0)
+        - limit: page size (default 200, max 2000)
+        """
+        visible_only = _coerce_bool(request.query.get("visible_only"), default=True)
+        query = (request.query.get("q", "") or "").strip().lower()
+        type_filter = (request.query.get("type", "") or "").strip().lower()
+        directory_filter = (request.query.get("directory", "") or "").strip().lower()
+        provider_filter = (request.query.get("provider", "") or "").strip().lower()
+        offset = _safe_int(request.query.get("offset"), default=0, minimum=0, maximum=5_000_000)
+        limit = _safe_int(request.query.get("limit"), default=200, minimum=1, maximum=2000)
+
+        entries = _load_model_library_entries()
+        filtered = []
+        for entry in entries:
+            if visible_only and not entry.get("library_visible", False):
+                continue
+
+            manager_type = str(entry.get("manager_type", "") or "").strip().lower()
+            model_type = str(entry.get("type", "") or "").strip().lower()
+            if type_filter and type_filter not in (manager_type, model_type):
+                continue
+
+            directory = str(entry.get("directory", "") or "").strip().lower()
+            if directory_filter and directory_filter != directory:
+                continue
+
+            provider = str(entry.get("provider", "") or "").strip().lower()
+            if provider_filter and provider_filter != provider:
+                continue
+
+            if query:
+                haystack = " ".join(
+                    [
+                        str(entry.get("filename", "") or ""),
+                        str(entry.get("url", "") or ""),
+                        str(entry.get("type", "") or ""),
+                        str(entry.get("manager_type", "") or ""),
+                        str(entry.get("directory", "") or ""),
+                        provider,
+                    ]
+                ).lower()
+                if query not in haystack:
+                    continue
+
+            filtered.append(entry)
+
+        total = len(filtered)
+        items = filtered[offset : offset + limit]
+        return web.json_response(
+            {
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+                "visible_only": visible_only,
+                "items": items,
+            }
+        )
     
     async def restart(request):
         """Restart ComfyUI server"""
@@ -707,3 +849,4 @@ def setup(app):
     app.router.add_post("/cancel_download", cancel_download)
     app.router.add_get("/download_status", download_status_endpoint)
     app.router.add_get("/search_status", search_status_endpoint)
+    app.router.add_get("/model_library", model_library_endpoint)

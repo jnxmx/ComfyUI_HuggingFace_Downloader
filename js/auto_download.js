@@ -578,7 +578,7 @@ app.registerExtension({
                 textAlign: "left",
                 width: "480px",
                 maxWidth: "92vw",
-                border: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
+                border: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
                 boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
                 fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
@@ -674,7 +674,7 @@ app.registerExtension({
             });
             closeIconButton.onmouseenter = () => {
                 closeIconButton.style.background = "var(--secondary-background-hover, #313235)";
-                closeIconButton.style.borderColor = "var(--border-subtle, var(--border-default, #3f434c))";
+                closeIconButton.style.borderColor = "var(--border-default, var(--border-color, #4e4e4e))";
             };
             closeIconButton.onmouseleave = () => {
                 closeIconButton.style.background = "var(--comfy-input-bg, #222)";
@@ -739,7 +739,7 @@ app.registerExtension({
             Object.assign(panel.style, {
                 background: "var(--comfy-menu-bg, #202020)",
                 color: "var(--input-text, #ddd)",
-                border: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
+                border: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
                 borderRadius: "16px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
@@ -760,7 +760,7 @@ app.registerExtension({
                 gap: "10px",
                 height: "72px",
                 padding: "0 24px",
-                borderBottom: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
+                borderBottom: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
                 flexShrink: "0",
             });
 
@@ -860,7 +860,7 @@ app.registerExtension({
                     gridTemplateColumns: "24px minmax(190px, 1.1fr) minmax(260px, 1.2fr) minmax(160px, 0.8fr)",
                     alignItems: "center",
                     gap: "12px",
-                    background: "var(--secondary-background-selected, #3a404b)",
+                    background: "var(--secondary-background-selected, color-mix(in srgb, var(--comfy-menu-bg, #202020) 86%, var(--base-foreground, #fff) 14%))",
                     borderRadius: "10px",
                     padding: "10px 12px",
                 });
@@ -1414,7 +1414,7 @@ app.registerExtension({
                 flexDirection: "column",
                 gap: "0",
                 boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
-                border: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
+                border: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
                 overflow: "hidden",
                 fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
@@ -1427,7 +1427,7 @@ app.registerExtension({
                 gap: "10px",
                 height: "72px",
                 padding: "0 24px",
-                borderBottom: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
+                borderBottom: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
                 flexShrink: "0",
             });
 

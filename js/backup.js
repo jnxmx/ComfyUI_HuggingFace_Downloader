@@ -156,7 +156,7 @@ app.registerExtension({
     width: 360px;
     max-width: calc(100vw - 32px);
     background: var(--comfy-menu-bg, #202020);
-    border: 1px solid var(--border-subtle, var(--border-default, #3f434c));
+    border: 1px solid var(--border-default, var(--border-color, #4e4e4e));
     border-radius: 16px;
     box-shadow: 1px 1px 8px rgba(0, 0, 0, 0.4);
     color: var(--input-text, #ddd);
@@ -174,7 +174,7 @@ app.registerExtension({
 }
 #hf-backup-op-panel .hf-backup-op-item {
     background: var(--comfy-input-bg, #222);
-    border: 1px solid var(--border-subtle, var(--border-default, #3f434c));
+    border: 1px solid var(--border-default, var(--border-color, #4e4e4e));
     border-radius: 6px;
     padding: 8px;
     display: flex;
@@ -220,7 +220,7 @@ app.registerExtension({
     display: none;
     justify-content: flex-end;
     padding: 8px 10px;
-    border-top: 1px solid var(--border-subtle, var(--border-default, #3f434c));
+    border-top: 1px solid var(--border-default, var(--border-color, #4e4e4e));
     background: var(--comfy-menu-bg, #202020);
 }
 #hf-backup-op-panel .hf-backup-op-refresh {
@@ -888,7 +888,7 @@ app.registerExtension({
             Object.assign(panel.style, {
                 background: "var(--comfy-menu-bg, #202020)",
                 color: "var(--input-text, #ddd)",
-                border: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
+                border: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
                 borderRadius: "16px",
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
@@ -905,11 +905,11 @@ app.registerExtension({
             Object.assign(headerWrap.style, {
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between",
-                gap: "10px",
+                justifyContent: "flex-start",
                 height: "72px",
-                padding: "0 32px 0 24px",
-                borderBottom: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
+                padding: "0 24px",
+                borderBottom: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
+                position: "relative",
             });
 
             const header = document.createElement("div");
@@ -918,14 +918,15 @@ app.registerExtension({
             header.style.fontWeight = "600";
             header.style.letterSpacing = "0";
             header.style.color = "var(--input-text, #ddd)";
+            header.style.paddingRight = "72px";
             headerWrap.appendChild(header);
 
             const closeIconButton = document.createElement("button");
             closeIconButton.type = "button";
             closeIconButton.innerHTML = "<i class=\"pi pi-times\"></i>";
             Object.assign(closeIconButton.style, {
-                width: "44px",
-                height: "44px",
+                width: "40px",
+                height: "40px",
                 borderRadius: "10px",
                 border: "1px solid transparent",
                 background: "var(--comfy-input-bg, #222)",
@@ -937,12 +938,14 @@ app.registerExtension({
                 display: "grid",
                 placeItems: "center",
                 transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
-                flexShrink: "0",
-                marginLeft: "12px",
+                position: "absolute",
+                right: "24px",
+                top: "50%",
+                transform: "translateY(-50%)",
             });
             closeIconButton.onmouseenter = () => {
                 closeIconButton.style.background = "var(--secondary-background-hover, #313235)";
-                closeIconButton.style.borderColor = "var(--border-subtle, var(--border-default, #3f434c))";
+                closeIconButton.style.borderColor = "var(--border-default, var(--border-color, #4e4e4e))";
             };
             closeIconButton.onmouseleave = () => {
                 closeIconButton.style.background = "var(--comfy-input-bg, #222)";
@@ -1024,7 +1027,7 @@ app.registerExtension({
                     flex: "1",
                     minHeight: "260px",
                     overflowY: "auto",
-                    border: "1px solid var(--border-subtle, var(--border-default, #3f434c))",
+                    border: "1px solid var(--border-default, var(--border-color, #4e4e4e))",
                     borderRadius: "10px",
                     padding: "6px",
                     background: "var(--comfy-input-bg, #222)",
