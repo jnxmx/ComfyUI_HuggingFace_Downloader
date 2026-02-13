@@ -466,6 +466,168 @@ app.registerExtension({
             };
         };
 
+        const FOLDER_REPO_SECTION_TITLE = "Folder/ Full Repo";
+        const FLASHVSR_TEXT_MARKERS = ["flashvsr", "flash-vsr", "flash vsr"];
+        const REPO_FOLDER_DOWNLOAD_EXCEPTIONS = [
+            {
+                id: "flashvsr",
+                label: "FlashVSR",
+                sectionTitle: FOLDER_REPO_SECTION_TITLE,
+                markers: FLASHVSR_TEXT_MARKERS,
+                defaultVariant: "v1.1",
+                variants: {
+                    v1: {
+                        displayName: "FlashVSR",
+                        repoId: "JunhaoZhuang/FlashVSR",
+                    },
+                    "v1.1": {
+                        displayName: "FlashVSR-v1.1",
+                        repoId: "JunhaoZhuang/FlashVSR-v1.1",
+                    },
+                },
+            },
+        ];
+
+        const textContainsAnyMarker = (value, markers) => {
+            const haystack = String(value || "").toLowerCase();
+            if (!haystack) return false;
+            return markers.some((marker) => marker && haystack.includes(marker));
+        };
+
+        const isFlashVsrFamilyText = (value) =>
+            textContainsAnyMarker(value, FLASHVSR_TEXT_MARKERS);
+
+        const inferFlashVsrVariantId = (signals = {}) => {
+            const missingValueLower = String(signals.missingValue || "").toLowerCase();
+            if (missingValueLower) {
+                if (missingValueLower.includes("1.1")) {
+                    return "v1.1";
+                }
+                if (
+                    isFlashVsrFamilyText(missingValueLower) ||
+                    /\bv?1(?:\.0)?\b/.test(missingValueLower)
+                ) {
+                    return "v1";
+                }
+            }
+
+            const explicitFields = [
+                signals.repoId,
+                signals.directory,
+                signals.url,
+                signals.filename,
+            ]
+                .map((value) => String(value || "").toLowerCase())
+                .filter(Boolean)
+                .join(" ");
+            if (explicitFields.includes("flashvsr-v1.1")) {
+                return "v1.1";
+            }
+            if (explicitFields.includes("flashvsr")) {
+                return "v1";
+            }
+
+            const contextualFields = [
+                signals.inputName,
+                signals.details,
+                signals.classType,
+                signals.nodeTitle,
+                signals.source,
+                signals.type,
+                signals.name,
+            ]
+                .map((value) => String(value || "").toLowerCase())
+                .filter(Boolean)
+                .join(" ");
+            if (contextualFields.includes("flashvsr-v1.1")) {
+                return "v1.1";
+            }
+            if (isFlashVsrFamilyText(contextualFields)) {
+                return null;
+            }
+
+            return null;
+        };
+
+        const resolveRepoFolderDownloadException = (signals = {}) => {
+            for (const exception of REPO_FOLDER_DOWNLOAD_EXCEPTIONS) {
+                const markers = Array.isArray(exception.markers) ? exception.markers : [];
+                if (!markers.length) continue;
+
+                const hasMarker = [
+                    signals.classType,
+                    signals.inputName,
+                    signals.details,
+                    signals.missingValue,
+                    signals.filename,
+                    signals.directory,
+                    signals.url,
+                    signals.repoId,
+                    signals.nodeTitle,
+                    signals.source,
+                    signals.type,
+                    signals.name,
+                ].some((value) => textContainsAnyMarker(value, markers));
+                if (!hasMarker) continue;
+
+                const variantId = exception.id === "flashvsr"
+                    ? inferFlashVsrVariantId(signals)
+                    : exception.defaultVariant;
+                const variants = exception.variants || {};
+                const selectedVariant = variants[variantId] || variants[exception.defaultVariant] || null;
+                if (!selectedVariant || !selectedVariant.repoId) {
+                    continue;
+                }
+
+                return {
+                    exceptionId: exception.id,
+                    exceptionLabel: exception.label,
+                    sectionTitle: exception.sectionTitle || FOLDER_REPO_SECTION_TITLE,
+                    variantId,
+                    variantLabel: selectedVariant.displayName || variantId,
+                    repoId: selectedVariant.repoId,
+                    url: `https://huggingface.co/${selectedVariant.repoId}`,
+                    suggestedFolder: String(selectedVariant.suggestedFolder || ""),
+                };
+            }
+            return null;
+        };
+
+        const createRepoFolderMissingModelEntry = (signals = {}) => {
+            const resolved = resolveRepoFolderDownloadException(signals);
+            if (!resolved) {
+                return null;
+            }
+
+            const nodeTitle =
+                String(signals.nodeTitle || "").trim() ||
+                String(signals.classType || "").trim() ||
+                "Unknown Node";
+            const nodeId = Number(signals.nodeId);
+
+            const requestedPathRaw = String(
+                signals.requestedPath || signals.missingValue || resolved.variantLabel || ""
+            ).trim();
+
+            return {
+                filename: resolved.variantLabel,
+                requested_path: requestedPathRaw || resolved.variantLabel,
+                url: resolved.url,
+                suggested_folder: resolved.suggestedFolder,
+                source: "folder_repo_exception",
+                node_title: nodeTitle,
+                node_id: Number.isFinite(nodeId) ? nodeId : undefined,
+                download_mode: "folder",
+                repo_id: resolved.repoId,
+                exception_id: resolved.exceptionId,
+                exception_label: resolved.exceptionLabel,
+                section: resolved.sectionTitle,
+            };
+        };
+
+        const isFolderRepoDownloadModel = (model) =>
+            String(model?.download_mode || "").toLowerCase() === "folder";
+
         const normalizeFolderPathInput = (value) =>
             String(value || "")
                 .replace(/\\/g, "/")
@@ -918,7 +1080,16 @@ app.registerExtension({
             headerWrap.appendChild(createDialogCloseIconButton(closeDialog));
             panel.appendChild(headerWrap);
 
-            const missingModels = Array.isArray(data.missing) ? [...data.missing] : [];
+            const rawMissingModels = Array.isArray(data.missing) ? [...data.missing] : [];
+            const {
+                repoFolderMissing: repoFolderMissingModelsRaw,
+                regularMissing: regularMissingModelsRaw
+            } = splitMissingModelsForRepoFolderSection(rawMissingModels);
+
+            const repoFolderMissingModels = [...repoFolderMissingModelsRaw];
+            repoFolderMissingModels.sort((a, b) => (a.filename || "").localeCompare(b.filename || ""));
+
+            const missingModels = [...regularMissingModelsRaw];
             missingModels.sort((a, b) => {
                 const aMissing = a.url ? 0 : 1;
                 const bMissing = b.url ? 0 : 1;
@@ -938,7 +1109,8 @@ app.registerExtension({
                 color: "var(--descrip-text, #999)",
                 padding: "10px 24px 0",
             });
-            summaryRow.textContent = `Missing: ${missingModels.length} • Found: ${foundModels.length} • Mismatches: ${mismatchModels.length}`;
+            const totalMissingCount = repoFolderMissingModels.length + missingModels.length;
+            summaryRow.textContent = `Missing: ${totalMissingCount} • Found: ${foundModels.length} • Mismatches: ${mismatchModels.length}`;
             panel.appendChild(summaryRow);
 
             const listFrame = document.createElement("div");
@@ -993,19 +1165,10 @@ app.registerExtension({
 
             const rowInputs = [];
 
-            content.appendChild(makeSectionTitle("Missing Models"));
-            if (!missingModels.length) {
-                const noMissing = document.createElement("div");
-                noMissing.textContent = "No missing models detected.";
-                Object.assign(noMissing.style, {
-                    padding: "12px 10px 16px",
-                    color: "#58d58c",
-                    fontSize: "14px",
-                    lineHeight: "1.15",
-                });
-                content.appendChild(noMissing);
-            } else {
-                missingModels.forEach((m) => {
+            const renderMissingRows = (models, options = {}) => {
+                const isFolderRepoSection = Boolean(options.isFolderRepoSection);
+                models.forEach((m) => {
+                    const downloadMode = isFolderRepoSection || isFolderRepoDownloadModel(m) ? "folder" : "file";
                     const rowWrapper = document.createElement("div");
                     Object.assign(rowWrapper.style, {
                         display: "flex",
@@ -1040,11 +1203,15 @@ app.registerExtension({
                         color: "var(--descrip-text, #999)",
                         marginTop: "3px",
                     });
-                    metaEl.textContent = `${m.node_title || "Unknown Node"}${m.source ? " • " + m.source : ""}`;
+                    const modeMeta = downloadMode === "folder" ? " • full repo/folder" : "";
+                    metaEl.textContent = `${m.node_title || "Unknown Node"}${m.source ? " • " + m.source : ""}${modeMeta}`;
                     infoDiv.appendChild(nameEl);
                     infoDiv.appendChild(metaEl);
 
-                    const urlInput = createInput(m.url, "HuggingFace URL...");
+                    const urlPlaceholder = downloadMode === "folder"
+                        ? "HuggingFace repo/folder URL..."
+                        : "HuggingFace URL...";
+                    const urlInput = createInput(m.url, urlPlaceholder);
                     Object.assign(urlInput.style, {
                         width: "100%",
                         minWidth: "0",
@@ -1052,7 +1219,10 @@ app.registerExtension({
                         minHeight: "40px",
                     });
 
-                    const folderPicker = createFolderPicker(m.suggested_folder || "checkpoints", "Folder");
+                    const defaultFolder = downloadMode === "folder"
+                        ? (m.suggested_folder || "")
+                        : (m.suggested_folder || "checkpoints");
+                    const folderPicker = createFolderPicker(defaultFolder, "Folder");
                     Object.assign(folderPicker.wrapper.style, {
                         width: "100%",
                         minWidth: "0",
@@ -1061,6 +1231,9 @@ app.registerExtension({
                         fontSize: "14px",
                         minHeight: "40px",
                     });
+                    if (downloadMode === "folder") {
+                        folderPicker.input.placeholder = "Root";
+                    }
 
                     row.appendChild(cb);
                     row.appendChild(infoDiv);
@@ -1081,10 +1254,12 @@ app.registerExtension({
                         metaEl: metaEl,
                         nodeTitle: m.node_title || "Unknown Node",
                         nodeId: m.node_id,
+                        downloadMode,
+                        skipWorkflowUpdate: downloadMode === "folder",
                     };
                     rowInputs.push(rowData);
 
-                    if (Array.isArray(m.alternatives) && m.alternatives.length > 0) {
+                    if (downloadMode !== "folder" && Array.isArray(m.alternatives) && m.alternatives.length > 0) {
                         const altToggle = document.createElement("button");
                         altToggle.textContent = `Alternatives (${m.alternatives.length})`;
                         Object.assign(altToggle.style, {
@@ -1166,6 +1341,26 @@ app.registerExtension({
 
                     content.appendChild(rowWrapper);
                 });
+            };
+
+            if (repoFolderMissingModels.length) {
+                content.appendChild(makeSectionTitle(FOLDER_REPO_SECTION_TITLE, "#9ec4ff"));
+                renderMissingRows(repoFolderMissingModels, { isFolderRepoSection: true });
+            }
+
+            content.appendChild(makeSectionTitle("Missing Models"));
+            if (!missingModels.length) {
+                const noMissing = document.createElement("div");
+                noMissing.textContent = "No missing model file links detected.";
+                Object.assign(noMissing.style, {
+                    padding: "12px 10px 16px",
+                    color: "#58d58c",
+                    fontSize: "14px",
+                    lineHeight: "1.15",
+                });
+                content.appendChild(noMissing);
+            } else {
+                renderMissingRows(missingModels);
             }
 
             content.appendChild(makeSectionTitle("Found Local Models"));
@@ -1324,11 +1519,17 @@ app.registerExtension({
 
             const downloadBtn = createButton("Download Selected", "p-button p-component p-button-success", async () => {
                 const selectedRows = rowInputs.filter((r) => r.checkbox.checked);
-                const toDownload = selectedRows.map((r) => ({
-                    filename: r.filename,
-                    url: r.urlInput.value.trim(),
-                    folder: r.folderInput.value.trim(),
-                }));
+                const toDownload = selectedRows.map((r) => {
+                    const item = {
+                        filename: r.filename,
+                        url: r.urlInput.value.trim(),
+                        folder: r.folderInput.value.trim(),
+                    };
+                    if (String(r.downloadMode || "").toLowerCase() === "folder") {
+                        item.download_mode = "folder";
+                    }
+                    return item;
+                });
 
                 if (toDownload.length === 0) {
                     alert("No models selected.");
@@ -1348,10 +1549,12 @@ app.registerExtension({
                         setStatus(`Skipped ${item.filename} (missing URL).`, "#f5b14c");
                         continue;
                     }
-                    const effectiveFilename = resolveDownloadedFilename(row);
-                    if (effectiveFilename) {
-                        item.filename = effectiveFilename;
-                        syncRowFilename(row, effectiveFilename);
+                    if (row.downloadMode !== "folder") {
+                        const effectiveFilename = resolveDownloadedFilename(row);
+                        if (effectiveFilename) {
+                            item.filename = effectiveFilename;
+                            syncRowFilename(row, effectiveFilename);
+                        }
                     }
                     row.resolvedUrl = item.url;
                     queueable.push(item);
@@ -1424,9 +1627,14 @@ app.registerExtension({
                                     if (!info || (info.status !== "downloaded" && info.status !== "completed")) continue;
                                     const row = queueRowsById.get(id);
                                     if (!row) continue;
-                                    const effectiveFilename = resolveDownloadedFilename(row, info);
-                                    if (effectiveFilename) {
-                                        syncRowFilename(row, effectiveFilename);
+                                    if (row.downloadMode !== "folder") {
+                                        const effectiveFilename = resolveDownloadedFilename(row, info);
+                                        if (effectiveFilename) {
+                                            syncRowFilename(row, effectiveFilename);
+                                        }
+                                    }
+                                    if (row.skipWorkflowUpdate) {
+                                        continue;
                                     }
                                     updatedRefs += applyDownloadedReferenceToWorkflow(row, info);
                                 }
@@ -1466,7 +1674,7 @@ app.registerExtension({
                 }
             });
 
-            if (!missingModels.length) {
+            if (rowInputs.length === 0) {
                 downloadBtn.disabled = true;
             }
             applyNativeButtonStyle(downloadBtn, "primary");
@@ -1477,7 +1685,9 @@ app.registerExtension({
             dlg.appendChild(panel);
             document.body.appendChild(dlg);
             setTimeout(() => {
-                const firstUrlInput = dlg.querySelector("input[placeholder='HuggingFace URL...']");
+                const firstUrlInput = dlg.querySelector(
+                    "input[placeholder='HuggingFace URL...'], input[placeholder='HuggingFace repo/folder URL...']"
+                );
                 if (firstUrlInput) {
                     firstUrlInput.focus();
                     firstUrlInput.select();
@@ -2295,7 +2505,6 @@ app.registerExtension({
             "audio_encoder_name",
             "name"
         ]);
-        const RUN_HOOK_FLASHVSR_MARKERS = ["flashvsr", "flash-vsr"];
         const RUN_HOOK_CLASS_INCLUDE_MARKERS = [
             "loader",
             "checkpoint",
@@ -2362,14 +2571,140 @@ app.registerExtension({
             return match ? String(match[1] || "").trim() : "";
         };
 
-        const textContainsAnyMarker = (value, markers) => {
-            const haystack = String(value || "").toLowerCase();
-            if (!haystack) return false;
-            return markers.some((marker) => marker && haystack.includes(marker));
+        const isValueNotInListValidation = (reason) => {
+            const type = String(reason?.type || "").toLowerCase();
+            const message = String(reason?.message || "").toLowerCase();
+            const details = String(reason?.details || "").toLowerCase();
+            return (
+                message.includes("value not in list") ||
+                type.includes("value_not_in_list") ||
+                details.includes("not in [")
+            );
         };
 
-        const isFlashVsrFamilyText = (value) =>
-            textContainsAnyMarker(value, RUN_HOOK_FLASHVSR_MARKERS);
+        const parseNodeIdFromExecutionId = (executionId) => {
+            const idToken = String(executionId || "").split(":").pop();
+            const numericId = Number(idToken);
+            return Number.isFinite(numericId) ? numericId : null;
+        };
+
+        const getGraphNodeTitleById = (nodeId, fallback = "") => {
+            if (!Number.isFinite(nodeId)) {
+                return fallback;
+            }
+            const node = app?.graph?.getNodeById?.(nodeId);
+            const title = String(node?.title || node?.type || "").trim();
+            return title || fallback;
+        };
+
+        const getRepoFolderModelKey = (model) => {
+            const exceptionId = String(model?.exception_id || "").toLowerCase();
+            const repoId = String(model?.repo_id || "").toLowerCase();
+            const url = String(model?.url || "").toLowerCase();
+            return `${exceptionId}|${repoId}|${url}`;
+        };
+
+        const collectRepoFolderMissingModelsFromNodeErrors = (nodeErrors = getNodeErrorsSnapshot()) => {
+            if (!nodeErrors || typeof nodeErrors !== "object") {
+                return [];
+            }
+
+            const collected = [];
+            const seen = new Set();
+            for (const [executionId, nodeError] of Object.entries(nodeErrors)) {
+                const classType = String(nodeError?.class_type || "").trim();
+                const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
+                if (!reasons.length) continue;
+
+                const nodeId = parseNodeIdFromExecutionId(executionId);
+                const nodeTitle = getGraphNodeTitleById(nodeId, classType || "Unknown Node");
+                for (const reason of reasons) {
+                    if (!isValueNotInListValidation(reason)) {
+                        continue;
+                    }
+                    const details = String(reason?.details || "");
+                    const inputName =
+                        String(reason?.extra_info?.input_name || "").trim() ||
+                        parseInputNameFromDetails(details);
+                    const missingValue = parseMissingValueFromDetails(details);
+
+                    const repoEntry = createRepoFolderMissingModelEntry({
+                        classType,
+                        inputName,
+                        details,
+                        missingValue,
+                        nodeId,
+                        nodeTitle,
+                    });
+                    if (!repoEntry) {
+                        continue;
+                    }
+                    const key = getRepoFolderModelKey(repoEntry);
+                    if (seen.has(key)) {
+                        continue;
+                    }
+                    seen.add(key);
+                    collected.push(repoEntry);
+                }
+            }
+
+            return collected;
+        };
+
+        const splitMissingModelsForRepoFolderSection = (missingModels, nodeErrors = getNodeErrorsSnapshot()) => {
+            const regularMissing = [];
+            const repoFolderMissing = [];
+            const seenRepoEntries = new Set();
+
+            const pushRepoEntry = (entry) => {
+                if (!entry) return;
+                const key = getRepoFolderModelKey(entry);
+                if (!key || seenRepoEntries.has(key)) {
+                    return;
+                }
+                seenRepoEntries.add(key);
+                repoFolderMissing.push(entry);
+            };
+
+            const missingList = Array.isArray(missingModels) ? missingModels : [];
+            for (const model of missingList) {
+                const repoEntry = createRepoFolderMissingModelEntry({
+                    classType: model?.node_title,
+                    missingValue: model?.requested_path || model?.filename,
+                    filename: model?.filename,
+                    directory: model?.directory,
+                    url: model?.url,
+                    repoId: model?.repo_id,
+                    nodeId: model?.node_id,
+                    nodeTitle: model?.node_title,
+                    source: model?.source,
+                    type: model?.type,
+                    name: model?.name,
+                    requestedPath: model?.requested_path,
+                });
+                if (repoEntry) {
+                    pushRepoEntry({
+                        ...repoEntry,
+                        node_title: String(model?.node_title || repoEntry.node_title || "").trim() || "Unknown Node",
+                        node_id: model?.node_id ?? repoEntry.node_id,
+                        source: String(model?.source || repoEntry.source || "").trim() || "folder_repo_exception",
+                    });
+                    continue;
+                }
+
+                if (isFolderRepoDownloadModel(model)) {
+                    pushRepoEntry(model);
+                    continue;
+                }
+
+                regularMissing.push(model);
+            }
+
+            const fromNodeErrors = collectRepoFolderMissingModelsFromNodeErrors(nodeErrors);
+            fromNodeErrors.forEach(pushRepoEntry);
+
+            return { repoFolderMissing, regularMissing };
+        };
 
         let resolvedModelStorePromise = null;
         let resolvedExecutionStorePromise = null;
@@ -2632,6 +2967,17 @@ app.registerExtension({
                 String(reason?.extra_info?.input_name || "").trim() ||
                 parseInputNameFromDetails(details);
             const inputNameLower = inputName.toLowerCase();
+
+            const repoFolderException = resolveRepoFolderDownloadException({
+                classType,
+                inputName,
+                details,
+                missingValue,
+            });
+            if (repoFolderException) {
+                return true;
+            }
+
             const flashVsrRelated =
                 isFlashVsrFamilyText(classType) ||
                 isFlashVsrFamilyText(inputNameLower) ||
@@ -2667,7 +3013,21 @@ app.registerExtension({
             if (!Array.isArray(models) || !models.length) {
                 return [];
             }
-            return models.filter((model) => !isFlashVsrModelReference(model));
+            return models.filter((model) => {
+                const repoFolderException = resolveRepoFolderDownloadException({
+                    filename: model?.name,
+                    name: model?.name,
+                    directory: model?.directory,
+                    url: model?.url,
+                    repoId: model?.repo_id,
+                    source: model?.source,
+                    type: model?.type,
+                });
+                if (repoFolderException) {
+                    return true;
+                }
+                return !isFlashVsrModelReference(model);
+            });
         };
 
         const getMissingModelsDialogEntries = () => {
@@ -2705,6 +3065,19 @@ app.registerExtension({
                 // If we cannot determine entries, avoid suppressing.
                 return false;
             }
+            const hasKnownRepoFolderException = entries.some((entry) =>
+                Boolean(
+                    resolveRepoFolderDownloadException({
+                        classType: entry,
+                        inputName: entry,
+                        details: entry,
+                        missingValue: entry,
+                    })
+                )
+            );
+            if (hasKnownRepoFolderException) {
+                return false;
+            }
             const hasFlash = entries.some((entry) => isFlashVsrFamilyText(entry));
             if (!hasFlash) {
                 return false;
@@ -2726,6 +3099,17 @@ app.registerExtension({
                 if (!text.includes("prompt execution failed")) continue;
                 if (!text.includes("value not in list")) continue;
                 hasRelevantDialog = true;
+                const hasKnownRepoFolderException = Boolean(
+                    resolveRepoFolderDownloadException({
+                        classType: text,
+                        inputName: text,
+                        details: text,
+                        missingValue: text,
+                    })
+                );
+                if (hasKnownRepoFolderException) {
+                    return false;
+                }
                 if (!isFlashVsrFamilyText(text)) {
                     hasNonFlashSignal = true;
                     break;
