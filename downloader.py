@@ -218,6 +218,7 @@ def run_download(parsed_data: dict,
                  defer_verify: bool = False,
                  overwrite: bool = False,
                  return_info: bool = False,
+                 target_filename: Optional[str] = None,
                  status_cb: Optional[Callable[[str], None]] = None,
                  cancel_check: Optional[Callable[[], bool]] = None) -> tuple:
     """
@@ -230,6 +231,9 @@ def run_download(parsed_data: dict,
     file_name = parsed_data.get("file", "unknown.bin").strip("/")
     sub = parsed_data.get("subfolder", "").strip("/")
     remote_filename = os.path.join(sub, file_name) if sub else file_name
+    target_name = os.path.basename(str(target_filename or "").replace("\\", "/").strip())
+    if not target_name:
+        target_name = os.path.basename(remote_filename)
 
     expected_size, expected_sha, _ = get_remote_file_metadata(
         parsed_data["repo"],
@@ -243,7 +247,7 @@ def run_download(parsed_data: dict,
     try:
         target_dir = os.path.join(os.getcwd(), "models", final_folder)
         os.makedirs(target_dir, exist_ok=True)
-        dest_path = os.path.join(target_dir, os.path.basename(remote_filename))
+        dest_path = os.path.join(target_dir, target_name)
 
         if os.path.exists(dest_path):
             if overwrite:
@@ -253,7 +257,7 @@ def run_download(parsed_data: dict,
                 try:
                     _verify_file_integrity(dest_path, expected_size, expected_sha)
                     size_gb = os.path.getsize(dest_path) / (1024 ** 3)
-                    message = f"{file_name} already exists | {size_gb:.3f} GB"
+                    message = f"{target_name} already exists | {size_gb:.3f} GB"
                     print("[DEBUG]", message)
                     if return_info:
                         return (message, dest_path, {"expected_size": expected_size, "expected_sha": expected_sha})
@@ -383,7 +387,11 @@ def run_download(parsed_data: dict,
         clear_cache_for_path(file_path_in_cache)
 
         size_gb = os.path.getsize(dest_path) / (1024 ** 3)
-        final_message = f"Downloaded {file_name} | {size_gb:.3f} GB"
+        source_name = os.path.basename(remote_filename)
+        if target_name != source_name:
+            final_message = f"Downloaded {target_name} (from {source_name}) | {size_gb:.3f} GB"
+        else:
+            final_message = f"Downloaded {target_name} | {size_gb:.3f} GB"
         print("[DEBUG]", final_message)
         if return_info:
             return (final_message, dest_path, {"expected_size": expected_size, "expected_sha": expected_sha})

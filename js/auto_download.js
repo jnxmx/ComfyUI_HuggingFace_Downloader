@@ -892,13 +892,21 @@ app.registerExtension({
             const fromStatusPath = getPathBasename(statusInfo?.path || "");
             if (fromStatusPath) return fromStatusPath;
 
+            const fromRowFilename = getPathBasename(rowData?.filename || rowData?.originalFilename || "");
+            if (fromRowFilename) return fromRowFilename;
+
+            const fromRequestedPath = getPathBasename(
+                rowData?.requestedPath || rowData?.initialWidgetValue || ""
+            );
+            if (fromRequestedPath) return fromRequestedPath;
+
             const fromInputUrl = parseFilenameFromUrl(rowData?.urlInput?.value || "");
             if (fromInputUrl) return fromInputUrl;
 
             const fromResolvedUrl = parseFilenameFromUrl(rowData?.resolvedUrl || "");
             if (fromResolvedUrl) return fromResolvedUrl;
 
-            const fallback = String(rowData?.filename || "").trim();
+            const fallback = String(rowData?.filename || rowData?.originalFilename || "").trim();
             return fallback || null;
         };
 

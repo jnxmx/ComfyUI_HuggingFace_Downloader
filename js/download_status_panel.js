@@ -293,7 +293,12 @@ app.registerExtension({
                     font-weight: 600;
                     letter-spacing: 0.03em;
                     white-space: nowrap;
-                    flex: 0 0 auto;
+                    position: absolute;
+                    right: 8px;
+                    bottom: 8px;
+                    line-height: 1;
+                    pointer-events: none;
+                    z-index: 2;
                     text-transform: uppercase;
                 }
                 #${PANEL_ID} .hf-downloader-cancel {
@@ -607,7 +612,6 @@ app.registerExtension({
             status.className = "hf-downloader-status-lower";
 
             meta.appendChild(sizeText);
-            meta.appendChild(status);
             content.appendChild(meta);
 
             const error = document.createElement("div");
@@ -616,6 +620,7 @@ app.registerExtension({
 
             item.appendChild(leading);
             item.appendChild(content);
+            item.appendChild(status);
             item.appendChild(cancelBtn);
             item.appendChild(error);
 

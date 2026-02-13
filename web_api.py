@@ -1438,6 +1438,7 @@ def _download_worker():
                     defer_verify=True,
                     overwrite=overwrite,
                     return_info=True,
+                    target_filename=item.get("filename"),
                     status_cb=status_cb,
                     cancel_check=lambda: _is_cancel_requested(download_id),
                 )
@@ -1476,6 +1477,7 @@ def _download_worker():
                     item["folder"],
                     sync=True,
                     overwrite=overwrite,
+                    target_filename=item.get("filename"),
                     status_cb=status_cb,
                     cancel_check=lambda: _is_cancel_requested(download_id),
                 )
@@ -1588,7 +1590,13 @@ async def install_models(request):
                 
             try:
                 parsed = _build_parsed_download_info(model)
-                msg, path = run_download(parsed, folder, sync=True, overwrite=bool(model.get("overwrite")))
+                msg, path = run_download(
+                    parsed,
+                    folder,
+                    sync=True,
+                    overwrite=bool(model.get("overwrite")),
+                    target_filename=filename,
+                )
                 results.append({"filename": filename, "status": "success", "path": path, "message": msg})
                 
             except Exception as e:
