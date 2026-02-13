@@ -1622,7 +1622,7 @@ app.registerExtension({
             });
 
             const fullRepoSwitchWrap = document.createElement("label");
-            fullRepoSwitchWrap.className = "p-inputswitch p-component";
+            fullRepoSwitchWrap.className = "p-toggleswitch p-component transition-transform active:scale-90";
             Object.assign(fullRepoSwitchWrap.style, {
                 margin: "0",
                 cursor: "pointer",
@@ -1631,16 +1631,40 @@ app.registerExtension({
 
             const fullRepoSwitch = document.createElement("input");
             fullRepoSwitch.type = "checkbox";
-            fullRepoSwitch.className = "p-inputswitch-input";
+            fullRepoSwitch.className = "p-toggleswitch-input";
             fullRepoSwitch.checked = false;
+            fullRepoSwitch.setAttribute("role", "switch");
+            fullRepoSwitch.setAttribute("aria-label", "Download full repo/folder");
 
             const fullRepoSwitchSlider = document.createElement("span");
-            fullRepoSwitchSlider.className = "p-inputswitch-slider";
+            fullRepoSwitchSlider.className = "p-toggleswitch-slider";
+
+            const setFullRepoSwitchVisualState = () => {
+                const on = Boolean(fullRepoSwitch.checked);
+                fullRepoSwitchWrap.classList.toggle("p-toggleswitch-checked", on);
+                fullRepoSwitch.setAttribute("aria-checked", on ? "true" : "false");
+            };
+
+            fullRepoSwitch.addEventListener("focus", () => {
+                fullRepoSwitchWrap.classList.add("p-focus");
+            });
+            fullRepoSwitch.addEventListener("blur", () => {
+                fullRepoSwitchWrap.classList.remove("p-focus");
+            });
 
             fullRepoSwitchWrap.appendChild(fullRepoSwitch);
             fullRepoSwitchWrap.appendChild(fullRepoSwitchSlider);
             fullRepoSwitchRow.appendChild(fullRepoSwitchText);
             fullRepoSwitchRow.appendChild(fullRepoSwitchWrap);
+
+            fullRepoSwitchRow.addEventListener("click", (event) => {
+                const target = event?.target;
+                if (target === fullRepoSwitch || fullRepoSwitchWrap.contains(target)) {
+                    return;
+                }
+                fullRepoSwitch.checked = !fullRepoSwitch.checked;
+                fullRepoSwitch.dispatchEvent(new Event("change", { bubbles: true }));
+            });
 
             const destinationPreviewLine = document.createElement("div");
             Object.assign(destinationPreviewLine.style, {
@@ -1746,9 +1770,13 @@ app.registerExtension({
                 destinationPreviewLine.style.display = "none";
             };
 
-            fullRepoSwitch.addEventListener("change", () => updateManualDownloadModeUi("toggle"));
+            fullRepoSwitch.addEventListener("change", () => {
+                setFullRepoSwitchVisualState();
+                updateManualDownloadModeUi("toggle");
+            });
             urlInput.addEventListener("input", () => updateManualDownloadModeUi("input"));
             folderPicker.input.addEventListener("input", () => updateManualDownloadModeUi("input"));
+            setFullRepoSwitchVisualState();
             updateManualDownloadModeUi();
 
             const downloadBtn = createButton("Download", "p-button p-component p-button-success", async () => {

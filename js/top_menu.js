@@ -151,34 +151,29 @@ const createTopMenuButton = () => {
         tooltip: BUTTON_TOOLTIP,
         app,
         enabled: true,
-        classList: "comfyui-button comfyui-menu-mobile-collapse primary"
+        classList: "comfyui-button comfyui-menu-mobile-collapse"
     });
 
     button.element.classList.add("hf-downloader-button");
     button.element.setAttribute("aria-label", BUTTON_TOOLTIP);
     button.element.title = BUTTON_TOOLTIP;
-    Object.assign(button.element.style, {
-        width: "32px",
-        height: "32px",
-        padding: "0",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontStyle: "normal"
-    });
 
-    const iconUrl = new URL("./assets/hf-favicon.ico", import.meta.url).toString();
+    const iconUrl = new URL("./assets/hf-logo-pirate.svg", import.meta.url).toString();
     const iconImg = document.createElement("img");
     iconImg.src = iconUrl;
     iconImg.alt = "Hugging Face";
-    iconImg.width = 18;
-    iconImg.height = 18;
+    iconImg.width = 20;
+    iconImg.height = 20;
     iconImg.style.display = "block";
 
     if (button.iconElement) {
-        button.iconElement.textContent = "";
-        button.iconElement.style.lineHeight = "1";
-        button.iconElement.style.transform = "none";
+        button.iconElement.className = "hf-downloader-icon";
+        Object.assign(button.iconElement.style, {
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            lineHeight: "1"
+        });
         button.iconElement.appendChild(iconImg);
     } else {
         button.element.appendChild(iconImg);
