@@ -34,6 +34,7 @@ app.registerExtension({
         let listBody = null;
         let countBadge = null;
         let minimizeBtn = null;
+        let footer = null;
         let refreshBtn = null;
         let refreshBusy = false;
         let bootstrapDone = false;
@@ -43,6 +44,11 @@ app.registerExtension({
 
         const PANEL_RIGHT_MARGIN = 16;
         const PANEL_TOP_MARGIN = 10;
+        const BUTTON_BASE_CLASS = "relative inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap appearance-none border-none rounded-md text-sm font-medium font-inter transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50";
+        const BUTTON_DESTRUCTIVE_CLASS = `${BUTTON_BASE_CLASS} bg-destructive-background text-base-foreground hover:bg-destructive-background-hover size-8`;
+        const BUTTON_TEXONLY_ICON_CLASS = `${BUTTON_BASE_CLASS} text-base-foreground bg-transparent hover:bg-secondary-background-hover size-8`;
+        const PANEL_CLASS = "pointer-events-auto flex w-[350px] min-w-[310px] max-h-[60vh] flex-col overflow-hidden rounded-lg border border-interface-stroke bg-interface-panel-surface font-inter transition-colors duration-200 ease-in-out shadow-interface";
+        const ITEM_CLASS = "hf-downloader-item relative flex items-center justify-between gap-2 overflow-hidden rounded-lg border border-secondary-background bg-secondary-background p-1 text-[12px] text-text-primary transition-colors duration-150 ease-in-out hover:border-secondary-background-hover hover:bg-secondary-background-hover";
 
         const registerGlobalAction = (name, action) => {
             if (typeof window === "undefined") return;
@@ -180,14 +186,13 @@ app.registerExtension({
                     position: fixed;
                     right: 16px;
                     top: 16px;
-                    width: 380px;
+                    width: 350px;
+                    min-width: 310px;
                     max-height: 60vh;
-                    background: var(--comfy-input-bg, var(--comfy-menu-bg, var(--p-surface-900, #141922)));
-                    border: 1px solid var(--border-color, var(--p-content-border-color, #3c4452));
-                    border-radius: 14px;
-                    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
+                    background: var(--interface-panel-surface, var(--hf-queue-bg, var(--p-content-background, var(--comfy-menu-bg, #1f2128))));
+                    border: 1px solid var(--interface-stroke, var(--hf-queue-border, var(--border-color, var(--p-content-border-color, #3c4452))));
+                    border-radius: 8px;
                     color: var(--fg-color, var(--p-text-color, #ddd));
-                    font-size: 12px;
                     z-index: 10000;
                     display: flex;
                     flex-direction: column;
@@ -197,159 +202,91 @@ app.registerExtension({
                     display: flex;
                     align-items: center;
                     justify-content: space-between;
-                    padding: 8px 12px;
-                    border-bottom: 1px solid var(--border-color, var(--p-content-border-color, #333));
+                    gap: 8px;
+                    min-height: 48px;
+                    padding: 0 8px;
+                    border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--p-content-border-color, #333)));
                     background: transparent;
                 }
                 #${PANEL_ID} .hf-downloader-header-title {
+                    padding: 0 8px;
                     font-size: 14px;
-                    font-weight: 600;
-                    color: var(--input-text, var(--p-text-color, #e5e7eb));
+                    font-weight: 400;
+                    color: var(--text-color, var(--input-text, var(--p-text-color, #e5e7eb)));
                 }
                 #${PANEL_ID} .hf-downloader-header-controls {
                     display: inline-flex;
                     align-items: center;
-                    gap: 6px;
+                    gap: 4px;
                 }
                 #${PANEL_ID} .hf-downloader-count {
-                    background: var(--secondary-background, var(--p-surface-800, #3b3f4b));
-                    color: var(--input-text, var(--p-text-color, #e5e7eb));
-                    padding: 2px 8px;
-                    border-radius: 999px;
-                    font-size: 11px;
-                    font-weight: 700;
-                }
-                #${PANEL_ID} .hf-downloader-minimize {
-                    border: none;
-                    background: transparent;
-                    color: var(--descrip-text, var(--p-text-muted-color, #aab1bc));
-                    width: 24px;
+                    min-width: 24px;
                     height: 24px;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    font-size: 18px;
-                    line-height: 1;
+                    background: var(--secondary-background, var(--p-surface-800, #2f323a));
+                    color: var(--text-color, var(--input-text, var(--p-text-color, #e5e7eb)));
+                    padding: 0 8px;
+                    border-radius: 999px;
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    padding: 0;
+                    font-size: 12px;
+                    line-height: 1;
+                    font-weight: 700;
+                    opacity: 0.9;
                 }
-                #${PANEL_ID} .hf-downloader-minimize:hover {
-                    background: var(--secondary-background-hover, var(--p-surface-700, #2d3240));
-                    color: var(--input-text, var(--p-text-color, #e5e7eb));
+                #${PANEL_ID} .hf-downloader-minimize {
+                    font-size: 16px;
+                    line-height: 1;
                 }
                 #${PANEL_ID} .hf-downloader-body {
+                    flex: 1 1 auto;
+                    min-height: 0;
                     overflow-y: auto;
-                    padding: 6px;
+                    padding: 10px 12px;
                     display: flex;
                     flex-direction: column;
-                    gap: 6px;
+                    gap: 8px;
                 }
                 #${PANEL_ID} .hf-downloader-item {
-                    background: var(--secondary-background, var(--p-surface-800, #2f323a));
-                    border: none;
-                    border-radius: 12px;
-                    min-height: 84px;
+                    height: 56px;
+                    min-height: 56px;
+                    max-height: 56px;
                     box-sizing: border-box;
-                    padding: 10px 8px 8px 12px;
-                    position: relative;
-                    display: flex;
-                    flex-direction: column;
-                    justify-content: center;
-                    gap: 4px;
-                    transition: background-color 140ms ease-in-out;
                 }
-                #${PANEL_ID} .hf-downloader-item:hover {
-                    background: var(--secondary-background-hover, var(--p-surface-700, #3a3f48));
-                }
-                #${PANEL_ID} .hf-downloader-row {
-                    display: flex;
-                    align-items: flex-start;
-                    justify-content: space-between;
-                    gap: 6px;
-                    padding-right: 38px;
+                #${PANEL_ID} .hf-downloader-content {
+                    min-width: 0;
+                    flex: 1 1 auto;
+                    padding-right: 4px;
                 }
                 #${PANEL_ID} .hf-downloader-name {
-                    font-size: 12px;
                     font-weight: 600;
-                    color: var(--input-text, var(--p-text-color, #e3e5ea));
+                    color: var(--text-color, var(--input-text, var(--p-text-color, #e3e5ea)));
                     overflow: hidden;
                     text-overflow: ellipsis;
                     white-space: nowrap;
-                    flex: 1;
                     opacity: 0.95;
                 }
-                #${PANEL_ID} .hf-downloader-cancel {
-                    border: none;
-                    background: var(--destructive-background, #e25252);
-                    color: #fff;
-                    width: 36px;
-                    height: 36px;
-                    border-radius: 12px;
-                    cursor: pointer;
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 0;
-                    opacity: 0;
-                    pointer-events: none;
-                    transition: opacity 140ms ease-in-out, transform 140ms ease-in-out, background-color 120ms ease-in-out;
-                    transform: translateY(2px);
-                    flex: 0 0 36px;
-                    position: absolute;
-                    right: 6px;
-                    top: 6px;
-                }
-                #${PANEL_ID} .hf-downloader-cancel i {
-                    font-size: 14px;
-                    line-height: 1;
-                }
-                #${PANEL_ID} .hf-downloader-item:hover .hf-downloader-cancel,
-                #${PANEL_ID} .hf-downloader-cancel:focus-visible {
-                    opacity: 1;
-                    pointer-events: auto;
-                    transform: translateY(0);
-                }
-                #${PANEL_ID} .hf-downloader-cancel:hover {
-                    background: var(--destructive-background-hover, #f06464);
-                }
-                #${PANEL_ID} .hf-downloader-cancel:disabled {
-                    opacity: 0.5;
-                    cursor: not-allowed;
-                    pointer-events: none;
-                }
                 #${PANEL_ID} .hf-downloader-meta {
-                    font-size: 12px;
+                    margin-top: 4px;
                     color: var(--descrip-text, var(--p-text-muted-color, #aab1bc));
                     display: flex;
                     align-items: center;
                     justify-content: space-between;
-                    gap: 8px;
-                }
-                #${PANEL_ID} .hf-downloader-size {
-                    display: inline-flex;
-                    align-items: center;
                     gap: 6px;
+                    min-width: 0;
+                    font-size: 12px;
+                    line-height: 1;
+                }
+                #${PANEL_ID} .hf-downloader-size-text {
                     min-width: 0;
                     overflow: hidden;
                     text-overflow: ellipsis;
                     white-space: nowrap;
                 }
-                #${PANEL_ID} .hf-downloader-spinner {
-                    width: 13px;
-                    height: 13px;
-                    border-radius: 50%;
-                    border: 2px solid var(--secondary-background-hover, #2a2d36);
-                    border-top-color: #4aa3ff;
-                    border-right-color: #4aa3ff;
-                    animation: hf-downloader-spin 0.9s linear infinite;
-                    flex: 0 0 auto;
-                }
-                #${PANEL_ID} .hf-downloader-spinner.hidden {
-                    visibility: hidden;
-                }
-                @keyframes hf-downloader-spin {
-                    to { transform: rotate(360deg); }
+                #${PANEL_ID} .hf-downloader-state-icon {
+                    width: 16px;
+                    height: 16px;
+                    display: inline-block;
                 }
                 #${PANEL_ID} .hf-downloader-status-lower {
                     font-weight: 600;
@@ -357,44 +294,95 @@ app.registerExtension({
                     white-space: nowrap;
                     flex: 0 0 auto;
                 }
+                #${PANEL_ID} .hf-downloader-cancel {
+                    position: absolute;
+                    right: 4px;
+                    top: 50%;
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 10px;
+                    opacity: 0;
+                    pointer-events: none;
+                    transform: translateY(calc(-50% + 2px));
+                    transition: opacity 140ms ease-in-out, transform 140ms ease-in-out;
+                }
+                #${PANEL_ID} .hf-downloader-item:hover .hf-downloader-cancel,
+                #${PANEL_ID} .hf-downloader-cancel:focus-visible {
+                    opacity: 1;
+                    pointer-events: auto;
+                    transform: translateY(-50%);
+                }
                 #${PANEL_ID} .hf-downloader-item.can-cancel:hover .hf-downloader-status-lower {
-                    display: none;
+                    visibility: hidden;
                 }
                 #${PANEL_ID} .hf-downloader-error {
-                    color: #ff6b6b;
-                    font-size: 11px;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
+                    display: none !important;
                 }
                 #${PANEL_ID} .hf-downloader-footer {
-                    display: flex;
+                    display: none;
                     justify-content: flex-end;
-                    padding: 8px 12px;
-                    border-top: 1px solid var(--border-color, var(--p-content-border-color, #333));
+                    padding: 8px 12px 10px;
                     background: transparent;
                 }
-                #${PANEL_ID} .hf-downloader-refresh {
-                    border: 1px solid var(--border-color, var(--p-content-border-color, #4b5563));
-                    background: var(--secondary-background, var(--p-surface-800, #2f323a));
-                    color: var(--input-text, var(--p-text-color, #e5e7eb));
-                    border-radius: 8px;
-                    padding: 7px 12px;
-                    font-size: 13px;
-                    line-height: 1.2;
-                    font-weight: 600;
+                #${PANEL_ID} .hf-downloader-footer.visible {
+                    display: flex;
+                    border-top: 1px solid var(--interface-stroke, var(--border-color, var(--p-content-border-color, #333)));
+                }
+                #${PANEL_ID} .hf-downloader-refresh.p-button {
                     min-height: 32px;
+                    padding: 0.4rem 0.95rem;
+                    font-size: 13px;
+                    font-weight: 600;
+                    font-family: var(--font-inter, Inter, sans-serif);
+                    border-radius: 8px;
                     cursor: pointer;
                 }
-                #${PANEL_ID} .hf-downloader-refresh:hover {
-                    background: var(--secondary-background-hover, var(--p-surface-700, #3a3f48));
-                }
                 #${PANEL_ID} .hf-downloader-refresh:disabled {
-                    opacity: 0.7;
+                    opacity: 0.6;
                     cursor: not-allowed;
                 }
             `;
             document.head.appendChild(style);
+        };
+
+        const syncPanelThemeFromJobQueue = () => {
+            if (!panel || typeof window === "undefined" || !window.getComputedStyle) return;
+
+            const textNodes = document.querySelectorAll("h1, h2, h3, h4, span, div");
+            let jobQueueTitle = null;
+            for (const node of textNodes) {
+                if ((node.textContent || "").trim() !== "Job Queue") continue;
+                if (node.closest(`#${PANEL_ID}`)) continue;
+                jobQueueTitle = node;
+                break;
+            }
+
+            if (!jobQueueTitle) {
+                panel.style.removeProperty("--hf-queue-bg");
+                panel.style.removeProperty("--hf-queue-border");
+                return;
+            }
+
+            const candidates = [
+                jobQueueTitle.closest("[class*='panel']"),
+                jobQueueTitle.closest("[class*='queue']"),
+                jobQueueTitle.closest("[role='dialog']"),
+                jobQueueTitle.closest("section"),
+                jobQueueTitle.parentElement
+            ];
+
+            const nativePanel = candidates.find((el) => el && el !== panel);
+            if (!nativePanel) return;
+
+            const styles = window.getComputedStyle(nativePanel);
+            const bg = styles.backgroundColor;
+            const border = styles.borderColor;
+            if (bg && bg !== "rgba(0, 0, 0, 0)") {
+                panel.style.setProperty("--hf-queue-bg", bg);
+            }
+            if (border && border !== "rgba(0, 0, 0, 0)") {
+                panel.style.setProperty("--hf-queue-border", border);
+            }
         };
 
         const getTopAnchor = () => {
@@ -432,6 +420,7 @@ app.registerExtension({
             panel.style.bottom = "auto";
             panel.style.left = "auto";
             panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
+            syncPanelThemeFromJobQueue();
         };
 
         const ensurePanel = () => {
@@ -440,6 +429,7 @@ app.registerExtension({
 
             panel = document.createElement("div");
             panel.id = PANEL_ID;
+            panel.className = PANEL_CLASS;
 
             const header = document.createElement("div");
             header.className = "hf-downloader-header";
@@ -457,8 +447,8 @@ app.registerExtension({
 
             minimizeBtn = document.createElement("button");
             minimizeBtn.type = "button";
-            minimizeBtn.className = "hf-downloader-minimize";
-            minimizeBtn.textContent = "−";
+            minimizeBtn.className = `${BUTTON_TEXONLY_ICON_CLASS} hf-downloader-minimize`;
+            minimizeBtn.innerHTML = "<i class=\"pi pi-minus\"></i>";
             minimizeBtn.title = "Minimize downloads";
             minimizeBtn.addEventListener("click", () => {
                 setPanelMinimized(true);
@@ -472,11 +462,12 @@ app.registerExtension({
             listBody = document.createElement("div");
             listBody.className = "hf-downloader-body";
 
-            const footer = document.createElement("div");
+            footer = document.createElement("div");
             footer.className = "hf-downloader-footer";
 
             refreshBtn = document.createElement("button");
             refreshBtn.className = "hf-downloader-refresh";
+            refreshBtn.classList.add("p-button", "p-component", "p-button-success");
             refreshBtn.textContent = "Refresh";
             refreshBtn.style.display = "none";
             refreshBtn.addEventListener("click", () => {
@@ -531,21 +522,73 @@ app.registerExtension({
             );
         };
 
+        const stateIconForStatus = (status) => {
+            switch (status) {
+                case "downloading":
+                case "copying":
+                case "cleaning_cache":
+                case "finalizing":
+                case "cancelling":
+                    return {
+                        key: "loading",
+                        className: "icon-[lucide--loader-circle] size-4 animate-spin text-primary-background"
+                    };
+                case "queued":
+                    return {
+                        key: "queued",
+                        className: "icon-[lucide--clock-3] size-4 text-text-secondary"
+                    };
+                case "downloaded":
+                    return {
+                        key: "downloaded",
+                        className: "icon-[lucide--check-check] size-4 text-green-400"
+                    };
+                case "failed":
+                    return {
+                        key: "failed",
+                        className: "icon-[lucide--alert-circle] size-4 text-red-400"
+                    };
+                case "cancelled":
+                    return {
+                        key: "cancelled",
+                        className: "icon-[lucide--x-circle] size-4 text-yellow-400"
+                    };
+                default:
+                    return {
+                        key: "default",
+                        className: "icon-[lucide--circle] size-4 text-text-secondary"
+                    };
+            }
+        };
+
         const createItemNode = () => {
             const item = document.createElement("div");
-            item.className = "hf-downloader-item";
+            item.className = ITEM_CLASS;
 
-            const row = document.createElement("div");
-            row.className = "hf-downloader-row";
+            const leading = document.createElement("div");
+            leading.className = "relative z-1 flex items-center gap-1";
+
+            const iconWrap = document.createElement("div");
+            iconWrap.className = "inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-[6px]";
+
+            const stateIcon = document.createElement("i");
+            stateIcon.className = "hf-downloader-state-icon icon-[lucide--clock-3] size-4 text-text-secondary";
+            iconWrap.appendChild(stateIcon);
+            leading.appendChild(iconWrap);
+
+            const content = document.createElement("div");
+            content.className = "hf-downloader-content relative z-1 min-w-0 flex-1";
 
             const name = document.createElement("div");
-            name.className = "hf-downloader-name";
+            name.className = "hf-downloader-name truncate opacity-90";
+
+            content.appendChild(name);
 
             const cancelBtn = document.createElement("button");
             cancelBtn.type = "button";
-            cancelBtn.className = "hf-downloader-cancel";
+            cancelBtn.className = `${BUTTON_DESTRUCTIVE_CLASS} hf-downloader-cancel`;
             cancelBtn.title = "Cancel download";
-            cancelBtn.innerHTML = "<i class=\"pi pi-trash\"></i>";
+            cancelBtn.innerHTML = "<i class=\"icon-[lucide--trash-2] size-4\"></i>";
             cancelBtn.addEventListener("click", (event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -554,43 +597,33 @@ app.registerExtension({
                 void cancelDownload(downloadId);
             });
 
-            row.appendChild(name);
-            row.appendChild(cancelBtn);
-
             const meta = document.createElement("div");
             meta.className = "hf-downloader-meta";
-
-            const sizeWrap = document.createElement("div");
-            sizeWrap.className = "hf-downloader-size";
-
-            const spinner = document.createElement("div");
-            spinner.className = "hf-downloader-spinner";
 
             const sizeText = document.createElement("div");
             sizeText.className = "hf-downloader-size-text";
 
-            sizeWrap.appendChild(spinner);
-            sizeWrap.appendChild(sizeText);
-
             const status = document.createElement("div");
             status.className = "hf-downloader-status-lower";
 
-            meta.appendChild(sizeWrap);
+            meta.appendChild(sizeText);
             meta.appendChild(status);
+            content.appendChild(meta);
 
             const error = document.createElement("div");
             error.className = "hf-downloader-error";
             error.style.display = "none";
 
-            item.appendChild(row);
-            item.appendChild(meta);
+            item.appendChild(leading);
+            item.appendChild(content);
+            item.appendChild(cancelBtn);
             item.appendChild(error);
 
             return {
                 root: item,
                 name,
                 cancelBtn,
-                spinner,
+                stateIcon,
                 sizeText,
                 status,
                 error
@@ -622,8 +655,11 @@ app.registerExtension({
                 ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
                 : formatBytes(downloadedBytes);
 
-            const shouldSpin = RUNNING_STATUSES.has(info.status) && info.status !== "queued";
-            refs.spinner.classList.toggle("hidden", !shouldSpin);
+            const iconMeta = stateIconForStatus(info.status);
+            if (refs.stateIcon.dataset.iconKey !== iconMeta.key) {
+                refs.stateIcon.className = `hf-downloader-state-icon ${iconMeta.className}`;
+                refs.stateIcon.dataset.iconKey = iconMeta.key;
+            }
 
             refs.status.textContent = resolveStatusText(info);
             refs.status.style.color = statusColor(info.status);
@@ -749,8 +785,10 @@ app.registerExtension({
             const hasRunning = runningCount > 0;
             const hasSuccess = entries.some((entry) => SUCCESS_STATUSES.has(entry.status));
             if (refreshBtn) {
-                refreshBtn.style.display = (!hasRunning && !hasFailed && hasSuccess) ? "inline-flex" : "none";
-                if (refreshBtn.style.display === "none") {
+                const showRefresh = !hasRunning && !hasFailed && hasSuccess;
+                refreshBtn.style.display = showRefresh ? "inline-flex" : "none";
+                footer?.classList.toggle("visible", showRefresh);
+                if (!showRefresh) {
                     refreshBtn.disabled = false;
                     refreshBtn.textContent = "Refresh";
                     refreshBusy = false;
