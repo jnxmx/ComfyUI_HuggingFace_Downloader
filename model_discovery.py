@@ -535,6 +535,10 @@ NODE_TYPE_MAPPING = {
     # External Repos / Custom Nodes
     
     # ComfyUI-WanVideoWrapper
+    "WanVideoModelLoader": "checkpoints",
+    "WanVideoVAELoader": "vae",
+    "WanVideoTextEncodeCached": "text_encoders",
+    "WanVideoTextEncode": "text_encoders",
     "WanVideoLoraSelect": "loras",
     "WanVideoLoraSelectByName": "loras",
     "WanVideoLoraSelectMulti": "loras",
@@ -589,6 +593,24 @@ NODE_TYPE_MAPPING = {
 }
 
 
+def resolve_wanvideo_wrapper_folder(node_type_lower: str) -> str | None:
+    if not node_type_lower:
+        return None
+    if "lora" in node_type_lower:
+        return "loras"
+    if "vae" in node_type_lower:
+        return "vae"
+    if "clipvision" in node_type_lower or "clip_vision" in node_type_lower:
+        return "clip_vision"
+    if "textencode" in node_type_lower or "textencoder" in node_type_lower:
+        return "text_encoders"
+    if "controlnet" in node_type_lower:
+        return "controlnet"
+    if "modelloader" in node_type_lower:
+        return "checkpoints"
+    return None
+
+
 def _build_links_map(raw_links: list[Any]) -> dict:
     links_map = {}
     for link in raw_links:
@@ -613,6 +635,11 @@ def resolve_node_folder(node: dict) -> str | None:
     properties = node.get("properties") or {}
     cnr_id = (properties.get("cnr_id") or "").lower()
     node_type_lower = node_type.lower()
+
+    if "wanvideowrapper" in cnr_id or node_type_lower.startswith("wanvideo"):
+        wan_folder = resolve_wanvideo_wrapper_folder(node_type_lower)
+        if wan_folder:
+            return wan_folder
 
     if "gguf" in node_type_lower or "gguf" in cnr_id:
         if "clip" in node_type_lower:
@@ -639,6 +666,10 @@ def resolve_proxy_widget_folder(widget_name: str | None) -> str | None:
     if not widget_name:
         return None
     name = widget_name.lower()
+    if "clip_vision" in name or "clip vision" in name:
+        return "clip_vision"
+    if "text_encoder" in name or "text encoder" in name or "textencode" in name:
+        return "text_encoders"
     if "unet" in name:
         return "diffusion_models"
     if "clip" in name:

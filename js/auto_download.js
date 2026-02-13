@@ -467,7 +467,41 @@ app.registerExtension({
         };
 
         const FOLDER_REPO_SECTION_TITLE = "Folder/ Full Repo";
+        const NODE_CURATED_SECTION_TITLE = "Node-Specific Downloads";
         const FLASHVSR_TEXT_MARKERS = ["flashvsr", "flash-vsr", "flash vsr"];
+        const WAN_ANIMATE_TEXT_MARKERS = [
+            "wananimatepreprocess",
+            "wan animate preprocess",
+            "onnxdetectionmodelloader",
+            "poseandfacedetection",
+        ];
+        const WAN_ANIMATE_INPUT_NAMES = new Set(["vitpose_model", "yolo_model"]);
+        const WAN_ANIMATE_CURATED_MODELS = {
+            yolo: {
+                filename: "yolov10m.onnx",
+                url: "https://huggingface.co/Wan-AI/Wan2.2-Animate-14B/resolve/main/process_checkpoint/det/yolov10m.onnx?download=true",
+                suggestedFolder: "detection",
+                source: "wananimatepreprocess_docs",
+            },
+            vitposeLarge: {
+                filename: "vitpose-l-wholebody.onnx",
+                url: "https://huggingface.co/JunkyByte/easy_ViTPose/resolve/main/onnx/wholebody/vitpose-l-wholebody.onnx?download=true",
+                suggestedFolder: "detection",
+                source: "wananimatepreprocess_docs",
+            },
+            vitposeHugeModel: {
+                filename: "vitpose_h_wholebody_model.onnx",
+                url: "https://huggingface.co/Kijai/vitpose_comfy/resolve/main/onnx/vitpose_h_wholebody_model.onnx?download=true",
+                suggestedFolder: "detection",
+                source: "wananimatepreprocess_docs",
+            },
+            vitposeHugeData: {
+                filename: "vitpose_h_wholebody_data.bin",
+                url: "https://huggingface.co/Kijai/vitpose_comfy/resolve/main/onnx/vitpose_h_wholebody_data.bin?download=true",
+                suggestedFolder: "detection",
+                source: "wananimatepreprocess_docs",
+            },
+        };
         const REPO_FOLDER_DOWNLOAD_EXCEPTIONS = [
             {
                 id: "flashvsr",
@@ -627,6 +661,118 @@ app.registerExtension({
 
         const isFolderRepoDownloadModel = (model) =>
             String(model?.download_mode || "").toLowerCase() === "folder";
+
+        const createWanAnimateCuratedModelEntry = (modelKey, signals = {}) => {
+            const config = WAN_ANIMATE_CURATED_MODELS[modelKey];
+            if (!config || !config.filename || !config.url) {
+                return null;
+            }
+            const nodeTitle =
+                String(signals.nodeTitle || "").trim() ||
+                String(signals.classType || "").trim() ||
+                "Unknown Node";
+            const nodeId = Number(signals.nodeId);
+            return {
+                filename: config.filename,
+                requested_path: config.filename,
+                url: config.url,
+                suggested_folder: config.suggestedFolder || "detection",
+                source: config.source || "wananimatepreprocess_docs",
+                node_title: nodeTitle,
+                node_id: Number.isFinite(nodeId) ? nodeId : undefined,
+                section: NODE_CURATED_SECTION_TITLE,
+                exception_id: "wananimatepreprocess",
+                exception_label: "WanAnimatePreprocess",
+            };
+        };
+
+        const createWanAnimatePreprocessCuratedEntries = (signals = {}) => {
+            const inputNameLower = String(signals.inputName || "").toLowerCase().trim();
+            const missingValueLower = String(signals.missingValue || "").toLowerCase().trim();
+            const classTypeLower = String(signals.classType || "").toLowerCase();
+            const nodeTitleLower = String(signals.nodeTitle || "").toLowerCase();
+            const detailsLower = String(signals.details || "").toLowerCase();
+            const sourceLower = String(signals.source || "").toLowerCase();
+            const nameLower = String(signals.name || "").toLowerCase();
+            const filenameLower = String(signals.filename || "").toLowerCase();
+
+            const contextualText = [
+                classTypeLower,
+                nodeTitleLower,
+                detailsLower,
+                sourceLower,
+                nameLower,
+                filenameLower,
+                missingValueLower,
+            ].join(" ");
+
+            const hasFamilyMarker = textContainsAnyMarker(contextualText, WAN_ANIMATE_TEXT_MARKERS);
+            const hasInputMarker = WAN_ANIMATE_INPUT_NAMES.has(inputNameLower);
+            const hasKnownFilenameMarker =
+                missingValueLower.includes("yolov10m.onnx") ||
+                missingValueLower.includes("vitpose-l-wholebody.onnx") ||
+                missingValueLower.includes("vitpose-h-wholebody.onnx") ||
+                missingValueLower.includes("vitpose_h_wholebody_model.onnx") ||
+                missingValueLower.includes("vitpose_h_wholebody_data.bin");
+            const hasOnnxLoaderHint =
+                classTypeLower.includes("onnx") ||
+                nodeTitleLower.includes("onnx");
+
+            const isWanAnimateContext =
+                hasFamilyMarker ||
+                (hasInputMarker && hasOnnxLoaderHint) ||
+                hasKnownFilenameMarker;
+            if (!isWanAnimateContext) {
+                return [];
+            }
+
+            const selectedKeys = [];
+            const pushKey = (key) => {
+                if (!key || selectedKeys.includes(key)) return;
+                selectedKeys.push(key);
+            };
+
+            const wantsYolo =
+                inputNameLower === "yolo_model" ||
+                missingValueLower.includes("yolo") ||
+                missingValueLower.includes("yolov10m.onnx");
+            if (wantsYolo) {
+                pushKey("yolo");
+            }
+
+            const wantsVitpose =
+                inputNameLower === "vitpose_model" ||
+                missingValueLower.includes("vitpose");
+            if (wantsVitpose) {
+                const wantsHuge =
+                    missingValueLower.includes("vitpose_h_wholebody_model.onnx") ||
+                    missingValueLower.includes("vitpose_h_wholebody_data.bin") ||
+                    missingValueLower.includes("vitpose-h-wholebody.onnx") ||
+                    missingValueLower.includes("vitpose_h_");
+                const wantsLarge =
+                    missingValueLower.includes("vitpose-l-wholebody.onnx") ||
+                    missingValueLower.includes("vitpose_l_wholebody.onnx");
+
+                if (wantsHuge) {
+                    pushKey("vitposeHugeModel");
+                    pushKey("vitposeHugeData");
+                } else if (wantsLarge) {
+                    pushKey("vitposeLarge");
+                } else {
+                    // Fallback to the README-recommended large checkpoint when the selected name is unknown.
+                    pushKey("vitposeLarge");
+                }
+            }
+
+            if (!selectedKeys.length && isWanAnimateContext) {
+                pushKey("yolo");
+                pushKey("vitposeLarge");
+            }
+
+            return selectedKeys
+                .map((modelKey) => createWanAnimateCuratedModelEntry(modelKey, signals))
+                .filter(Boolean);
+        };
 
         const normalizeFolderPathInput = (value) =>
             String(value || "")
@@ -1083,11 +1229,15 @@ app.registerExtension({
             const rawMissingModels = Array.isArray(data.missing) ? [...data.missing] : [];
             const {
                 repoFolderMissing: repoFolderMissingModelsRaw,
+                curatedMissing: curatedMissingModelsRaw,
                 regularMissing: regularMissingModelsRaw
             } = splitMissingModelsForRepoFolderSection(rawMissingModels);
 
             const repoFolderMissingModels = [...repoFolderMissingModelsRaw];
             repoFolderMissingModels.sort((a, b) => (a.filename || "").localeCompare(b.filename || ""));
+
+            const curatedMissingModels = [...curatedMissingModelsRaw];
+            curatedMissingModels.sort((a, b) => (a.filename || "").localeCompare(b.filename || ""));
 
             const missingModels = [...regularMissingModelsRaw];
             missingModels.sort((a, b) => {
@@ -1109,7 +1259,10 @@ app.registerExtension({
                 color: "var(--descrip-text, #999)",
                 padding: "10px 24px 0",
             });
-            const totalMissingCount = repoFolderMissingModels.length + missingModels.length;
+            const totalMissingCount =
+                repoFolderMissingModels.length +
+                curatedMissingModels.length +
+                missingModels.length;
             summaryRow.textContent = `Missing: ${totalMissingCount} • Found: ${foundModels.length} • Mismatches: ${mismatchModels.length}`;
             panel.appendChild(summaryRow);
 
@@ -1348,10 +1501,17 @@ app.registerExtension({
                 renderMissingRows(repoFolderMissingModels, { isFolderRepoSection: true });
             }
 
+            if (curatedMissingModels.length) {
+                content.appendChild(makeSectionTitle(NODE_CURATED_SECTION_TITLE, "#9ec4ff"));
+                renderMissingRows(curatedMissingModels);
+            }
+
             content.appendChild(makeSectionTitle("Missing Models"));
             if (!missingModels.length) {
                 const noMissing = document.createElement("div");
-                noMissing.textContent = "No missing model file links detected.";
+                noMissing.textContent = curatedMissingModels.length
+                    ? "No additional missing model file links detected."
+                    : "No missing model file links detected.";
                 Object.assign(noMissing.style, {
                     padding: "12px 10px 16px",
                     color: "#58d58c",
@@ -2604,6 +2764,17 @@ app.registerExtension({
             return `${exceptionId}|${repoId}|${url}`;
         };
 
+        const getFileModelKey = (model) => {
+            const mode = String(model?.download_mode || "file").toLowerCase();
+            if (mode === "folder") {
+                return "";
+            }
+            const filename = String(model?.filename || "").toLowerCase();
+            const url = String(model?.url || "").toLowerCase();
+            const folder = String(model?.suggested_folder || model?.folder || "").toLowerCase();
+            return `${filename}|${url}|${folder}`;
+        };
+
         const collectRepoFolderMissingModelsFromNodeErrors = (nodeErrors = getNodeErrorsSnapshot()) => {
             if (!nodeErrors || typeof nodeErrors !== "object") {
                 return [];
@@ -2651,10 +2822,58 @@ app.registerExtension({
             return collected;
         };
 
+        const collectNodeSpecificCuratedMissingModelsFromNodeErrors = (nodeErrors = getNodeErrorsSnapshot()) => {
+            if (!nodeErrors || typeof nodeErrors !== "object") {
+                return [];
+            }
+
+            const collected = [];
+            const seen = new Set();
+            for (const [executionId, nodeError] of Object.entries(nodeErrors)) {
+                const classType = String(nodeError?.class_type || "").trim();
+                const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
+                if (!reasons.length) continue;
+
+                const nodeId = parseNodeIdFromExecutionId(executionId);
+                const nodeTitle = getGraphNodeTitleById(nodeId, classType || "Unknown Node");
+                for (const reason of reasons) {
+                    if (!isValueNotInListValidation(reason)) {
+                        continue;
+                    }
+                    const details = String(reason?.details || "");
+                    const inputName =
+                        String(reason?.extra_info?.input_name || "").trim() ||
+                        parseInputNameFromDetails(details);
+                    const missingValue = parseMissingValueFromDetails(details);
+
+                    const curatedEntries = createWanAnimatePreprocessCuratedEntries({
+                        classType,
+                        inputName,
+                        details,
+                        missingValue,
+                        nodeId,
+                        nodeTitle,
+                    });
+                    for (const entry of curatedEntries) {
+                        const key = getFileModelKey(entry);
+                        if (!key || seen.has(key)) {
+                            continue;
+                        }
+                        seen.add(key);
+                        collected.push(entry);
+                    }
+                }
+            }
+
+            return collected;
+        };
+
         const splitMissingModelsForRepoFolderSection = (missingModels, nodeErrors = getNodeErrorsSnapshot()) => {
             const regularMissing = [];
+            const curatedMissing = [];
             const repoFolderMissing = [];
             const seenRepoEntries = new Set();
+            const seenFileEntries = new Set();
 
             const pushRepoEntry = (entry) => {
                 if (!entry) return;
@@ -2664,6 +2883,22 @@ app.registerExtension({
                 }
                 seenRepoEntries.add(key);
                 repoFolderMissing.push(entry);
+            };
+
+            const pushFileEntry = (entry, target = "regular") => {
+                if (!entry || isFolderRepoDownloadModel(entry)) return;
+                const key = getFileModelKey(entry);
+                if (key && seenFileEntries.has(key)) {
+                    return;
+                }
+                if (key) {
+                    seenFileEntries.add(key);
+                }
+                if (target === "curated") {
+                    curatedMissing.push(entry);
+                } else {
+                    regularMissing.push(entry);
+                }
             };
 
             const missingList = Array.isArray(missingModels) ? missingModels : [];
@@ -2697,13 +2932,42 @@ app.registerExtension({
                     continue;
                 }
 
-                regularMissing.push(model);
+                const curatedEntries = createWanAnimatePreprocessCuratedEntries({
+                    classType: model?.node_title,
+                    inputName: model?.input_name,
+                    missingValue: model?.requested_path || model?.filename,
+                    filename: model?.filename,
+                    details: model?.details,
+                    directory: model?.directory,
+                    url: model?.url,
+                    repoId: model?.repo_id,
+                    nodeId: model?.node_id,
+                    nodeTitle: model?.node_title,
+                    source: model?.source,
+                    type: model?.type,
+                    name: model?.name,
+                });
+                if (curatedEntries.length) {
+                    curatedEntries.forEach((entry) => {
+                        pushFileEntry({
+                            ...entry,
+                            node_title: String(model?.node_title || entry.node_title || "").trim() || "Unknown Node",
+                            node_id: model?.node_id ?? entry.node_id,
+                        }, "curated");
+                    });
+                    continue;
+                }
+
+                pushFileEntry(model, "regular");
             }
 
             const fromNodeErrors = collectRepoFolderMissingModelsFromNodeErrors(nodeErrors);
             fromNodeErrors.forEach(pushRepoEntry);
 
-            return { repoFolderMissing, regularMissing };
+            const fromNodeErrorsCurated = collectNodeSpecificCuratedMissingModelsFromNodeErrors(nodeErrors);
+            fromNodeErrorsCurated.forEach((entry) => pushFileEntry(entry, "curated"));
+
+            return { repoFolderMissing, curatedMissing, regularMissing };
         };
 
         let resolvedModelStorePromise = null;
