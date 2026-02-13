@@ -242,21 +242,21 @@ app.registerExtension({
                     flex: 1 1 auto;
                     min-height: 0;
                     overflow-y: auto;
-                    padding: 10px 12px;
+                    padding: 6px 10px;
                     display: flex;
                     flex-direction: column;
-                    gap: 8px;
+                    gap: 6px;
                 }
                 #${PANEL_ID} .hf-downloader-item {
-                    height: 56px;
-                    min-height: 56px;
-                    max-height: 56px;
+                    height: 52px;
+                    min-height: 52px;
+                    max-height: 52px;
                     box-sizing: border-box;
                 }
                 #${PANEL_ID} .hf-downloader-content {
                     min-width: 0;
                     flex: 1 1 auto;
-                    padding-right: 4px;
+                    padding-right: 42px;
                 }
                 #${PANEL_ID} .hf-downloader-name {
                     font-weight: 600;
@@ -267,7 +267,7 @@ app.registerExtension({
                     opacity: 0.95;
                 }
                 #${PANEL_ID} .hf-downloader-meta {
-                    margin-top: 4px;
+                    margin-top: 2px;
                     color: var(--descrip-text, var(--p-text-muted-color, #aab1bc));
                     display: flex;
                     align-items: center;
@@ -290,9 +290,10 @@ app.registerExtension({
                 }
                 #${PANEL_ID} .hf-downloader-status-lower {
                     font-weight: 600;
-                    letter-spacing: 0.01em;
+                    letter-spacing: 0.03em;
                     white-space: nowrap;
                     flex: 0 0 auto;
+                    text-transform: uppercase;
                 }
                 #${PANEL_ID} .hf-downloader-cancel {
                     position: absolute;
@@ -305,6 +306,7 @@ app.registerExtension({
                     pointer-events: none;
                     transform: translateY(calc(-50% + 2px));
                     transition: opacity 140ms ease-in-out, transform 140ms ease-in-out;
+                    z-index: 5;
                 }
                 #${PANEL_ID} .hf-downloader-item:hover .hf-downloader-cancel,
                 #${PANEL_ID} .hf-downloader-cancel:focus-visible {
@@ -536,7 +538,7 @@ app.registerExtension({
                 case "queued":
                     return {
                         key: "queued",
-                        className: "icon-[lucide--clock-3] size-4 text-text-secondary"
+                        className: "icon-[lucide--loader-circle] size-4 animate-spin text-white"
                     };
                 case "downloaded":
                     return {
@@ -566,7 +568,7 @@ app.registerExtension({
             item.className = ITEM_CLASS;
 
             const leading = document.createElement("div");
-            leading.className = "relative z-1 flex items-center gap-1";
+            leading.className = "relative flex items-center gap-1";
 
             const iconWrap = document.createElement("div");
             iconWrap.className = "inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-[6px]";
@@ -577,7 +579,7 @@ app.registerExtension({
             leading.appendChild(iconWrap);
 
             const content = document.createElement("div");
-            content.className = "hf-downloader-content relative z-1 min-w-0 flex-1";
+            content.className = "hf-downloader-content relative min-w-0 flex-1";
 
             const name = document.createElement("div");
             name.className = "hf-downloader-name truncate opacity-90";
