@@ -2,12 +2,12 @@ import os
 import sys
 import shutil
 import tempfile
-import threading
 import time
 import json
 import zipfile
 import hashlib
 import yaml
+import subprocess
 from typing import Optional, Tuple, Callable
 
 from huggingface_hub import (
@@ -65,6 +65,50 @@ def clear_cache_for_path(downloaded_path: str):
                     return
     except Exception as e:
         print(f"[DEBUG] Cache cleaning failed: {e}")
+
+
+def clear_cache_for_repo(repo_id: str):
+    """Remove cached snapshots/blobs for a specific HF model repo."""
+    normalized_repo = str(repo_id or "").strip()
+    if not normalized_repo:
+        return
+    print(f"[DEBUG] Attempting to clean cache for repo {normalized_repo}")
+
+    try:
+        cache_info = scan_cache_dir()
+        commit_hashes = []
+        for repo in getattr(cache_info, "repos", []) or []:
+            repo_key = str(getattr(repo, "repo_id", "") or "").strip()
+            if repo_key.lower() != normalized_repo.lower():
+                continue
+            for revision in getattr(repo, "revisions", []) or []:
+                commit_hash = str(getattr(revision, "commit_hash", "") or "").strip()
+                if commit_hash:
+                    commit_hashes.append(commit_hash)
+        for commit_hash in commit_hashes:
+            try:
+                delete_strategy = cache_info.delete_revisions(commit_hash)
+                print(f"[DEBUG] Deleting cached revision for repo cleanup: {commit_hash}")
+                delete_strategy.execute()
+            except Exception as inner:
+                print(f"[DEBUG] Failed to delete revision {commit_hash}: {inner}")
+    except Exception as e:
+        print(f"[DEBUG] Repo cache cleanup via scan_cache_dir failed: {e}")
+
+    # Interrupted downloads can leave orphaned *.incomplete blobs outside tracked revisions.
+    try:
+        repo_folder = f"models--{normalized_repo.replace('/', '--')}"
+        repo_cache_dir = os.path.join(_get_hf_cache_dir(), repo_folder)
+        blobs_dir = os.path.join(repo_cache_dir, "blobs")
+        if os.path.isdir(blobs_dir):
+            for name in os.listdir(blobs_dir):
+                if name.endswith(".incomplete"):
+                    _safe_remove(os.path.join(blobs_dir, name))
+        if os.path.isdir(repo_cache_dir):
+            shutil.rmtree(repo_cache_dir, ignore_errors=True)
+        print(f"[DEBUG] Repo cache cleaned for {normalized_repo}")
+    except Exception as e:
+        print(f"[DEBUG] Repo cache directory cleanup failed: {e}")
 
 
 def get_token():
@@ -277,7 +321,8 @@ def run_download_folder(parsed_data: dict,
                         remote_subfolder_path: str = "",
                         last_segment: str = "",
                         sync: bool = False,
-                        status_cb: Optional[Callable[[str], None]] = None) -> tuple[str, str]:
+                        status_cb: Optional[Callable[[str], None]] = None,
+                        cancel_check: Optional[Callable[[], bool]] = None) -> tuple[str, str]:
     """
     Downloads a folder or subfolder from Hugging Face Hub using snapshot_download.
     The result is placed in:
@@ -338,7 +383,6 @@ def run_download_folder(parsed_data: dict,
             status_cb("Fetching files")
 
     allow_patterns = [f"{remote_subfolder_path}/**"] if remote_subfolder_path else None
-
     kwargs = {
         "repo_id": parsed_data["repo"],
         "local_dir": temp_dir,
@@ -349,58 +393,121 @@ def run_download_folder(parsed_data: dict,
     if allow_patterns:
         kwargs["allow_patterns"] = allow_patterns
 
-    progress_event = threading.Event()
-    final_total = 0
-    last_percent = -1
+    def run_snapshot_with_cancel(download_kwargs: dict) -> str:
+        payload_fd, payload_path = tempfile.mkstemp(prefix="hf_snapshot_payload_", suffix=".json", dir=comfy_temp)
+        result_fd, result_path = tempfile.mkstemp(prefix="hf_snapshot_result_", suffix=".json", dir=comfy_temp)
+        os.close(payload_fd)
+        os.close(result_fd)
+        script = (
+            "import json, sys\n"
+            "from huggingface_hub import snapshot_download\n"
+            "payload_path = sys.argv[1]\n"
+            "result_path = sys.argv[2]\n"
+            "with open(payload_path, 'r', encoding='utf-8') as f:\n"
+            "    kwargs = json.load(f)\n"
+            "result = {}\n"
+            "try:\n"
+            "    path = snapshot_download(**kwargs)\n"
+            "    result = {'ok': True, 'path': path}\n"
+            "except Exception as e:\n"
+            "    result = {'ok': False, 'error': str(e)}\n"
+            "with open(result_path, 'w', encoding='utf-8') as f:\n"
+            "    json.dump(result, f)\n"
+            "sys.exit(0 if result.get('ok') else 1)\n"
+        )
 
-    def folder_monitor():
-        nonlocal final_total, last_percent
-        print("[DEBUG] Folder monitor started.")
-        while not progress_event.is_set():
-            csz = folder_size(temp_dir)
-            pct = (csz / final_total) * 100 if final_total else 0
-            ip = int(pct)
-            if ip > last_percent:
-                print(f"\r[DEBUG] [Folder Monitor] {ip}%", end="")
-                last_percent = ip
-            time.sleep(1)
-        print()
+        try:
+            with open(payload_path, "w", encoding="utf-8") as f:
+                json.dump(download_kwargs, f)
 
-    threading.Thread(target=folder_monitor, daemon=True).start()
+            proc = subprocess.Popen(
+                [sys.executable, "-c", script, payload_path, result_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
+            while True:
+                if proc.poll() is not None:
+                    break
+                if cancel_check and cancel_check():
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=5)
+                    raise InterruptedError("Folder download cancelled")
+                time.sleep(0.2)
+
+            result = {}
+            if os.path.exists(result_path):
+                try:
+                    with open(result_path, "r", encoding="utf-8") as f:
+                        result = json.load(f)
+                except Exception:
+                    result = {}
+
+            if result.get("ok"):
+                return str(result.get("path") or temp_dir)
+
+            error = result.get("error") or "snapshot_download failed."
+            raise RuntimeError(error)
+        finally:
+            _safe_remove(payload_path)
+            _safe_remove(result_path)
+
+    start_time = time.time()
+    stage_dir = tempfile.mkdtemp(prefix="hf_stage_", dir=base_dir)
+    downloaded_folder = ""
     try:
         if status_cb:
             status_cb("Downloading files")
-        downloaded_folder = snapshot_download(**kwargs)
+        downloaded_folder = run_snapshot_with_cancel(kwargs)
         print("[DEBUG] snapshot_download =>", downloaded_folder)
-        final_total = folder_size(downloaded_folder)
+
+        source_folder = traverse_subfolders(downloaded_folder, remote_subfolder_path.split("/")) \
+            if remote_subfolder_path else downloaded_folder
+        if not os.path.isdir(source_folder):
+            raise RuntimeError("Downloaded folder path not found.")
+
+        if status_cb:
+            status_cb("Copying files")
+        for item in os.listdir(source_folder):
+            if item == ".cache":
+                continue
+            if cancel_check and cancel_check():
+                raise InterruptedError("Folder download cancelled")
+            src_item = os.path.join(source_folder, item)
+            dst_item = os.path.join(stage_dir, item)
+            shutil.move(src_item, dst_item)
+
+        if cancel_check and cancel_check():
+            raise InterruptedError("Folder download cancelled")
+
+        if os.path.exists(dest_path):
+            shutil.rmtree(dest_path, ignore_errors=True)
+        os.replace(stage_dir, dest_path)
+        stage_dir = ""
+    except InterruptedError:
+        clear_cache_for_repo(parsed_data.get("repo", ""))
+        cancel_msg = "Folder download cancelled"
+        print("[DEBUG]", cancel_msg)
+        return (cancel_msg, "") if sync else ("", "")
     except Exception as e:
-        progress_event.set()
-        shutil.rmtree(temp_dir, ignore_errors=True)
         err = f"Download failed: {e}"
         print("[DEBUG]", err)
         return (err, "") if sync else ("", "")
+    finally:
+        if stage_dir and os.path.isdir(stage_dir):
+            shutil.rmtree(stage_dir, ignore_errors=True)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        print("[DEBUG] Removed temp folder:", temp_dir)
 
-    source_folder = traverse_subfolders(downloaded_folder, remote_subfolder_path.split("/")) \
-        if remote_subfolder_path else downloaded_folder
-
-    if status_cb:
-        status_cb("Copying files")
-    os.makedirs(dest_path, exist_ok=True)
-    for item in os.listdir(source_folder):
-        if item == ".cache":
-            continue
-        shutil.move(os.path.join(source_folder, item), os.path.join(dest_path, item))
-
-    elapsed = time.time() - time.time()
+    elapsed = time.time() - start_time
     fsz = folder_size(dest_path)
     fgb = fsz / (1024 ** 3)
-    final_message = f"Folder downloaded: {os.path.basename(dest_path)} | {fgb:.3f} GB"
+    final_message = f"Folder downloaded: {os.path.basename(dest_path)} | {fgb:.3f} GB in {elapsed:.1f}s"
     print("[DEBUG]", final_message)
-
-    progress_event.set()
-    shutil.rmtree(temp_dir, ignore_errors=True)
-    print("[DEBUG] Removed temp folder:", temp_dir)
 
     if status_cb:
         status_cb("Finalizing")

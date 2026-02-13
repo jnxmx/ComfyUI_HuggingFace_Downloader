@@ -1264,7 +1264,8 @@ def _download_worker():
                     remote_subfolder_path=folder_info["remote_subfolder_path"],
                     last_segment=folder_info["last_segment"],
                     sync=True,
-                    status_cb=folder_status_cb
+                    status_cb=folder_status_cb,
+                    cancel_check=lambda: _is_cancel_requested(download_id),
                 )
                 if _is_cancel_requested(download_id):
                     _set_download_status(download_id, {
