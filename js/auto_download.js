@@ -2000,6 +2000,8 @@ app.registerExtension({
                 maxWidth: "92vw",
                 maxHeight: "92vh",
             });
+            // Allow folder picker popup to extend beyond the panel body.
+            panel.style.overflow = "visible";
 
             const headerWrap = document.createElement("div");
             Object.assign(headerWrap.style, {
@@ -2044,6 +2046,7 @@ app.registerExtension({
                 border: "none",
                 borderRadius: "0",
                 padding: "12px 24px",
+                overflow: "visible",
             });
 
             const urlLabel = document.createElement("div");
