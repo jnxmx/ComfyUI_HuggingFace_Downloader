@@ -2360,7 +2360,7 @@ app.registerExtension({
             }, 0);
         };
 
-        const runAutoDownload = async (skippedFilenames = new Set(), skipAllUnresolved = false) => {
+        const runAutoDownload = async (skippedFilenames = new Set(), skipAllUnresolved = false, options = {}) => {
             let loadingDlg = null;
             let aborted = false;
             let skipRequested = false;
@@ -2504,6 +2504,31 @@ app.registerExtension({
                 const data = await resp.json();
                 console.log("[AutoDownload] Scan results:", data);
 
+                const suppressEmptyResults = Boolean(options?.suppressEmptyResults);
+                if (suppressEmptyResults) {
+                    const split = splitMissingModelsForRepoFolderSection(
+                        Array.isArray(data?.missing) ? data.missing : [],
+                        getNodeErrorsSnapshot()
+                    );
+                    const totalMissing =
+                        (Array.isArray(split?.repoFolderMissing) ? split.repoFolderMissing.length : 0) +
+                        (Array.isArray(split?.curatedMissing) ? split.curatedMissing.length : 0) +
+                        (Array.isArray(split?.regularMissing) ? split.regularMissing.length : 0);
+                    const foundCount = Array.isArray(data?.found) ? data.found.length : 0;
+                    const mismatchCount = Array.isArray(data?.mismatches) ? data.mismatches.length : 0;
+                    const hasAnyResults = totalMissing > 0 || foundCount > 0 || mismatchCount > 0;
+
+                    if (!hasAnyResults) {
+                        showToast({
+                            severity: "warn",
+                            summary: "Auto-download skipped",
+                            detail: "Run hook detected missing-model signals, but scan returned no actionable models.",
+                            life: 4200
+                        });
+                        return;
+                    }
+                }
+
                 // Show results
                 showResultsDialog(data);
 
@@ -2522,7 +2547,7 @@ app.registerExtension({
                             loadingDlg.remove();
                             // Restart scan and skip unresolved Hugging Face lookups.
                             setTimeout(() => {
-                                runAutoDownload(skippedFilenames, true);
+                                runAutoDownload(skippedFilenames, true, options);
                             }, 0);
                             return;
                         }
@@ -3723,7 +3748,11 @@ app.registerExtension({
 
             runHookLastTriggeredAt = now;
             suppressNativePromptValidationDialogsSoon();
-            runAction();
+            runAction(new Set(), false, {
+                suppressEmptyResults: true,
+                triggeredByRunHook: true,
+                reason,
+            });
             if (isValidationReason) {
                 void clearModelValidationErrorsFromFrontendState();
             }
@@ -3732,16 +3761,16 @@ app.registerExtension({
             const detail = isValidationReason
                 ? (
                     firstMissing
-                        ? `Detected run validation mismatch for "${firstMissing}". Opened auto-download.`
-                        : "Detected run validation mismatch for model loaders. Opened auto-download."
+                        ? `Detected run validation mismatch for "${firstMissing}". Started auto-download scan.`
+                        : "Detected run validation mismatch for model loaders. Started auto-download scan."
                 )
                 : (reason === "native-missing-models"
                     ? (
                         firstMissing
-                            ? `Native missing-model check found "${firstMissing}". Opened auto-download.`
-                            : "Native missing-model check failed. Opened auto-download."
+                            ? `Native missing-model check found "${firstMissing}". Started auto-download scan.`
+                            : "Native missing-model check failed. Started auto-download scan."
                     )
-                    : "Opened auto-download from native missing-model check.");
+                    : "Started auto-download scan from native missing-model check.");
 
             showToast({
                 severity: "info",

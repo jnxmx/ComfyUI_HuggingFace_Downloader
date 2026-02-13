@@ -77,7 +77,10 @@ const createMenuItem = (label, actionName) => {
         padding: "8px 12px",
         textAlign: "left",
         cursor: "pointer",
-        width: "100%",
+        width: "auto",
+        minWidth: "100%",
+        boxSizing: "border-box",
+        whiteSpace: "nowrap",
         fontSize: "12px"
     });
 
@@ -110,12 +113,12 @@ const ensureMenu = () => {
         borderRadius: "8px",
         boxShadow: "0 8px 20px rgba(0,0,0,0.5)",
         padding: "6px 0",
-        minWidth: "220px",
+        width: "fit-content",
         zIndex: 10000,
         display: "none"
     });
 
-    menu.appendChild(createMenuItem("Backup ComfyUI to Hugging Face", "showBackupDialog"));
+    menu.appendChild(createMenuItem("Backup Manager", "showBackupDialog"));
     menu.appendChild(createMenuItem("Auto-download models", "runAutoDownload"));
     menu.appendChild(createMenuItem("Download new model", "showManualDownloadDialog"));
 
