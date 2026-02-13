@@ -218,7 +218,8 @@ def run_download(parsed_data: dict,
                  defer_verify: bool = False,
                  overwrite: bool = False,
                  return_info: bool = False,
-                 status_cb: Optional[Callable[[str], None]] = None) -> tuple:
+                 status_cb: Optional[Callable[[str], None]] = None,
+                 cancel_check: Optional[Callable[[], bool]] = None) -> tuple:
     """
     Downloads a single file from Hugging Face Hub and copies it to models/<final_folder>.
     Cleans up the cached copy to save disk space.
@@ -237,6 +238,8 @@ def run_download(parsed_data: dict,
         token=token or None
     )
 
+    dest_path = ""
+    copy_tmp_path = ""
     try:
         target_dir = os.path.join(os.getcwd(), "models", final_folder)
         os.makedirs(target_dir, exist_ok=True)
@@ -259,34 +262,124 @@ def run_download(parsed_data: dict,
                     print(f"[DEBUG] Existing file failed verification, re-downloading: {e}")
                     _safe_remove(dest_path)
 
+        def run_file_download_with_cancel(download_kwargs: dict) -> str:
+            if not cancel_check:
+                return hf_hub_download(**download_kwargs)
+
+            comfy_temp = os.path.join(os.getcwd(), "temp")
+            os.makedirs(comfy_temp, exist_ok=True)
+            payload_fd, payload_path = tempfile.mkstemp(prefix="hf_file_payload_", suffix=".json", dir=comfy_temp)
+            result_fd, result_path = tempfile.mkstemp(prefix="hf_file_result_", suffix=".json", dir=comfy_temp)
+            os.close(payload_fd)
+            os.close(result_fd)
+
+            script = (
+                "import json, sys\n"
+                "from huggingface_hub import hf_hub_download\n"
+                "payload_path = sys.argv[1]\n"
+                "result_path = sys.argv[2]\n"
+                "with open(payload_path, 'r', encoding='utf-8') as f:\n"
+                "    kwargs = json.load(f)\n"
+                "result = {}\n"
+                "try:\n"
+                "    path = hf_hub_download(**kwargs)\n"
+                "    result = {'ok': True, 'path': path}\n"
+                "except Exception as e:\n"
+                "    result = {'ok': False, 'error': str(e)}\n"
+                "with open(result_path, 'w', encoding='utf-8') as f:\n"
+                "    json.dump(result, f)\n"
+                "sys.exit(0 if result.get('ok') else 1)\n"
+            )
+
+            try:
+                with open(payload_path, "w", encoding="utf-8") as f:
+                    json.dump(download_kwargs, f)
+
+                proc = subprocess.Popen(
+                    [sys.executable, "-c", script, payload_path, result_path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+                while True:
+                    if proc.poll() is not None:
+                        break
+                    if cancel_check and cancel_check():
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait(timeout=5)
+                        raise InterruptedError("Download cancelled")
+                    time.sleep(0.2)
+
+                result = {}
+                if os.path.exists(result_path):
+                    try:
+                        with open(result_path, "r", encoding="utf-8") as f:
+                            result = json.load(f)
+                    except Exception:
+                        result = {}
+
+                if result.get("ok"):
+                    return str(result.get("path") or "")
+
+                raise RuntimeError(result.get("error") or "hf_hub_download failed.")
+            finally:
+                _safe_remove(payload_path)
+                _safe_remove(result_path)
+
         download_start = time.time()
         print(f"[DEBUG] hf_hub_download start: {parsed_data['repo']}/{remote_filename}")
-        file_path_in_cache = hf_hub_download(
-            repo_id=parsed_data["repo"],
-            filename=remote_filename,
-            revision=parsed_data.get("revision"),
-            token=token or None
-        )
+        file_path_in_cache = run_file_download_with_cancel({
+            "repo_id": parsed_data["repo"],
+            "filename": remote_filename,
+            "revision": parsed_data.get("revision"),
+            "token": token or None,
+        })
+        if not file_path_in_cache:
+            raise RuntimeError("hf_hub_download did not return a cache path.")
+        if cancel_check and cancel_check():
+            raise InterruptedError("Download cancelled")
         elapsed = time.time() - download_start
         print(f"[DEBUG] hf_hub_download finished in {elapsed:.1f}s")
         print("[DEBUG] File downloaded to cache:", file_path_in_cache)
 
         if status_cb:
             status_cb("copying")
-        shutil.copyfile(file_path_in_cache, dest_path)
+        copy_tmp_path = dest_path + ".tmp_copy"
+        with open(file_path_in_cache, "rb") as src, open(copy_tmp_path, "wb") as dst:
+            while True:
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Download cancelled")
+                chunk = src.read(8 * 1024 * 1024)
+                if not chunk:
+                    break
+                dst.write(chunk)
+        os.replace(copy_tmp_path, dest_path)
+        copy_tmp_path = ""
+        if cancel_check and cancel_check():
+            raise InterruptedError("Download cancelled")
         print("[DEBUG] File copied to:", dest_path)
 
         if not defer_verify:
             try:
                 if status_cb:
                     status_cb("verifying")
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Download cancelled")
                 _verify_file_integrity(dest_path, expected_size, expected_sha)
+            except InterruptedError:
+                raise
             except Exception as e:
                 _safe_remove(dest_path)
                 raise RuntimeError(f"Download verification failed: {e}") from e
 
         if status_cb:
             status_cb("cleaning_cache")
+        if cancel_check and cancel_check():
+            raise InterruptedError("Download cancelled")
         clear_cache_for_path(file_path_in_cache)
 
         size_gb = os.path.getsize(dest_path) / (1024 ** 3)
@@ -295,6 +388,17 @@ def run_download(parsed_data: dict,
         if return_info:
             return (final_message, dest_path, {"expected_size": expected_size, "expected_sha": expected_sha})
         return (final_message, dest_path) if sync else ("", "")
+    except InterruptedError:
+        if copy_tmp_path:
+            _safe_remove(copy_tmp_path)
+        if dest_path and os.path.exists(dest_path):
+            _safe_remove(dest_path)
+        clear_cache_for_repo(parsed_data.get("repo", ""))
+        cancel_msg = "Download cancelled"
+        print("[DEBUG]", cancel_msg)
+        if return_info:
+            return (cancel_msg, "", {"expected_size": expected_size, "expected_sha": expected_sha})
+        return (cancel_msg, "") if sync else ("", "")
     except Exception as e:
         # Provide clearer feedback for common authentication/authorization problems
         if "Invalid credentials" in str(e) or "401" in str(e):

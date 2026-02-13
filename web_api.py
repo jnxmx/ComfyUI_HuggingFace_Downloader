@@ -349,6 +349,20 @@ def _build_parsed_folder_download_info(model: dict) -> dict:
 def _set_download_status(download_id: str, fields: dict):
     with download_status_lock:
         existing = download_status.get(download_id, {})
+        existing_status = str(existing.get("status") or "").strip().lower()
+        incoming_status = str(fields.get("status") or "").strip().lower()
+
+        # Once a download is cancelling/cancelled, do not let progress callbacks
+        # overwrite it back to active states like "downloading".
+        if existing_status in ("cancelling", "cancelled"):
+            if incoming_status and incoming_status not in ("cancelled", "failed"):
+                fields = dict(fields)
+                fields.pop("status", None)
+                if existing_status == "cancelling":
+                    fields["phase"] = "cancelling"
+            elif existing_status == "cancelled" and incoming_status and incoming_status != "cancelled":
+                fields = dict(fields)
+                fields.pop("status", None)
         existing.update(fields)
         download_status[download_id] = existing
 
@@ -1315,6 +1329,8 @@ def _download_worker():
                 waiting_logged = False
                 try:
                     while not stop_event.is_set():
+                        if _is_cancel_requested(download_id):
+                            return
                         bytes_now = None
                         if incomplete_path and os.path.exists(incomplete_path):
                             bytes_now = os.path.getsize(incomplete_path)
@@ -1407,6 +1423,8 @@ def _download_worker():
 
             overwrite = bool(item.get("overwrite"))
             def status_cb(phase: str):
+                if _is_cancel_requested(download_id):
+                    return
                 _set_download_status(download_id, {
                     "status": phase,
                     "phase": phase,
@@ -1420,7 +1438,8 @@ def _download_worker():
                     defer_verify=True,
                     overwrite=overwrite,
                     return_info=True,
-                    status_cb=status_cb
+                    status_cb=status_cb,
+                    cancel_check=lambda: _is_cancel_requested(download_id),
                 )
                 if _is_cancel_requested(download_id):
                     try:
@@ -1452,7 +1471,14 @@ def _download_worker():
                         "message": msg
                     })
             else:
-                msg, path = run_download(parsed, item["folder"], sync=True, overwrite=overwrite, status_cb=status_cb)
+                msg, path = run_download(
+                    parsed,
+                    item["folder"],
+                    sync=True,
+                    overwrite=overwrite,
+                    status_cb=status_cb,
+                    cancel_check=lambda: _is_cancel_requested(download_id),
+                )
                 if _is_cancel_requested(download_id):
                     try:
                         if path and os.path.exists(path):
@@ -1812,9 +1838,13 @@ def setup(app):
             _clear_cancel_request(download_id)
             return web.json_response({"status": current_status, "download_id": download_id})
 
+        if current_status == "cancelling":
+            return web.json_response({"status": "cancelling", "download_id": download_id})
+
         if current_status in ("downloading", "copying", "cleaning_cache", "finalizing", "verifying", "downloaded"):
             _set_download_status(download_id, {
                 "status": "cancelling",
+                "phase": "cancelling",
                 "updated_at": time.time()
             })
             return web.json_response({"status": "cancelling", "download_id": download_id})

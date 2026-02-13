@@ -182,11 +182,11 @@ app.registerExtension({
                     top: 16px;
                     width: 380px;
                     max-height: 60vh;
-                    background: var(--comfy-menu-bg, #1f2128);
-                    border: 1px solid var(--border-color, #3c3c3c);
-                    border-radius: 12px;
+                    background: var(--comfy-input-bg, var(--comfy-menu-bg, var(--p-surface-900, #141922)));
+                    border: 1px solid var(--border-color, var(--p-content-border-color, #3c4452));
+                    border-radius: 14px;
                     box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
-                    color: var(--fg-color, #ddd);
+                    color: var(--fg-color, var(--p-text-color, #ddd));
                     font-size: 12px;
                     z-index: 10000;
                     display: flex;
@@ -197,23 +197,23 @@ app.registerExtension({
                     display: flex;
                     align-items: center;
                     justify-content: space-between;
-                    padding: 10px 12px;
-                    border-bottom: 1px solid var(--border-color, #333);
-                    background: var(--comfy-menu-bg, #1f2128);
+                    padding: 8px 12px;
+                    border-bottom: 1px solid var(--border-color, var(--p-content-border-color, #333));
+                    background: transparent;
                 }
                 #${PANEL_ID} .hf-downloader-header-title {
                     font-size: 14px;
                     font-weight: 600;
-                    color: var(--input-text, #e5e7eb);
+                    color: var(--input-text, var(--p-text-color, #e5e7eb));
                 }
                 #${PANEL_ID} .hf-downloader-header-controls {
                     display: inline-flex;
                     align-items: center;
-                    gap: 8px;
+                    gap: 6px;
                 }
                 #${PANEL_ID} .hf-downloader-count {
-                    background: var(--secondary-background, #3b3f4b);
-                    color: var(--input-text, #e5e7eb);
+                    background: var(--secondary-background, var(--p-surface-800, #3b3f4b));
+                    color: var(--input-text, var(--p-text-color, #e5e7eb));
                     padding: 2px 8px;
                     border-radius: 999px;
                     font-size: 11px;
@@ -222,7 +222,7 @@ app.registerExtension({
                 #${PANEL_ID} .hf-downloader-minimize {
                     border: none;
                     background: transparent;
-                    color: var(--descrip-text, #aab1bc);
+                    color: var(--descrip-text, var(--p-text-muted-color, #aab1bc));
                     width: 24px;
                     height: 24px;
                     border-radius: 6px;
@@ -235,39 +235,44 @@ app.registerExtension({
                     padding: 0;
                 }
                 #${PANEL_ID} .hf-downloader-minimize:hover {
-                    background: var(--secondary-background-hover, #2d3240);
-                    color: var(--input-text, #e5e7eb);
+                    background: var(--secondary-background-hover, var(--p-surface-700, #2d3240));
+                    color: var(--input-text, var(--p-text-color, #e5e7eb));
                 }
                 #${PANEL_ID} .hf-downloader-body {
                     overflow-y: auto;
-                    padding: 8px;
-                    display: flex;
-                    flex-direction: column;
-                    gap: 8px;
-                }
-                #${PANEL_ID} .hf-downloader-item {
-                    background: var(--secondary-background, #2f323a);
-                    border: 1px solid transparent;
-                    border-radius: 10px;
-                    padding: 8px 10px;
+                    padding: 6px;
                     display: flex;
                     flex-direction: column;
                     gap: 6px;
-                    transition: background-color 150ms ease-in-out;
+                }
+                #${PANEL_ID} .hf-downloader-item {
+                    background: var(--secondary-background, var(--p-surface-800, #2f323a));
+                    border: none;
+                    border-radius: 12px;
+                    min-height: 84px;
+                    box-sizing: border-box;
+                    padding: 10px 8px 8px 12px;
+                    position: relative;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    gap: 4px;
+                    transition: background-color 140ms ease-in-out;
                 }
                 #${PANEL_ID} .hf-downloader-item:hover {
-                    background: var(--secondary-background-hover, #3a3f48);
+                    background: var(--secondary-background-hover, var(--p-surface-700, #3a3f48));
                 }
                 #${PANEL_ID} .hf-downloader-row {
                     display: flex;
-                    align-items: center;
+                    align-items: flex-start;
                     justify-content: space-between;
-                    gap: 8px;
+                    gap: 6px;
+                    padding-right: 38px;
                 }
                 #${PANEL_ID} .hf-downloader-name {
                     font-size: 12px;
                     font-weight: 600;
-                    color: var(--input-text, #e3e5ea);
+                    color: var(--input-text, var(--p-text-color, #e3e5ea));
                     overflow: hidden;
                     text-overflow: ellipsis;
                     white-space: nowrap;
@@ -278,9 +283,9 @@ app.registerExtension({
                     border: none;
                     background: var(--destructive-background, #e25252);
                     color: #fff;
-                    width: 32px;
-                    height: 32px;
-                    border-radius: 10px;
+                    width: 36px;
+                    height: 36px;
+                    border-radius: 12px;
                     cursor: pointer;
                     display: inline-flex;
                     align-items: center;
@@ -289,7 +294,11 @@ app.registerExtension({
                     opacity: 0;
                     pointer-events: none;
                     transition: opacity 140ms ease-in-out, transform 140ms ease-in-out, background-color 120ms ease-in-out;
-                    transform: translateY(1px);
+                    transform: translateY(2px);
+                    flex: 0 0 36px;
+                    position: absolute;
+                    right: 6px;
+                    top: 6px;
                 }
                 #${PANEL_ID} .hf-downloader-cancel i {
                     font-size: 14px;
@@ -311,27 +320,28 @@ app.registerExtension({
                 }
                 #${PANEL_ID} .hf-downloader-meta {
                     font-size: 12px;
-                    color: var(--descrip-text, #aab1bc);
+                    color: var(--descrip-text, var(--p-text-muted-color, #aab1bc));
                     display: flex;
                     align-items: center;
                     justify-content: space-between;
-                    gap: 10px;
+                    gap: 8px;
                 }
                 #${PANEL_ID} .hf-downloader-size {
                     display: inline-flex;
                     align-items: center;
-                    gap: 8px;
+                    gap: 6px;
                     min-width: 0;
                     overflow: hidden;
                     text-overflow: ellipsis;
                     white-space: nowrap;
                 }
                 #${PANEL_ID} .hf-downloader-spinner {
-                    width: 12px;
-                    height: 12px;
+                    width: 13px;
+                    height: 13px;
                     border-radius: 50%;
-                    border: 2px solid #2a2d36;
+                    border: 2px solid var(--secondary-background-hover, #2a2d36);
                     border-top-color: #4aa3ff;
+                    border-right-color: #4aa3ff;
                     animation: hf-downloader-spin 0.9s linear infinite;
                     flex: 0 0 auto;
                 }
@@ -347,6 +357,9 @@ app.registerExtension({
                     white-space: nowrap;
                     flex: 0 0 auto;
                 }
+                #${PANEL_ID} .hf-downloader-item.can-cancel:hover .hf-downloader-status-lower {
+                    display: none;
+                }
                 #${PANEL_ID} .hf-downloader-error {
                     color: #ff6b6b;
                     font-size: 11px;
@@ -357,16 +370,16 @@ app.registerExtension({
                 #${PANEL_ID} .hf-downloader-footer {
                     display: flex;
                     justify-content: flex-end;
-                    padding: 10px 12px;
-                    border-top: 1px solid var(--border-color, #333);
-                    background: var(--comfy-menu-bg, #1f2128);
+                    padding: 8px 12px;
+                    border-top: 1px solid var(--border-color, var(--p-content-border-color, #333));
+                    background: transparent;
                 }
                 #${PANEL_ID} .hf-downloader-refresh {
-                    border: 1px solid var(--border-color, #4b5563);
-                    background: var(--secondary-background, #2f323a);
-                    color: var(--input-text, #e5e7eb);
+                    border: 1px solid var(--border-color, var(--p-content-border-color, #4b5563));
+                    background: var(--secondary-background, var(--p-surface-800, #2f323a));
+                    color: var(--input-text, var(--p-text-color, #e5e7eb));
                     border-radius: 8px;
-                    padding: 7px 14px;
+                    padding: 7px 12px;
                     font-size: 13px;
                     line-height: 1.2;
                     font-weight: 600;
@@ -374,7 +387,7 @@ app.registerExtension({
                     cursor: pointer;
                 }
                 #${PANEL_ID} .hf-downloader-refresh:hover {
-                    background: var(--secondary-background-hover, #3a3f48);
+                    background: var(--secondary-background-hover, var(--p-surface-700, #3a3f48));
                 }
                 #${PANEL_ID} .hf-downloader-refresh:disabled {
                     opacity: 0.7;
@@ -597,6 +610,7 @@ app.registerExtension({
             }
 
             const canCancel = CAN_CANCEL_STATUSES.has(info.status);
+            refs.root.classList.toggle("can-cancel", canCancel);
             refs.cancelBtn.style.display = canCancel ? "inline-flex" : "none";
             if (!canCancel) {
                 refs.cancelBtn.disabled = false;
