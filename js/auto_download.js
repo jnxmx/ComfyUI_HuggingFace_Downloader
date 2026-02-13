@@ -1814,6 +1814,7 @@ app.registerExtension({
                     urlLabel.textContent = "Hugging Face URL / Repo / Folder";
                     urlInput.placeholder = "https://huggingface.co/owner/repo[/tree/main/subfolder]";
                     folderLabel.textContent = "Folder";
+                    folderPicker.input.placeholder = "Root";
                     destinationPreviewLine.style.display = "block";
                     const parsed = parseHfFolderLinkInfo(urlInput.value);
                     if (parsed?.targetSegment) {
@@ -1830,6 +1831,7 @@ app.registerExtension({
                 urlLabel.textContent = "Hugging Face URL";
                 urlInput.placeholder = "HuggingFace URL...";
                 folderLabel.textContent = "Folder";
+                folderPicker.input.placeholder = "Folder";
                 destinationPreviewLine.style.display = "none";
             };
 
