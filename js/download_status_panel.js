@@ -248,15 +248,15 @@ app.registerExtension({
                     gap: 6px;
                 }
                 #${PANEL_ID} .hf-downloader-item {
-                    height: 52px;
-                    min-height: 52px;
-                    max-height: 52px;
+                    height: 48px;
+                    min-height: 48px;
+                    max-height: 48px;
                     box-sizing: border-box;
                 }
                 #${PANEL_ID} .hf-downloader-content {
                     min-width: 0;
                     flex: 1 1 auto;
-                    padding-right: 42px;
+                    padding-right: 48px;
                 }
                 #${PANEL_ID} .hf-downloader-name {
                     font-weight: 600;
@@ -289,6 +289,7 @@ app.registerExtension({
                     display: inline-block;
                 }
                 #${PANEL_ID} .hf-downloader-status-lower {
+                    font-size: 9px;
                     font-weight: 600;
                     letter-spacing: 0.03em;
                     white-space: nowrap;
@@ -297,11 +298,8 @@ app.registerExtension({
                 }
                 #${PANEL_ID} .hf-downloader-cancel {
                     position: absolute;
-                    right: 4px;
+                    right: 8px;
                     top: 50%;
-                    width: 32px;
-                    height: 32px;
-                    border-radius: 10px;
                     opacity: 0;
                     pointer-events: none;
                     transform: translateY(calc(-50% + 2px));
@@ -331,9 +329,9 @@ app.registerExtension({
                     border-top: 1px solid var(--interface-stroke, var(--border-color, var(--p-content-border-color, #333)));
                 }
                 #${PANEL_ID} .hf-downloader-refresh.p-button {
-                    min-height: 32px;
-                    padding: 0.4rem 0.95rem;
-                    font-size: 13px;
+                    min-height: 40px;
+                    padding: 0.55rem 1.15rem;
+                    font-size: 14px;
                     font-weight: 600;
                     font-family: var(--font-inter, Inter, sans-serif);
                     border-radius: 8px;
