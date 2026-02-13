@@ -1486,6 +1486,69 @@ app.registerExtension({
         };
 
         const showManualDownloadDialog = () => {
+            const ensureManualToggleStyles = () => {
+                if (document.getElementById("hf-manual-toggle-style")) {
+                    return;
+                }
+                const style = document.createElement("style");
+                style.id = "hf-manual-toggle-style";
+                style.textContent = `
+                    #manual-download-dialog .hf-manual-toggle.p-toggleswitch {
+                        position: relative;
+                        display: inline-block;
+                        width: 46px;
+                        height: 26px;
+                        vertical-align: middle;
+                    }
+                    #manual-download-dialog .hf-manual-toggle .p-toggleswitch-input {
+                        position: absolute;
+                        inset: 0;
+                        width: 100%;
+                        height: 100%;
+                        margin: 0;
+                        opacity: 0;
+                        z-index: 1;
+                        cursor: pointer;
+                    }
+                    #manual-download-dialog .hf-manual-toggle .p-toggleswitch-slider {
+                        position: absolute;
+                        inset: 0;
+                        border-radius: 999px;
+                        border: 1px solid var(--border-default, #4b5563);
+                        background: var(--secondary-background, #2a2f3a);
+                        transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+                        box-sizing: border-box;
+                    }
+                    #manual-download-dialog .hf-manual-toggle .p-toggleswitch-slider::before {
+                        content: "";
+                        position: absolute;
+                        top: 2px;
+                        left: 2px;
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 999px;
+                        border: 1px solid color-mix(in srgb, var(--border-default, #4b5563) 85%, #000 15%);
+                        background: var(--comfy-input-bg, #1f2128);
+                        box-sizing: border-box;
+                        transition: transform 120ms ease, background-color 120ms ease, border-color 120ms ease;
+                    }
+                    #manual-download-dialog .hf-manual-toggle.p-toggleswitch-checked .p-toggleswitch-slider {
+                        background: var(--primary-background, #3b82f6);
+                        border-color: var(--primary-background, #3b82f6);
+                    }
+                    #manual-download-dialog .hf-manual-toggle.p-toggleswitch-checked .p-toggleswitch-slider::before {
+                        transform: translateX(20px);
+                        background: var(--comfy-menu-bg, #111319);
+                    }
+                    #manual-download-dialog .hf-manual-toggle.p-focus .p-toggleswitch-slider {
+                        box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-background, #3b82f6) 40%, transparent);
+                    }
+                `;
+                document.head.appendChild(style);
+            };
+
+            ensureManualToggleStyles();
+
             let pollTimer = null;
             const stopPolling = () => {
                 if (pollTimer) {
@@ -1622,7 +1685,7 @@ app.registerExtension({
             });
 
             const fullRepoSwitchWrap = document.createElement("label");
-            fullRepoSwitchWrap.className = "p-toggleswitch p-component transition-transform active:scale-90";
+            fullRepoSwitchWrap.className = "hf-manual-toggle p-toggleswitch p-component transition-transform active:scale-90";
             Object.assign(fullRepoSwitchWrap.style, {
                 margin: "0",
                 cursor: "pointer",

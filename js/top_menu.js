@@ -158,21 +158,27 @@ const createTopMenuButton = () => {
     button.element.setAttribute("aria-label", BUTTON_TOOLTIP);
     button.element.title = BUTTON_TOOLTIP;
 
-    const iconUrl = new URL("./assets/hf-logo-pirate.svg", import.meta.url).toString();
+    const iconUrl = "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate.png?download=true";
+    const fallbackIconUrl = new URL("./assets/hf-favicon.ico", import.meta.url).toString();
     const iconImg = document.createElement("img");
     iconImg.src = iconUrl;
+    iconImg.onerror = () => {
+        iconImg.onerror = null;
+        iconImg.src = fallbackIconUrl;
+    };
     iconImg.alt = "Hugging Face";
     iconImg.width = 20;
     iconImg.height = 20;
     iconImg.style.display = "block";
 
     if (button.iconElement) {
-        button.iconElement.className = "hf-downloader-icon";
+        button.iconElement.textContent = "";
         Object.assign(button.iconElement.style, {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            lineHeight: "1"
+            lineHeight: "1",
+            transform: "none"
         });
         button.iconElement.appendChild(iconImg);
     } else {
