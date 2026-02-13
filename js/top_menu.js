@@ -151,19 +151,12 @@ const createTopMenuButton = () => {
         tooltip: BUTTON_TOOLTIP,
         app,
         enabled: true,
-        classList: "comfyui-button comfyui-menu-mobile-collapse comfy-btn"
+        classList: "comfyui-button comfyui-menu-mobile-collapse primary"
     });
 
     button.element.classList.add("hf-downloader-button");
     button.element.setAttribute("aria-label", BUTTON_TOOLTIP);
     button.element.title = BUTTON_TOOLTIP;
-    Object.assign(button.element.style, {
-        backgroundColor: "var(--comfy-input-bg)",
-        color: "var(--input-text)",
-        borderColor: "var(--border-color)",
-        borderStyle: "solid",
-        borderWidth: "1px"
-    });
 
     const iconUrls = [
         "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate-white.png?download=true",

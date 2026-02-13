@@ -1670,8 +1670,8 @@ app.registerExtension({
             Object.assign(fullRepoSwitchRow.style, {
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between",
-                gap: "12px",
+                justifyContent: "flex-start",
+                gap: "10px",
                 marginTop: "2px",
             });
 
@@ -1717,8 +1717,8 @@ app.registerExtension({
 
             fullRepoSwitchWrap.appendChild(fullRepoSwitch);
             fullRepoSwitchWrap.appendChild(fullRepoSwitchSlider);
-            fullRepoSwitchRow.appendChild(fullRepoSwitchText);
             fullRepoSwitchRow.appendChild(fullRepoSwitchWrap);
+            fullRepoSwitchRow.appendChild(fullRepoSwitchText);
 
             fullRepoSwitchRow.addEventListener("click", (event) => {
                 const target = event?.target;
