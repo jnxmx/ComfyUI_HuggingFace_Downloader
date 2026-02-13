@@ -1831,7 +1831,6 @@ app.registerExtension({
 
                             if (pending.size === 0) {
                                 stopPolling();
-                                const failures = downloadIds.filter((id) => downloads[id]?.status === "failed" || downloads[id]?.status === "cancelled").length;
                                 let updatedRefs = 0;
                                 for (const id of downloadIds) {
                                     const info = downloads[id];
@@ -1850,19 +1849,6 @@ app.registerExtension({
                                     updatedRefs += applyDownloadedReferenceToWorkflow(row, info);
                                 }
 
-                                if (failures) {
-                                    showToast({
-                                        severity: failures === downloadIds.length ? "error" : "warn",
-                                        summary: "Downloads finished with errors",
-                                        detail: `${downloadIds.length - failures} succeeded, ${failures} failed or cancelled.`,
-                                    });
-                                } else {
-                                    showToast({
-                                        severity: "success",
-                                        summary: "Downloads queued",
-                                        detail: `${downloadIds.length} model(s) completed.`,
-                                    });
-                                }
                                 if (updatedRefs > 0) {
                                     showToast({
                                         severity: "success",
