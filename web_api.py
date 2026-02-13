@@ -343,7 +343,7 @@ def _build_parsed_folder_download_info(model: dict) -> dict:
         "parsed": parsed,
         "remote_subfolder_path": remote_subfolder_path,
         "last_segment": last_segment,
-        "display_name": f"{last_segment}/",
+        "display_name": f"{last_segment}",
     }
 
 def _set_download_status(download_id: str, fields: dict):
@@ -1251,12 +1251,20 @@ def _download_worker():
             download_mode = str(item.get("download_mode") or "").strip().lower()
             if download_mode == "folder":
                 folder_info = _build_parsed_folder_download_info(item)
+                def folder_status_cb(phase_text: str):
+                    phase_value = str(phase_text or "").strip()
+                    _set_download_status(download_id, {
+                        "status": "downloading",
+                        "phase": phase_value or "downloading",
+                        "updated_at": time.time()
+                    })
                 msg, path = run_download_folder(
                     folder_info["parsed"],
                     item.get("folder", ""),
                     remote_subfolder_path=folder_info["remote_subfolder_path"],
                     last_segment=folder_info["last_segment"],
-                    sync=True
+                    sync=True,
+                    status_cb=folder_status_cb
                 )
                 if _is_cancel_requested(download_id):
                     _set_download_status(download_id, {
@@ -1708,6 +1716,7 @@ def setup(app):
                     if not filename:
                         filename = folder_info.get("display_name") or ""
                 else:
+                    download_mode = "file"
                     folder = model.get("folder", "checkpoints")
                     if not filename:
                         rejected.append({
@@ -1727,12 +1736,14 @@ def setup(app):
                 item["download_id"] = download_id
                 item["filename"] = filename
                 item["folder"] = folder
+                item["download_mode"] = download_mode
                 with download_queue_lock:
                     download_queue.append(item)
                 _set_download_status(download_id, {
                     "status": "queued",
                     "filename": filename,
                     "folder": folder,
+                    "download_mode": download_mode,
                     "queued_at": time.time()
                 })
                 queued.append({"download_id": download_id, "filename": filename})

@@ -86,6 +86,31 @@ app.registerExtension({
             }
         };
 
+        const resolveStatusText = (info) => {
+            const phase = String(info?.phase || "").trim();
+            if (!phase) {
+                return statusLabel(info?.status);
+            }
+            const phaseLower = phase.toLowerCase();
+            const genericPhases = new Set([
+                "queued",
+                "downloading",
+                "copying",
+                "cleaning_cache",
+                "finalizing",
+                "downloaded",
+                "failed",
+                "cancelled",
+                "cancelling",
+                "verifying",
+                "completed",
+            ]);
+            if (genericPhases.has(phaseLower)) {
+                return statusLabel(info?.status);
+            }
+            return phase;
+        };
+
         const ensureStyles = () => {
             if (document.getElementById(STYLE_ID)) return;
             const style = document.createElement("style");
@@ -495,8 +520,12 @@ app.registerExtension({
 
                 const name = document.createElement("div");
                 name.className = "hf-downloader-name";
-                name.textContent = info.filename || info.id || "unknown";
+                const rawName = String(info.filename || info.id || "unknown");
+                name.textContent = rawName.replace(/\/+$/, "");
                 name.title = name.textContent;
+                if (String(info.download_mode || "").toLowerCase() === "folder") {
+                    name.style.color = "#f5b14c";
+                }
                 row.appendChild(name);
 
                 if (CAN_CANCEL_STATUSES.has(info.status)) {
@@ -540,7 +569,7 @@ app.registerExtension({
 
                 const rightMeta = document.createElement("div");
                 rightMeta.className = "hf-downloader-status-lower";
-                rightMeta.textContent = statusLabel(info.status);
+                rightMeta.textContent = resolveStatusText(info);
                 rightMeta.style.color = statusColor(info.status);
 
                 meta.appendChild(leftMeta);

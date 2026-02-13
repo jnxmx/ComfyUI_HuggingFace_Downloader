@@ -276,7 +276,8 @@ def run_download_folder(parsed_data: dict,
                         final_folder: str,
                         remote_subfolder_path: str = "",
                         last_segment: str = "",
-                        sync: bool = False) -> tuple[str, str]:
+                        sync: bool = False,
+                        status_cb: Optional[Callable[[str], None]] = None) -> tuple[str, str]:
     """
     Downloads a folder or subfolder from Hugging Face Hub using snapshot_download.
     The result is placed in:
@@ -285,6 +286,8 @@ def run_download_folder(parsed_data: dict,
     """
     token = get_token()
     print("[DEBUG] run_download_folder started")
+    if status_cb:
+        status_cb("Resolving folder contents")
 
     # Get repository name from the parsed data
     repo_name = parsed_data["repo"].split("/")[-1] if "/" in parsed_data["repo"] else parsed_data["repo"]
@@ -312,6 +315,27 @@ def run_download_folder(parsed_data: dict,
     os.makedirs(comfy_temp, exist_ok=True)
     temp_dir = tempfile.mkdtemp(prefix="hf_dl_", dir=comfy_temp)
     print("[DEBUG] Temp folder =>", temp_dir)
+
+    file_count = None
+    try:
+        repo_files = list_repo_files(
+            parsed_data["repo"],
+            revision=parsed_data.get("revision"),
+            token=token or None
+        )
+        if remote_subfolder_path:
+            prefix = remote_subfolder_path.strip("/") + "/"
+            file_count = sum(1 for item in repo_files if str(item).startswith(prefix))
+        else:
+            file_count = len(repo_files)
+    except Exception as e:
+        print(f"[DEBUG] Could not count repository files: {e}")
+
+    if status_cb:
+        if isinstance(file_count, int) and file_count >= 0:
+            status_cb(f"Fetching {file_count} files")
+        else:
+            status_cb("Fetching files")
 
     allow_patterns = [f"{remote_subfolder_path}/**"] if remote_subfolder_path else None
 
@@ -345,6 +369,8 @@ def run_download_folder(parsed_data: dict,
     threading.Thread(target=folder_monitor, daemon=True).start()
 
     try:
+        if status_cb:
+            status_cb("Downloading files")
         downloaded_folder = snapshot_download(**kwargs)
         print("[DEBUG] snapshot_download =>", downloaded_folder)
         final_total = folder_size(downloaded_folder)
@@ -358,6 +384,8 @@ def run_download_folder(parsed_data: dict,
     source_folder = traverse_subfolders(downloaded_folder, remote_subfolder_path.split("/")) \
         if remote_subfolder_path else downloaded_folder
 
+    if status_cb:
+        status_cb("Copying files")
     os.makedirs(dest_path, exist_ok=True)
     for item in os.listdir(source_folder):
         if item == ".cache":
@@ -374,6 +402,8 @@ def run_download_folder(parsed_data: dict,
     shutil.rmtree(temp_dir, ignore_errors=True)
     print("[DEBUG] Removed temp folder:", temp_dir)
 
+    if status_cb:
+        status_cb("Finalizing")
     clear_cache_for_path(downloaded_folder)
 
     return (final_message, dest_path) if sync else ("", "")

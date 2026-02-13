@@ -1603,23 +1603,13 @@ app.registerExtension({
                 minHeight: "40px",
             });
 
-            const fullRepoSwitchRow = document.createElement("label");
+            const fullRepoSwitchRow = document.createElement("div");
             Object.assign(fullRepoSwitchRow.style, {
                 display: "flex",
                 alignItems: "center",
-                gap: "10px",
+                justifyContent: "space-between",
+                gap: "12px",
                 marginTop: "2px",
-                cursor: "pointer",
-                userSelect: "none",
-            });
-
-            const fullRepoSwitch = document.createElement("input");
-            fullRepoSwitch.type = "checkbox";
-            fullRepoSwitch.checked = false;
-            Object.assign(fullRepoSwitch.style, {
-                width: "16px",
-                height: "16px",
-                cursor: "pointer",
             });
 
             const fullRepoSwitchText = document.createElement("span");
@@ -1628,43 +1618,40 @@ app.registerExtension({
                 fontSize: "13px",
                 color: "var(--input-text)",
                 fontWeight: "500",
+                userSelect: "none",
             });
 
-            fullRepoSwitchRow.appendChild(fullRepoSwitch);
-            fullRepoSwitchRow.appendChild(fullRepoSwitchText);
+            const fullRepoSwitchWrap = document.createElement("label");
+            fullRepoSwitchWrap.className = "p-inputswitch p-component";
+            Object.assign(fullRepoSwitchWrap.style, {
+                margin: "0",
+                cursor: "pointer",
+                flexShrink: "0",
+            });
 
-            const destinationPreviewWrap = document.createElement("div");
-            Object.assign(destinationPreviewWrap.style, {
+            const fullRepoSwitch = document.createElement("input");
+            fullRepoSwitch.type = "checkbox";
+            fullRepoSwitch.className = "p-inputswitch-input";
+            fullRepoSwitch.checked = false;
+
+            const fullRepoSwitchSlider = document.createElement("span");
+            fullRepoSwitchSlider.className = "p-inputswitch-slider";
+
+            fullRepoSwitchWrap.appendChild(fullRepoSwitch);
+            fullRepoSwitchWrap.appendChild(fullRepoSwitchSlider);
+            fullRepoSwitchRow.appendChild(fullRepoSwitchText);
+            fullRepoSwitchRow.appendChild(fullRepoSwitchWrap);
+
+            const destinationPreviewLine = document.createElement("div");
+            Object.assign(destinationPreviewLine.style, {
                 display: "none",
-                flexDirection: "column",
-                gap: "4px",
+                fontSize: "13px",
+                color: "var(--descrip-text, #9aa1ad)",
+                fontWeight: "500",
+                lineHeight: "1.4",
+                marginTop: "-2px",
                 marginBottom: "2px",
             });
-
-            const destinationPreviewLabel = document.createElement("div");
-            destinationPreviewLabel.textContent = "Destination preview";
-            Object.assign(destinationPreviewLabel.style, {
-                fontSize: "11px",
-                color: "var(--descrip-text, #999)",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                fontWeight: "600",
-            });
-
-            const destinationPreviewValue = document.createElement("div");
-            Object.assign(destinationPreviewValue.style, {
-                fontSize: "13px",
-                color: "var(--input-text)",
-                fontFamily: "var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)",
-                lineHeight: "1.4",
-                padding: "6px 8px",
-                background: "color-mix(in srgb, var(--comfy-input-bg) 88%, var(--border-default) 12%)",
-                border: "1px solid var(--border-default)",
-                borderRadius: "8px",
-            });
-
-            destinationPreviewWrap.appendChild(destinationPreviewLabel);
-            destinationPreviewWrap.appendChild(destinationPreviewValue);
 
             const folderLabel = document.createElement("div");
             folderLabel.textContent = "Folder";
@@ -1675,7 +1662,7 @@ app.registerExtension({
                 letterSpacing: "0.05em",
                 fontWeight: "600",
             });
-            const folderPicker = createFolderPicker("", "Folder (optional)");
+            const folderPicker = createFolderPicker("loras", "Folder");
             Object.assign(folderPicker.input.style, {
                 fontSize: "14px",
                 minHeight: "40px",
@@ -1684,7 +1671,7 @@ app.registerExtension({
             content.appendChild(urlLabel);
             content.appendChild(urlInput);
             content.appendChild(fullRepoSwitchRow);
-            content.appendChild(destinationPreviewWrap);
+            content.appendChild(destinationPreviewLine);
             content.appendChild(folderLabel);
             content.appendChild(folderPicker.wrapper);
             panel.appendChild(content);
@@ -1711,26 +1698,44 @@ app.registerExtension({
                 statusLine.style.color = color;
             };
 
-            const updateManualDownloadModeUi = () => {
+            let folderValueForNormalMode = "loras";
+            let folderValueForRepoMode = "";
+
+            const setFolderInputValue = (value) => {
+                folderPicker.input.value = String(value || "");
+            };
+
+            const updateManualDownloadModeUi = (reason = "refresh") => {
                 const fullRepoMode = Boolean(fullRepoSwitch.checked);
+                const currentFolderValue = normalizeFolderPathInput(folderPicker.input.value);
+
+                if (reason === "toggle") {
+                    if (fullRepoMode) {
+                        folderValueForNormalMode = currentFolderValue || "loras";
+                        setFolderInputValue(folderValueForRepoMode);
+                    } else {
+                        folderValueForRepoMode = currentFolderValue;
+                        setFolderInputValue(folderValueForNormalMode || "loras");
+                    }
+                } else if (fullRepoMode) {
+                    folderValueForRepoMode = currentFolderValue;
+                } else {
+                    folderValueForNormalMode = currentFolderValue || "loras";
+                }
+
                 if (fullRepoMode) {
                     urlLabel.textContent = "Hugging Face URL / Repo / Folder";
                     urlInput.placeholder = "https://huggingface.co/owner/repo[/tree/main/subfolder]";
-                    folderLabel.textContent = "Folder (optional)";
-                    destinationPreviewWrap.style.display = "flex";
+                    folderLabel.textContent = "Folder";
+                    destinationPreviewLine.style.display = "block";
                     const parsed = parseHfFolderLinkInfo(urlInput.value);
                     if (parsed?.targetSegment) {
-                        destinationPreviewValue.textContent = buildFolderDownloadDestinationPreview(
+                        destinationPreviewLine.textContent = buildFolderDownloadDestinationPreview(
                             folderPicker.input.value,
                             parsed.targetSegment
                         );
-                        destinationPreviewValue.style.color = "var(--input-text)";
-                    } else if (String(urlInput.value || "").trim()) {
-                        destinationPreviewValue.textContent = "Enter a valid Hugging Face repo or folder link.";
-                        destinationPreviewValue.style.color = "#f5b14c";
                     } else {
-                        destinationPreviewValue.textContent = "models/<repo-or-subfolder>/";
-                        destinationPreviewValue.style.color = "var(--descrip-text, #999)";
+                        destinationPreviewLine.textContent = "models/<repo-or-subfolder>/";
                     }
                     return;
                 }
@@ -1738,12 +1743,12 @@ app.registerExtension({
                 urlLabel.textContent = "Hugging Face URL";
                 urlInput.placeholder = "HuggingFace URL...";
                 folderLabel.textContent = "Folder";
-                destinationPreviewWrap.style.display = "none";
+                destinationPreviewLine.style.display = "none";
             };
 
-            fullRepoSwitch.addEventListener("change", updateManualDownloadModeUi);
-            urlInput.addEventListener("input", updateManualDownloadModeUi);
-            folderPicker.input.addEventListener("input", updateManualDownloadModeUi);
+            fullRepoSwitch.addEventListener("change", () => updateManualDownloadModeUi("toggle"));
+            urlInput.addEventListener("input", () => updateManualDownloadModeUi("input"));
+            folderPicker.input.addEventListener("input", () => updateManualDownloadModeUi("input"));
             updateManualDownloadModeUi();
 
             const downloadBtn = createButton("Download", "p-button p-component p-button-success", async () => {
@@ -1774,7 +1779,7 @@ app.registerExtension({
                         });
                         return;
                     }
-                    filename = `${parsedFolder.targetSegment}/`;
+                    filename = `${parsedFolder.targetSegment}`;
                     queueModel = {
                         filename,
                         url,
