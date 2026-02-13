@@ -77,8 +77,8 @@ const createMenuItem = (label, actionName) => {
         padding: "8px 12px",
         textAlign: "left",
         cursor: "pointer",
-        width: "auto",
-        minWidth: "100%",
+        width: "100%",
+        minWidth: "0",
         boxSizing: "border-box",
         whiteSpace: "nowrap",
         fontSize: "12px"
@@ -113,10 +113,16 @@ const ensureMenu = () => {
         borderRadius: "8px",
         boxShadow: "0 8px 20px rgba(0,0,0,0.5)",
         padding: "6px 0",
-        width: "fit-content",
+        display: "inline-flex",
+        flexDirection: "column",
+        width: "max-content",
+        minWidth: "0",
+        maxWidth: "calc(100vw - 16px)",
         zIndex: 10000,
-        display: "none"
+        overflowX: "auto",
+        overflowY: "hidden"
     });
+    menu.style.display = "none";
 
     menu.appendChild(createMenuItem("Backup Manager", "showBackupDialog"));
     menu.appendChild(createMenuItem("Auto-download models", "runAutoDownload"));
@@ -144,7 +150,7 @@ const toggleMenu = (buttonEl) => {
     const rect = buttonEl.getBoundingClientRect();
     menu.style.left = `${Math.round(rect.left)}px`;
     menu.style.top = `${Math.round(rect.bottom + 6)}px`;
-    menu.style.display = "block";
+    menu.style.display = "inline-flex";
     menuVisible = true;
 };
 

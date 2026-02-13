@@ -774,6 +774,57 @@ app.registerExtension({
                 .filter(Boolean);
         };
 
+        const createRunHookFallbackMissingModels = (failures = []) => {
+            if (!Array.isArray(failures) || !failures.length) {
+                return [];
+            }
+
+            const collected = [];
+            const seen = new Set();
+            const pushEntry = (entry) => {
+                if (!entry || typeof entry !== "object") {
+                    return;
+                }
+                const mode = String(entry.download_mode || "file").toLowerCase();
+                const key = mode === "folder"
+                    ? `folder|${String(entry.exception_id || "").toLowerCase()}|${String(entry.repo_id || "").toLowerCase()}|${String(entry.url || "").toLowerCase()}`
+                    : `file|${String(entry.filename || "").toLowerCase()}|${String(entry.url || "").toLowerCase()}|${String(entry.suggested_folder || entry.folder || "").toLowerCase()}`;
+                if (!key || seen.has(key)) {
+                    return;
+                }
+                seen.add(key);
+                collected.push(entry);
+            };
+
+            for (const failure of failures) {
+                const signals = {
+                    classType: failure?.classType,
+                    inputName: failure?.inputName,
+                    details: failure?.details,
+                    missingValue: failure?.missingValue,
+                    nodeTitle: failure?.classType,
+                };
+
+                const repoEntry = createRepoFolderMissingModelEntry(signals);
+                if (repoEntry) {
+                    pushEntry({
+                        ...repoEntry,
+                        source: "run_hook_fallback",
+                    });
+                }
+
+                const curatedEntries = createWanAnimatePreprocessCuratedEntries(signals);
+                curatedEntries.forEach((entry) => {
+                    pushEntry({
+                        ...entry,
+                        source: "run_hook_fallback",
+                    });
+                });
+            }
+
+            return collected;
+        };
+
         const normalizeFolderPathInput = (value) =>
             String(value || "")
                 .replace(/\\/g, "/")
@@ -2506,6 +2557,13 @@ app.registerExtension({
 
                 const suppressEmptyResults = Boolean(options?.suppressEmptyResults);
                 if (suppressEmptyResults) {
+                    const fallbackMissingFromFailures =
+                        createRunHookFallbackMissingModels(options?.runHookFailures || []);
+                    if (fallbackMissingFromFailures.length) {
+                        const existingMissing = Array.isArray(data?.missing) ? data.missing : [];
+                        data.missing = [...existingMissing, ...fallbackMissingFromFailures];
+                    }
+
                     const split = splitMissingModelsForRepoFolderSection(
                         Array.isArray(data?.missing) ? data.missing : [],
                         getNodeErrorsSnapshot()
@@ -3752,6 +3810,7 @@ app.registerExtension({
                 suppressEmptyResults: true,
                 triggeredByRunHook: true,
                 reason,
+                runHookFailures: Array.isArray(failures) ? failures : [],
             });
             if (isValidationReason) {
                 void clearModelValidationErrorsFromFrontendState();
