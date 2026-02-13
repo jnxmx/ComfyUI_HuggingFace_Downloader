@@ -7,7 +7,7 @@ import uuid
 import asyncio
 import mimetypes
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 from aiohttp import web
 from .backup import (
     backup_to_huggingface,
@@ -19,7 +19,14 @@ from .backup import (
 )
 from .file_manager import get_model_subfolders
 from .model_discovery import process_workflow_for_missing_models
-from .downloader import run_download, run_download_folder, get_remote_file_metadata, get_blob_paths, get_token
+from .downloader import (
+    run_download,
+    run_download_folder,
+    run_download_url,
+    get_remote_file_metadata,
+    get_blob_paths,
+    get_token,
+)
 from .parse_link import parse_link
 try:
     import folder_paths
@@ -289,6 +296,65 @@ def _is_supported_hf_link(value: str | None) -> bool:
         return bool(parsed.get("repo"))
     except Exception:
         return False
+
+
+def _is_direct_http_url(value: str | None) -> bool:
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if not text:
+        return False
+    try:
+        parsed = urlparse(text)
+    except Exception:
+        return False
+    scheme = (parsed.scheme or "").lower()
+    return scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def _sanitize_filename_hint(value: str | None) -> str:
+    text = str(value or "").replace("\\", "/").strip().strip("/")
+    if not text:
+        return ""
+    base = os.path.basename(text)
+    if not base or base in (".", ".."):
+        return ""
+    return base
+
+
+def _derive_file_display_name(model: dict) -> str:
+    explicit = _sanitize_filename_hint(model.get("filename"))
+    if explicit:
+        return explicit
+
+    hf_path = _sanitize_filename_hint(model.get("hf_path"))
+    if hf_path:
+        return hf_path
+
+    url = str(model.get("url") or "").strip()
+    if not url:
+        return ""
+
+    if _is_supported_hf_link(url):
+        try:
+            parsed = parse_link(url)
+            parsed_file = _sanitize_filename_hint(parsed.get("file"))
+            if parsed_file:
+                return parsed_file
+        except Exception:
+            pass
+
+    if _is_direct_http_url(url):
+        try:
+            parsed_url = urlparse(url)
+            tail = _sanitize_filename_hint(unquote(os.path.basename((parsed_url.path or "").rstrip("/"))))
+            if tail:
+                return tail
+        except Exception:
+            pass
+        return "download"
+
+    return ""
 
 def _build_parsed_download_info(model: dict) -> dict:
     """Build parsed download info for run_download using HF repo/path if provided."""
@@ -1301,6 +1367,89 @@ def _download_worker():
                 _touch_queue_activity()
                 continue
 
+            overwrite = bool(item.get("overwrite"))
+            item_url = str(item.get("url") or "").strip()
+            is_hf_file_download = bool(item.get("hf_repo") and item.get("hf_path"))
+            if not is_hf_file_download and item_url:
+                is_hf_file_download = _is_supported_hf_link(item_url)
+
+            if not is_hf_file_download:
+                if not _is_direct_http_url(item_url):
+                    raise RuntimeError("URL must be a valid http(s) link for direct file downloads.")
+
+                _set_download_status(download_id, {
+                    "status": "downloading",
+                    "downloaded_bytes": 0,
+                    "total_bytes": None,
+                    "updated_at": time.time()
+                })
+
+                def direct_status_cb(phase: str):
+                    if _is_cancel_requested(download_id):
+                        return
+                    phase_text = str(phase or "").strip()
+                    phase_lower = phase_text.lower()
+                    status_value = "downloading"
+                    if phase_lower in ("finalizing", "cancelling", "cancelled", "failed"):
+                        status_value = phase_lower
+                    _set_download_status(download_id, {
+                        "status": status_value,
+                        "phase": phase_text or status_value,
+                        "updated_at": time.time()
+                    })
+
+                def direct_progress_cb(payload: dict):
+                    if _is_cancel_requested(download_id):
+                        return
+                    data = payload if isinstance(payload, dict) else {}
+                    phase_text = str(data.get("phase") or "downloading").strip()
+                    phase_lower = phase_text.lower()
+                    status_value = "downloading" if phase_lower not in ("finalizing", "cancelling") else phase_lower
+                    _set_download_status(download_id, {
+                        "status": status_value,
+                        "downloaded_bytes": data.get("downloaded_bytes", 0),
+                        "total_bytes": data.get("total_bytes"),
+                        "speed_bps": data.get("speed_bps"),
+                        "eta_seconds": data.get("eta_seconds"),
+                        "phase": phase_text,
+                        "updated_at": time.time()
+                    })
+
+                msg, path = run_download_url(
+                    item_url,
+                    item["folder"],
+                    sync=True,
+                    overwrite=overwrite,
+                    target_filename=item.get("target_filename"),
+                    status_cb=direct_status_cb,
+                    progress_cb=direct_progress_cb,
+                    cancel_check=lambda: _is_cancel_requested(download_id),
+                )
+                if _is_cancel_requested(download_id):
+                    try:
+                        if path and os.path.exists(path):
+                            os.remove(path)
+                    except Exception:
+                        pass
+                    _set_download_status(download_id, {
+                        "status": "cancelled",
+                        "message": "Cancelled",
+                        "finished_at": time.time()
+                    })
+                    _clear_cancel_request(download_id)
+                    _touch_queue_activity()
+                    continue
+                if not path:
+                    raise RuntimeError(msg or "Direct URL download failed.")
+                _set_download_status(download_id, {
+                    "status": "completed",
+                    "message": msg,
+                    "path": path,
+                    "finished_at": time.time()
+                })
+                _touch_queue_activity()
+                continue
+
             parsed = _build_parsed_download_info(item)
             token = get_token()
             remote_filename = parsed["file"]
@@ -1421,7 +1570,6 @@ def _download_worker():
                     daemon=True
                 ).start()
 
-            overwrite = bool(item.get("overwrite"))
             def status_cb(phase: str):
                 if _is_cancel_requested(download_id):
                     return
@@ -1589,14 +1737,29 @@ async def install_models(request):
                 continue
                 
             try:
-                parsed = _build_parsed_download_info(model)
-                msg, path = run_download(
-                    parsed,
-                    folder,
-                    sync=True,
-                    overwrite=bool(model.get("overwrite")),
-                    target_filename=filename,
-                )
+                has_hf_repo_path = bool(model.get("hf_repo") and model.get("hf_path"))
+                is_hf_url = _is_supported_hf_link(url) if url else False
+                overwrite = bool(model.get("overwrite"))
+
+                if has_hf_repo_path or is_hf_url:
+                    parsed = _build_parsed_download_info(model)
+                    msg, path = run_download(
+                        parsed,
+                        folder,
+                        sync=True,
+                        overwrite=overwrite,
+                        target_filename=filename,
+                    )
+                else:
+                    if not _is_direct_http_url(url):
+                        raise ValueError("URL must be a valid http(s) link or Hugging Face file link.")
+                    msg, path = run_download_url(
+                        url,
+                        folder,
+                        sync=True,
+                        overwrite=overwrite,
+                        target_filename=filename,
+                    )
                 results.append({"filename": filename, "status": "success", "path": path, "message": msg})
                 
             except Exception as e:
@@ -1731,6 +1894,7 @@ def setup(app):
                 filename = model.get("filename")
                 url = model.get("url")
                 download_mode = str(model.get("download_mode") or "").strip().lower()
+                is_hf_file_download = False
 
                 if download_mode == "folder":
                     folder = str(model.get("folder", "") or "").replace("\\", "/").strip().strip("/")
@@ -1753,23 +1917,30 @@ def setup(app):
                 else:
                     download_mode = "file"
                     folder = model.get("folder", "checkpoints")
-                    if not filename:
+                    has_hf_repo_path = bool(model.get("hf_repo") and model.get("hf_path"))
+                    is_hf_file_download = has_hf_repo_path or (url and _is_supported_hf_link(url))
+                    if not url and not has_hf_repo_path:
                         rejected.append({
                             "filename": filename or "",
-                            "error": "Missing filename",
+                            "error": "Missing URL",
                         })
                         continue
-                    if url and not _is_supported_hf_link(url):
+                    if url and not (_is_supported_hf_link(url) or _is_direct_http_url(url)):
                         rejected.append({
-                            "filename": filename,
-                            "error": "Only Hugging Face URLs are supported by this backend.",
+                            "filename": filename or "",
+                            "error": "URL must be a valid http(s) link or Hugging Face file link.",
                         })
                         continue
+                    filename = _derive_file_display_name(model) or "download"
 
                 download_id = f"dl_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
                 item = dict(model)
+                requested_filename = _sanitize_filename_hint(model.get("target_filename"))
+                if not requested_filename and download_mode == "file" and is_hf_file_download:
+                    requested_filename = _sanitize_filename_hint(model.get("filename"))
                 item["download_id"] = download_id
                 item["filename"] = filename
+                item["target_filename"] = requested_filename or None
                 item["folder"] = folder
                 item["download_mode"] = download_mode
                 with download_queue_lock:

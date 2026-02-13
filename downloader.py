@@ -6,8 +6,13 @@ import time
 import json
 import zipfile
 import hashlib
+import re
+import socket
 import yaml
 import subprocess
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Optional, Tuple, Callable
 
 from huggingface_hub import (
@@ -210,6 +215,82 @@ def _verify_file_integrity(dest_path: str,
         actual_sha = sha256.hexdigest().lower()
         if actual_sha != expected_sha.lower():
             raise RuntimeError("SHA256 mismatch")
+
+
+def _sanitize_download_filename(value: str) -> str:
+    text = str(value or "").replace("\\", "/").strip()
+    if not text:
+        return ""
+    name = os.path.basename(text)
+    if not name or name in (".", ".."):
+        return ""
+    return name
+
+
+def _filename_from_content_disposition(header_value: str) -> str:
+    if not header_value:
+        return ""
+    text = str(header_value)
+    # RFC 5987 form: filename*=UTF-8''encoded-name
+    match_star = re.search(r"filename\*\s*=\s*([^;]+)", text, flags=re.IGNORECASE)
+    if match_star:
+        raw = match_star.group(1).strip().strip("\"'")
+        if "''" in raw:
+            raw = raw.split("''", 1)[1]
+        try:
+            return _sanitize_download_filename(urllib.parse.unquote(raw))
+        except Exception:
+            return _sanitize_download_filename(raw)
+
+    match = re.search(r"filename\s*=\s*([^;]+)", text, flags=re.IGNORECASE)
+    if match:
+        raw = match.group(1).strip().strip("\"'")
+        try:
+            return _sanitize_download_filename(urllib.parse.unquote(raw))
+        except Exception:
+            return _sanitize_download_filename(raw)
+    return ""
+
+
+def _filename_from_url_path(url_value: str) -> str:
+    if not url_value:
+        return ""
+    try:
+        parsed = urllib.parse.urlparse(url_value)
+        path = parsed.path or ""
+    except Exception:
+        path = str(url_value).split("?", 1)[0].split("#", 1)[0]
+    tail = os.path.basename(path.rstrip("/"))
+    if not tail:
+        return ""
+    try:
+        tail = urllib.parse.unquote(tail)
+    except Exception:
+        pass
+    return _sanitize_download_filename(tail)
+
+
+def _parse_content_length(header_value: str) -> Optional[int]:
+    if header_value is None:
+        return None
+    try:
+        size = int(str(header_value).strip())
+        return size if size >= 0 else None
+    except Exception:
+        return None
+
+
+def _is_retryable_url_error(error: Exception) -> bool:
+    if isinstance(error, urllib.error.HTTPError):
+        return int(getattr(error, "code", 0) or 0) in (408, 425, 429, 500, 502, 503, 504)
+    if isinstance(error, urllib.error.URLError):
+        reason = getattr(error, "reason", None)
+        if isinstance(reason, socket.timeout):
+            return True
+        text = str(reason or "").lower()
+        return any(token in text for token in ("timeout", "temporarily", "reset", "refused", "unreachable"))
+    text = str(error).lower()
+    return "timeout" in text or "temporarily unavailable" in text
 
 
 def run_download(parsed_data: dict,
@@ -426,6 +507,180 @@ def run_download(parsed_data: dict,
         print("[DEBUG]", error_msg)
         # Raise so ComfyUI shows the standard error dialog, not just console output
         raise RuntimeError(error_msg)
+
+
+def run_download_url(url: str,
+                     final_folder: str,
+                     sync: bool = False,
+                     overwrite: bool = False,
+                     target_filename: Optional[str] = None,
+                     status_cb: Optional[Callable[[str], None]] = None,
+                     progress_cb: Optional[Callable[[dict], None]] = None,
+                     cancel_check: Optional[Callable[[], bool]] = None,
+                     max_retries: int = 3) -> tuple:
+    """
+    Download a single file from a direct HTTP(S) URL into models/<final_folder>.
+    Uses streamed writes with retry/backoff, supports cancellation, and writes atomically.
+    """
+    raw_url = str(url or "").strip()
+    parsed_url = urllib.parse.urlparse(raw_url)
+    if parsed_url.scheme.lower() not in ("http", "https") or not parsed_url.netloc:
+        raise RuntimeError("URL must be a valid http(s) link.")
+
+    target_dir = os.path.join(os.getcwd(), "models", final_folder)
+    os.makedirs(target_dir, exist_ok=True)
+
+    explicit_target = _sanitize_download_filename(target_filename or "")
+    request_headers = {
+        "User-Agent": "ComfyUI-HuggingFace-Downloader/1.0",
+        "Accept": "*/*",
+    }
+
+    retry_count = max(0, int(max_retries))
+    last_error = None
+
+    for attempt in range(retry_count + 1):
+        if cancel_check and cancel_check():
+            cancel_msg = "Download cancelled"
+            print("[DEBUG]", cancel_msg)
+            return (cancel_msg, "") if sync else ("", "")
+
+        temp_path = ""
+        dest_path = ""
+        try:
+            if status_cb:
+                status_cb("downloading")
+
+            request = urllib.request.Request(raw_url, headers=request_headers, method="GET")
+            with urllib.request.urlopen(request, timeout=60) as response:
+                final_url = str(getattr(response, "geturl", lambda: raw_url)() or raw_url)
+                headers = getattr(response, "headers", {})
+                content_disposition = ""
+                content_length = None
+                if headers:
+                    try:
+                        content_disposition = headers.get("Content-Disposition", "")
+                        content_length = _parse_content_length(headers.get("Content-Length"))
+                    except Exception:
+                        content_disposition = ""
+                        content_length = None
+
+                resolved_name = (
+                    explicit_target
+                    or _filename_from_content_disposition(content_disposition)
+                    or _filename_from_url_path(final_url)
+                    or _filename_from_url_path(raw_url)
+                    or "download.bin"
+                )
+                target_name = _sanitize_download_filename(resolved_name) or "download.bin"
+                dest_path = os.path.join(target_dir, target_name)
+                temp_path = dest_path + ".part"
+
+                if os.path.exists(dest_path):
+                    if overwrite:
+                        print("[DEBUG] Overwrite requested, deleting existing file before direct URL download.")
+                        _safe_remove(dest_path)
+                    else:
+                        existing_size = os.path.getsize(dest_path)
+                        size_gb = existing_size / (1024 ** 3)
+                        message = f"{target_name} already exists | {size_gb:.3f} GB"
+                        print("[DEBUG]", message)
+                        return (message, dest_path) if sync else ("", "")
+
+                _safe_remove(temp_path)
+
+                downloaded_bytes = 0
+                last_bytes = 0
+                last_time = time.time()
+                last_progress_emit = 0.0
+                ema_speed = None
+                chunk_size = 8 * 1024 * 1024
+
+                with open(temp_path, "wb") as out:
+                    while True:
+                        if cancel_check and cancel_check():
+                            raise InterruptedError("Download cancelled")
+                        chunk = response.read(chunk_size)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        downloaded_bytes += len(chunk)
+
+                        now = time.time()
+                        dt = now - last_time
+                        if dt > 0:
+                            inst_speed = (downloaded_bytes - last_bytes) / dt
+                            ema_speed = inst_speed if ema_speed is None else (0.2 * inst_speed + 0.8 * ema_speed)
+                            last_time = now
+                            last_bytes = downloaded_bytes
+
+                        should_emit = False
+                        if now - last_progress_emit >= 0.25:
+                            should_emit = True
+                        if content_length is not None and downloaded_bytes >= content_length:
+                            should_emit = True
+                        if should_emit and progress_cb:
+                            eta_seconds = None
+                            if content_length and ema_speed and ema_speed > 0:
+                                eta_seconds = max(0, (content_length - downloaded_bytes) / ema_speed)
+                            progress_cb({
+                                "downloaded_bytes": downloaded_bytes,
+                                "total_bytes": content_length,
+                                "speed_bps": ema_speed or 0,
+                                "eta_seconds": eta_seconds,
+                                "phase": "downloading",
+                            })
+                            last_progress_emit = now
+
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Download cancelled")
+
+                if content_length is not None and downloaded_bytes != content_length:
+                    raise RuntimeError(
+                        f"Incomplete download (expected {content_length} bytes, got {downloaded_bytes} bytes)"
+                    )
+
+                if status_cb:
+                    status_cb("finalizing")
+                os.replace(temp_path, dest_path)
+                temp_path = ""
+
+                final_size = os.path.getsize(dest_path)
+                size_gb = final_size / (1024 ** 3)
+                if progress_cb:
+                    progress_cb({
+                        "downloaded_bytes": final_size,
+                        "total_bytes": content_length if content_length is not None else final_size,
+                        "speed_bps": 0,
+                        "eta_seconds": 0,
+                        "phase": "finalizing",
+                    })
+
+                final_message = f"Downloaded {target_name} | {size_gb:.3f} GB"
+                print("[DEBUG]", final_message)
+                return (final_message, dest_path) if sync else ("", "")
+        except InterruptedError:
+            if temp_path:
+                _safe_remove(temp_path)
+            if status_cb:
+                status_cb("cancelling")
+            cancel_msg = "Download cancelled"
+            print("[DEBUG]", cancel_msg)
+            return (cancel_msg, "") if sync else ("", "")
+        except Exception as e:
+            if temp_path:
+                _safe_remove(temp_path)
+            last_error = e
+            if attempt >= retry_count or not _is_retryable_url_error(e):
+                break
+            backoff_seconds = min(8.0, float(2 ** attempt))
+            print(
+                f"[DEBUG] Direct URL download retry {attempt + 1}/{retry_count} "
+                f"after {backoff_seconds:.1f}s: {e}"
+            )
+            time.sleep(backoff_seconds)
+
+    raise RuntimeError(f"Download failed: {last_error}")
 
 
 def run_download_folder(parsed_data: dict,

@@ -39,6 +39,47 @@ app.registerExtension({
             }
         };
 
+        const TEMPLATE_DIALOG_TOKENS = Object.freeze({
+            surface: "var(--base-background, var(--interface-panel-surface, var(--comfy-menu-bg, #1f2128)))",
+            panel: "var(--modal-panel-background, var(--base-background, var(--comfy-menu-bg, #1f2128)))",
+            border: "var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)))",
+            text: "var(--input-text, var(--text-color, var(--p-text-color, #e5e7eb)))",
+            shadow: "var(--shadow-interface, 0 12px 28px rgba(0, 0, 0, 0.45))",
+        });
+
+        const applyTemplateDialogOverlayStyle = (overlay, zIndex = 9999) => {
+            Object.assign(overlay.style, {
+                position: "fixed",
+                inset: "0",
+                width: "100vw",
+                height: "100vh",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.5)",
+                zIndex: String(zIndex),
+                padding: "16px",
+                boxSizing: "border-box",
+            });
+        };
+
+        const applyTemplateDialogPanelStyle = (panel, sizeStyle = {}) => {
+            panel.classList.add("base-widget-layout", "rounded-2xl", "overflow-hidden", "relative");
+            Object.assign(panel.style, {
+                background: TEMPLATE_DIALOG_TOKENS.surface,
+                color: TEMPLATE_DIALOG_TOKENS.text,
+                border: `1px solid ${TEMPLATE_DIALOG_TOKENS.border}`,
+                borderRadius: "16px",
+                boxShadow: TEMPLATE_DIALOG_TOKENS.shadow,
+                display: "flex",
+                flexDirection: "column",
+                gap: "0",
+                overflow: "hidden",
+                fontFamily: "var(--font-inter, Inter, sans-serif)",
+                ...sizeStyle,
+            });
+        };
+
         const ensureTreeStyles = () => {
             if (document.getElementById("hf-backup-tree-style")) return;
             const style = document.createElement("style");
@@ -67,7 +108,7 @@ app.registerExtension({
 #backup-hf-dialog .hf-tree-block + .hf-tree-block {
     margin-top: 8px;
     padding-top: 8px;
-    border-top: 1px solid var(--border-default);
+    border-top: 1px solid var(--interface-stroke, var(--border-color, var(--border-default)));
 }
 #backup-hf-dialog .hf-tree-block-title {
     color: var(--descrip-text, #999);
@@ -159,10 +200,10 @@ app.registerExtension({
     top: 16px;
     width: 360px;
     max-width: calc(100vw - 32px);
-    background: var(--comfy-menu-bg);
-    border: 1px solid var(--border-default);
+    background: var(--base-background, var(--interface-panel-surface, var(--comfy-menu-bg, #1f2128)));
+    border: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
     border-radius: 16px;
-    box-shadow: 1px 1px 8px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-interface, 0 12px 28px rgba(0, 0, 0, 0.45));
     color: var(--input-text);
     font-size: 12px;
     z-index: 10002;
@@ -177,8 +218,8 @@ app.registerExtension({
     gap: 8px;
 }
 #hf-backup-op-panel .hf-backup-op-item {
-    background: var(--comfy-input-bg, #222);
-    border: 1px solid var(--border-default);
+    background: var(--modal-panel-background, var(--comfy-input-bg, #222));
+    border: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
     border-radius: 6px;
     padding: 8px;
     display: flex;
@@ -224,8 +265,8 @@ app.registerExtension({
     display: none;
     justify-content: flex-end;
     padding: 8px 10px;
-    border-top: 1px solid var(--border-default);
-    background: var(--comfy-menu-bg);
+    border-top: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
+    background: var(--base-background, var(--interface-panel-surface, var(--comfy-menu-bg, #1f2128)));
 }
 #hf-backup-op-panel .hf-backup-op-refresh {
     border: 1px solid #3f8d4d;
@@ -301,17 +342,17 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             Object.assign(panel.style, {
-                background: "#17191f",
-                border: "1px solid #3c3c3c",
-                borderRadius: "10px",
+                background: TEMPLATE_DIALOG_TOKENS.surface,
+                border: `1px solid ${TEMPLATE_DIALOG_TOKENS.border}`,
+                borderRadius: "16px",
                 padding: "24px",
                 minWidth: "360px",
                 maxWidth: "520px",
-                color: "#fff",
+                color: TEMPLATE_DIALOG_TOKENS.text,
                 display: "flex",
                 flexDirection: "column",
                 gap: "14px",
-                boxShadow: "0 12px 28px rgba(0,0,0,0.6)",
+                boxShadow: TEMPLATE_DIALOG_TOKENS.shadow,
             });
 
             const text = document.createElement("div");
@@ -862,17 +903,7 @@ app.registerExtension({
             const overlay = document.createElement("div");
             currentDialog = overlay;
             overlay.id = "backup-hf-dialog";
-            Object.assign(overlay.style, {
-                position: "fixed",
-                inset: "0",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(0,0,0,0.5)",
-                zIndex: "9999",
-                padding: "16px",
-                boxSizing: "border-box",
-            });
+            applyTemplateDialogOverlayStyle(overlay, 9999);
             const closeDialog = () => {
                 if (typeof currentDialogCleanup === "function") {
                     currentDialogCleanup();
@@ -890,20 +921,10 @@ app.registerExtension({
             });
 
             const panel = document.createElement("div");
-            Object.assign(panel.style, {
-                background: "var(--comfy-menu-bg)",
-                color: "var(--input-text)",
-                border: "1px solid var(--border-default)",
-                borderRadius: "16px",
+            applyTemplateDialogPanelStyle(panel, {
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
                 padding: "0",
-                boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
-                display: "flex",
-                flexDirection: "column",
-                gap: "0",
-                overflow: "hidden",
-                fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
 
             const headerWrap = document.createElement("div");
@@ -937,7 +958,7 @@ app.registerExtension({
                 height: "40px",
                 borderRadius: "10px",
                 border: "none",
-                background: "var(--comfy-input-bg)",
+                background: "var(--modal-panel-background, var(--comfy-input-bg))",
                 color: "var(--input-text)",
                 fontSize: "14px",
                 lineHeight: "1",
@@ -960,7 +981,7 @@ app.registerExtension({
                 closeIconButton.style.background = "var(--secondary-background-hover)";
             };
             closeIconButton.onmouseleave = () => {
-                closeIconButton.style.background = "var(--comfy-input-bg)";
+                closeIconButton.style.background = "var(--modal-panel-background, var(--comfy-input-bg))";
             };
             closeIconButton.onclick = () => {
                 if (busy) return;
@@ -1042,10 +1063,10 @@ app.registerExtension({
                     flex: "1",
                     minHeight: "260px",
                     overflowY: "auto",
-                    border: "1px solid var(--border-default)",
+                    border: `1px solid ${TEMPLATE_DIALOG_TOKENS.border}`,
                     borderRadius: "10px",
                     padding: "6px",
-                    background: "var(--comfy-input-bg)",
+                    background: TEMPLATE_DIALOG_TOKENS.panel,
                 });
                 tree.textContent = "Loading...";
                 root.appendChild(tree);
@@ -1063,7 +1084,7 @@ app.registerExtension({
 
             const localPanel = makePanel("Local Install (ComfyUI)");
             const backupPanel = makePanel("Backup (Hugging Face)");
-            localPanel.tree.style.background = "#000000";
+            localPanel.tree.style.background = TEMPLATE_DIALOG_TOKENS.panel;
 
             body.appendChild(localPanel.root);
             body.appendChild(backupPanel.root);

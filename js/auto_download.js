@@ -83,6 +83,47 @@ app.registerExtension({
             });
         };
 
+        const TEMPLATE_DIALOG_TOKENS = Object.freeze({
+            surface: "var(--base-background, var(--interface-panel-surface, var(--comfy-menu-bg, #1f2128)))",
+            panel: "var(--modal-panel-background, var(--base-background, var(--comfy-menu-bg, #1f2128)))",
+            border: "var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)))",
+            text: "var(--input-text, var(--text-color, var(--p-text-color, #e5e7eb)))",
+            shadow: "var(--shadow-interface, 0 12px 28px rgba(0, 0, 0, 0.45))",
+        });
+
+        const applyTemplateDialogOverlayStyle = (overlay, zIndex = 9000) => {
+            Object.assign(overlay.style, {
+                position: "fixed",
+                inset: "0",
+                width: "100vw",
+                height: "100vh",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0, 0, 0, 0.5)",
+                zIndex: String(zIndex),
+                padding: "16px",
+                boxSizing: "border-box",
+            });
+        };
+
+        const applyTemplateDialogPanelStyle = (panel, sizeStyle = {}) => {
+            panel.classList.add("base-widget-layout", "rounded-2xl", "overflow-hidden", "relative");
+            Object.assign(panel.style, {
+                background: TEMPLATE_DIALOG_TOKENS.surface,
+                color: TEMPLATE_DIALOG_TOKENS.text,
+                border: `1px solid ${TEMPLATE_DIALOG_TOKENS.border}`,
+                borderRadius: "16px",
+                boxShadow: TEMPLATE_DIALOG_TOKENS.shadow,
+                display: "flex",
+                flexDirection: "column",
+                gap: "0",
+                overflow: "hidden",
+                fontFamily: "var(--font-inter, Inter, sans-serif)",
+                ...sizeStyle,
+            });
+        };
+
         const createInput = (value, placeholder) => {
             const inp = document.createElement("input");
             inp.type = "text";
@@ -1049,31 +1090,14 @@ app.registerExtension({
 
             const dlg = document.createElement("div");
             dlg.id = "auto-download-dialog";
-            Object.assign(dlg.style, {
-                position: "fixed",
-                top: 0,
-                left: 0,
-                width: "100vw",
-                height: "100vh",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(0, 0, 0, 0.5)",
-                zIndex: 9000
-            });
+            applyTemplateDialogOverlayStyle(dlg, 9000);
 
             const panel = document.createElement("div");
-            Object.assign(panel.style, {
-                background: "var(--comfy-menu-bg)",
-                color: "var(--input-text)",
+            applyTemplateDialogPanelStyle(panel, {
                 padding: "20px 22px",
-                borderRadius: "16px",
                 textAlign: "left",
                 width: "480px",
                 maxWidth: "92vw",
-                border: "1px solid var(--border-default)",
-                boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
-                fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
 
             const statusEl = document.createElement("div");
@@ -1154,7 +1178,7 @@ app.registerExtension({
                 height: "40px",
                 borderRadius: "10px",
                 border: "none",
-                background: "var(--comfy-input-bg)",
+                background: "var(--modal-panel-background, var(--comfy-input-bg))",
                 color: "var(--input-text)",
                 fontSize: "14px",
                 lineHeight: "1",
@@ -1177,7 +1201,7 @@ app.registerExtension({
                 closeIconButton.style.background = "var(--secondary-background-hover)";
             };
             closeIconButton.onmouseleave = () => {
-                closeIconButton.style.background = "var(--comfy-input-bg)";
+                closeIconButton.style.background = "var(--modal-panel-background, var(--comfy-input-bg))";
             };
             closeIconButton.onclick = () => {
                 if (typeof onClose === "function") {
@@ -1202,20 +1226,7 @@ app.registerExtension({
 
             const dlg = document.createElement("div");
             dlg.id = "auto-download-dialog";
-            Object.assign(dlg.style, {
-                position: "fixed",
-                top: 0,
-                left: 0,
-                width: "100vw",
-                height: "100vh",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(0, 0, 0, 0.5)",
-                zIndex: 9000,
-                padding: "16px",
-                boxSizing: "border-box",
-            });
+            applyTemplateDialogOverlayStyle(dlg, 9000);
 
             let content = null;
             const cleanupUi = () => {};
@@ -1235,20 +1246,10 @@ app.registerExtension({
             });
 
             const panel = document.createElement("div");
-            Object.assign(panel.style, {
-                background: "var(--comfy-menu-bg)",
-                color: "var(--input-text)",
-                border: "1px solid var(--border-default)",
-                borderRadius: "16px",
+            applyTemplateDialogPanelStyle(panel, {
                 width: "min(1220px, 100%)",
                 maxHeight: "92vh",
                 padding: "0",
-                boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
-                display: "flex",
-                flexDirection: "column",
-                gap: "0",
-                overflow: "hidden",
-                fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
 
             const headerWrap = document.createElement("div");
@@ -1329,7 +1330,7 @@ app.registerExtension({
             Object.assign(listFrame.style, {
                 border: "none",
                 borderRadius: "0",
-                background: "transparent",
+                background: TEMPLATE_DIALOG_TOKENS.surface,
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
@@ -1977,18 +1978,7 @@ app.registerExtension({
 
             const dlg = document.createElement("div");
             dlg.id = "manual-download-dialog";
-            Object.assign(dlg.style, {
-                position: "fixed",
-                top: 0,
-                left: 0,
-                width: "100vw",
-                height: "100vh",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(0, 0, 0, 0.5)",
-                zIndex: 9000
-            });
+            applyTemplateDialogOverlayStyle(dlg, 9000);
 
             const closeDialog = () => {
                 stopPolling();
@@ -2004,21 +1994,11 @@ app.registerExtension({
             });
 
             const panel = document.createElement("div");
-            Object.assign(panel.style, {
-                background: "var(--comfy-menu-bg)",
-                color: "var(--input-text)",
+            applyTemplateDialogPanelStyle(panel, {
                 padding: "0",
-                borderRadius: "16px",
                 width: "min(820px, 100%)",
                 maxWidth: "92vw",
                 maxHeight: "92vh",
-                display: "flex",
-                flexDirection: "column",
-                gap: "0",
-                boxShadow: "1px 1px 8px rgba(0,0,0,0.4)",
-                border: "1px solid var(--border-default)",
-                overflow: "hidden",
-                fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
 
             const headerWrap = document.createElement("div");
@@ -2067,7 +2047,7 @@ app.registerExtension({
             });
 
             const urlLabel = document.createElement("div");
-            urlLabel.textContent = "Hugging Face URL";
+            urlLabel.textContent = "Model URL";
             Object.assign(urlLabel.style, {
                 fontSize: "11px",
                 color: "var(--descrip-text, #999)",
@@ -2075,7 +2055,7 @@ app.registerExtension({
                 letterSpacing: "0.05em",
                 fontWeight: "600",
             });
-            const urlInput = createInput("", "HuggingFace URL...");
+            const urlInput = createInput("", "Model URL...");
             Object.assign(urlInput.style, {
                 fontSize: "14px",
                 minHeight: "40px",
@@ -2243,8 +2223,8 @@ app.registerExtension({
                     return;
                 }
 
-                urlLabel.textContent = "Hugging Face URL";
-                urlInput.placeholder = "HuggingFace URL...";
+                urlLabel.textContent = "Model URL";
+                urlInput.placeholder = "https://example.com/path/model.safetensors";
                 folderLabel.textContent = "Folder";
                 folderPicker.input.placeholder = "Folder";
                 destinationPreviewLine.style.display = "none";
@@ -2272,7 +2252,7 @@ app.registerExtension({
                         summary: "Missing URL",
                         detail: fullRepoMode
                             ? "Enter a Hugging Face repo or folder link."
-                            : "Enter a Hugging Face file URL."
+                            : "Enter a direct model file URL."
                     });
                     return;
                 }
@@ -2283,7 +2263,7 @@ app.registerExtension({
                         showToast({
                             severity: "error",
                             summary: "Invalid link",
-                            detail: "Could not parse repository/folder from link."
+                            detail: "Could not parse repository/folder from Hugging Face link."
                         });
                         return;
                     }
@@ -2295,15 +2275,7 @@ app.registerExtension({
                         download_mode: "folder"
                     };
                 } else {
-                    filename = parseFilenameFromUrl(url);
-                    if (!filename) {
-                        showToast({
-                            severity: "error",
-                            summary: "Invalid URL",
-                            detail: "Could not extract filename from URL."
-                        });
-                        return;
-                    }
+                    filename = parseFilenameFromUrl(url) || "";
                     queueModel = {
                         filename,
                         url,
@@ -2331,12 +2303,15 @@ app.registerExtension({
                     }
                     const res = await resp.json();
                     const queued = res.queued || [];
+                    const rejected = Array.isArray(res.rejected) ? res.rejected : [];
                     const downloadIds = queued.map(q => q.download_id);
                     if (!downloadIds.length) {
-                        showToast({ severity: "warn", summary: "Queue empty", detail: "No download was queued." });
+                        const rejection = rejected.length ? String(rejected[0]?.error || "").trim() : "";
+                        const detail = rejection || "No download was queued.";
+                        showToast({ severity: "warn", summary: "Queue rejected", detail });
                         downloadBtn.disabled = false;
                         downloadBtn.textContent = "Download";
-                        setStatus("No download queued.", "#f5b14c");
+                        setStatus(detail, "#f5b14c");
                         return;
                     }
 
