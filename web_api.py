@@ -19,7 +19,7 @@ from .backup import (
 )
 from .file_manager import get_model_subfolders
 from .model_discovery import process_workflow_for_missing_models
-from .downloader import run_download, get_remote_file_metadata, get_blob_paths, get_token
+from .downloader import run_download, run_download_folder, get_remote_file_metadata, get_blob_paths, get_token
 from .parse_link import parse_link
 try:
     import folder_paths
@@ -315,6 +315,36 @@ def _build_parsed_download_info(model: dict) -> dict:
             "Folder/repo links are not valid for single-file download queue."
         )
     return parsed
+
+def _build_parsed_folder_download_info(model: dict) -> dict:
+    """Build parsed info for folder/repo download queue items."""
+    url = model.get("url")
+    if not url:
+        raise ValueError("No URL provided for folder download.")
+    if not _is_supported_hf_link(url):
+        raise ValueError("Only Hugging Face URLs are supported by this backend.")
+
+    parsed = parse_link(url)
+    repo = str(parsed.get("repo") or "").strip()
+    if not repo:
+        raise ValueError("Link does not contain repository information.")
+
+    remote_subfolder_path = str(parsed.get("subfolder") or "").replace("\\", "/").strip("/")
+    if remote_subfolder_path:
+        last_segment = os.path.basename(remote_subfolder_path)
+    else:
+        split_repo = repo.split("/", 1)
+        last_segment = split_repo[1] if len(split_repo) > 1 else split_repo[0]
+
+    if not last_segment:
+        raise ValueError("Could not determine destination folder name from link.")
+
+    return {
+        "parsed": parsed,
+        "remote_subfolder_path": remote_subfolder_path,
+        "last_segment": last_segment,
+        "display_name": f"{last_segment}/",
+    }
 
 def _set_download_status(download_id: str, fields: dict):
     with download_status_lock:
@@ -1218,6 +1248,36 @@ def _download_worker():
 
         stop_event = None
         try:
+            download_mode = str(item.get("download_mode") or "").strip().lower()
+            if download_mode == "folder":
+                folder_info = _build_parsed_folder_download_info(item)
+                msg, path = run_download_folder(
+                    folder_info["parsed"],
+                    item.get("folder", ""),
+                    remote_subfolder_path=folder_info["remote_subfolder_path"],
+                    last_segment=folder_info["last_segment"],
+                    sync=True
+                )
+                if _is_cancel_requested(download_id):
+                    _set_download_status(download_id, {
+                        "status": "cancelled",
+                        "message": "Cancelled",
+                        "finished_at": time.time()
+                    })
+                    _clear_cancel_request(download_id)
+                    _touch_queue_activity()
+                    continue
+                if not path:
+                    raise RuntimeError(msg or "Folder download failed.")
+                _set_download_status(download_id, {
+                    "status": "completed",
+                    "message": msg,
+                    "path": path,
+                    "finished_at": time.time()
+                })
+                _touch_queue_activity()
+                continue
+
             parsed = _build_parsed_download_info(item)
             token = get_token()
             remote_filename = parsed["file"]
@@ -1626,23 +1686,46 @@ def setup(app):
             rejected = []
             for model in models:
                 filename = model.get("filename")
-                folder = model.get("folder", "checkpoints")
-                if not filename:
-                    rejected.append({
-                        "filename": filename or "",
-                        "error": "Missing filename",
-                    })
-                    continue
                 url = model.get("url")
-                if url and not _is_supported_hf_link(url):
-                    rejected.append({
-                        "filename": filename,
-                        "error": "Only Hugging Face URLs are supported by this backend.",
-                    })
-                    continue
+                download_mode = str(model.get("download_mode") or "").strip().lower()
+
+                if download_mode == "folder":
+                    folder = str(model.get("folder", "") or "").replace("\\", "/").strip().strip("/")
+                    if not url:
+                        rejected.append({
+                            "filename": filename or "",
+                            "error": "Missing URL",
+                        })
+                        continue
+                    try:
+                        folder_info = _build_parsed_folder_download_info(model)
+                    except Exception as e:
+                        rejected.append({
+                            "filename": filename or "",
+                            "error": str(e),
+                        })
+                        continue
+                    if not filename:
+                        filename = folder_info.get("display_name") or ""
+                else:
+                    folder = model.get("folder", "checkpoints")
+                    if not filename:
+                        rejected.append({
+                            "filename": filename or "",
+                            "error": "Missing filename",
+                        })
+                        continue
+                    if url and not _is_supported_hf_link(url):
+                        rejected.append({
+                            "filename": filename,
+                            "error": "Only Hugging Face URLs are supported by this backend.",
+                        })
+                        continue
+
                 download_id = f"dl_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
                 item = dict(model)
                 item["download_id"] = download_id
+                item["filename"] = filename
                 item["folder"] = folder
                 with download_queue_lock:
                     download_queue.append(item)

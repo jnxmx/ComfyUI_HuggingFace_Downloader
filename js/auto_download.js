@@ -391,6 +391,100 @@ app.registerExtension({
             return extract(value);
         };
 
+        const parseHfFolderLinkInfo = (link) => {
+            if (!link || typeof link !== "string") return null;
+            const value = link.trim();
+            if (!value) return null;
+
+            let pathText = value;
+            try {
+                if (value.includes("://")) {
+                    const parsed = new URL(value);
+                    const host = String(parsed.hostname || "").toLowerCase();
+                    if (host && host !== "huggingface.co") {
+                        return null;
+                    }
+                    pathText = parsed.pathname || "";
+                }
+            } catch {
+                return null;
+            }
+
+            const cleanPath = String(pathText).split("?")[0].split("#")[0];
+            const pathParts = cleanPath.split("/").filter(Boolean);
+            if (pathParts.length < 2) {
+                return null;
+            }
+
+            const repoOwner = pathParts[0];
+            const repoName = pathParts[1];
+            if (!repoOwner || !repoName) {
+                return null;
+            }
+
+            let subfolderParts = [];
+            const treeIdx = pathParts.indexOf("tree");
+            const resolveIdx = pathParts.indexOf("resolve");
+            const blobIdx = pathParts.indexOf("blob");
+
+            if (treeIdx >= 0) {
+                if (pathParts.length > treeIdx + 2) {
+                    subfolderParts = pathParts.slice(treeIdx + 2);
+                }
+            } else if (resolveIdx >= 0 || blobIdx >= 0) {
+                const idx = resolveIdx >= 0 ? resolveIdx : blobIdx;
+                if (pathParts.length > idx + 2) {
+                    const remaining = pathParts.slice(idx + 2);
+                    if (remaining.length > 1) {
+                        subfolderParts = remaining.slice(0, -1);
+                    }
+                }
+            } else if (pathParts.length > 2) {
+                const remaining = pathParts.slice(2);
+                const tail = remaining[remaining.length - 1] || "";
+                if (tail.includes(".")) {
+                    subfolderParts = remaining.slice(0, -1);
+                } else {
+                    subfolderParts = remaining;
+                }
+            }
+
+            const subfolder = subfolderParts.join("/").replace(/^\/+|\/+$/g, "");
+            const targetSegment = subfolder
+                ? subfolder.split("/").filter(Boolean).slice(-1)[0]
+                : repoName;
+
+            if (!targetSegment) {
+                return null;
+            }
+
+            return {
+                repo: `${repoOwner}/${repoName}`,
+                repoName,
+                subfolder,
+                targetSegment
+            };
+        };
+
+        const normalizeFolderPathInput = (value) =>
+            String(value || "")
+                .replace(/\\/g, "/")
+                .trim()
+                .replace(/^\/+/, "")
+                .replace(/\/+$/, "");
+
+        const buildFolderDownloadDestinationPreview = (folder, targetSegment) => {
+            const parts = ["models"];
+            const normalizedFolder = normalizeFolderPathInput(folder);
+            if (normalizedFolder) {
+                parts.push(normalizedFolder);
+            }
+            if (targetSegment) {
+                parts.push(targetSegment);
+            }
+            return `${parts.join("/")}/`;
+        };
+
         const normalizeWorkflowPath = (value) => String(value || "").replace(/\\/g, "/").trim();
 
         const getPathBasename = (value) => {
@@ -1509,6 +1603,69 @@ app.registerExtension({
                 minHeight: "40px",
             });
 
+            const fullRepoSwitchRow = document.createElement("label");
+            Object.assign(fullRepoSwitchRow.style, {
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                marginTop: "2px",
+                cursor: "pointer",
+                userSelect: "none",
+            });
+
+            const fullRepoSwitch = document.createElement("input");
+            fullRepoSwitch.type = "checkbox";
+            fullRepoSwitch.checked = false;
+            Object.assign(fullRepoSwitch.style, {
+                width: "16px",
+                height: "16px",
+                cursor: "pointer",
+            });
+
+            const fullRepoSwitchText = document.createElement("span");
+            fullRepoSwitchText.textContent = "Download full repo/folder";
+            Object.assign(fullRepoSwitchText.style, {
+                fontSize: "13px",
+                color: "var(--input-text)",
+                fontWeight: "500",
+            });
+
+            fullRepoSwitchRow.appendChild(fullRepoSwitch);
+            fullRepoSwitchRow.appendChild(fullRepoSwitchText);
+
+            const destinationPreviewWrap = document.createElement("div");
+            Object.assign(destinationPreviewWrap.style, {
+                display: "none",
+                flexDirection: "column",
+                gap: "4px",
+                marginBottom: "2px",
+            });
+
+            const destinationPreviewLabel = document.createElement("div");
+            destinationPreviewLabel.textContent = "Destination preview";
+            Object.assign(destinationPreviewLabel.style, {
+                fontSize: "11px",
+                color: "var(--descrip-text, #999)",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+                fontWeight: "600",
+            });
+
+            const destinationPreviewValue = document.createElement("div");
+            Object.assign(destinationPreviewValue.style, {
+                fontSize: "13px",
+                color: "var(--input-text)",
+                fontFamily: "var(--font-monospace, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)",
+                lineHeight: "1.4",
+                padding: "6px 8px",
+                background: "color-mix(in srgb, var(--comfy-input-bg) 88%, var(--border-default) 12%)",
+                border: "1px solid var(--border-default)",
+                borderRadius: "8px",
+            });
+
+            destinationPreviewWrap.appendChild(destinationPreviewLabel);
+            destinationPreviewWrap.appendChild(destinationPreviewValue);
+
             const folderLabel = document.createElement("div");
             folderLabel.textContent = "Folder";
             Object.assign(folderLabel.style, {
@@ -1518,7 +1675,7 @@ app.registerExtension({
                 letterSpacing: "0.05em",
                 fontWeight: "600",
             });
-            const folderPicker = createFolderPicker("loras", "Folder");
+            const folderPicker = createFolderPicker("", "Folder (optional)");
             Object.assign(folderPicker.input.style, {
                 fontSize: "14px",
                 minHeight: "40px",
@@ -1526,6 +1683,8 @@ app.registerExtension({
 
             content.appendChild(urlLabel);
             content.appendChild(urlInput);
+            content.appendChild(fullRepoSwitchRow);
+            content.appendChild(destinationPreviewWrap);
             content.appendChild(folderLabel);
             content.appendChild(folderPicker.wrapper);
             panel.appendChild(content);
@@ -1552,36 +1711,106 @@ app.registerExtension({
                 statusLine.style.color = color;
             };
 
-            const downloadBtn = createButton("Download", "p-button p-component p-button-success", async () => {
-                const url = urlInput.value.trim();
-                const folder = folderPicker.input.value.trim() || "loras";
-                const filename = parseFilenameFromUrl(url);
-
-                if (!url) {
-                    showToast({ severity: "warn", summary: "Missing URL", detail: "Enter a Hugging Face file URL." });
+            const updateManualDownloadModeUi = () => {
+                const fullRepoMode = Boolean(fullRepoSwitch.checked);
+                if (fullRepoMode) {
+                    urlLabel.textContent = "Hugging Face URL / Repo / Folder";
+                    urlInput.placeholder = "https://huggingface.co/owner/repo[/tree/main/subfolder]";
+                    folderLabel.textContent = "Folder (optional)";
+                    destinationPreviewWrap.style.display = "flex";
+                    const parsed = parseHfFolderLinkInfo(urlInput.value);
+                    if (parsed?.targetSegment) {
+                        destinationPreviewValue.textContent = buildFolderDownloadDestinationPreview(
+                            folderPicker.input.value,
+                            parsed.targetSegment
+                        );
+                        destinationPreviewValue.style.color = "var(--input-text)";
+                    } else if (String(urlInput.value || "").trim()) {
+                        destinationPreviewValue.textContent = "Enter a valid Hugging Face repo or folder link.";
+                        destinationPreviewValue.style.color = "#f5b14c";
+                    } else {
+                        destinationPreviewValue.textContent = "models/<repo-or-subfolder>/";
+                        destinationPreviewValue.style.color = "var(--descrip-text, #999)";
+                    }
                     return;
                 }
-                if (!filename) {
-                    showToast({ severity: "error", summary: "Invalid URL", detail: "Could not extract filename from URL." });
+
+                urlLabel.textContent = "Hugging Face URL";
+                urlInput.placeholder = "HuggingFace URL...";
+                folderLabel.textContent = "Folder";
+                destinationPreviewWrap.style.display = "none";
+            };
+
+            fullRepoSwitch.addEventListener("change", updateManualDownloadModeUi);
+            urlInput.addEventListener("input", updateManualDownloadModeUi);
+            folderPicker.input.addEventListener("input", updateManualDownloadModeUi);
+            updateManualDownloadModeUi();
+
+            const downloadBtn = createButton("Download", "p-button p-component p-button-success", async () => {
+                const url = urlInput.value.trim();
+                const fullRepoMode = Boolean(fullRepoSwitch.checked);
+                const normalizedFolder = normalizeFolderPathInput(folderPicker.input.value);
+                let filename = "";
+                let queueModel = null;
+
+                if (!url) {
+                    showToast({
+                        severity: "warn",
+                        summary: "Missing URL",
+                        detail: fullRepoMode
+                            ? "Enter a Hugging Face repo or folder link."
+                            : "Enter a Hugging Face file URL."
+                    });
                     return;
+                }
+
+                if (fullRepoMode) {
+                    const parsedFolder = parseHfFolderLinkInfo(url);
+                    if (!parsedFolder?.targetSegment) {
+                        showToast({
+                            severity: "error",
+                            summary: "Invalid link",
+                            detail: "Could not parse repository/folder from link."
+                        });
+                        return;
+                    }
+                    filename = `${parsedFolder.targetSegment}/`;
+                    queueModel = {
+                        filename,
+                        url,
+                        folder: normalizedFolder,
+                        download_mode: "folder"
+                    };
+                } else {
+                    filename = parseFilenameFromUrl(url);
+                    if (!filename) {
+                        showToast({
+                            severity: "error",
+                            summary: "Invalid URL",
+                            detail: "Could not extract filename from URL."
+                        });
+                        return;
+                    }
+                    queueModel = {
+                        filename,
+                        url,
+                        folder: normalizedFolder || "loras"
+                    };
                 }
 
                 downloadBtn.disabled = true;
                 downloadBtn.textContent = "Queued";
-                setStatus("Queuing download...", "#9ad6ff");
+                setStatus(
+                    fullRepoMode ? "Queuing folder download..." : "Queuing download...",
+                    "#9ad6ff"
+                );
 
                 try {
                     const resp = await fetch("/queue_download", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
-                            models: [
-                                {
-                                    filename,
-                                    url,
-                                    folder
-                                }
-                            ]
+                            models: [queueModel]
                         })
                     });
                     if (resp.status !== 200) {
