@@ -151,20 +151,35 @@ const createTopMenuButton = () => {
         tooltip: BUTTON_TOOLTIP,
         app,
         enabled: true,
-        classList: "comfyui-button comfyui-menu-mobile-collapse"
+        classList: "comfyui-button comfyui-menu-mobile-collapse comfy-btn"
     });
 
     button.element.classList.add("hf-downloader-button");
     button.element.setAttribute("aria-label", BUTTON_TOOLTIP);
     button.element.title = BUTTON_TOOLTIP;
+    Object.assign(button.element.style, {
+        backgroundColor: "var(--comfy-input-bg)",
+        color: "var(--input-text)",
+        borderColor: "var(--border-color)",
+        borderStyle: "solid",
+        borderWidth: "1px"
+    });
 
-    const iconUrl = "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate.png?download=true";
-    const fallbackIconUrl = new URL("./assets/hf-favicon.ico", import.meta.url).toString();
+    const iconUrls = [
+        "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate-white.png?download=true",
+        "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate.png?download=true",
+        new URL("./assets/hf-favicon.ico", import.meta.url).toString()
+    ];
+    let iconUrlIndex = 0;
     const iconImg = document.createElement("img");
-    iconImg.src = iconUrl;
+    iconImg.src = iconUrls[iconUrlIndex];
     iconImg.onerror = () => {
-        iconImg.onerror = null;
-        iconImg.src = fallbackIconUrl;
+        iconUrlIndex += 1;
+        if (iconUrlIndex >= iconUrls.length) {
+            iconImg.onerror = null;
+            return;
+        }
+        iconImg.src = iconUrls[iconUrlIndex];
     };
     iconImg.alt = "Hugging Face";
     iconImg.width = 20;
