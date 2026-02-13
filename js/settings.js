@@ -16,7 +16,9 @@ app.registerExtension({
       category: ["Hugging Face downloader", "Model Library", "Use as Model Library backend"],
       name: "Use as Model Library backend",
       type: "boolean",
-      defaultValue: true,
+      defaultValue: false,
+      experimental: true,
+      icon: "beaker",
       tooltip:
         "Route native Model Library Asset API calls through this node pack backend (HuggingFace-only catalog + local installed-model discovery).",
       onChange: (newValue) => {

@@ -457,7 +457,7 @@ def _read_setting_bool(setting_id: str, default: bool) -> bool:
     return _coerce_bool(settings.get(setting_id), default=default)
 
 def _is_model_library_backend_enabled() -> bool:
-    return _read_setting_bool(MODEL_LIBRARY_BACKEND_SETTING, default=True)
+    return _read_setting_bool(MODEL_LIBRARY_BACKEND_SETTING, default=False)
 
 def _get_models_root() -> str:
     base_path = getattr(folder_paths, "base_path", None) if folder_paths else None
