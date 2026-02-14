@@ -124,7 +124,8 @@ app.registerExtension({
             });
         };
 
-        const createInput = (value, placeholder) => {
+        const createInput = (value, placeholder, options = {}) => {
+            const { highlightMissingUrl = true } = options;
             const inp = document.createElement("input");
             inp.type = "text";
             inp.value = value || "";
@@ -143,7 +144,7 @@ app.registerExtension({
                 fontFamily: "var(--font-inter, Inter, sans-serif)",
             });
 
-            if (!value && placeholder && placeholder.includes("URL")) {
+            if (highlightMissingUrl && !value && placeholder && placeholder.includes("URL")) {
                 inp.style.borderColor = "color-mix(in srgb, var(--destructive-background) 50%, var(--border-default) 50%)";
                 inp.style.background = "color-mix(in srgb, var(--comfy-input-bg) 88%, var(--destructive-background) 12%)";
 
@@ -2058,7 +2059,7 @@ app.registerExtension({
                 letterSpacing: "0.05em",
                 fontWeight: "600",
             });
-            const urlInput = createInput("", "Model URL...");
+            const urlInput = createInput("", "Model URL...", { highlightMissingUrl: false });
             Object.assign(urlInput.style, {
                 fontSize: "14px",
                 minHeight: "40px",
