@@ -1,12 +1,10 @@
 import { app } from "../../../scripts/app.js";
-import { ComfyButtonGroup } from "../../../scripts/ui/components/buttonGroup.js";
-import { ComfyButton } from "../../../scripts/ui/components/button.js";
 
-const BUTTON_GROUP_CLASS = "hf-downloader-top-menu-group";
 const MENU_ID = "hf-downloader-top-menu";
 const BUTTON_TOOLTIP = "Hugging Face Downloader";
 const BUTTON_SPINNER_STYLE_ID = "hf-downloader-top-menu-spinner-style";
-const MAX_ATTACH_ATTEMPTS = 120;
+const BUTTON_STYLE_ID = "hf-downloader-top-menu-button-style";
+const BUTTON_SELECTOR = `button[aria-label="${BUTTON_TOOLTIP}"]`;
 
 const getActions = () => {
     if (typeof window === "undefined") return {};
@@ -45,8 +43,10 @@ let menuVisible = false;
 let menuElement = null;
 let closeHandlersAttached = false;
 let panelStateListenerAttached = false;
-let iconImageElement = null;
-let iconSpinnerElement = null;
+let buttonObserverAttached = false;
+let buttonObserver = null;
+let decorateQueued = false;
+const buttonVisuals = new Map();
 
 const ensureSpinnerStyles = () => {
     if (document.getElementById(BUTTON_SPINNER_STYLE_ID)) return;
@@ -69,19 +69,56 @@ const ensureSpinnerStyles = () => {
     document.head.appendChild(style);
 };
 
+const ensureButtonStyles = () => {
+    if (document.getElementById(BUTTON_STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = BUTTON_STYLE_ID;
+    style.textContent = `
+        button[aria-label="${BUTTON_TOOLTIP}"].hf-downloader-button {
+            border-radius: 4px;
+            padding: 6px;
+            border: 1px solid transparent;
+            background-color: var(--primary-bg);
+            transition: all 0.2s ease;
+        }
+        button[aria-label="${BUTTON_TOOLTIP}"].hf-downloader-button:hover {
+            background-color: var(--primary-hover-bg) !important;
+        }
+        .hf-downloader-top-icon-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            line-height: 1;
+        }
+        .hf-downloader-top-icon-wrap img {
+            display: block;
+            width: 20px;
+            height: 20px;
+        }
+    `;
+    document.head.appendChild(style);
+};
+
 const getPanelState = () => {
     if (typeof window === "undefined") return null;
     return window?.hfDownloader?.downloadPanelState || null;
 };
 
 const applyTopButtonState = (state = null) => {
-    if (!iconImageElement || !iconSpinnerElement) return;
-
     const current = state || getPanelState() || {};
     const showSpinner = Boolean(current.minimized && current.hasRunning);
 
-    iconImageElement.style.display = showSpinner ? "none" : "block";
-    iconSpinnerElement.style.display = showSpinner ? "block" : "none";
+    for (const [button, visuals] of buttonVisuals.entries()) {
+        if (!button?.isConnected || !visuals?.iconImg?.isConnected || !visuals?.iconSpinner?.isConnected) {
+            buttonVisuals.delete(button);
+            continue;
+        }
+
+        visuals.iconImg.style.display = showSpinner ? "none" : "block";
+        visuals.iconSpinner.style.display = showSpinner ? "block" : "none";
+    }
 };
 
 const hideMenu = () => {
@@ -194,21 +231,7 @@ const toggleMenu = (buttonEl) => {
     menuVisible = true;
 };
 
-const createTopMenuButton = () => {
-    ensureSpinnerStyles();
-
-    const button = new ComfyButton({
-        icon: "huggingface",
-        tooltip: BUTTON_TOOLTIP,
-        app,
-        enabled: true,
-        classList: "comfyui-button comfyui-menu-mobile-collapse primary"
-    });
-
-    button.element.classList.add("hf-downloader-button");
-    button.element.setAttribute("aria-label", BUTTON_TOOLTIP);
-    button.element.title = BUTTON_TOOLTIP;
-
+const createButtonVisuals = () => {
     const iconUrls = [
         "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate-white.png?download=true",
         "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate.png?download=true",
@@ -226,86 +249,124 @@ const createTopMenuButton = () => {
         iconImg.src = iconUrls[iconUrlIndex];
     };
     iconImg.alt = "Hugging Face";
-    iconImg.width = 20;
-    iconImg.height = 20;
-    iconImg.style.display = "block";
 
     const iconSpinner = document.createElement("div");
     iconSpinner.className = "hf-downloader-top-spinner";
     iconSpinner.setAttribute("aria-hidden", "true");
 
-    if (button.iconElement) {
-        button.iconElement.textContent = "";
-        Object.assign(button.iconElement.style, {
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            lineHeight: "1",
-            transform: "none"
-        });
-        button.iconElement.appendChild(iconImg);
-        button.iconElement.appendChild(iconSpinner);
-    } else {
-        button.element.appendChild(iconImg);
-        button.element.appendChild(iconSpinner);
-    }
+    const iconWrap = document.createElement("span");
+    iconWrap.className = "hf-downloader-top-icon-wrap";
+    iconWrap.setAttribute("aria-hidden", "true");
+    iconWrap.appendChild(iconImg);
+    iconWrap.appendChild(iconSpinner);
 
-    iconImageElement = iconImg;
-    iconSpinnerElement = iconSpinner;
-    applyTopButtonState();
-
-    button.element.addEventListener("click", (event) => {
-        event.stopPropagation();
-        const panelState = getPanelState();
-        if (panelState?.minimized && panelState?.hasEntries) {
-            const restore = window?.hfDownloader?.restoreDownloadPanel;
-            if (typeof restore === "function") {
-                hideMenu();
-                restore();
-                applyTopButtonState();
-                return;
-            }
-        }
-        toggleMenu(button.element);
-    });
-
-    return button;
+    return { iconWrap, iconImg, iconSpinner };
 };
 
-const attachTopMenuButton = (attempt = 0) => {
-    if (!panelStateListenerAttached && typeof window !== "undefined") {
-        window.addEventListener("hfDownloader:panelState", (event) => {
-            applyTopButtonState(event?.detail);
-        });
-        panelStateListenerAttached = true;
+const decorateTopButtons = () => {
+    for (const [button] of buttonVisuals.entries()) {
+        if (!button?.isConnected) {
+            buttonVisuals.delete(button);
+        }
     }
 
-    if (document.querySelector(`.${BUTTON_GROUP_CLASS}`)) {
-        applyTopButtonState();
-        return;
-    }
-
-    const settingsGroup = app.menu?.settingsGroup;
-    if (!settingsGroup?.element?.parentElement) {
-        if (attempt >= MAX_ATTACH_ATTEMPTS) {
-            console.warn("[HF Downloader] Unable to locate the ComfyUI menu bar.");
+    const buttons = document.querySelectorAll(BUTTON_SELECTOR);
+    buttons.forEach((button) => {
+        const existing = buttonVisuals.get(button);
+        if (
+            existing?.iconWrap?.isConnected &&
+            existing?.iconImg?.isConnected &&
+            existing?.iconSpinner?.isConnected &&
+            button.contains(existing.iconWrap)
+        ) {
             return;
         }
 
-        requestAnimationFrame(() => attachTopMenuButton(attempt + 1));
-        return;
+        const visuals = createButtonVisuals();
+        button.classList.add("hf-downloader-button");
+        button.title = BUTTON_TOOLTIP;
+        button.setAttribute("aria-label", BUTTON_TOOLTIP);
+        button.replaceChildren(visuals.iconWrap);
+        buttonVisuals.set(button, visuals);
+
+        button.addEventListener("click", (event) => {
+            event.stopPropagation();
+        });
+    });
+
+    applyTopButtonState();
+};
+
+const queueDecorateTopButtons = () => {
+    if (decorateQueued) return;
+    decorateQueued = true;
+    requestAnimationFrame(() => {
+        decorateQueued = false;
+        decorateTopButtons();
+    });
+};
+
+const watchTopButtonRenders = () => {
+    if (buttonObserverAttached || typeof MutationObserver === "undefined") return;
+    buttonObserver = new MutationObserver(() => {
+        queueDecorateTopButtons();
+    });
+    buttonObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    buttonObserverAttached = true;
+};
+
+const resolveButtonElement = (event) => {
+    if (event?.currentTarget instanceof HTMLElement) {
+        return event.currentTarget;
     }
+    if (event?.target instanceof HTMLElement) {
+        const targetButton = event.target.closest(BUTTON_SELECTOR);
+        if (targetButton) return targetButton;
+    }
+    return document.querySelector(BUTTON_SELECTOR);
+};
 
-    const hfButton = createTopMenuButton();
-    const buttonGroup = new ComfyButtonGroup(hfButton);
-    buttonGroup.element.classList.add(BUTTON_GROUP_CLASS);
+const handleTopButtonClick = (event) => {
+    event?.stopPropagation?.();
+    const buttonEl = resolveButtonElement(event);
+    if (!buttonEl) return;
 
-    settingsGroup.element.before(buttonGroup.element);
+    const panelState = getPanelState();
+    if (panelState?.minimized && panelState?.hasEntries) {
+        const restore = window?.hfDownloader?.restoreDownloadPanel;
+        if (typeof restore === "function") {
+            hideMenu();
+            restore();
+            applyTopButtonState();
+            return;
+        }
+    }
+    toggleMenu(buttonEl);
 };
 
 app.registerExtension({
     name: "HuggingFaceDownloader.TopMenu",
+    actionBarButtons: [
+        {
+            icon: "pi pi-cloud-download",
+            tooltip: BUTTON_TOOLTIP,
+            onClick: handleTopButtonClick
+        }
+    ],
     setup() {
-        attachTopMenuButton();
+        ensureSpinnerStyles();
+        ensureButtonStyles();
+        queueDecorateTopButtons();
+        watchTopButtonRenders();
+
+        if (!panelStateListenerAttached && typeof window !== "undefined") {
+            window.addEventListener("hfDownloader:panelState", (event) => {
+                applyTopButtonState(event?.detail);
+            });
+            panelStateListenerAttached = true;
+        }
     }
 });
