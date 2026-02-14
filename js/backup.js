@@ -1084,11 +1084,12 @@ app.registerExtension({
                 const actions = document.createElement("div");
                 Object.assign(actions.style, {
                     display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-start",
+                    flexWrap: "nowrap",
+                    alignItems: "center",
+                    justifyContent: "flex-start",
                     gap: "8px",
                     marginTop: "10px",
-                    minHeight: "88px",
+                    minHeight: "40px",
                 });
                 root.appendChild(actions);
 
@@ -1122,26 +1123,14 @@ app.registerExtension({
             document.body.appendChild(overlay);
 
             const backupDownloadAllBtn = createButton("↓ Download full backup", "success");
-            const backupSelectedRow = document.createElement("div");
-            Object.assign(backupSelectedRow.style, {
-                display: "flex",
-                gap: "8px",
-                flexWrap: "wrap",
-                width: "100%",
-                minHeight: "40px",
-                alignItems: "center",
-                visibility: "hidden",
-                pointerEvents: "none",
-            });
-            const backupDownloadSelectedBtn = createButton("↓ Download selected only", "success");
             const backupDeleteSelectedBtn = createButton("Delete selected from backup", "danger");
             const backupClearSelectionBtn = createButton("Clear selection", "secondary");
-            backupSelectedRow.appendChild(backupDownloadSelectedBtn);
-            backupSelectedRow.appendChild(backupDeleteSelectedBtn);
-            backupSelectedRow.appendChild(backupClearSelectionBtn);
+            backupDeleteSelectedBtn.style.display = "none";
+            backupClearSelectionBtn.style.display = "none";
 
             backupPanel.actions.appendChild(backupDownloadAllBtn);
-            backupPanel.actions.appendChild(backupSelectedRow);
+            backupPanel.actions.appendChild(backupDeleteSelectedBtn);
+            backupPanel.actions.appendChild(backupClearSelectionBtn);
 
             const settingsUi = app?.ui?.settings;
             const fileSizeLimitRow = document.createElement("div");
@@ -1149,8 +1138,9 @@ app.registerExtension({
                 display: "flex",
                 alignItems: "center",
                 gap: "8px",
-                width: "100%",
+                width: "auto",
                 minHeight: "40px",
+                flex: "0 0 auto",
             });
 
             const fileSizeLimitLabel = document.createElement("span");
@@ -1256,10 +1246,12 @@ app.registerExtension({
                 const localItems = getSelectedItems(localState);
 
                 const hasBackupSelection = backupItems.length > 0;
-                backupSelectedRow.style.visibility = hasBackupSelection ? "visible" : "hidden";
-                backupSelectedRow.style.pointerEvents = hasBackupSelection ? "auto" : "none";
+                backupDownloadAllBtn.textContent = hasBackupSelection
+                    ? "↓ Download selected only"
+                    : "↓ Download full backup";
+                backupDeleteSelectedBtn.style.display = hasBackupSelection ? "inline-flex" : "none";
+                backupClearSelectionBtn.style.display = hasBackupSelection ? "inline-flex" : "none";
                 backupDownloadAllBtn.disabled = busy;
-                backupDownloadSelectedBtn.disabled = busy || backupItems.length === 0;
                 backupDeleteSelectedBtn.disabled = busy || backupItems.length === 0;
                 backupClearSelectionBtn.disabled = busy || backupItems.length === 0;
                 localAddSelectedBtn.disabled = busy || localItems.length === 0;
@@ -1312,6 +1304,53 @@ app.registerExtension({
             };
 
             backupDownloadAllBtn.onclick = async () => {
+                const items = getSelectedItems(backupState);
+                if (items.length) {
+                    try {
+                        showOperationProgress({
+                            title: "Backup restore in progress. Please wait.",
+                            categories: inferCategoriesFromItems(items, ["Selected items"]),
+                        });
+                        setBusy(true, "Restoring selected items...");
+                        closeDialog();
+                        const result = await requestJson("/restore_selected_from_hf", {
+                            method: "POST",
+                            body: JSON.stringify({ items }),
+                        });
+                        const restoredFiles = result.restored_files || 0;
+                        const restoredNodes = result.restored_custom_nodes || 0;
+                        showToast({
+                            severity: "success",
+                            summary: "Selected restore complete",
+                            detail: `Restored ${restoredFiles} file(s), ${restoredNodes} custom node entry(ies).`,
+                            life: 5000,
+                        });
+                        await loadTree();
+                        showOperationDone({
+                            title: "Backup restore complete",
+                            detail: `Restored ${restoredFiles} file(s).`,
+                            showRefresh: false,
+                        });
+                        if (result.restart_required) {
+                            showRestartDialog();
+                        }
+                    } catch (e) {
+                        showOperationError({
+                            title: "Selected restore failed",
+                            detail: String(e.message || e),
+                        });
+                        showToast({
+                            severity: "error",
+                            summary: "Selected restore failed",
+                            detail: String(e.message || e),
+                            life: 7000,
+                        });
+                    } finally {
+                        setBusy(false, "");
+                    }
+                    return;
+                }
+
                 try {
                     showOperationProgress({
                         title: "Backup restore in progress. Please wait.",
@@ -1342,54 +1381,6 @@ app.registerExtension({
                     showToast({
                         severity: "error",
                         summary: "Download failed",
-                        detail: String(e.message || e),
-                        life: 7000,
-                    });
-                } finally {
-                    setBusy(false, "");
-                }
-            };
-
-            backupDownloadSelectedBtn.onclick = async () => {
-                const items = getSelectedItems(backupState);
-                if (!items.length) return;
-
-                try {
-                    showOperationProgress({
-                        title: "Backup restore in progress. Please wait.",
-                        categories: inferCategoriesFromItems(items, ["Selected items"]),
-                    });
-                    setBusy(true, "Restoring selected items...");
-                    closeDialog();
-                    const result = await requestJson("/restore_selected_from_hf", {
-                        method: "POST",
-                        body: JSON.stringify({ items }),
-                    });
-                    const restoredFiles = result.restored_files || 0;
-                    const restoredNodes = result.restored_custom_nodes || 0;
-                    showToast({
-                        severity: "success",
-                        summary: "Selected restore complete",
-                        detail: `Restored ${restoredFiles} file(s), ${restoredNodes} custom node entry(ies).`,
-                        life: 5000,
-                    });
-                    await loadTree();
-                    showOperationDone({
-                        title: "Backup restore complete",
-                        detail: `Restored ${restoredFiles} file(s).`,
-                        showRefresh: false,
-                    });
-                    if (result.restart_required) {
-                        showRestartDialog();
-                    }
-                } catch (e) {
-                    showOperationError({
-                        title: "Selected restore failed",
-                        detail: String(e.message || e),
-                    });
-                    showToast({
-                        severity: "error",
-                        summary: "Selected restore failed",
                         detail: String(e.message || e),
                         life: 7000,
                     });
