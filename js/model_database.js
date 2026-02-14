@@ -453,11 +453,12 @@ class ModelDatabaseDialog {
             fontSize: "12px",
             fontWeight: "600"
         });
-        dlBtn.onmouseover = () => dlBtn.style.backgroundColor = "#1c7ed6";
-        dlBtn.onmouseout = () => dlBtn.style.backgroundColor = "#228be6";
+        dlBtn.onmouseover = () => { if (!dlBtn.disabled) dlBtn.style.backgroundColor = "#1c7ed6"; };
+        dlBtn.onmouseout = () => { if (!dlBtn.disabled) dlBtn.style.backgroundColor = "#228be6"; };
 
-        dlBtn.onclick = () => {
-            this.triggerDownload(model);
+        dlBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.triggerDownload(model, dlBtn);
         };
 
         actions.appendChild(dlBtn);
@@ -521,39 +522,54 @@ class ModelDatabaseDialog {
         return wrapper;
     }
 
-    triggerDownload(model) {
-        // Integrate with existing download logic
-        // We can use runAutoDownload or ManualDownload logic?
-        // Actually we should just hit the queue endpoint directly or use a helper from auto_download.js if exported?
-        // auto_download.js is not a module that exports helper... wait, it is a module but does it export?
-        // top_menu.js calls `window.hfDownloader.runAutoDownload`.
+    async triggerDownload(model, btn) {
+        if (btn) {
+            btn.textContent = "Queued";
+            btn.disabled = true;
+            btn.style.backgroundColor = "#9aa4b6";
+            btn.style.cursor = "default";
+        }
 
-        // Let's implement queue call directly here to be safe and independent.
-
-        const payload = {
+        const queueModel = {
+            filename: model.filename,
             url: model.url,
-            // If we have repo_id, better to use it? 
-            // web_api uses "url" or "hf_repo"+"hf_path"
-            target_folder: model.directory
+            folder: model.directory
         };
 
-        // We show a toast/notification
-        // Re-use logic from top_menu.js for toast if possible, or just console log + standard alert?
-        // Let's use ComfyUI's alert if avail, or custom toast.
+        try {
+            const resp = await fetch("/queue_download", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    models: [queueModel]
+                })
+            });
 
-        fetch("/api/queue_download", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        }).then(res => {
-            if (res.ok) {
-                alert(`Queued download for ${model.filename}`);
-            } else {
-                res.text().then(t => alert("Download failed: " + t));
+            if (resp.status !== 200) {
+                const errText = await resp.text();
+                console.error("Download failed:", errText);
+                if (btn) {
+                    btn.textContent = "Failed";
+                    btn.style.backgroundColor = "#e03131";
+                    setTimeout(() => {
+                        btn.textContent = "Download";
+                        btn.disabled = false;
+                        btn.style.backgroundColor = "#228be6";
+                        btn.style.cursor = "pointer";
+                    }, 3000);
+                }
+                return;
             }
-        }).catch(e => {
-            alert("Network error: " + e);
-        });
+
+            console.log("Queued download for", model.filename);
+
+        } catch (e) {
+            console.error("Network error:", e);
+            if (btn) {
+                btn.textContent = "Error";
+                btn.style.backgroundColor = "#e03131";
+            }
+        }
     }
 }
 

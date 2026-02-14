@@ -141,12 +141,28 @@ MODEL_LIBRARY_CATEGORY_CANONICAL = {
     "segformer_b2_clothes": "segformer_b2_clothes",
     "segformer_b3_clothes": "segformer_b3_clothes",
     "segformer_b3_fashion": "segformer_b3_fashion",
-    "nlf": "nlf",
-    "flashvsr": "FlashVSR",
     "flashvsr-v1.1": "FlashVSR-v1.1",
 }
 
 # --- Model Database Helpers ---
+
+MODEL_DATABASE_ALLOWED_CATEGORIES = {
+    "diffusion_models",
+    "text_encoders",
+    "vae",
+    "checkpoints",
+    "loras",
+    "upscale_models",
+    "controlnet",
+    "clip_vision",
+    "model_patches",
+    "style_models",
+    "latent_upscale_models",
+    "vae_approx",
+    "animatediff_models",
+    "animatediff_motion_lora",
+    "ipadapter",
+}
 
 MODEL_DATABASE_CLOUD_CATALOG_PATH = os.path.join(
     os.path.dirname(__file__),
@@ -2709,12 +2725,15 @@ async def model_database_list_categories(request):
         for m in models.values():
             cat = m.get("directory")
             if cat:
-                # Use the top-level directory as category usually
-                # But user request specific list:
-                # "diffusion_models/unet", "text_encoders/clip" imply deeper structure support?
-                # The user request listed specific top-level folders basically.
-                # Let's just return all unique directory values found.
-                categories.add(str(cat).replace("\\", "/"))
+                # Normalize category
+                cat_norm = str(cat).replace("\\", "/")
+                # Check allow list (exact match or parent folder match if we want to be nice? User seems strict)
+                # The allowed list has "diffusion_models", DB has "diffusion_models".
+                # If DB has "diffusion_models/something", should it be included? 
+                # User's list "diffusion_models/unet" implies he knows what he wants.
+                # Let's simple check if the cat is in the allowed list.
+                if cat_norm in MODEL_DATABASE_ALLOWED_CATEGORIES:
+                    categories.add(cat_norm)
         
         # Sort output
         return web.json_response(sorted(list(categories)))
