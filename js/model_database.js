@@ -3,10 +3,6 @@ import { api } from "../../../scripts/api.js";
 
 const MAX_Z_INDEX = 10001;
 
-// Reuse styles or create new ones? 
-// We should match the style of auto_download.js if possible.
-// But this is a full dialog.
-
 class ModelDatabaseDialog {
     constructor() {
         this.element = null;
@@ -20,6 +16,11 @@ class ModelDatabaseDialog {
             precision: "any",
             search: ""
         };
+        this.availableFilters = {
+            base_models: [],
+            types: [],
+            precisions: []
+        };
         this.abortController = null;
     }
 
@@ -32,15 +33,15 @@ class ModelDatabaseDialog {
         // 1. Fetch initial data
         await this.fetchCategories();
         await this.fetchSVDQCompatibility();
-        // Set default category if available, or keep default
+        // Set default category
         if (this.categories.length > 0 && !this.categories.includes(this.filters.category)) {
-            // Try to find a good default or just pick first
             if (this.categories.includes("diffusion_models")) this.filters.category = "diffusion_models";
             else this.filters.category = this.categories[0];
         }
 
         this.createUI();
-        await this.fetchModels();
+        // Initial fetch of filters and models
+        await this.updateFiltersAndModels();
     }
 
     async fetchCategories() {
@@ -64,6 +65,24 @@ class ModelDatabaseDialog {
         } catch (e) {
             console.error("Failed to fetch SVDQ compatibility", e);
         }
+    }
+
+    async fetchFiltersForCategory() {
+        try {
+            const params = new URLSearchParams({ category: this.filters.category });
+            const resp = await api.fetchApi(`/model_database/filters?${params.toString()}`);
+            if (resp.ok) {
+                this.availableFilters = await resp.json();
+                this.updateFilterDropdowns();
+            }
+        } catch (e) {
+            console.error("Failed to fetch filters", e);
+        }
+    }
+
+    async updateFiltersAndModels() {
+        await this.fetchFiltersForCategory();
+        await this.fetchModels();
     }
 
     async fetchModels() {
@@ -156,8 +175,8 @@ class ModelDatabaseDialog {
         container.appendChild(header);
 
         // Top Panel (Filters)
-        const filtersPanel = document.createElement("div");
-        Object.assign(filtersPanel.style, {
+        this.filtersPanel = document.createElement("div");
+        Object.assign(this.filtersPanel.style, {
             padding: "12px",
             borderBottom: "1px solid #333",
             display: "flex",
@@ -168,38 +187,36 @@ class ModelDatabaseDialog {
         });
 
         // Category Select
-        this.categorySelect = this.createSelect("Category", this.categories, this.filters.category, (val) => {
+        this.categorySelect = this.createSelect("Category", this.categories, this.filters.category, async (val) => {
             this.filters.category = val;
-            this.fetchModels();
+            // Reset other filters when category changes
+            this.filters.base_model = "any";
+            this.filters.type = "any";
+            this.filters.precision = "any";
+            await this.updateFiltersAndModels();
         });
-        filtersPanel.appendChild(this.categorySelect.wrapper);
+        this.filtersPanel.appendChild(this.categorySelect.wrapper);
 
-        // Base Model Select (Hardcoded for now as we don't have API for it yet, or derived from current models?)
-        // The user wants "Base Model" filter.
-        // Let's populate it with common ones + "any"
-        // In a real implementation this should probably be dynamic based on category.
-        const baseModels = ["any", "SD1.5", "SDXL", "SD3", "Flux", "Pony", "Wan 2.1", "Hunyuan", "LTX", "PixArt", "AuraFlow", "Cosmos"];
-        this.baseModelSelect = this.createSelect("Base Model", baseModels, "any", (val) => {
+        // Base Model Select
+        this.baseModelSelect = this.createSelect("Base Model", ["any"], "any", (val) => {
             this.filters.base_model = val;
             this.fetchModels();
         });
-        filtersPanel.appendChild(this.baseModelSelect.wrapper);
+        this.filtersPanel.appendChild(this.baseModelSelect.wrapper);
 
         // Type Filter
-        const types = ["any", "safetensors", "gguf", "svdq", "pt", "bin"];
-        this.typeSelect = this.createSelect("Type", types, "any", (val) => {
+        this.typeSelect = this.createSelect("Type", ["any"], "any", (val) => {
             this.filters.type = val;
             this.fetchModels();
         });
-        filtersPanel.appendChild(this.typeSelect.wrapper);
+        this.filtersPanel.appendChild(this.typeSelect.wrapper);
 
         // Precision Filter
-        const precisions = ["any", "fp32", "fp16", "bf16", "fp8", "int8", "int4", "fp4", "Q8_0", "Q6_K", "Q5_K_M", "Q5_0", "Q4_K_M", "Q4_0", "IQ4_NL"];
-        this.precisionSelect = this.createSelect("Precision", precisions, "any", (val) => {
+        this.precisionSelect = this.createSelect("Precision", ["any"], "any", (val) => {
             this.filters.precision = val;
             this.fetchModels();
         });
-        filtersPanel.appendChild(this.precisionSelect.wrapper);
+        this.filtersPanel.appendChild(this.precisionSelect.wrapper);
 
         // Search Box
         const searchWrapper = document.createElement("div");
@@ -213,7 +230,7 @@ class ModelDatabaseDialog {
 
         const searchInput = document.createElement("input");
         searchInput.type = "text";
-        searchInput.placeholder = "Filter by name...";
+        searchInput.placeholder = "Filter name...";
         Object.assign(searchInput.style, {
             padding: "4px 8px",
             borderRadius: "4px",
@@ -232,9 +249,9 @@ class ModelDatabaseDialog {
         });
         searchWrapper.appendChild(searchLabel);
         searchWrapper.appendChild(searchInput);
-        filtersPanel.appendChild(searchWrapper);
+        this.filtersPanel.appendChild(searchWrapper);
 
-        container.appendChild(filtersPanel);
+        container.appendChild(this.filtersPanel);
 
         // Main Content (List)
         this.contentArea = document.createElement("div");
@@ -264,7 +281,6 @@ class ModelDatabaseDialog {
         this.element.appendChild(container);
         document.body.appendChild(this.element);
 
-        // Close on outside click
         this.element.addEventListener("click", (e) => {
             if (e.target === this.element) this.utils_close();
         });
@@ -295,7 +311,7 @@ class ModelDatabaseDialog {
 
         const sel = document.createElement("select");
         Object.assign(sel.style, {
-            padding: "4px 20px 4px 8px", // extra padding for arrow
+            padding: "4px 20px 4px 8px",
             borderRadius: "4px",
             border: "1px solid #444",
             background: "#333",
@@ -305,13 +321,7 @@ class ModelDatabaseDialog {
             appearance: "auto"
         });
 
-        options.forEach(opt => {
-            const el = document.createElement("option");
-            el.value = opt;
-            el.textContent = opt;
-            if (opt === selected) el.selected = true;
-            sel.appendChild(el);
-        });
+        this._populateSelect(sel, options, selected);
 
         sel.onchange = (e) => onChange(e.target.value);
 
@@ -321,8 +331,35 @@ class ModelDatabaseDialog {
         return { wrapper, select: sel };
     }
 
+    _populateSelect(selElement, options, selected) {
+        selElement.innerHTML = "";
+        options.forEach(opt => {
+            const el = document.createElement("option");
+            el.value = opt;
+            el.textContent = opt;
+            if (opt === selected) el.selected = true;
+            selElement.appendChild(el);
+        });
+    }
+
+    updateFilterDropdowns() {
+        // Base Model
+        const baseOpts = ["any", ...this.availableFilters.base_models];
+        this._populateSelect(this.baseModelSelect.select, baseOpts, this.filters.base_model);
+        this.baseModelSelect.wrapper.style.display = (baseOpts.length <= 1) ? "none" : "flex";
+
+        // Type
+        const typeOpts = ["any", ...this.availableFilters.types];
+        this._populateSelect(this.typeSelect.select, typeOpts, this.filters.type);
+        this.typeSelect.wrapper.style.display = (typeOpts.length <= 1) ? "none" : "flex";
+
+        // Precision
+        const precOpts = ["any", ...this.availableFilters.precisions];
+        this._populateSelect(this.precisionSelect.select, precOpts, this.filters.precision);
+        this.precisionSelect.wrapper.style.display = (precOpts.length <= 1) ? "none" : "flex";
+    }
+
     renderModels() {
-        // Clear content but keep loader
         Array.from(this.contentArea.children).forEach(child => {
             if (child !== this.loader) this.contentArea.removeChild(child);
         });
@@ -337,36 +374,21 @@ class ModelDatabaseDialog {
             return;
         }
 
-        // Apply grouping logic: Group by "Family" -> Folder
-        // Heuristic: Simplify filename to find common prefix?
-        // Or simplistic approach: just list them for now but support folder structure if implied?
-        // User said: "catalogue is list of entries... each entry is folder where group different precision... If folder have only one version it shouldn't have folder sign"
-
-        // Let's group by a "Stem" (removing extension, precision, type suffixes)
-        // This is hard to do perfectly on frontend without metadata.
-        // We'll use a simple heuristic:
-        // 1. Remove extension
-        // 2. Remove known suffixes (fp16, int4, q8_0, etc.)
-        // 3. Remove "base" suffix if any?
-
         const grouped = {};
-
         const precisionRegex = /[-_.]?(fp32|fp16|bf16|fp8|int8|int4|fp4|q[2-8]_|iq4_)[a-zA-Z0-9_]*$/i;
 
         this.models.forEach(model => {
             let name = model.filename;
-            // Remove extension
-            name = name.replace(/\.[^/.]+$/, "");
-            // Remove precision/quant suffix
-            name = name.replace(precisionRegex, "");
-            // Remove -gguf or -svdq markers
-            name = name.replace(/[-_]?(gguf|svdq)/i, "");
+            // Fuzzy grouping normalization: remove extension, precision, separators
+            let base = name.replace(/\.[^/.]+$/, "");
+            base = base.replace(precisionRegex, "");
+            base = base.replace(/[-_]?(gguf|svdq)/i, "");
 
-            // Clean trail
-            name = name.replace(/[-_]$/, "");
+            // Normalize separators for grouping key
+            const key = base.toLowerCase().replace(/[-_.]/g, " ").trim();
 
-            if (!grouped[name]) grouped[name] = [];
-            grouped[name].push(model);
+            if (!grouped[key]) grouped[key] = { name: base, items: [] };
+            grouped[key].items.push(model);
         });
 
         const listContainer = document.createElement("div");
@@ -374,17 +396,16 @@ class ModelDatabaseDialog {
         listContainer.style.flexDirection = "column";
         listContainer.style.gap = "8px";
 
-        // Sort groups by name
         const sortedKeys = Object.keys(grouped).sort();
 
         sortedKeys.forEach(key => {
             const group = grouped[key];
-            if (group.length === 1) {
-                // Render single item
-                listContainer.appendChild(this.renderModelCard(group[0], false));
+            if (group.items.length === 1) {
+                listContainer.appendChild(this.renderModelCard(group.items[0], false));
             } else {
-                // Render folder
-                listContainer.appendChild(this.renderFolderCard(key, group));
+                // Use the name from the first item as display name foundation, or the simplified base
+                // Use Title Case for display if we normalized it down
+                listContainer.appendChild(this.renderFolderCard(group.name, group.items));
             }
         });
 
@@ -424,42 +445,70 @@ class ModelDatabaseDialog {
         metaEl.style.color = "#aaa";
         metaEl.style.marginTop = "2px";
 
-        // Size format
         let sizeStr = "";
         if (model.size) {
             const gb = model.size / (1024 * 1024 * 1024);
             sizeStr = gb > 0.9 ? `${gb.toFixed(2)} GB` : `${(model.size / (1024 * 1024)).toFixed(0)} MB`;
         }
 
-        metaEl.textContent = `${model.type} | ${model.precision} ${sizeStr ? "| " + sizeStr : ""}`;
+        const typeStr = model.type !== "unknown" ? model.type : "";
+        const precStr = model.precision !== "unknown" ? model.precision : "";
+        const baseStr = model.base_model && model.base_model !== "unknown" ? model.base_model : "";
+
+        const tags = [baseStr, typeStr, precStr, sizeStr].filter(Boolean).join(" | ");
+        metaEl.textContent = tags;
 
         nameCol.appendChild(nameEl);
         nameCol.appendChild(metaEl);
-
         info.appendChild(nameCol);
+
+        if (model.installed) {
+            const badge = document.createElement("span");
+            badge.textContent = "Installed";
+            Object.assign(badge.style, {
+                backgroundColor: "#2f9e44",
+                color: "white",
+                padding: "2px 6px",
+                borderRadius: "4px",
+                fontSize: "10px",
+                marginLeft: "8px",
+                fontWeight: "bold"
+            });
+            // Try to put badge next to name
+            nameEl.appendChild(badge);
+        }
+
         card.appendChild(info);
 
         const actions = document.createElement("div");
 
         const dlBtn = document.createElement("button");
-        dlBtn.textContent = "Download";
+        const isInstalled = model.installed;
+
+        dlBtn.textContent = isInstalled ? "Installed" : "Download";
         Object.assign(dlBtn.style, {
             padding: "6px 12px",
-            backgroundColor: "#228be6",
+            backgroundColor: isInstalled ? "#37b24d" : "#228be6",
             color: "white",
             border: "none",
             borderRadius: "4px",
-            cursor: "pointer",
+            cursor: isInstalled ? "default" : "pointer",
             fontSize: "12px",
-            fontWeight: "600"
+            fontWeight: "600",
+            opacity: isInstalled ? "0.7" : "1"
         });
-        dlBtn.onmouseover = () => { if (!dlBtn.disabled) dlBtn.style.backgroundColor = "#1c7ed6"; };
-        dlBtn.onmouseout = () => { if (!dlBtn.disabled) dlBtn.style.backgroundColor = "#228be6"; };
 
-        dlBtn.onclick = (e) => {
-            e.stopPropagation();
-            this.triggerDownload(model, dlBtn);
-        };
+        dlBtn.disabled = isInstalled;
+
+        if (!isInstalled) {
+            dlBtn.onmouseover = () => { if (!dlBtn.disabled) dlBtn.style.backgroundColor = "#1c7ed6"; };
+            dlBtn.onmouseout = () => { if (!dlBtn.disabled) dlBtn.style.backgroundColor = "#228be6"; };
+
+            dlBtn.onclick = (e) => {
+                e.stopPropagation();
+                this.triggerDownload(model, dlBtn);
+            };
+        }
 
         actions.appendChild(dlBtn);
         card.appendChild(actions);
@@ -560,7 +609,6 @@ class ModelDatabaseDialog {
                 }
                 return;
             }
-
             console.log("Queued download for", model.filename);
 
         } catch (e) {
@@ -572,6 +620,5 @@ class ModelDatabaseDialog {
         }
     }
 }
-
 
 export const modelDatabaseDialog = new ModelDatabaseDialog();

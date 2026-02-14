@@ -168,11 +168,14 @@ const createMenuItem = (label, actionName) => {
     item.addEventListener("mouseleave", () => {
         item.style.background = "transparent";
     });
-    item.addEventListener("click", (event) => {
-        event.stopPropagation();
-        hideMenu();
-        runAction(actionName);
-    });
+
+    if (actionName) {
+        item.addEventListener("click", (event) => {
+            event.stopPropagation();
+            hideMenu();
+            runAction(actionName);
+        });
+    }
 
     return item;
 };
@@ -206,7 +209,7 @@ const ensureMenu = () => {
     menu.appendChild(createMenuItem("Auto-download models", "runAutoDownload"));
 
     // Model Database
-    const dbItem = createMenuItem("Model database", "showModelDatabase");
+    const dbItem = createMenuItem("Model database", null);
     dbItem.onclick = (e) => {
         e.stopPropagation();
         hideMenu();
