@@ -193,10 +193,10 @@ def _load_cloud_marketplace_catalog() -> dict:
             # popular-models.json has "models" dict
             raw_models = data.get("models", {})
             
-            # Filter for cloud entries only
+            # Filter: include everything unless explicitly hidden
             filtered_models = {}
             for name, meta in raw_models.items():
-                if meta.get("source") == "cloud_marketplace_export":
+                if meta.get("library_visible") is not False:
                     filtered_models[name] = meta
                     
     except Exception as e:
@@ -2756,11 +2756,11 @@ async def model_database_get_filters(request):
         types = set()
         precisions = set()
         
-        for m in models.values():
-            if m.get("source") != "cloud_marketplace_export":
-                continue
+        for filename, data in models.items():
+            # if data.get("source") != "cloud_marketplace_export":
+            #     continue
                 
-            cat = m.get("directory", "")
+            cat = data.get("directory", "")
             if category and category != "any":
                  # Simple check: exact match or maybe subdirectory logic?
                  # Current logic uses exact string in "directory" field mostly
@@ -2768,14 +2768,14 @@ async def model_database_get_filters(request):
                      continue
             
             # Infer base model if not present
-            base = m.get("base_model") or _infer_model_base_type(m.get("filename", ""), m)
+            base = data.get("base_model") or _infer_model_base_type(filename, data)
             if base and base != "unknown": 
                 base_models.add(base)
                 
-            t = m.get("type", "unknown")
+            t = data.get("type", "unknown")
             if t and t != "unknown": types.add(t)
             
-            p = _canonical_precision(m.get("precision", "unknown"))
+            p = _canonical_precision(data.get("precision", "unknown"))
             if p and p != "unknown": precisions.add(p)
             
         return web.json_response({
@@ -2848,10 +2848,7 @@ async def model_database_list_models(request):
         
         results = []
         
-        for filename, data in models.values():
-            if data.get("source") != "cloud_marketplace_export":
-                continue
-
+        for filename, data in models.items():
             # 1. Category Filter
             model_dir = str(data.get("directory") or "").replace("\\", "/")
             if category and category != "any":
