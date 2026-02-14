@@ -1087,8 +1087,8 @@ app.registerExtension({
                     flexDirection: "column",
                     alignItems: "flex-start",
                     gap: "8px",
-                    marginTop: "8px",
-                    minHeight: "132px",
+                    marginTop: "10px",
+                    minHeight: "88px",
                 });
                 root.appendChild(actions);
 
@@ -1128,6 +1128,8 @@ app.registerExtension({
                 gap: "8px",
                 flexWrap: "wrap",
                 width: "100%",
+                minHeight: "40px",
+                alignItems: "center",
                 visibility: "hidden",
                 pointerEvents: "none",
             });
@@ -1138,27 +1140,29 @@ app.registerExtension({
             backupSelectedRow.appendChild(backupDeleteSelectedBtn);
             backupSelectedRow.appendChild(backupClearSelectionBtn);
 
-            backupPanel.actions.appendChild(backupSelectedRow);
             backupPanel.actions.appendChild(backupDownloadAllBtn);
+            backupPanel.actions.appendChild(backupSelectedRow);
 
             const settingsUi = app?.ui?.settings;
             const fileSizeLimitRow = document.createElement("div");
             Object.assign(fileSizeLimitRow.style, {
                 display: "flex",
-                flexDirection: "column",
-                gap: "6px",
+                alignItems: "center",
+                gap: "8px",
                 width: "100%",
+                minHeight: "40px",
             });
 
-            const fileSizeLimitLabel = document.createElement("div");
+            const fileSizeLimitLabel = document.createElement("span");
             fileSizeLimitLabel.textContent = "Maximum individual file size (GB)";
             Object.assign(fileSizeLimitLabel.style, {
                 fontSize: "12px",
-                fontWeight: "600",
+                fontWeight: "500",
                 color: "var(--descrip-text, #999)",
-                textTransform: "uppercase",
-                letterSpacing: "0.03em",
-                lineHeight: "1.2",
+                textTransform: "none",
+                letterSpacing: "0",
+                lineHeight: "1",
+                whiteSpace: "nowrap",
             });
 
             const fileSizeLimitInput = document.createElement("input");
@@ -1168,16 +1172,17 @@ app.registerExtension({
             fileSizeLimitInput.max = "100";
             fileSizeLimitInput.step = "1";
             Object.assign(fileSizeLimitInput.style, {
-                width: "100%",
-                minHeight: "40px",
-                borderRadius: "10px",
+                width: "64px",
+                minHeight: "30px",
+                borderRadius: "8px",
                 border: `1px solid ${TEMPLATE_DIALOG_TOKENS.border}`,
                 background: "var(--modal-panel-background, var(--comfy-input-bg))",
                 color: "var(--input-text)",
-                padding: "0 12px",
-                fontSize: "14px",
+                padding: "0 8px",
+                fontSize: "13px",
                 fontWeight: "500",
                 boxSizing: "border-box",
+                textAlign: "center",
             });
 
             const initialFileLimit = normalizeFileSizeLimit(
@@ -1201,8 +1206,8 @@ app.registerExtension({
             fileSizeLimitRow.appendChild(fileSizeLimitInput);
 
             const localAddSelectedBtn = createButton("↑ Upload to backup", "primary");
-            localPanel.actions.appendChild(fileSizeLimitRow);
             localPanel.actions.appendChild(localAddSelectedBtn);
+            localPanel.actions.appendChild(fileSizeLimitRow);
 
             const setStatus = (text) => {
                 status.textContent = text || "";
