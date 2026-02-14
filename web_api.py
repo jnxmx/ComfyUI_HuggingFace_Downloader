@@ -151,9 +151,7 @@ MODEL_LIBRARY_CATEGORY_CANONICAL = {
 MODEL_DATABASE_CLOUD_CATALOG_PATH = os.path.join(
     os.path.dirname(__file__),
     "metadata",
-    "marketplace_extract",
-    "from_dump",
-    "cloud_marketplace_models.json",
+    "popular-models.json",
 )
 
 _model_database_catalog_cache = {"mtime": 0.0, "models": {}}
@@ -176,14 +174,22 @@ def _load_cloud_marketplace_catalog() -> dict:
     try:
         with open(MODEL_DATABASE_CLOUD_CATALOG_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
-            models = data.get("models", {})
+            # popular-models.json has "models" dict
+            raw_models = data.get("models", {})
+            
+            # Filter for cloud entries only
+            filtered_models = {}
+            for name, meta in raw_models.items():
+                if meta.get("source") == "cloud_marketplace_export":
+                    filtered_models[name] = meta
+                    
     except Exception as e:
-        print(f"[ERROR] Failed to load cloud marketplace catalog: {e}")
-        models = {}
+        print(f"[ERROR] Failed to load popular models catalog for database: {e}")
+        filtered_models = {}
 
     with _model_database_catalog_lock:
-        _model_database_catalog_cache = {"mtime": mtime, "models": models}
-    return models
+        _model_database_catalog_cache = {"mtime": mtime, "models": filtered_models}
+    return filtered_models
 
 
 def _get_model_database_svdq_compatibility() -> str:
