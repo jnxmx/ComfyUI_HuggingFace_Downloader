@@ -145,6 +145,52 @@ MODEL_LIBRARY_CATEGORY_CANONICAL = {
     "flashvsr": "FlashVSR",
     "flashvsr-v1.1": "FlashVSR-v1.1",
 }
+
+# --- Model Database Helpers ---
+
+MODEL_DATABASE_CLOUD_CATALOG_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "metadata",
+    "marketplace_extract",
+    "from_dump",
+    "cloud_marketplace_models.json",
+)
+
+_model_database_catalog_cache = {"mtime": 0.0, "models": {}}
+_model_database_catalog_lock = threading.Lock()
+
+def _load_cloud_marketplace_catalog() -> dict:
+    global _model_database_catalog_cache
+    if not os.path.exists(MODEL_DATABASE_CLOUD_CATALOG_PATH):
+        return {}
+
+    try:
+        mtime = os.path.getmtime(MODEL_DATABASE_CLOUD_CATALOG_PATH)
+    except Exception:
+        return {}
+
+    with _model_database_catalog_lock:
+        if _model_database_catalog_cache["mtime"] == mtime:
+            return _model_database_catalog_cache["models"]
+
+    try:
+        with open(MODEL_DATABASE_CLOUD_CATALOG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            models = data.get("models", {})
+    except Exception as e:
+        print(f"[ERROR] Failed to load cloud marketplace catalog: {e}")
+        models = {}
+
+    with _model_database_catalog_lock:
+        _model_database_catalog_cache = {"mtime": mtime, "models": models}
+    return models
+
+
+def _get_model_database_svdq_compatibility() -> str:
+    """Returns 'fp4' for Blackwell GPUs, 'int4' otherwise."""
+    # Lazy import to avoid circular dependency issues if any
+    from .model_discovery import _preferred_nunchaku_precision
+    return _preferred_nunchaku_precision()
 PRIORITY_RECLASS_CATEGORY_UNKNOWN = "unknown"
 PRIORITY_RECLASS_LORA_MARKERS = (
     " lora",
@@ -2611,3 +2657,156 @@ def setup(app):
     app.router.add_put(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}", hf_model_library_asset_update)
     app.router.add_post(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_add_tags)
     app.router.add_delete(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_remove_tags)
+
+    # --- Model Database Routes ---
+    app.router.add_get("/api/model_database/categories", model_database_list_categories)
+    app.router.add_get("/api/model_database/models", model_database_list_models)
+    app.router.add_get("/api/model_database/svdq_compatibility", model_database_svdq_check)
+
+
+def _canonical_precision(val: str) -> str:
+    v = str(val or "").lower().strip()
+    if not v:
+        return "unknown"
+    if "fp16" in v: return "fp16"
+    if "bf16" in v: return "bf16"
+    if "fp32" in v: return "fp32"
+    if "fp8" in v: return "fp8"
+    if "int8" in v: return "int8"
+    if "int4" in v: return "int4"
+    if "fp4" in v: return "fp4"
+    # GGUF quants
+    if "q8_0" in v: return "Q8_0"
+    if "q6_k" in v: return "Q6_K"
+    if "q5_k_m" in v: return "Q5_K_M"
+    if "q5_0" in v: return "Q5_0"
+    if "q4_k_m" in v: return "Q4_K_M"
+    if "q4_0" in v: return "Q4_0"
+    if "iq4_nl" in v: return "IQ4_NL"
+    return "other"
+
+def _canonical_type(val: str, filename: str) -> str:
+    # Basic type inference from extension/name
+    f = filename.lower()
+    if ".gguf" in f: return "gguf"
+    if "svdq" in f: return "svdq"
+    if ".safetensors" in f: return "safetensors"
+    if ".pt" in f or ".pth" in f: return "pt"
+    if ".bin" in f: return "bin"
+    return "other"
+
+
+async def model_database_list_categories(request):
+    try:
+        models = _load_cloud_marketplace_catalog()
+        categories = set()
+        for m in models.values():
+            cat = m.get("directory")
+            if cat:
+                # Use the top-level directory as category usually
+                # But user request specific list:
+                # "diffusion_models/unet", "text_encoders/clip" imply deeper structure support?
+                # The user request listed specific top-level folders basically.
+                # Let's just return all unique directory values found.
+                categories.add(str(cat).replace("\\", "/"))
+        
+        # Sort output
+        return web.json_response(sorted(list(categories)))
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def model_database_svdq_check(request):
+    try:
+        return web.json_response({"compatibility": _get_model_database_svdq_compatibility()})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def model_database_list_models(request):
+    try:
+        category = request.query.get("category")
+        base_model_filter = request.query.get("base_model") # User provided
+        val_type_filter = request.query.get("type")
+        precision_filter = request.query.get("precision")
+        search_query = (request.query.get("search") or "").lower().strip()
+        
+        svdq_compat = _get_model_database_svdq_compatibility() # "fp4" or "int4"
+
+        models = _load_cloud_marketplace_catalog()
+        
+        # We need to group models by "Base Model" family if possible, 
+        # but the JSON doesn't strictly have a "family" field. 
+        # We will grouping logic in frontend or here?
+        # User request: "catalogue is list of entries... each entry is folder where group different precision"
+        # So backend should probably return flat list and frontend groups, OR backend groups.
+        # User said: "It should have field 'base model' for checkpoints..."
+        # The cloud catalog JSON does NOT have 'base_model' field in the sample I saw. 
+        # I might need to infer it or just pass everything to frontend.
+        # Given the complexity of "groups", let's handle grouping in frontend 
+        # but return enough metadata. 
+        
+        results = []
+        
+        for filename, data in models.items():
+            # 1. Category Filter
+            model_dir = str(data.get("directory") or "").replace("\\", "/")
+            if category and category != model_dir:
+                continue
+                
+            # Precision / Type Inference
+            # Use 'filename' for this
+            f_lower = filename.lower()
+            
+            # SVDQ Hardware Filtering
+            # "as we have detection of svdq type for users gpu in code it show only usable on current machine svdq variants"
+            if "svdq" in f_lower:
+                # If compat is fp4, show fp4. If compat is int4, show int4.
+                # Hide mismatched SVDQ.
+                if svdq_compat == "fp4" and "int4" in f_lower:
+                    continue
+                if svdq_compat == "int4" and "fp4" in f_lower:
+                    continue
+            
+            m_type = _canonical_type(data.get("type"), filename)
+            m_precision = _canonical_precision(filename)
+
+            # 2. Search Filter (Simple containment)
+            if search_query:
+                # Check filename, tags?
+                # Cloud catalog keys: url, type, directory, source, asset_id, provider, content_length, repo_id
+                if search_query not in f_lower:
+                    continue
+
+            # 3. Type Filter
+            if val_type_filter and val_type_filter != "any" and val_type_filter != m_type:
+                continue
+
+            # 4. Precision Filter
+            if precision_filter and precision_filter != "any" and precision_filter != m_precision:
+                continue
+                
+            # 5. Base Model Filter
+            # Since we don't have this in DB, we rely on implicit filtering? 
+            # Or if user passes base_model string, we search for it?
+            if base_model_filter and base_model_filter != "any":
+                 if base_model_filter.lower() not in f_lower:
+                     continue
+
+            # Return simplified object for UI
+            results.append({
+                "filename": filename,
+                "url": data.get("url"),
+                "directory": data.get("directory"),
+                "repo_id": data.get("repo_id"),
+                "size": data.get("content_length"),
+                "type": m_type,
+                "precision": m_precision,
+                "preview_url": data.get("preview_url") # Some items have this
+            })
+
+        return web.json_response(results)
+
+    except Exception as e:
+        traceback.print_exc()
+        return web.json_response({"error": str(e)}, status=500)

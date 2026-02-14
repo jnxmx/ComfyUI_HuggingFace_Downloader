@@ -1,4 +1,5 @@
 import { app } from "../../../scripts/app.js";
+import { modelDatabaseDialog } from "./model_database.js";
 
 const MENU_ID = "hf-downloader-top-menu";
 const BUTTON_TOOLTIP = "Hugging Face Downloader";
@@ -203,6 +204,16 @@ const ensureMenu = () => {
 
     menu.appendChild(createMenuItem("Backup Manager", "showBackupDialog"));
     menu.appendChild(createMenuItem("Auto-download models", "runAutoDownload"));
+
+    // Model Database
+    const dbItem = createMenuItem("Model database", "showModelDatabase");
+    dbItem.onclick = (e) => {
+        e.stopPropagation();
+        hideMenu();
+        modelDatabaseDialog.show();
+    };
+    menu.appendChild(dbItem);
+
     menu.appendChild(createMenuItem("Download new model", "showManualDownloadDialog"));
 
     document.body.appendChild(menu);
