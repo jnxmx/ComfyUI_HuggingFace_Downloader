@@ -2692,10 +2692,27 @@ def setup(app):
     app.router.add_get("/api/model_database/svdq_compatibility", model_database_svdq_check)
 
 
-def _canonical_precision(val: str) -> str:
+def _canonical_precision(val: str, filename: str = "") -> str:
     v = str(val or "").lower().strip()
-    if not v:
+    f = str(filename or "").lower().strip().replace("-", "_")
+    
+    # regex to find common precision patterns in filename
+    # matches: fp16, bf16, fp32, fp8_e4m3fn, fp8_e5m2, int8, int4, fp4, q4_k_m, etc.
+    # also looks for trailing _scaled
+    import re
+    prec_pattern = r"(fp16|bf16|fp32|fp8(?:_e\dm\d\w*)?|int8|int4|fp4|q\d_\w*|iq\d_\w*)"
+    match = re.search(prec_pattern, f)
+    
+    if match:
+        p = match.group(1)
+        if "_scaled" in f:
+            p += "_scaled"
+        return p
+        
+    if not v or v == "unknown":
         return "unknown"
+        
+    # fallback to val if filename check failed
     if "fp16" in v: return "fp16"
     if "bf16" in v: return "bf16"
     if "fp32" in v: return "fp32"
@@ -2703,14 +2720,6 @@ def _canonical_precision(val: str) -> str:
     if "int8" in v: return "int8"
     if "int4" in v: return "int4"
     if "fp4" in v: return "fp4"
-    # GGUF quants
-    if "q8_0" in v: return "Q8_0"
-    if "q6_k" in v: return "Q6_K"
-    if "q5_k_m" in v: return "Q5_K_M"
-    if "q5_0" in v: return "Q5_0"
-    if "q4_k_m" in v: return "Q4_K_M"
-    if "q4_0" in v: return "Q4_0"
-    if "iq4_nl" in v: return "IQ4_NL"
     return "other"
 
 def _canonical_type(val: str, filename: str) -> str:
@@ -2725,6 +2734,17 @@ def _canonical_type(val: str, filename: str) -> str:
 
 
 
+
+
+def _map_model_type(filename: str, raw_type: str) -> str:
+    """Map raw model type to user-friendly categories: native, gguf, nunchaku."""
+    f_lower = filename.lower()
+    raw_type_lower = str(raw_type).lower()
+    if "svdq" in f_lower or raw_type_lower == "svdq":
+        return "nunchaku"
+    if f_lower.endswith(".gguf") or raw_type_lower == "gguf":
+        return "gguf"
+    return "native"
 
 
 async def model_database_get_filters(request):
@@ -2746,10 +2766,10 @@ async def model_database_get_filters(request):
                  if str(cat).replace("\\", "/") != category:
                      continue
             
-            t = data.get("type", "unknown")
-            if t and t != "unknown": types.add(t)
+            t = _map_model_type(filename, data.get("type", ""))
+            types.add(t)
             
-            p = _canonical_precision(data.get("precision", "unknown"))
+            p = _canonical_precision(data.get("precision", "unknown"), filename)
             if p and p != "unknown": precisions.add(p)
             
         return web.json_response({
@@ -2839,8 +2859,8 @@ async def model_database_list_models(request):
                     continue
             
             # Infer Metadata
-            m_type = data.get("type") or "unknown"
-            m_precision = _canonical_precision(data.get("precision", "unknown"))
+            m_type = _map_model_type(filename, data.get("type", ""))
+            m_precision = _canonical_precision(data.get("precision", "unknown"), filename)
 
             # 2. Search Filter (Fuzzy)
             if search_query:
