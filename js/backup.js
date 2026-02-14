@@ -1119,8 +1119,12 @@ app.registerExtension({
             const backupDownloadAllBtn = createButton("↓ Download full backup", "success");
             const backupDeleteSelectedBtn = createButton("Delete selected from backup", "danger");
             const backupClearSelectionBtn = createButton("Clear selection", "secondary");
-            backupDeleteSelectedBtn.style.display = "none";
-            backupClearSelectionBtn.style.display = "none";
+            const setBackupSelectionButtonsVisible = (visible) => {
+                const displayValue = visible ? "inline-flex" : "none";
+                backupDeleteSelectedBtn.style.setProperty("display", displayValue, "important");
+                backupClearSelectionBtn.style.setProperty("display", displayValue, "important");
+            };
+            setBackupSelectionButtonsVisible(false);
 
             backupPanel.actions.appendChild(backupDownloadAllBtn);
             backupPanel.actions.appendChild(backupDeleteSelectedBtn);
@@ -1179,8 +1183,7 @@ app.registerExtension({
                 backupDownloadAllBtn.textContent = hasBackupSelection
                     ? "↓ Download selected only"
                     : "↓ Download full backup";
-                backupDeleteSelectedBtn.style.display = hasBackupSelection ? "inline-flex" : "none";
-                backupClearSelectionBtn.style.display = hasBackupSelection ? "inline-flex" : "none";
+                setBackupSelectionButtonsVisible(hasBackupSelection);
                 backupDownloadAllBtn.disabled = busy;
                 backupDeleteSelectedBtn.disabled = busy || backupItems.length === 0;
                 backupClearSelectionBtn.disabled = busy || backupItems.length === 0;
