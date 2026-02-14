@@ -46,7 +46,6 @@ app.registerExtension({
             text: "var(--input-text, var(--text-color, var(--p-text-color, #e5e7eb)))",
             shadow: "var(--shadow-interface, 0 12px 28px rgba(0, 0, 0, 0.45))",
         });
-        const BACKUP_FILE_SIZE_LIMIT_SETTING_ID = "downloaderbackup.file_size_limit";
 
         const applyTemplateDialogOverlayStyle = (overlay, zIndex = 9999) => {
             Object.assign(overlay.style, {
@@ -326,12 +325,6 @@ app.registerExtension({
                 button.classList.add("p-button-danger");
             }
             return button;
-        };
-
-        const normalizeFileSizeLimit = (value) => {
-            const num = Number(value);
-            if (!Number.isFinite(num)) return 5;
-            return Math.max(1, Math.min(100, Math.round(num)));
         };
 
         const showRestartDialog = () => {
@@ -909,6 +902,7 @@ app.registerExtension({
             const backupState = createSelectionState();
             const localState = createSelectionState();
             let busy = false;
+            let backupSelectionTouched = false;
 
             const overlay = document.createElement("div");
             currentDialog = overlay;
@@ -1132,72 +1126,8 @@ app.registerExtension({
             backupPanel.actions.appendChild(backupDeleteSelectedBtn);
             backupPanel.actions.appendChild(backupClearSelectionBtn);
 
-            const settingsUi = app?.ui?.settings;
-            const fileSizeLimitRow = document.createElement("div");
-            Object.assign(fileSizeLimitRow.style, {
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                width: "auto",
-                minHeight: "40px",
-                flex: "0 0 auto",
-            });
-
-            const fileSizeLimitLabel = document.createElement("span");
-            fileSizeLimitLabel.textContent = "Maximum individual file size (GB)";
-            Object.assign(fileSizeLimitLabel.style, {
-                fontSize: "12px",
-                fontWeight: "500",
-                color: "var(--descrip-text, #999)",
-                textTransform: "none",
-                letterSpacing: "0",
-                lineHeight: "1",
-                whiteSpace: "nowrap",
-            });
-
-            const fileSizeLimitInput = document.createElement("input");
-            fileSizeLimitInput.type = "number";
-            fileSizeLimitInput.className = "p-inputtext p-component";
-            fileSizeLimitInput.min = "1";
-            fileSizeLimitInput.max = "100";
-            fileSizeLimitInput.step = "1";
-            Object.assign(fileSizeLimitInput.style, {
-                width: "64px",
-                minHeight: "30px",
-                borderRadius: "8px",
-                border: `1px solid ${TEMPLATE_DIALOG_TOKENS.border}`,
-                background: "var(--modal-panel-background, var(--comfy-input-bg))",
-                color: "var(--input-text)",
-                padding: "0 8px",
-                fontSize: "13px",
-                fontWeight: "500",
-                boxSizing: "border-box",
-                textAlign: "center",
-            });
-
-            const initialFileLimit = normalizeFileSizeLimit(
-                settingsUi?.getSettingValue?.(BACKUP_FILE_SIZE_LIMIT_SETTING_ID)
-            );
-            fileSizeLimitInput.value = String(initialFileLimit);
-            fileSizeLimitInput.disabled = !Boolean(settingsUi?.setSettingValue);
-            if (fileSizeLimitInput.disabled) {
-                fileSizeLimitInput.title = "Setting UI not available in this build";
-                fileSizeLimitInput.style.opacity = "0.7";
-            }
-            fileSizeLimitInput.addEventListener("change", () => {
-                const next = normalizeFileSizeLimit(fileSizeLimitInput.value);
-                fileSizeLimitInput.value = String(next);
-                if (settingsUi?.setSettingValue) {
-                    settingsUi.setSettingValue(BACKUP_FILE_SIZE_LIMIT_SETTING_ID, next);
-                }
-            });
-
-            fileSizeLimitRow.appendChild(fileSizeLimitLabel);
-            fileSizeLimitRow.appendChild(fileSizeLimitInput);
-
             const localAddSelectedBtn = createButton("↑ Upload to backup", "primary");
             localPanel.actions.appendChild(localAddSelectedBtn);
-            localPanel.actions.appendChild(fileSizeLimitRow);
 
             const setStatus = (text) => {
                 status.textContent = text || "";
@@ -1245,7 +1175,7 @@ app.registerExtension({
                 const backupItems = getSelectedItems(backupState);
                 const localItems = getSelectedItems(localState);
 
-                const hasBackupSelection = backupItems.length > 0;
+                const hasBackupSelection = backupSelectionTouched && backupItems.length > 0;
                 backupDownloadAllBtn.textContent = hasBackupSelection
                     ? "↓ Download selected only"
                     : "↓ Download full backup";
@@ -1278,6 +1208,7 @@ app.registerExtension({
             const loadTree = async () => {
                 resetSelectionStructure(backupState);
                 resetSelectionStructure(localState);
+                backupSelectionTouched = false;
 
                 backupPanel.tree.innerHTML = "Loading...";
                 localPanel.tree.innerHTML = "Loading...";
@@ -1289,7 +1220,10 @@ app.registerExtension({
                 backupPanel.tree.innerHTML = "";
                 localPanel.tree.innerHTML = "";
 
-                renderGroupedTree(payload.backup || [], backupPanel.tree, backupState, updateActions);
+                renderGroupedTree(payload.backup || [], backupPanel.tree, backupState, () => {
+                    backupSelectionTouched = true;
+                    updateActions();
+                });
                 renderGroupedTree(payload.local || [], localPanel.tree, localState, updateActions);
                 initializeDefaultSelections(backupState);
                 initializeDefaultSelections(localState);
@@ -1305,7 +1239,7 @@ app.registerExtension({
 
             backupDownloadAllBtn.onclick = async () => {
                 const items = getSelectedItems(backupState);
-                if (items.length) {
+                if (backupSelectionTouched && items.length) {
                     try {
                         showOperationProgress({
                             title: "Backup restore in progress. Please wait.",
