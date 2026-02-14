@@ -143,7 +143,7 @@ app.registerExtension({
 }
 .hf-backup-action-btn.p-button {
     min-height: 40px;
-    padding: 0.45rem 1rem;
+    padding: 0.5rem 0.8rem;
     font-size: 14px;
     font-weight: 600;
     font-family: var(--font-inter, Inter, sans-serif);
@@ -153,6 +153,11 @@ app.registerExtension({
     background: var(--secondary-background) !important;
     color: var(--base-foreground) !important;
     transition: background-color 120ms ease, opacity 120ms ease;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    line-height: 1.1;
 }
 .hf-backup-action-btn.p-button:hover {
     background: var(--secondary-background-hover) !important;
@@ -318,8 +323,6 @@ app.registerExtension({
                 button.classList.add("hf-btn-primary");
             } else if (tone === "danger") {
                 button.classList.add("p-button-danger");
-            } else if (tone === "secondary") {
-                button.classList.add("p-button-secondary");
             }
             return button;
         };
@@ -546,8 +549,8 @@ app.registerExtension({
             return [
                 { id: "core", title: "Settings / Workflows", nodes: groups.core },
                 { id: "custom", title: "Custom Nodes", nodes: groups.custom },
-                { id: "models", title: "Models", nodes: groups.models },
                 { id: "io", title: "Input / Output", nodes: groups.io },
+                { id: "models", title: "Models", nodes: groups.models },
             ];
         };
 
@@ -570,9 +573,9 @@ app.registerExtension({
                 gridTemplateColumns: "16px 22px minmax(0,1fr)",
                 alignItems: "center",
                 gap: "8px",
-                padding: "3px 6px",
+                padding: "4px 6px",
                 color: node.selectable ? "var(--input-text)" : "var(--descrip-text, #999)",
-                minHeight: "22px",
+                minHeight: "24px",
                 minWidth: "0",
             });
 
@@ -583,7 +586,7 @@ app.registerExtension({
                 width: "16px",
                 textAlign: "center",
                 color: "var(--input-text)",
-                fontSize: "12px",
+                fontSize: "13px",
                 userSelect: "none",
                 opacity: "0.85",
             });
@@ -618,7 +621,7 @@ app.registerExtension({
 
             const label = document.createElement("span");
             label.textContent = node.label;
-            label.style.fontSize = "12px";
+            label.style.fontSize = "13px";
             label.style.flex = "1";
             label.style.minWidth = "0";
             label.style.overflowWrap = "anywhere";
@@ -1020,7 +1023,7 @@ app.registerExtension({
                     minHeight: "420px",
                     display: "flex",
                     flexDirection: "column",
-                    gap: "6px",
+                    gap: "12px",
                 });
 
                 const titleRow = document.createElement("div");
@@ -1076,6 +1079,7 @@ app.registerExtension({
                     display: "flex",
                     flexWrap: "wrap",
                     gap: "6px",
+                    marginTop: "8px",
                 });
                 root.appendChild(actions);
 
@@ -1084,7 +1088,7 @@ app.registerExtension({
 
             const localPanel = makePanel("Local Install (ComfyUI)");
             const backupPanel = makePanel("Backup (Hugging Face)");
-            localPanel.tree.style.background = TEMPLATE_DIALOG_TOKENS.panel;
+            localPanel.tree.style.background = "#000000";
 
             body.appendChild(localPanel.root);
             body.appendChild(backupPanel.root);
@@ -1108,7 +1112,7 @@ app.registerExtension({
             overlay.appendChild(panel);
             document.body.appendChild(overlay);
 
-            const backupDownloadAllBtn = createButton("↓ Download all", "success");
+            const backupDownloadAllBtn = createButton("↓ Download full backup", "success");
             const backupSelectedRow = document.createElement("div");
             Object.assign(backupSelectedRow.style, {
                 display: "none",
