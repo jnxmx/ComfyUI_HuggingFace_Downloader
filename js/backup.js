@@ -1088,6 +1088,7 @@ app.registerExtension({
                     alignItems: "flex-start",
                     gap: "8px",
                     marginTop: "8px",
+                    minHeight: "132px",
                 });
                 root.appendChild(actions);
 
@@ -1147,7 +1148,6 @@ app.registerExtension({
                 flexDirection: "column",
                 gap: "6px",
                 width: "100%",
-                maxWidth: "360px",
             });
 
             const fileSizeLimitLabel = document.createElement("div");
