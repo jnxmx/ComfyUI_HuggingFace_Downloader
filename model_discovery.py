@@ -735,6 +735,9 @@ def resolve_node_folder_for_widget(
             return chosen
 
     fallback = resolve_node_folder(node)
+    if _is_strict_node_folder_mapping(node_type, fallback):
+        return fallback
+
     filename_hint = _guess_folder_from_filename(widget_value)
     known_dir = _lookup_known_directory_for_filename(widget_value)
     known_norm = normalize_save_path(known_dir) if known_dir else None
@@ -767,6 +770,8 @@ def apply_known_directory_hints(models: list[dict]) -> None:
             continue
 
         current = normalize_save_path(model.get("suggested_folder")) or ""
+        if _is_strict_node_folder_mapping(model.get("node_type"), current):
+            continue
         if not current:
             model["suggested_folder"] = known_dir
             continue
@@ -1008,6 +1013,20 @@ def resolve_wanvideo_wrapper_folder(node_type_lower: str) -> str | None:
     return None
 
 
+def _is_strict_node_folder_mapping(node_type: str | None, folder: str | None) -> bool:
+    """
+    Treat explicit node-type mapping as authoritative for auto-download folder selection.
+    """
+    if not node_type or not folder:
+        return False
+    mapped = NODE_TYPE_MAPPING.get(node_type)
+    if not mapped:
+        return False
+    mapped_norm = normalize_save_path(mapped) or mapped
+    folder_norm = normalize_save_path(folder) or folder
+    return mapped_norm == folder_norm
+
+
 def _build_links_map(raw_links: list[Any]) -> dict:
     links_map = {}
     for link in raw_links:
@@ -1227,6 +1246,7 @@ def _collect_models_from_nodes(
                     "url": proxy_model.get("url"),
                     "node_id": node_id,
                     "node_title": node_title,
+                    "node_type": node_type,
                     "suggested_folder": proxy_model.get("suggested_folder"),
                     "origin": proxy_model.get("origin")
                 })
@@ -1265,6 +1285,7 @@ def _collect_models_from_nodes(
                         "url": url,
                         "node_id": node_id,
                         "node_title": node_title,
+                        "node_type": node_type,
                         "suggested_folder": suggested_folder
                     })
                     continue  # Skip generic widget scan for this node
@@ -1314,6 +1335,7 @@ def _collect_models_from_nodes(
                             "url": model_info.get("url"),
                             "node_id": node_id,
                             "node_title": node_title,
+                            "node_type": node_type,
                             "suggested_folder": model_info.get("directory")
                         })
                 
@@ -1353,6 +1375,7 @@ def _collect_models_from_nodes(
                                         "url": val,
                                         "node_id": node_id,
                                         "node_title": node_title,
+                                        "node_type": node_type,
                                         "suggested_folder": suggested_folder
                                     })
                                 continue
@@ -1376,6 +1399,7 @@ def _collect_models_from_nodes(
                                 "url": None,
                                 "node_id": node_id,
                                 "node_title": node_title,
+                                "node_type": node_type,
                                 "suggested_folder": suggested_folder
                             })
 
