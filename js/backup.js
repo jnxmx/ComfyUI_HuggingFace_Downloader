@@ -46,6 +46,7 @@ app.registerExtension({
             text: "var(--input-text, var(--text-color, var(--p-text-color, #e5e7eb)))",
             shadow: "var(--shadow-interface, 0 12px 28px rgba(0, 0, 0, 0.45))",
         });
+        const BACKUP_FILE_SIZE_LIMIT_SETTING_ID = "downloaderbackup.file_size_limit";
 
         const applyTemplateDialogOverlayStyle = (overlay, zIndex = 9999) => {
             Object.assign(overlay.style, {
@@ -325,6 +326,12 @@ app.registerExtension({
                 button.classList.add("p-button-danger");
             }
             return button;
+        };
+
+        const normalizeFileSizeLimit = (value) => {
+            const num = Number(value);
+            if (!Number.isFinite(num)) return 5;
+            return Math.max(1, Math.min(100, Math.round(num)));
         };
 
         const showRestartDialog = () => {
@@ -1077,8 +1084,9 @@ app.registerExtension({
                 const actions = document.createElement("div");
                 Object.assign(actions.style, {
                     display: "flex",
-                    flexWrap: "wrap",
-                    gap: "6px",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: "8px",
                     marginTop: "8px",
                 });
                 root.appendChild(actions);
@@ -1115,9 +1123,12 @@ app.registerExtension({
             const backupDownloadAllBtn = createButton("↓ Download full backup", "success");
             const backupSelectedRow = document.createElement("div");
             Object.assign(backupSelectedRow.style, {
-                display: "none",
+                display: "flex",
                 gap: "8px",
                 flexWrap: "wrap",
+                width: "100%",
+                visibility: "hidden",
+                pointerEvents: "none",
             });
             const backupDownloadSelectedBtn = createButton("↓ Download selected only", "success");
             const backupDeleteSelectedBtn = createButton("Delete selected from backup", "danger");
@@ -1126,10 +1137,71 @@ app.registerExtension({
             backupSelectedRow.appendChild(backupDeleteSelectedBtn);
             backupSelectedRow.appendChild(backupClearSelectionBtn);
 
-            backupPanel.actions.appendChild(backupDownloadAllBtn);
             backupPanel.actions.appendChild(backupSelectedRow);
+            backupPanel.actions.appendChild(backupDownloadAllBtn);
+
+            const settingsUi = app?.ui?.settings;
+            const fileSizeLimitRow = document.createElement("div");
+            Object.assign(fileSizeLimitRow.style, {
+                display: "flex",
+                flexDirection: "column",
+                gap: "6px",
+                width: "100%",
+                maxWidth: "360px",
+            });
+
+            const fileSizeLimitLabel = document.createElement("div");
+            fileSizeLimitLabel.textContent = "Maximum individual file size (GB)";
+            Object.assign(fileSizeLimitLabel.style, {
+                fontSize: "12px",
+                fontWeight: "600",
+                color: "var(--descrip-text, #999)",
+                textTransform: "uppercase",
+                letterSpacing: "0.03em",
+                lineHeight: "1.2",
+            });
+
+            const fileSizeLimitInput = document.createElement("input");
+            fileSizeLimitInput.type = "number";
+            fileSizeLimitInput.className = "p-inputtext p-component";
+            fileSizeLimitInput.min = "1";
+            fileSizeLimitInput.max = "100";
+            fileSizeLimitInput.step = "1";
+            Object.assign(fileSizeLimitInput.style, {
+                width: "100%",
+                minHeight: "40px",
+                borderRadius: "10px",
+                border: `1px solid ${TEMPLATE_DIALOG_TOKENS.border}`,
+                background: "var(--modal-panel-background, var(--comfy-input-bg))",
+                color: "var(--input-text)",
+                padding: "0 12px",
+                fontSize: "14px",
+                fontWeight: "500",
+                boxSizing: "border-box",
+            });
+
+            const initialFileLimit = normalizeFileSizeLimit(
+                settingsUi?.getSettingValue?.(BACKUP_FILE_SIZE_LIMIT_SETTING_ID)
+            );
+            fileSizeLimitInput.value = String(initialFileLimit);
+            fileSizeLimitInput.disabled = !Boolean(settingsUi?.setSettingValue);
+            if (fileSizeLimitInput.disabled) {
+                fileSizeLimitInput.title = "Setting UI not available in this build";
+                fileSizeLimitInput.style.opacity = "0.7";
+            }
+            fileSizeLimitInput.addEventListener("change", () => {
+                const next = normalizeFileSizeLimit(fileSizeLimitInput.value);
+                fileSizeLimitInput.value = String(next);
+                if (settingsUi?.setSettingValue) {
+                    settingsUi.setSettingValue(BACKUP_FILE_SIZE_LIMIT_SETTING_ID, next);
+                }
+            });
+
+            fileSizeLimitRow.appendChild(fileSizeLimitLabel);
+            fileSizeLimitRow.appendChild(fileSizeLimitInput);
 
             const localAddSelectedBtn = createButton("↑ Upload to backup", "primary");
+            localPanel.actions.appendChild(fileSizeLimitRow);
             localPanel.actions.appendChild(localAddSelectedBtn);
 
             const setStatus = (text) => {
@@ -1178,7 +1250,9 @@ app.registerExtension({
                 const backupItems = getSelectedItems(backupState);
                 const localItems = getSelectedItems(localState);
 
-                backupSelectedRow.style.display = backupItems.length > 0 ? "flex" : "none";
+                const hasBackupSelection = backupItems.length > 0;
+                backupSelectedRow.style.visibility = hasBackupSelection ? "visible" : "hidden";
+                backupSelectedRow.style.pointerEvents = hasBackupSelection ? "auto" : "none";
                 backupDownloadAllBtn.disabled = busy;
                 backupDownloadSelectedBtn.disabled = busy || backupItems.length === 0;
                 backupDeleteSelectedBtn.disabled = busy || backupItems.length === 0;
