@@ -11,13 +11,11 @@ class ModelDatabaseDialog {
         this.svdqCompatibility = "unknown";
         this.filters = {
             category: "diffusion_models",
-            base_model: "any",
             type: "any",
             precision: "any",
             search: ""
         };
         this.availableFilters = {
-            base_models: [],
             types: [],
             precisions: []
         };
@@ -190,19 +188,13 @@ class ModelDatabaseDialog {
         this.categorySelect = this.createSelect("Category", this.categories, this.filters.category, async (val) => {
             this.filters.category = val;
             // Reset other filters when category changes
-            this.filters.base_model = "any";
             this.filters.type = "any";
             this.filters.precision = "any";
             await this.updateFiltersAndModels();
         });
         this.filtersPanel.appendChild(this.categorySelect.wrapper);
 
-        // Base Model Select
-        this.baseModelSelect = this.createSelect("Base Model", ["any"], "any", (val) => {
-            this.filters.base_model = val;
-            this.fetchModels();
-        });
-        this.filtersPanel.appendChild(this.baseModelSelect.wrapper);
+
 
         // Type Filter
         this.typeSelect = this.createSelect("Type", ["any"], "any", (val) => {
@@ -343,11 +335,6 @@ class ModelDatabaseDialog {
     }
 
     updateFilterDropdowns() {
-        // Base Model
-        const baseOpts = ["any", ...this.availableFilters.base_models];
-        this._populateSelect(this.baseModelSelect.select, baseOpts, this.filters.base_model);
-        this.baseModelSelect.wrapper.style.display = (baseOpts.length <= 1) ? "none" : "flex";
-
         // Type
         const typeOpts = ["any", ...this.availableFilters.types];
         this._populateSelect(this.typeSelect.select, typeOpts, this.filters.type);
@@ -453,9 +440,8 @@ class ModelDatabaseDialog {
 
         const typeStr = model.type !== "unknown" ? model.type : "";
         const precStr = model.precision !== "unknown" ? model.precision : "";
-        const baseStr = model.base_model && model.base_model !== "unknown" ? model.base_model : "";
 
-        const tags = [baseStr, typeStr, precStr, sizeStr].filter(Boolean).join(" | ");
+        const tags = [typeStr, precStr, sizeStr].filter(Boolean).join(" | ");
         metaEl.textContent = tags;
 
         nameCol.appendChild(nameEl);

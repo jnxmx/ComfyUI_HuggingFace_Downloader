@@ -193,10 +193,15 @@ def _load_cloud_marketplace_catalog() -> dict:
             # popular-models.json has "models" dict
             raw_models = data.get("models", {})
             
-            # Filter: include everything unless explicitly hidden
+            # Filter: include cloud marketplace and manager model list
+            # Skip massive priority_repo_scrape which has messy metadata
             filtered_models = {}
             for name, meta in raw_models.items():
-                if meta.get("library_visible") is not False:
+                if meta.get("library_visible") is False:
+                    continue
+                
+                source = meta.get("source")
+                if source in ["cloud_marketplace_export", "comfyui_manager_model_list"]:
                     filtered_models[name] = meta
                     
     except Exception as e:
@@ -2719,32 +2724,7 @@ def _canonical_type(val: str, filename: str) -> str:
     return "other"
 
 
-def _infer_model_base_type(filename: str, metadata: dict) -> str:
-    """Infer the base model type from filename/metadata."""
-    # Check manual metadata if we ever add it
-    if metadata.get("base_model"):
-        return metadata.get("base_model")
 
-    name = filename.lower()
-    
-    # Heuristics based on keywords
-    if "pgdxl" in name: return "Pony"  # Playground? No, Pony Diffusion XL usually has explicit keywords or just uses SDXL base.
-    # Pony is SDXL based but user often wants separate filter.
-    if "pony" in name: return "Pony"
-    if "flux" in name: return "Flux"
-    if "sdxl" in name: return "SDXL"
-    if "sd3" in name: return "SD3"
-    if "hunyuan" in name: return "Hunyuan"
-    if "aura" in name: return "AuraFlow"
-    if "cosmos" in name: return "Cosmos"
-    if "ltx" in name: return "LTX"
-    if "pixart" in name: return "PixArt"
-    if "wan" in name: return "Wan 2.1"
-    if "2.1" in name and "wan" not in name: return "SD2.1" # Risky?
-    if "1.5" in name: return "SD1.5"
-    if "sd15" in name: return "SD1.5"
-    
-    return "unknown"
 
 
 async def model_database_get_filters(request):
@@ -2752,7 +2732,6 @@ async def model_database_get_filters(request):
         category = request.query.get("category", "diffusion_models")
         models = _load_cloud_marketplace_catalog()
         
-        base_models = set()
         types = set()
         precisions = set()
         
@@ -2767,11 +2746,6 @@ async def model_database_get_filters(request):
                  if str(cat).replace("\\", "/") != category:
                      continue
             
-            # Infer base model if not present
-            base = data.get("base_model") or _infer_model_base_type(filename, data)
-            if base and base != "unknown": 
-                base_models.add(base)
-                
             t = data.get("type", "unknown")
             if t and t != "unknown": types.add(t)
             
@@ -2779,7 +2753,6 @@ async def model_database_get_filters(request):
             if p and p != "unknown": precisions.add(p)
             
         return web.json_response({
-            "base_models": sorted(list(base_models)),
             "types": sorted(list(types)),
             "precisions": sorted(list(precisions))
         })
@@ -2837,7 +2810,6 @@ def _is_model_installed(folder: str, filename: str) -> bool:
 async def model_database_list_models(request):
     try:
         category = request.query.get("category")
-        base_model_filter = request.query.get("base_model")
         val_type_filter = request.query.get("type")
         precision_filter = request.query.get("precision")
         search_query = _normalize_name(request.query.get("search") or "")
@@ -2867,7 +2839,6 @@ async def model_database_list_models(request):
                     continue
             
             # Infer Metadata
-            base_model = data.get("base_model") or _infer_model_base_type(filename, data)
             m_type = data.get("type") or "unknown"
             m_precision = _canonical_precision(data.get("precision", "unknown"))
 
@@ -2886,11 +2857,6 @@ async def model_database_list_models(request):
             if precision_filter and precision_filter != "any":
                 if m_precision != _canonical_precision(precision_filter):
                     continue
-                
-            # 5. Base Model Filter
-            if base_model_filter and base_model_filter != "any":
-                 if base_model != base_model_filter:
-                     continue
             
             # Check installed status
             installed = _is_model_installed(model_dir, filename)
@@ -2903,7 +2869,6 @@ async def model_database_list_models(request):
                 "size": data.get("content_length"),
                 "type": m_type,
                 "precision": m_precision,
-                "base_model": base_model,
                 "source": data.get("source"),
                 "preview_url": data.get("preview_url"),
                 "installed": installed
