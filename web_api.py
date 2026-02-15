@@ -2694,19 +2694,27 @@ def setup(app):
 
 def _canonical_precision(val: str, filename: str = "") -> str:
     v = str(val or "").lower().strip()
+    # Normalize filename for matching
     f = str(filename or "").lower().strip().replace("-", "_")
     
-    # regex to find common precision patterns in filename
-    # matches: fp16, bf16, fp32, fp8_e4m3fn, fp8_e5m2, int8, int4, fp4, q4_k_m, etc.
-    # also looks for trailing _scaled
+    # FP8 Grouping Logic
+    is_fp8 = "fp8" in v or "fp8" in f
+    if is_fp8:
+        if "mixed" in v or "mixed" in f:
+            return "fp8 mixed"
+        if "scaled" in v or "scaled" in f:
+            return "fp8 scaled"
+        return "fp8"
+
+    # Other precisions from filename (Regex matches: fp16, bf16, fp32, int8, int4, fp4, q4_k_m, etc.)
     import re
-    prec_pattern = r"(fp16|bf16|fp32|fp8(?:_e\dm\d\w*)?|int8|int4|fp4|q\d_\w*|iq\d_\w*)"
+    prec_pattern = r"(fp16|bf16|fp32|int8|int4|fp4|q\d_\w*|iq\d_\w*)"
     match = re.search(prec_pattern, f)
     
     if match:
         p = match.group(1)
         if "_scaled" in f:
-            p += "_scaled"
+            p += " scaled"
         return p
         
     if not v or v == "unknown":
@@ -2716,7 +2724,6 @@ def _canonical_precision(val: str, filename: str = "") -> str:
     if "fp16" in v: return "fp16"
     if "bf16" in v: return "bf16"
     if "fp32" in v: return "fp32"
-    if "fp8" in v: return "fp8"
     if "int8" in v: return "int8"
     if "int4" in v: return "int4"
     if "fp4" in v: return "fp4"
