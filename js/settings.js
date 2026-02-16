@@ -12,6 +12,19 @@ app.registerExtension({
       tooltip: "Enter your Hugging Face token to enable downloads from gated repos.",
     },
     {
+      id: "downloader.top_menu_button_style",
+      category: ["Hugging Face downloader", "Appearance", "Top menu button"],
+      name: "Top menu button",
+      type: "combo",
+      defaultValue: "default",
+      tooltip: "Choose the Hugging Face top menu button style.",
+      options: [
+        { value: "default", text: "Default" },
+        { value: "yellow", text: "Yellow logo" },
+        { value: "disabled", text: "Disabled" }
+      ]
+    },
+    {
       id: "downloader.model_library_backend_enabled",
       category: ["Hugging Face downloader", "Model Library", "Use as Model Library backend"],
       name: "Use as Model Library backend",

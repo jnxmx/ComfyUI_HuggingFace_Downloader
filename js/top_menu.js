@@ -1,11 +1,24 @@
 import { app } from "../../../scripts/app.js";
-import { modelDatabaseDialog } from "./model_database.js";
 
 const MENU_ID = "hf-downloader-top-menu";
 const BUTTON_TOOLTIP = "Hugging Face Downloader";
 const BUTTON_SPINNER_STYLE_ID = "hf-downloader-top-menu-spinner-style";
 const BUTTON_STYLE_ID = "hf-downloader-top-menu-button-style";
 const BUTTON_SELECTOR = `button[aria-label="${BUTTON_TOOLTIP}"]`;
+const TOP_MENU_STYLE_SETTING_ID = "downloader.top_menu_button_style";
+const TOP_MENU_STYLE_DEFAULT = "default";
+const TOP_MENU_STYLE_CHANGE_EVENT = `${TOP_MENU_STYLE_SETTING_ID}.change`;
+const HUGGINGFACE_YELLOW_ICON =
+    "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-with-title.png?download=true";
+const DEFAULT_ICON_URLS = [
+    "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate-white.png?download=true",
+    "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate.png?download=true",
+    new URL("./assets/hf-favicon.ico", import.meta.url).toString()
+];
+const LORA_BUTTON_TOOLTIP = "Launch LoRA Manager (Shift+Click opens in new window)";
+const LORA_BUTTON_SELECTOR = `button[aria-label="${LORA_BUTTON_TOOLTIP}"]`;
+const LORA_STYLE_ID = "hf-downloader-lora-button-style";
+const LORA_FALLBACK_ICON_HTML = `<span class="lm-top-menu-l-icon">L</span>`;
 
 const getActions = () => {
     if (typeof window === "undefined") return {};
@@ -81,6 +94,7 @@ const ensureButtonStyles = () => {
             border: 1px solid transparent;
             background-color: var(--primary-bg);
             transition: all 0.2s ease;
+            margin-left: 6px;
         }
         button[aria-label="${BUTTON_TOOLTIP}"].hf-downloader-button:hover {
             background-color: var(--primary-hover-bg) !important;
@@ -97,6 +111,36 @@ const ensureButtonStyles = () => {
             display: block;
             width: 20px;
             height: 20px;
+        }
+    `;
+    document.head.appendChild(style);
+};
+
+const ensureLoraButtonStyles = () => {
+    if (document.getElementById(LORA_STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = LORA_STYLE_ID;
+    style.textContent = `
+        button[aria-label="${LORA_BUTTON_TOOLTIP}"].lm-top-menu-button {
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+            border-radius: 4px;
+            padding: 6px;
+            background-color: var(--primary-bg);
+        }
+        button[aria-label="${LORA_BUTTON_TOOLTIP}"].lm-top-menu-button:hover {
+            background-color: var(--primary-hover-bg) !important;
+        }
+        button[aria-label="${LORA_BUTTON_TOOLTIP}"].lm-top-menu-button .lm-top-menu-l-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            line-height: 1;
+            font-size: 18px;
+            font-weight: 600;
+            color: #fff;
         }
     `;
     document.head.appendChild(style);
@@ -120,6 +164,16 @@ const applyTopButtonState = (state = null) => {
         visuals.iconImg.style.display = showSpinner ? "none" : "block";
         visuals.iconSpinner.style.display = showSpinner ? "block" : "none";
     }
+};
+
+const getTopMenuButtonStyle = () => {
+    const settingsUi = app?.ui?.settings;
+    if (!settingsUi?.getSettingValue) return TOP_MENU_STYLE_DEFAULT;
+    const value = settingsUi.getSettingValue(TOP_MENU_STYLE_SETTING_ID);
+    if (typeof value === "string" && value) {
+        return value;
+    }
+    return TOP_MENU_STYLE_DEFAULT;
 };
 
 const hideMenu = () => {
@@ -247,12 +301,11 @@ const toggleMenu = (buttonEl) => {
     menuVisible = true;
 };
 
-const createButtonVisuals = () => {
-    const iconUrls = [
-        "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate-white.png?download=true",
-        "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate.png?download=true",
-        new URL("./assets/hf-favicon.ico", import.meta.url).toString()
-    ];
+const createButtonVisuals = (style) => {
+    const iconUrls =
+        style === "yellow"
+            ? [HUGGINGFACE_YELLOW_ICON]
+            : [...DEFAULT_ICON_URLS];
     let iconUrlIndex = 0;
     const iconImg = document.createElement("img");
     iconImg.src = iconUrls[iconUrlIndex];
@@ -276,10 +329,24 @@ const createButtonVisuals = () => {
     iconWrap.appendChild(iconImg);
     iconWrap.appendChild(iconSpinner);
 
-    return { iconWrap, iconImg, iconSpinner };
+    return { iconWrap, iconImg, iconSpinner, style };
+};
+
+const decorateLoraButton = () => {
+    ensureLoraButtonStyles();
+    const button = document.querySelector(LORA_BUTTON_SELECTOR);
+    if (!button) return;
+    if (!button.classList.contains("lm-top-menu-button")) {
+        button.classList.add("lm-top-menu-button");
+    }
+    const hasIcon = button.querySelector("svg, .lm-top-menu-l-icon");
+    if (!hasIcon) {
+        button.innerHTML = LORA_FALLBACK_ICON_HTML;
+    }
 };
 
 const decorateTopButtons = () => {
+    const style = getTopMenuButtonStyle();
     for (const [button] of buttonVisuals.entries()) {
         if (!button?.isConnected) {
             buttonVisuals.delete(button);
@@ -288,29 +355,35 @@ const decorateTopButtons = () => {
 
     const buttons = document.querySelectorAll(BUTTON_SELECTOR);
     buttons.forEach((button) => {
+        button.style.display = style === "disabled" ? "none" : "";
+
         const existing = buttonVisuals.get(button);
-        if (
-            existing?.iconWrap?.isConnected &&
-            existing?.iconImg?.isConnected &&
-            existing?.iconSpinner?.isConnected &&
-            button.contains(existing.iconWrap)
-        ) {
-            return;
+        const needsRebuild =
+            !existing ||
+            existing.style !== style ||
+            !button.contains(existing.iconWrap);
+
+        if (needsRebuild) {
+            const visuals = createButtonVisuals(style);
+            button.classList.add("hf-downloader-button");
+            button.title = BUTTON_TOOLTIP;
+            button.setAttribute("aria-label", BUTTON_TOOLTIP);
+            button.replaceChildren(visuals.iconWrap);
+            buttonVisuals.set(button, visuals);
+        } else {
+            existing.style = style;
         }
 
-        const visuals = createButtonVisuals();
-        button.classList.add("hf-downloader-button");
-        button.title = BUTTON_TOOLTIP;
-        button.setAttribute("aria-label", BUTTON_TOOLTIP);
-        button.replaceChildren(visuals.iconWrap);
-        buttonVisuals.set(button, visuals);
-
-        button.addEventListener("click", (event) => {
-            event.stopPropagation();
-        });
+        if (button.dataset.hfDownloaderClickGuard !== "1") {
+            button.addEventListener("click", (event) => {
+                event.stopPropagation();
+            });
+            button.dataset.hfDownloaderClickGuard = "1";
+        }
     });
 
     applyTopButtonState();
+    decorateLoraButton();
 };
 
 const queueDecorateTopButtons = () => {
@@ -320,6 +393,11 @@ const queueDecorateTopButtons = () => {
         decorateQueued = false;
         decorateTopButtons();
     });
+};
+
+const handleTopMenuStyleChange = () => {
+    buttonVisuals.clear();
+    queueDecorateTopButtons();
 };
 
 const watchTopButtonRenders = () => {
@@ -375,6 +453,10 @@ app.registerExtension({
     setup() {
         ensureSpinnerStyles();
         ensureButtonStyles();
+        const settingsUi = app?.ui?.settings;
+        if (settingsUi?.addEventListener) {
+            settingsUi.addEventListener(TOP_MENU_STYLE_CHANGE_EVENT, handleTopMenuStyleChange);
+        }
         queueDecorateTopButtons();
         watchTopButtonRenders();
 
