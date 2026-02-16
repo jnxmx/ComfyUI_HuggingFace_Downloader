@@ -9,10 +9,9 @@ const TOP_MENU_STYLE_SETTING_ID = "downloader.top_menu_button_style";
 const TOP_MENU_STYLE_DEFAULT = "default";
 const TOP_MENU_STYLE_CHANGE_EVENT = `${TOP_MENU_STYLE_SETTING_ID}.change`;
 const HUGGINGFACE_YELLOW_ICON =
-    "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-with-title.png?download=true";
+    new URL("./assets/hf-logo.svg", import.meta.url).toString();
 const DEFAULT_ICON_URLS = [
-    "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate-white.png?download=true",
-    "https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo-pirate.png?download=true",
+    new URL("./assets/hf-logo-pirate.svg", import.meta.url).toString(),
     new URL("./assets/hf-favicon.ico", import.meta.url).toString()
 ];
 const LORA_BUTTON_TOOLTIP = "Launch LoRA Manager (Shift+Click opens in new window)";
@@ -94,7 +93,8 @@ const ensureButtonStyles = () => {
             border: 1px solid transparent;
             background-color: var(--primary-bg);
             transition: all 0.2s ease;
-            margin-left: 6px;
+            margin-left: 10px;
+            margin-right: 6px;
         }
         button[aria-label="${BUTTON_TOOLTIP}"].hf-downloader-button:hover {
             background-color: var(--primary-hover-bg) !important;
