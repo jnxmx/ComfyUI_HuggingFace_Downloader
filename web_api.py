@@ -6,6 +6,7 @@ import time
 import uuid
 import asyncio
 import mimetypes
+import shutil
 from datetime import datetime, timezone
 from urllib.parse import urlparse, unquote
 from aiohttp import web
@@ -1789,6 +1790,137 @@ async def check_missing_models(request):
         print(f"[ERROR] Traceback: {traceback.format_exc()}")
         return web.json_response({"error": str(e) if str(e) else repr(e)}, status=500)
 
+
+def _is_path_like(value: str) -> bool:
+    return ("/" in value) or ("\\" in value)
+
+
+def _resolve_model_search_paths(folder_hint: str) -> list[str]:
+    folder_value = str(folder_hint or "checkpoints").strip() or "checkpoints"
+    search_paths = []
+    if folder_paths is not None:
+        try:
+            search_paths = folder_paths.get_folder_paths(folder_value) or []
+        except KeyError:
+            search_paths = []
+        except Exception:
+            search_paths = []
+
+    if not search_paths:
+        comfy_root = getattr(folder_paths, "base_path", os.getcwd()) if folder_paths else os.getcwd()
+        if folder_value and (os.path.isabs(folder_value) or _is_path_like(folder_value)):
+            fallback = folder_value if os.path.isabs(folder_value) else os.path.join(comfy_root, folder_value)
+        else:
+            fallback = os.path.join(comfy_root, "models", folder_value)
+        search_paths = [fallback]
+
+    normalized = []
+    seen = set()
+    for path in search_paths:
+        abs_path = os.path.abspath(path)
+        if abs_path in seen:
+            continue
+        seen.add(abs_path)
+        normalized.append(abs_path)
+    return normalized
+
+
+def _is_within_directory(base_dir: str, candidate_path: str) -> bool:
+    try:
+        return os.path.commonpath([os.path.abspath(base_dir), os.path.abspath(candidate_path)]) == os.path.abspath(base_dir)
+    except Exception:
+        return False
+
+
+def _invalidate_model_library_local_cache() -> None:
+    global model_library_local_cache
+    with model_library_local_cache_lock:
+        model_library_local_cache = {"timestamp": 0.0, "entries": [], "name_map": {}}
+
+
+async def relocate_model_file(request):
+    """Move an already-downloaded model into the requested path under the suggested model folder root."""
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    found_path_raw = str(data.get("found_path") or "").strip()
+    requested_path_raw = str(data.get("requested_path") or data.get("filename") or "").strip()
+    suggested_folder = str(data.get("suggested_folder") or "checkpoints").strip() or "checkpoints"
+
+    if not found_path_raw:
+        return web.json_response({"error": "Missing found_path."}, status=400)
+
+    source_path = os.path.abspath(found_path_raw)
+    if not os.path.exists(source_path):
+        return web.json_response({"error": f"Source not found: {source_path}"}, status=404)
+
+    requested_path = _normalize_rel_path(requested_path_raw)
+    if not requested_path:
+        requested_path = _normalize_rel_path(os.path.basename(source_path))
+    if not requested_path:
+        return web.json_response({"error": "Could not determine destination filename/path."}, status=400)
+
+    search_roots = _resolve_model_search_paths(suggested_folder)
+    if not search_roots:
+        return web.json_response({"error": "Could not resolve destination search paths."}, status=500)
+
+    preferred_root = None
+    for root in search_roots:
+        if _is_within_directory(root, source_path):
+            preferred_root = root
+            break
+
+    ordered_roots = [preferred_root, *search_roots] if preferred_root else search_roots
+    dedup_roots = []
+    seen_roots = set()
+    for root in ordered_roots:
+        if not root or root in seen_roots:
+            continue
+        seen_roots.add(root)
+        dedup_roots.append(root)
+
+    destination_path = None
+    destination_root = None
+    for root in dedup_roots:
+        candidate = os.path.abspath(os.path.join(root, requested_path))
+        if not _is_within_directory(root, candidate):
+            continue
+        destination_path = candidate
+        destination_root = root
+        break
+
+    if not destination_path or not destination_root:
+        return web.json_response({"error": "Could not resolve a safe destination path."}, status=400)
+
+    if os.path.abspath(destination_path) == source_path:
+        clean_path = _normalize_rel_path(os.path.relpath(source_path, destination_root))
+        return web.json_response({
+            "status": "already_in_place",
+            "from": source_path,
+            "to": source_path,
+            "clean_path": clean_path,
+        })
+
+    if os.path.exists(destination_path):
+        return web.json_response({
+            "error": f"Destination already exists: {destination_path}",
+            "status": "destination_exists",
+        }, status=409)
+
+    os.makedirs(os.path.dirname(destination_path), exist_ok=True)
+    shutil.move(source_path, destination_path)
+    _invalidate_model_library_local_cache()
+
+    clean_path = _normalize_rel_path(os.path.relpath(destination_path, destination_root))
+    return web.json_response({
+        "status": "moved",
+        "from": source_path,
+        "to": destination_path,
+        "clean_path": clean_path,
+    })
+
 async def install_models(request):
     """
     Downloads a list of models.
@@ -1954,6 +2086,7 @@ def setup(app):
     app.router.add_post("/restore_selected_from_hf", restore_selected_from_hf_endpoint)
     app.router.add_post("/delete_from_hf_backup", delete_from_hf_backup_endpoint)
     app.router.add_post("/check_missing_models", check_missing_models)
+    app.router.add_post("/relocate_model_file", relocate_model_file)
     app.router.add_post("/install_models", install_models)
 
     async def queue_download(request):

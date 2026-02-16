@@ -9,9 +9,10 @@ const TOP_MENU_STYLE_SETTING_ID = "downloader.top_menu_button_style";
 const TOP_MENU_STYLE_DEFAULT = "default";
 const TOP_MENU_STYLE_CHANGE_EVENT = `${TOP_MENU_STYLE_SETTING_ID}.change`;
 const HUGGINGFACE_YELLOW_ICON =
-    new URL("./assets/hf-logo.svg", import.meta.url).toString();
+    new URL("./assets/hf-logo.png", import.meta.url).toString();
 const DEFAULT_ICON_URLS = [
-    new URL("./assets/hf-logo-pirate.svg", import.meta.url).toString(),
+    new URL("./assets/hf-logo-pirate-white.png", import.meta.url).toString(),
+    new URL("./assets/hf-logo-pirate.png", import.meta.url).toString(),
     new URL("./assets/hf-favicon.ico", import.meta.url).toString()
 ];
 const LORA_BUTTON_TOOLTIP = "Launch LoRA Manager (Shift+Click opens in new window)";

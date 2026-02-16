@@ -1009,6 +1009,109 @@ app.registerExtension({
             return matches;
         };
 
+        const buildRowDataFromModelEntry = (entry) => ({
+            requestedPath: entry?.requested_path || entry?.requestedPath || entry?.filename || "",
+            originalFilename: entry?.filename || "",
+            initialWidgetValue: entry?.requested_path || entry?.requestedPath || entry?.filename || "",
+        });
+
+        const collectModelWidgetTargets = (entry) => {
+            const graphNodes = Array.isArray(app?.graph?._nodes) ? app.graph._nodes : [];
+            if (!graphNodes.length) return [];
+
+            const rowData = buildRowDataFromModelEntry(entry);
+            const targets = [];
+            const seenWidgets = new Set();
+            const pushNodeMatches = (node) => {
+                if (!node) return;
+                const widgets = collectModelWidgetsInNode(node, rowData);
+                if (!widgets.length) return;
+                for (const widget of widgets) {
+                    if (seenWidgets.has(widget)) continue;
+                    seenWidgets.add(widget);
+                    targets.push({ node, widget });
+                }
+            };
+
+            const nodeId = Number(entry?.node_id);
+            let hadPreferredMatches = false;
+            if (Number.isFinite(nodeId) && app?.graph?.getNodeById) {
+                const beforeCount = targets.length;
+                pushNodeMatches(app.graph.getNodeById(nodeId));
+                hadPreferredMatches = targets.length > beforeCount;
+            }
+
+            if (hadPreferredMatches) {
+                return targets;
+            }
+
+            for (const node of graphNodes) {
+                if (!isLocalModelLoaderNode(node)) continue;
+                pushNodeMatches(node);
+            }
+            return targets;
+        };
+
+        const applyWorkflowPathForModelEntry = (entry, nextValue) => {
+            const targetValue = normalizeWorkflowPath(nextValue);
+            if (!targetValue) return 0;
+
+            const targets = collectModelWidgetTargets(entry);
+            if (!targets.length) return 0;
+
+            let updatedRefs = 0;
+            const dirtyNodes = new Set();
+            for (const { node, widget } of targets) {
+                if (!widget || typeof widget.value !== "string") continue;
+                if (normalizeWorkflowPath(widget.value) === targetValue) continue;
+                widget.value = targetValue;
+                updatedRefs += 1;
+                dirtyNodes.add(node);
+            }
+
+            for (const node of dirtyNodes) {
+                node?.setDirtyCanvas?.(true);
+            }
+            return updatedRefs;
+        };
+
+        const shouldAutoFixPathMismatch = (entry) => {
+            const requestedPath = normalizeWorkflowPath(entry?.requested_path || entry?.filename || "");
+            const foundPath = normalizeWorkflowPath(entry?.clean_path || "");
+            if (!requestedPath || !foundPath || requestedPath === foundPath) {
+                return false;
+            }
+
+            const requestedBase = getPathBasename(requestedPath).toLowerCase();
+            const foundBase = getPathBasename(foundPath).toLowerCase();
+            if (requestedBase && foundBase && requestedBase !== foundBase) {
+                return false;
+            }
+            return true;
+        };
+
+        const autoApplyPathMismatches = (mismatches) => {
+            let fixedRefs = 0;
+            let fixedRows = 0;
+            const remaining = [];
+
+            for (const entry of mismatches || []) {
+                if (!shouldAutoFixPathMismatch(entry)) {
+                    remaining.push(entry);
+                    continue;
+                }
+                const updated = applyWorkflowPathForModelEntry(entry, entry?.clean_path || "");
+                if (updated > 0) {
+                    fixedRows += 1;
+                    fixedRefs += updated;
+                    continue;
+                }
+                remaining.push(entry);
+            }
+
+            return { remaining, fixedRows, fixedRefs };
+        };
+
         const isLocalModelLoaderNode = (node) => {
             if (!node) return false;
             const typeLower = String(node.type || "").toLowerCase();
@@ -1213,7 +1316,7 @@ app.registerExtension({
         };
 
         /* ──────────────── UI Components ──────────────── */
-        const showResultsDialog = (data) => {
+        const showResultsDialog = (data, options = {}) => {
             let pollTimer = null;
             const stopPolling = () => {
                 if (pollTimer) {
@@ -1309,7 +1412,18 @@ app.registerExtension({
             });
 
             const foundModels = Array.isArray(data.found) ? data.found : [];
-            const mismatchModels = Array.isArray(data.mismatches) ? data.mismatches : [];
+            let mismatchModels = Array.isArray(data.mismatches) ? [...data.mismatches] : [];
+            const autoMismatchFix = autoApplyPathMismatches(mismatchModels);
+            mismatchModels = autoMismatchFix.remaining;
+
+            if (autoMismatchFix.fixedRows > 0) {
+                showToast({
+                    severity: "info",
+                    summary: "Model paths auto-fixed",
+                    detail: `Updated ${autoMismatchFix.fixedRefs} loader reference${autoMismatchFix.fixedRefs === 1 ? "" : "s"} to installed model paths.`,
+                    life: 3200,
+                });
+            }
 
             const summaryRow = document.createElement("div");
             Object.assign(summaryRow.style, {
@@ -1324,6 +1438,23 @@ app.registerExtension({
                 repoFolderMissingModels.length +
                 curatedMissingModels.length +
                 missingModels.length;
+
+            if (
+                options?.triggeredByRunHook &&
+                totalMissingCount === 0 &&
+                mismatchModels.length === 0
+            ) {
+                showToast({
+                    severity: "success",
+                    summary: "No downloads needed",
+                    detail: autoMismatchFix.fixedRows > 0
+                        ? "Resolved path mismatches. Press Run again."
+                        : "All required model files are already available.",
+                    life: 3200,
+                });
+                return;
+            }
+
             summaryRow.textContent = `Missing: ${totalMissingCount} • Found: ${foundModels.length} • Mismatches: ${mismatchModels.length}`;
             panel.appendChild(summaryRow);
 
@@ -1665,17 +1796,18 @@ app.registerExtension({
                 mismatchModels.forEach((m) => {
                     const row = makeBaseRow();
                     Object.assign(row.style, {
-                        gridTemplateColumns: "1fr auto",
+                        gridTemplateColumns: "1fr auto auto",
                     });
                     const left = document.createElement("div");
                     Object.assign(left.style, {
                         minWidth: "220px",
                     });
-                    const currentLabel = m.requested_path || m.filename;
-                    left.innerHTML = `<div style="color:#aaa; font-size:11px">Current: ${currentLabel}</div><div style="color:#4caf50; font-weight:600; font-size:12px; margin-top:2px;">Found: ${m.clean_path}</div>`;
+                    const currentLabel = m.requested_path || m.filename || "";
+                    const foundLabel = m.clean_path || "";
+                    left.innerHTML = `<div style="color:#aaa; font-size:11px">Current: ${currentLabel}</div><div style="color:#4caf50; font-weight:600; font-size:12px; margin-top:2px;">Found: ${foundLabel}</div>`;
 
                     const fixBtn = document.createElement("button");
-                    fixBtn.textContent = "Fix Path";
+                    fixBtn.textContent = "Use Found Path";
                     Object.assign(fixBtn.style, {
                         padding: "7px 10px",
                         background: "#2f84da",
@@ -1688,26 +1820,77 @@ app.registerExtension({
                     });
 
                     fixBtn.onclick = () => {
-                        const node = app.graph.getNodeById(m.node_id);
-                        if (!node) {
-                            alert("Node not found.");
+                        const updated = applyWorkflowPathForModelEntry(m, m.clean_path || "");
+                        if (updated <= 0) {
+                            alert("Could not find matching model widget to update.");
                             return;
                         }
-                        const targetValue = m.requested_path || m.filename;
-                        const widget = node.widgets.find((w) => w.value === targetValue || w.value === m.filename);
-                        if (!widget) {
-                            alert("Could not find matching widget value on node.");
-                            return;
-                        }
-                        widget.value = m.clean_path;
-                        node.setDirtyCanvas(true);
                         fixBtn.textContent = "Fixed";
                         fixBtn.style.background = "#4caf50";
                         fixBtn.disabled = true;
+                        moveBtn.disabled = true;
+                        moveBtn.style.opacity = "0.7";
+                    };
+
+                    const moveBtn = document.createElement("button");
+                    moveBtn.textContent = "Move File";
+                    Object.assign(moveBtn.style, {
+                        padding: "7px 10px",
+                        background: "#f2ae42",
+                        color: "#111",
+                        border: "none",
+                        borderRadius: "8px",
+                        cursor: "pointer",
+                        fontWeight: "700",
+                        fontSize: "13px",
+                    });
+
+                    moveBtn.onclick = async () => {
+                        moveBtn.disabled = true;
+                        moveBtn.style.opacity = "0.7";
+                        moveBtn.textContent = "Moving...";
+                        try {
+                            const resp = await fetch("/relocate_model_file", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    found_path: m.found_path,
+                                    requested_path: m.requested_path || m.filename,
+                                    filename: m.filename,
+                                    suggested_folder: m.suggested_folder || "checkpoints",
+                                }),
+                            });
+                            const payload = await resp.json().catch(() => ({}));
+                            if (resp.status !== 200) {
+                                const detail = payload?.error || `Server returned ${resp.status}`;
+                                throw new Error(detail);
+                            }
+
+                            const nextPath = payload?.clean_path || (m.requested_path || m.filename || "");
+                            if (nextPath) {
+                                applyWorkflowPathForModelEntry(m, nextPath);
+                            }
+
+                            moveBtn.textContent = payload?.status === "already_in_place" ? "Already in place" : "Moved";
+                            moveBtn.style.background = "#4caf50";
+                            moveBtn.style.color = "#fff";
+                            fixBtn.disabled = true;
+                            fixBtn.style.opacity = "0.7";
+
+                            if (payload?.to) {
+                                left.innerHTML = `<div style="color:#aaa; font-size:11px">Current: ${m.requested_path || m.filename || ""}</div><div style="color:#4caf50; font-weight:600; font-size:12px; margin-top:2px;">Found: ${nextPath}</div>`;
+                            }
+                        } catch (err) {
+                            moveBtn.disabled = false;
+                            moveBtn.style.opacity = "1";
+                            moveBtn.textContent = "Move File";
+                            alert(`Move failed: ${err}`);
+                        }
                     };
 
                     row.appendChild(left);
                     row.appendChild(fixBtn);
+                    row.appendChild(moveBtn);
                     content.appendChild(row);
                 });
             }
@@ -2561,7 +2744,7 @@ app.registerExtension({
                 }
 
                 // Show results
-                showResultsDialog(data);
+                showResultsDialog(data, options || {});
 
             } catch (e) {
                 // Remove loading dialog on error
