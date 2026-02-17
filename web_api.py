@@ -2948,6 +2948,13 @@ def setup(app):
     _safe_add_route("DELETE", f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_remove_tags)
 
     # --- Model Explorer Routes ---
+    _safe_add_route("GET", "/hf_model_explorer/categories", model_explorer_list_categories)
+    _safe_add_route("GET", "/hf_model_explorer/filters", model_explorer_get_filters)
+    _safe_add_route("GET", "/hf_model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("POST", "/hf_model_explorer/use", model_explorer_use)
+    _safe_add_route("POST", "/hf_model_explorer/delete", model_explorer_delete)
+    _safe_add_route("POST", "/hf_model_explorer/download", model_explorer_download_proxy)
+
     _safe_add_route("GET", "/api/model_explorer/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/api/model_explorer/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/api/model_explorer/groups", model_explorer_list_groups)
