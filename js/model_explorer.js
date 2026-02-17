@@ -287,14 +287,55 @@ class ModelExplorerDialog {
                     <input id="hf-me-search" type="text" placeholder="Search models..." style="height:38px;border-radius:8px;border:1px solid var(--border-default);background:var(--comfy-input-bg);color:var(--input-text);padding:0 12px;" />
                 </label>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;padding:4px 22px 12px;">
-                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--descrip-text,#9aa4b6);">
-                    <input id="hf-me-installed-only" type="checkbox" style="width:16px;height:16px;" />
-                    <span>Show only installed</span>
-                </label>
-            </div>
+            <div id="hf-me-installed-only-row" style="display:flex;align-items:center;gap:10px;padding:4px 22px 12px;color:var(--descrip-text,#9aa4b6);font-size:13px;"></div>
             <div id="hf-me-body" style="padding:14px 22px;overflow:auto;display:flex;flex-direction:column;gap:10px;min-height:260px;max-height:66vh;"></div>
         `;
+
+        const installedOnlyRow = panel.querySelector("#hf-me-installed-only-row");
+        if (installedOnlyRow) {
+            const toggleContainer = document.createElement("label");
+            Object.assign(toggleContainer.style, {
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                cursor: "pointer",
+                userSelect: "none",
+            });
+
+            const toggleWrap = document.createElement("span");
+            toggleWrap.className = "p-component p-toggleswitch hf-installed-toggle";
+
+            const toggleInput = document.createElement("input");
+            toggleInput.id = "hf-me-installed-only";
+            toggleInput.type = "checkbox";
+            toggleInput.className = "p-toggleswitch-input";
+            toggleInput.setAttribute("role", "switch");
+
+            const toggleSlider = document.createElement("span");
+            toggleSlider.className = "p-toggleswitch-slider";
+
+            toggleWrap.append(toggleInput, toggleSlider);
+            toggleContainer.appendChild(toggleWrap);
+
+            const toggleText = document.createElement("span");
+            toggleText.textContent = "Show only installed";
+            Object.assign(toggleText.style, {
+                fontSize: "13px",
+                color: "var(--descrip-text, #9aa4b6)",
+            });
+            toggleContainer.appendChild(toggleText);
+
+            installedOnlyRow.appendChild(toggleContainer);
+
+            const updateSliderState = () => {
+                toggleWrap.classList.toggle("p-toggleswitch-checked", Boolean(toggleInput.checked));
+            };
+
+            toggleInput.addEventListener("change", () => {
+                updateSliderState();
+            });
+            updateSliderState();
+        }
 
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
@@ -522,7 +563,7 @@ class ModelExplorerDialog {
                         : `<div></div>`;
 
                     return `
-                        <div style="display:grid;grid-template-columns:minmax(320px,1.6fr) minmax(120px,0.6fr) minmax(120px,0.6fr) auto;gap:12px;align-items:center;padding:10px;border-radius:8px;background:color-mix(in srgb, var(--comfy-input-bg,#2b3242) 80%, transparent);">
+                        <div style="display:grid;grid-template-columns:minmax(220px,1.4fr) minmax(90px,0.6fr) minmax(120px,0.6fr) auto;gap:4px;align-items:center;padding:4px 8px;border-radius:10px;background:var(--comfy-input-bg,#2b3242);border:1px solid transparent;min-height:46px;box-sizing:border-box;margin:0;">
                             <div style="display:flex;flex-direction:column;gap:4px;word-break:break-word;font-size:13px;line-height:1.3;">
                                 <div style="font-weight:600;">${filename}</div>
                                 ${baseLabel ? `<div style="font-size:11px;color:var(--descrip-text,#9aa4b6);">Base: ${baseLabel}</div>` : ""}
@@ -537,7 +578,7 @@ class ModelExplorerDialog {
                 .join("");
             if (variantRows) {
                 rows.push(`
-                    <div style="border:1px solid var(--border-default,#3c4452);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:10px;background:color-mix(in srgb, var(--comfy-input-bg,#2b3242) 100%, transparent);">
+                    <div style="border:1px solid var(--border-default,#3c4452);border-radius:12px;padding:4px;display:flex;flex-direction:column;gap:2px;background:color-mix(in srgb, var(--comfy-input-bg,#2b3242) 100%, transparent);">
                         ${variantRows}
                     </div>
                 `);
