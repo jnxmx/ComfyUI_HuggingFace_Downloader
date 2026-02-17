@@ -17,6 +17,43 @@ const FALLBACK_NODE_PROVIDER_BY_CATEGORY = {
     clip_vision: { nodeType: "CLIPVisionLoader", key: "clip_name" },
     upscale_models: { nodeType: "UpscaleModelLoader", key: "model_name" },
 };
+const MODEL_EXPLORER_OTHER_CATEGORY_KEY = "__other__";
+const MODEL_EXPLORER_DEFERRED_CATEGORY_ORDER = Object.freeze([
+    "animatediff_models",
+    "animatediff_motion_lora",
+]);
+const MODEL_EXPLORER_PRIMARY_CATEGORIES = new Set([
+    "checkpoints",
+    "configs",
+    "controlnet",
+    "clip",
+    "clip_vision",
+    "custom_nodes",
+    "diffusers",
+    "diffusion_models",
+    "embeddings",
+    "gligen",
+    "hypernetworks",
+    "ipadapter",
+    "loras",
+    "model_patches",
+    "style_models",
+    "text_encoders",
+    "upscale_models",
+    "vae",
+    "vae_approx",
+    "audio_encoders",
+    "animatediff_models",
+    "animatediff_motion_lora",
+    "sams",
+    "ultralytics",
+    "depthanything",
+    "photomaker",
+    "prompt_expansion",
+    "tokenizers",
+    "unet",
+    "onnx",
+]);
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const fetchWithTimeout = async (url, init = {}, timeoutMs = 15000) => {
@@ -225,16 +262,18 @@ class ModelExplorerDialog {
         this.element = null;
         this.body = null;
         this.categoryList = null;
-        this.baseSelect = null;
-        this.precisionSelect = null;
+        this.baseControl = null;
+        this.precisionControl = null;
         this.searchInput = null;
         this.installedOnlyToggle = null;
         this.baseWrap = null;
         this.precisionWrap = null;
         this.filterWrap = null;
+        this.activeFilterPanel = null;
+        this.otherCategoryIds = new Set();
         this.groups = [];
         this.categories = [];
-        this.filters = { category: "", base: "", precision: "", search: "", installedOnly: false };
+        this.filters = { category: "", base: [], precision: [], search: "", installedOnly: false };
         this.loading = false;
         this.searchTimer = null;
     }
@@ -270,14 +309,13 @@ class ModelExplorerDialog {
                 height: 72px;
                 flex-shrink: 0;
                 padding-left: 24px;
-                padding-right: 12px;
-                gap: 0.5rem;
+                padding-right: 24px;
                 align-items: center;
             }
             #hf-model-explorer-dialog .hf-me-left-title {
                 flex: 1 1 auto;
                 user-select: none;
-                font-size: 1.5rem;
+                font-size: 1.95rem;
                 font-weight: 600;
                 color: var(--base-foreground, var(--input-text, #e5e7eb));
                 white-space: nowrap;
@@ -321,7 +359,6 @@ class ModelExplorerDialog {
                 width: 100%;
                 display: flex;
                 align-items: center;
-                gap: 0.5rem;
                 border-radius: 0.375rem;
                 padding: 0.75rem 1rem;
                 color: var(--base-foreground, var(--input-text, #e5e7eb));
@@ -338,36 +375,12 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-nav-item.is-active {
                 background: var(--interface-menu-component-surface-selected, var(--secondary-background, #2f3747));
             }
-            #hf-model-explorer-dialog .hf-me-nav-icon {
-                font-size: 0.75rem;
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
-                flex: 0 0 auto;
-            }
-            #hf-model-explorer-dialog .hf-me-left-header-icon {
-                font-size: 1rem;
-                color: var(--base-foreground, var(--input-text, #e5e7eb));
-                flex: 0 0 auto;
-            }
             #hf-model-explorer-dialog .hf-me-nav-label {
                 min-width: 0;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-            }
-            #hf-model-explorer-dialog .hf-me-nav-badge {
-                margin-left: auto;
-                min-width: 1.625rem;
-                height: 1.625rem;
-                border-radius: 0.45rem;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                padding: 0 0.35rem;
-                background: color-mix(in srgb, var(--secondary-background, #2f3747) 88%, transparent);
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
-                font-size: 0.86rem;
-                line-height: 1;
-                font-weight: 600;
+                text-transform: none;
             }
             #hf-model-explorer-dialog .hf-me-main-panel {
                 display: flex;
@@ -441,48 +454,202 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-filter-row {
                 display: flex;
                 align-items: center;
-                gap: 1rem;
+                gap: 0.5rem;
                 padding: 8px 24px 8px;
                 flex-wrap: nowrap;
                 flex-shrink: 0;
             }
-            #hf-model-explorer-dialog .hf-me-filter-item {
+            #hf-model-explorer-dialog .hf-me-filter {
+                position: relative;
+                display: inline-block;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-trigger {
                 height: 40px;
+                min-width: 170px;
                 position: relative;
                 display: inline-flex;
                 align-items: center;
+                justify-content: flex-start;
+                gap: 0.5rem;
                 border-radius: 0.5rem;
-                background: var(--comfy-input-bg, #2b3242);
+                background: var(--secondary-background, #2f3747);
                 color: var(--base-foreground, var(--input-text, #e5e7eb));
-                border: 1px solid var(--border-default, #4b5563);
-                transition: all 160ms ease;
-                min-width: 10rem;
-                max-width: 17rem;
+                border: 2.5px solid transparent;
+                transition: border-color 140ms ease, background-color 140ms ease;
+                padding: 0 0.9rem 0 0.95rem;
+                cursor: pointer;
+                font-size: 0.92rem;
+                font-weight: 500;
+                text-align: left;
             }
-            #hf-model-explorer-dialog .hf-me-filter-item:focus-within {
+            #hf-model-explorer-dialog .hf-me-filter-trigger:hover {
+                background: var(--secondary-background-hover, #3a4458);
+            }
+            #hf-model-explorer-dialog .hf-me-filter.is-open .hf-me-filter-trigger,
+            #hf-model-explorer-dialog .hf-me-filter.has-selection .hf-me-filter-trigger {
                 border-color: var(--node-component-border, var(--primary-background, #3b82f6));
             }
-            #hf-model-explorer-dialog .hf-me-filter-select {
-                appearance: none;
-                border: none;
-                outline: none;
-                background: transparent;
-                color: inherit;
-                width: 100%;
-                height: 100%;
-                cursor: pointer;
-                padding: 0 2rem 0 0.75rem;
-                font-size: 0.9rem;
-                font-weight: 500;
+            #hf-model-explorer-dialog .hf-me-filter-label {
+                display: inline-flex;
+                align-items: center;
+                min-width: 0;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-badge {
+                pointer-events: none;
+                position: absolute;
+                top: -7px;
+                right: -7px;
+                width: 20px;
+                height: 20px;
+                border-radius: 999px;
+                background: var(--primary-background, #2786e5);
+                color: var(--base-foreground, #fff);
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 11px;
+                font-weight: 700;
+                line-height: 1;
             }
             #hf-model-explorer-dialog .hf-me-filter-caret {
-                position: absolute;
-                right: 0.75rem;
-                top: 50%;
-                transform: translateY(-50%);
+                margin-left: auto;
                 color: var(--text-secondary, var(--descrip-text, #9aa4b6));
                 pointer-events: none;
                 font-size: 0.9rem;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-popover {
+                position: absolute;
+                top: calc(100% + 8px);
+                left: 0;
+                min-width: 22rem;
+                max-width: 25rem;
+                z-index: 7;
+                border-radius: 0.75rem;
+                border: 1px solid var(--border-default, #4b5563);
+                background: var(--base-background, #111319);
+                padding: 0.55rem;
+                box-shadow: var(--shadow-interface, 0 12px 28px rgba(0, 0, 0, 0.45));
+            }
+            #hf-model-explorer-dialog .hf-me-filter-search {
+                position: relative;
+                width: 100%;
+                height: 38px;
+                border-radius: 0.5rem;
+                border: 1px solid var(--border-default, #4b5563);
+                background: var(--comfy-input-bg, #2b3242);
+                margin-bottom: 0.65rem;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-search-icon {
+                position: absolute;
+                left: 10px;
+                top: 50%;
+                transform: translateY(-50%);
+                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
+                font-size: 0.95rem;
+                pointer-events: none;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-search-input {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                border: none;
+                outline: none;
+                background: transparent;
+                color: var(--input-text);
+                font-size: 0.9rem;
+                border-radius: 0.5rem;
+                padding: 0 0.55rem 0 2rem;
+                box-sizing: border-box;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-search-input::placeholder {
+                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
+            }
+            #hf-model-explorer-dialog .hf-me-filter-meta {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 0.5rem;
+                padding: 0 0.3rem 0.35rem;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-meta-text {
+                font-size: 0.92rem;
+                color: var(--base-foreground, var(--input-text, #e5e7eb));
+                font-weight: 500;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-clear-btn {
+                appearance: none;
+                border: none;
+                background: transparent;
+                color: var(--base-foreground, var(--input-text, #e5e7eb));
+                font-size: 0.92rem;
+                font-weight: 600;
+                cursor: pointer;
+                padding: 0.1rem 0.2rem;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-clear-btn:hover {
+                color: var(--primary-background, #2786e5);
+            }
+            #hf-model-explorer-dialog .hf-me-filter-divider {
+                height: 1px;
+                background: var(--border-default, #4b5563);
+                margin: 0.4rem 0 0.5rem;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-options {
+                max-height: min(18rem, 45vh);
+                overflow-y: auto;
+                display: flex;
+                flex-direction: column;
+                gap: 0.15rem;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-option {
+                appearance: none;
+                border: none;
+                width: 100%;
+                display: flex;
+                align-items: center;
+                gap: 0.55rem;
+                height: 38px;
+                padding: 0 0.5rem;
+                border-radius: 0.45rem;
+                background: transparent;
+                color: var(--base-foreground, var(--input-text, #e5e7eb));
+                text-align: left;
+                font-size: 0.92rem;
+                cursor: pointer;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-option:hover {
+                background: var(--secondary-background-hover, #3a4458);
+            }
+            #hf-model-explorer-dialog .hf-me-filter-option-check {
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                background: var(--secondary-background, #2f3747);
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex: 0 0 auto;
+                color: transparent;
+                font-size: 10px;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-option.is-selected .hf-me-filter-option-check {
+                background: var(--primary-background, #2786e5);
+                color: var(--base-foreground, #fff);
+            }
+            #hf-model-explorer-dialog .hf-me-filter-option-label {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-empty {
+                padding: 0.35rem 0.5rem;
+                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
+                font-size: 0.88rem;
             }
             #hf-model-explorer-dialog .hf-me-toggle-row {
                 display: flex;
@@ -504,6 +671,13 @@ class ModelExplorerDialog {
             }
             #hf-model-explorer-dialog .hf-me-installed-toggle {
                 flex: 0 0 auto;
+                margin: 0;
+                cursor: pointer;
+            }
+            #hf-model-explorer-dialog .hf-me-installed-toggle-wrap {
+                margin: 0;
+                cursor: pointer;
+                flex: 0 0 auto;
             }
             #hf-model-explorer-dialog .hf-me-content-scroll {
                 flex: 1 1 auto;
@@ -522,7 +696,7 @@ class ModelExplorerDialog {
             }
             #hf-model-explorer-dialog .hf-me-row {
                 display: grid;
-                grid-template-columns: minmax(0, 1fr) minmax(72px, 104px) minmax(92px, 156px) auto;
+                grid-template-columns: minmax(0, 1fr) 8rem 9.5rem 12rem;
                 align-items: center;
                 gap: 8px;
                 min-height: 50px;
@@ -590,6 +764,7 @@ class ModelExplorerDialog {
                 justify-content: flex-end;
                 gap: 6px;
                 align-self: stretch;
+                width: 100%;
             }
             #hf-model-explorer-dialog .hf-me-action-btn {
                 position: relative;
@@ -643,7 +818,7 @@ class ModelExplorerDialog {
             }
             @media (max-width: 1200px) {
                 #hf-model-explorer-dialog .hf-me-row {
-                    grid-template-columns: minmax(0, 1fr) minmax(66px, 94px) minmax(80px, 128px) auto;
+                    grid-template-columns: minmax(0, 1fr) 7rem 8rem 10.8rem;
                 }
             }
             @media (max-width: 1024px) {
@@ -696,6 +871,7 @@ class ModelExplorerDialog {
     close() {
         if (this.element) {
             this.element.style.display = "none";
+            this.closeFilterPopover();
         }
     }
 
@@ -726,8 +902,7 @@ class ModelExplorerDialog {
         leftPanel.className = "hf-me-left-panel";
         leftPanel.innerHTML = `
             <header class="hf-me-left-header">
-                <i class="icon-[comfy--ai-model] hf-me-left-header-icon" aria-hidden="true"></i>
-                <h2 class="hf-me-left-title">Model Library</h2>
+                <h2 class="hf-me-left-title">Model Explorer</h2>
             </header>
             <div class="hf-me-left-scroll">
                 <div class="hf-me-nav-title">
@@ -765,13 +940,43 @@ class ModelExplorerDialog {
         filterWrap.className = "hf-me-filter-row";
         filterWrap.style.display = "none";
         filterWrap.innerHTML = `
-            <div id="hf-me-precision-wrap" class="hf-me-filter-item">
-                <select id="hf-me-precision" class="hf-me-filter-select" aria-label="Precision"></select>
-                <i class="pi pi-chevron-down hf-me-filter-caret" aria-hidden="true"></i>
+            <div id="hf-me-precision-wrap" class="hf-me-filter" data-filter-key="precision">
+                <button type="button" class="hf-me-filter-trigger" aria-label="Precision filter">
+                    <span class="hf-me-filter-label">Precision</span>
+                    <span class="hf-me-filter-badge" style="display:none;">0</span>
+                    <i class="icon-[lucide--chevron-down] hf-me-filter-caret" aria-hidden="true"></i>
+                </button>
+                <div class="hf-me-filter-popover" style="display:none;">
+                    <div class="hf-me-filter-search">
+                        <i class="hf-me-filter-search-icon pi pi-search" aria-hidden="true"></i>
+                        <input type="text" class="hf-me-filter-search-input" placeholder="Search..." />
+                    </div>
+                    <div class="hf-me-filter-meta">
+                        <span class="hf-me-filter-meta-text">0 item selected</span>
+                        <button type="button" class="hf-me-filter-clear-btn">Clear all</button>
+                    </div>
+                    <div class="hf-me-filter-divider"></div>
+                    <div class="hf-me-filter-options"></div>
+                </div>
             </div>
-            <div id="hf-me-base-wrap" class="hf-me-filter-item">
-                <select id="hf-me-base" class="hf-me-filter-select" aria-label="Base models"></select>
-                <i class="pi pi-chevron-down hf-me-filter-caret" aria-hidden="true"></i>
+            <div id="hf-me-base-wrap" class="hf-me-filter" data-filter-key="base">
+                <button type="button" class="hf-me-filter-trigger" aria-label="Base models filter">
+                    <span class="hf-me-filter-label">Base models</span>
+                    <span class="hf-me-filter-badge" style="display:none;">0</span>
+                    <i class="icon-[lucide--chevron-down] hf-me-filter-caret" aria-hidden="true"></i>
+                </button>
+                <div class="hf-me-filter-popover" style="display:none;">
+                    <div class="hf-me-filter-search">
+                        <i class="hf-me-filter-search-icon pi pi-search" aria-hidden="true"></i>
+                        <input type="text" class="hf-me-filter-search-input" placeholder="Search..." />
+                    </div>
+                    <div class="hf-me-filter-meta">
+                        <span class="hf-me-filter-meta-text">0 item selected</span>
+                        <button type="button" class="hf-me-filter-clear-btn">Clear all</button>
+                    </div>
+                    <div class="hf-me-filter-divider"></div>
+                    <div class="hf-me-filter-options"></div>
+                </div>
             </div>
         `;
         mainPanel.appendChild(filterWrap);
@@ -780,13 +985,13 @@ class ModelExplorerDialog {
         installedOnlyRow.id = "hf-me-installed-only-row";
         installedOnlyRow.className = "hf-me-toggle-row";
         installedOnlyRow.innerHTML = `
-            <label class="hf-me-toggle-label">
-                <span class="hf-me-installed-toggle p-toggleswitch p-component">
+            <div class="hf-me-toggle-label">
+                <label class="hf-me-installed-toggle-wrap hf-manual-toggle p-toggleswitch p-component transition-transform active:scale-90">
                     <input id="hf-me-installed-only" type="checkbox" class="p-toggleswitch-input" role="switch" aria-label="Show downloaded only" />
                     <span class="p-toggleswitch-slider"></span>
-                </span>
+                </label>
                 <span>Show downloaded only</span>
-            </label>
+            </div>
         `;
         mainPanel.appendChild(installedOnlyRow);
 
@@ -803,19 +1008,20 @@ class ModelExplorerDialog {
         this.element = overlay;
         this.body = body;
         this.categoryList = panel.querySelector("#hf-me-category-list");
-        this.baseSelect = panel.querySelector("#hf-me-base");
-        this.precisionSelect = panel.querySelector("#hf-me-precision");
+        this.baseControl = this.createFilterControl(panel.querySelector("#hf-me-base-wrap"), "base", "Base models");
+        this.precisionControl = this.createFilterControl(panel.querySelector("#hf-me-precision-wrap"), "precision", "Precision");
         this.searchInput = panel.querySelector("#hf-me-search");
         this.installedOnlyToggle = panel.querySelector("#hf-me-installed-only");
         this.baseWrap = panel.querySelector("#hf-me-base-wrap");
         this.precisionWrap = panel.querySelector("#hf-me-precision-wrap");
         this.filterWrap = filterWrap;
-        const toggleWrap = installedOnlyRow.querySelector(".hf-me-installed-toggle");
+        const toggleWrap = installedOnlyRow.querySelector(".hf-me-installed-toggle-wrap");
         const toggleInput = this.installedOnlyToggle;
 
         const updateSliderState = () => {
             if (!toggleWrap || !toggleInput) return;
             toggleWrap.classList.toggle("p-toggleswitch-checked", Boolean(toggleInput.checked));
+            toggleInput.setAttribute("aria-checked", toggleInput.checked ? "true" : "false");
         };
         if (toggleInput && toggleWrap) {
             toggleInput.addEventListener("focus", () => toggleWrap.classList.add("p-focus"));
@@ -823,15 +1029,16 @@ class ModelExplorerDialog {
             toggleInput.addEventListener("change", () => updateSliderState());
             updateSliderState();
         }
+        installedOnlyRow.addEventListener("click", (event) => {
+            const target = event?.target;
+            if (target === toggleInput || (toggleWrap && toggleWrap.contains(target))) {
+                return;
+            }
+            if (!toggleInput) return;
+            toggleInput.checked = !toggleInput.checked;
+            toggleInput.dispatchEvent(new Event("change", { bubbles: true }));
+        });
 
-        this.baseSelect.onchange = async () => {
-            this.filters.base = this.baseSelect.value;
-            await this.refreshGroups();
-        };
-        this.precisionSelect.onchange = async () => {
-            this.filters.precision = this.normalizePrecision(this.precisionSelect.value);
-            await this.refreshGroups();
-        };
         this.searchInput.oninput = () => {
             clearTimeout(this.searchTimer);
             this.searchTimer = setTimeout(() => {
@@ -848,6 +1055,14 @@ class ModelExplorerDialog {
                 await this.refreshFiltersAndGroups();
             };
         }
+
+        document.addEventListener("click", (event) => {
+            if (!this.element || this.element.style.display === "none") return;
+            const target = event?.target;
+            if (!(target instanceof Element)) return;
+            if (target.closest(".hf-me-filter")) return;
+            this.closeFilterPopover();
+        });
     }
 
     async refreshAll() {
@@ -858,6 +1073,212 @@ class ModelExplorerDialog {
     async refreshFiltersAndGroups() {
         await this.fetchFilters();
         await this.refreshGroups();
+    }
+
+    createFilterControl(root, key, label) {
+        if (!root) return null;
+        const trigger = root.querySelector(".hf-me-filter-trigger");
+        const labelEl = root.querySelector(".hf-me-filter-label");
+        const badgeEl = root.querySelector(".hf-me-filter-badge");
+        const popover = root.querySelector(".hf-me-filter-popover");
+        const searchInput = root.querySelector(".hf-me-filter-search-input");
+        const metaText = root.querySelector(".hf-me-filter-meta-text");
+        const clearBtn = root.querySelector(".hf-me-filter-clear-btn");
+        const optionsEl = root.querySelector(".hf-me-filter-options");
+        if (!trigger || !labelEl || !badgeEl || !popover || !searchInput || !metaText || !clearBtn || !optionsEl) {
+            return null;
+        }
+
+        const control = {
+            key,
+            label,
+            root,
+            trigger,
+            labelEl,
+            badgeEl,
+            popover,
+            searchInput,
+            metaText,
+            clearBtn,
+            optionsEl,
+            options: [],
+        };
+
+        trigger.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const isOpen = popover.style.display !== "none";
+            this.closeFilterPopover(isOpen ? null : key);
+            if (!isOpen) {
+                root.classList.add("is-open");
+                popover.style.display = "block";
+                searchInput.focus();
+            }
+        });
+
+        searchInput.addEventListener("input", () => {
+            this.renderFilterOptions(control);
+        });
+
+        clearBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!Array.isArray(this.filters[key]) || !this.filters[key].length) {
+                return;
+            }
+            this.filters[key] = [];
+            this.renderFilterControl(control);
+            void this.refreshGroups();
+        });
+
+        optionsEl.addEventListener("click", (event) => {
+            const target = event?.target;
+            if (!(target instanceof Element)) return;
+            const option = target.closest(".hf-me-filter-option");
+            if (!option) return;
+            const rawValue = String(option.getAttribute("data-value") || "").trim();
+            if (!rawValue) return;
+            const value = key === "precision" ? this.normalizePrecision(rawValue) : rawValue;
+            if (!value) return;
+            const current = Array.isArray(this.filters[key]) ? [...this.filters[key]] : [];
+            const index = current.indexOf(value);
+            if (index >= 0) {
+                current.splice(index, 1);
+            } else {
+                current.push(value);
+            }
+            this.filters[key] = current;
+            this.renderFilterControl(control);
+            void this.refreshGroups();
+        });
+
+        return control;
+    }
+
+    closeFilterPopover(keepOpenKey = null) {
+        const controls = [this.baseControl, this.precisionControl].filter(Boolean);
+        controls.forEach((control) => {
+            const shouldKeepOpen = keepOpenKey && control.key === keepOpenKey;
+            if (shouldKeepOpen) {
+                control.root.classList.add("is-open");
+                control.popover.style.display = "block";
+                this.activeFilterPanel = control.key;
+            } else {
+                control.root.classList.remove("is-open");
+                control.popover.style.display = "none";
+            }
+        });
+        if (!keepOpenKey) {
+            this.activeFilterPanel = null;
+        }
+    }
+
+    updateFilterOptions(key, options) {
+        const control = key === "base" ? this.baseControl : this.precisionControl;
+        if (!control) return;
+
+        const seen = new Set();
+        const normalized = [];
+        for (const rawValue of Array.isArray(options) ? options : []) {
+            const value = key === "precision"
+                ? this.normalizePrecision(rawValue)
+                : String(rawValue || "").trim();
+            if (!value || (key === "precision" && value === "unknown")) continue;
+            if (seen.has(value)) continue;
+            seen.add(value);
+            normalized.push(value);
+        }
+
+        control.options = normalized;
+        const selected = Array.isArray(this.filters[key]) ? this.filters[key] : [];
+        this.filters[key] = selected.filter((value) => normalized.includes(value));
+        this.renderFilterControl(control);
+    }
+
+    renderFilterControl(control) {
+        if (!control) return;
+        const selected = Array.isArray(this.filters[control.key]) ? this.filters[control.key] : [];
+        const count = selected.length;
+        control.root.classList.toggle("has-selection", count > 0);
+        control.badgeEl.style.display = count > 0 ? "inline-flex" : "none";
+        control.badgeEl.textContent = String(count);
+
+        if (count === 0) {
+            control.labelEl.textContent = control.label;
+        } else if (count === 1) {
+            const value = selected[0];
+            control.labelEl.textContent = control.key === "precision"
+                ? this.formatPrecision(value)
+                : value;
+        } else {
+            control.labelEl.textContent = `${control.label} (${count})`;
+        }
+
+        control.metaText.textContent = `${count} item selected`;
+        this.renderFilterOptions(control);
+    }
+
+    renderFilterOptions(control) {
+        if (!control) return;
+        const query = String(control.searchInput.value || "").trim().toLowerCase();
+        const selected = new Set(Array.isArray(this.filters[control.key]) ? this.filters[control.key] : []);
+        const visibleOptions = control.options.filter((value) => {
+            if (!query) return true;
+            const label = control.key === "precision" ? this.formatPrecision(value) : String(value);
+            return label.toLowerCase().includes(query);
+        });
+        if (!visibleOptions.length) {
+            control.optionsEl.innerHTML = `<div class="hf-me-filter-empty">No items found</div>`;
+            return;
+        }
+        control.optionsEl.innerHTML = visibleOptions
+            .map((value) => {
+                const isSelected = selected.has(value);
+                const label = control.key === "precision" ? this.formatPrecision(value) : String(value);
+                return `
+                    <button type="button" class="hf-me-filter-option${isSelected ? " is-selected" : ""}" data-value="${escapeHtml(value)}">
+                        <span class="hf-me-filter-option-check">${isSelected ? '<i class="icon-[lucide--check]" aria-hidden="true"></i>' : ""}</span>
+                        <span class="hf-me-filter-option-label">${escapeHtml(label)}</span>
+                    </button>
+                `;
+            })
+            .join("");
+    }
+
+    normalizeCategoryId(value) {
+        return String(value || "")
+            .trim()
+            .toLowerCase()
+            .replaceAll(" ", "_");
+    }
+
+    formatCategoryLabel(value) {
+        const normalized = this.normalizeCategoryId(value);
+        if (!normalized) return "";
+        if (normalized === MODEL_EXPLORER_OTHER_CATEGORY_KEY) {
+            return "Other";
+        }
+        if (normalized === "animatediff_models") {
+            return "Animatediff";
+        }
+        if (normalized === "animatediff_motion_lora") {
+            return "Animatediff Loras";
+        }
+        return normalized
+            .replaceAll("_", " ")
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" ");
+    }
+
+    isOtherCategory(categoryId) {
+        const normalized = this.normalizeCategoryId(categoryId);
+        if (!normalized) return false;
+        if (this.otherCategoryIds.has(normalized)) return true;
+        if (MODEL_EXPLORER_PRIMARY_CATEGORIES.has(normalized)) return false;
+        if (MODEL_EXPLORER_DEFERRED_CATEGORY_ORDER.includes(normalized)) return false;
+        return true;
     }
 
     async fetchCategories() {
@@ -871,8 +1292,13 @@ class ModelExplorerDialog {
             }
             const data = await resp.json();
             this.categories = Array.isArray(data?.categories) ? data.categories : [];
-            const categoryIds = new Set(this.categories.map((item) => String(item?.id || "")));
-            if (this.filters.category && !categoryIds.has(this.filters.category)) {
+            const categoryIds = new Set(this.categories.map((item) => this.normalizeCategoryId(item?.id)));
+            const hasOtherCategory = this.categories.some((item) => this.isOtherCategory(item?.id));
+            if (
+                this.filters.category &&
+                !categoryIds.has(this.normalizeCategoryId(this.filters.category)) &&
+                !(this.filters.category === MODEL_EXPLORER_OTHER_CATEGORY_KEY && hasOtherCategory)
+            ) {
                 this.filters.category = "";
             }
             this.renderCategorySelect();
@@ -885,19 +1311,22 @@ class ModelExplorerDialog {
 
     async fetchFilters() {
         let precisionOptions = [];
+        let baseOptions = [];
         try {
             const params = new URLSearchParams();
-            if (this.filters.category) params.set("category", this.filters.category);
+            if (this.filters.category && this.filters.category !== MODEL_EXPLORER_OTHER_CATEGORY_KEY) {
+                params.set("category", this.filters.category);
+            }
             if (this.filters.installedOnly) params.set("installed_only", "true");
             const resp = await this.fetchExplorer(`/filters?${params.toString()}`);
             if (!resp.ok) {
-                this.renderSelectWithAny(this.baseSelect, [], "", "Base models");
-                this.renderSelectWithAny(this.precisionSelect, [], "", "Precision");
+                this.updateFilterOptions("base", []);
+                this.updateFilterOptions("precision", []);
                 this.renderError(`Filters request failed (HTTP ${resp.status}).`);
                 return;
             }
             const data = await resp.json();
-            const bases = Array.isArray(data?.bases) ? data.bases : [];
+            baseOptions = Array.isArray(data?.bases) ? data.bases : [];
             const precisions = Array.isArray(data?.precisions) ? data.precisions : [];
             const seenPrecisions = new Set();
             precisionOptions = [];
@@ -908,17 +1337,11 @@ class ModelExplorerDialog {
                 seenPrecisions.add(normalizedPrecision);
                 precisionOptions.push(normalizedPrecision);
             }
-
-            if (this.filters.precision) {
-                const normalizedSelected = this.normalizePrecision(this.filters.precision);
-                this.filters.precision = precisionOptions.includes(normalizedSelected) ? normalizedSelected : "";
-            }
-
-            this.renderSelectWithAny(this.baseSelect, bases, this.filters.base, "Base models");
-            this.renderSelectWithAny(this.precisionSelect, precisionOptions, this.filters.precision, "Precision");
+            this.updateFilterOptions("base", baseOptions);
+            this.updateFilterOptions("precision", precisionOptions);
         } catch (error) {
-            this.renderSelectWithAny(this.baseSelect, [], "", "Base models");
-            this.renderSelectWithAny(this.precisionSelect, [], "", "Precision");
+            this.updateFilterOptions("base", []);
+            this.updateFilterOptions("precision", []);
             this.renderError(`Failed to fetch filters: ${error}`);
         }
         const categoryKey = String(this.filters.category || "").toLowerCase();
@@ -934,10 +1357,13 @@ class ModelExplorerDialog {
             this.precisionWrap.style.display = precisionAllowed ? "inline-flex" : "none";
         }
         if (!filterAllowed) {
-            this.filters.base = "";
-            this.filters.precision = "";
+            this.filters.base = [];
+            this.filters.precision = [];
+            if (this.baseControl) this.renderFilterControl(this.baseControl);
+            if (this.precisionControl) this.renderFilterControl(this.precisionControl);
         } else if (!precisionAllowed) {
-            this.filters.precision = "";
+            this.filters.precision = [];
+            if (this.precisionControl) this.renderFilterControl(this.precisionControl);
         }
     }
 
@@ -945,9 +1371,13 @@ class ModelExplorerDialog {
         this.setLoading(true);
         try {
             const params = new URLSearchParams();
-            if (this.filters.category) params.set("category", this.filters.category);
-            if (this.filters.base) params.set("base", this.filters.base);
-            if (this.filters.precision) params.set("precision", this.filters.precision);
+            const selectedBase = Array.isArray(this.filters.base) ? this.filters.base : [];
+            const selectedPrecision = Array.isArray(this.filters.precision) ? this.filters.precision : [];
+            if (this.filters.category && this.filters.category !== MODEL_EXPLORER_OTHER_CATEGORY_KEY) {
+                params.set("category", this.filters.category);
+            }
+            if (selectedBase.length === 1) params.set("base", selectedBase[0]);
+            if (selectedPrecision.length === 1) params.set("precision", selectedPrecision[0]);
             if (this.filters.search) params.set("search", this.filters.search);
             if (this.filters.installedOnly) params.set("installed_only", "true");
             params.set("installed_first", "true");
@@ -959,7 +1389,28 @@ class ModelExplorerDialog {
                 return;
             }
             const data = await resp.json();
-            this.groups = Array.isArray(data?.groups) ? data.groups : [];
+            let groups = Array.isArray(data?.groups) ? data.groups : [];
+            if (this.filters.category === MODEL_EXPLORER_OTHER_CATEGORY_KEY) {
+                groups = groups.filter((group) => this.isOtherCategory(group?.category));
+            }
+            if (selectedBase.length) {
+                const baseSet = new Set(selectedBase.map((value) => String(value || "").toLowerCase()));
+                groups = groups.filter((group) => baseSet.has(String(group?.base || "").toLowerCase()));
+            }
+            if (selectedPrecision.length) {
+                const precisionSet = new Set(selectedPrecision.map((value) => this.normalizePrecision(value)));
+                groups = groups
+                    .map((group) => {
+                        const variants = Array.isArray(group?.variants) ? group.variants : [];
+                        const filteredVariants = variants.filter((variant) =>
+                            precisionSet.has(this.normalizePrecision(variant?.precision))
+                        );
+                        if (!filteredVariants.length) return null;
+                        return { ...group, variants: filteredVariants };
+                    })
+                    .filter(Boolean);
+            }
+            this.groups = groups;
             this.renderGroups();
         } catch (error) {
             this.renderError(`Failed to fetch groups: ${error}`);
@@ -972,7 +1423,7 @@ class ModelExplorerDialog {
         if (!this.categoryList) return;
         this.categoryList.innerHTML = "";
 
-        const createCategoryButton = (value, label, count, iconClass) => {
+        const createCategoryButton = (value, label) => {
             const button = document.createElement("button");
             button.type = "button";
             button.className = "hf-me-nav-item";
@@ -980,34 +1431,53 @@ class ModelExplorerDialog {
                 button.classList.add("is-active");
             }
             button.innerHTML = `
-                <i class="hf-me-nav-icon ${iconClass}" aria-hidden="true"></i>
                 <span class="hf-me-nav-label">${escapeHtml(label)}</span>
-                <span class="hf-me-nav-badge">${Number(count || 0)}</span>
             `;
             button.onclick = () => {
                 if (this.filters.category === value) return;
                 this.filters.category = value;
-                this.filters.base = "";
-                this.filters.precision = "";
+                this.filters.base = [];
+                this.filters.precision = [];
+                this.closeFilterPopover();
                 this.renderCategorySelect();
                 void this.refreshFiltersAndGroups();
             };
             this.categoryList.appendChild(button);
         };
 
-        const totalCount = this.categories.reduce((sum, item) => sum + Number(item?.count || 0), 0);
-        createCategoryButton("", "All categories", totalCount, "icon-[lucide--list]");
+        createCategoryButton("", "All Categories");
 
-        const sortedCategories = [...this.categories].sort((a, b) =>
-            String(a?.id || "").localeCompare(String(b?.id || ""))
+        const regularCategories = [];
+        const deferredCategories = [];
+        const otherCategories = [];
+        for (const rawItem of this.categories) {
+            const categoryId = this.normalizeCategoryId(rawItem?.id);
+            if (!categoryId) continue;
+            if (this.isOtherCategory(categoryId)) {
+                otherCategories.push(categoryId);
+                continue;
+            }
+            if (MODEL_EXPLORER_DEFERRED_CATEGORY_ORDER.includes(categoryId)) {
+                deferredCategories.push(categoryId);
+                continue;
+            }
+            regularCategories.push(categoryId);
+        }
+
+        const dedupe = (values) => [...new Set(values)];
+        const sortedRegular = dedupe(regularCategories).sort((a, b) => a.localeCompare(b));
+        const orderedDeferred = MODEL_EXPLORER_DEFERRED_CATEGORY_ORDER.filter((id) =>
+            dedupe(deferredCategories).includes(id)
         );
-        for (const item of sortedCategories) {
-            createCategoryButton(
-                String(item?.id || ""),
-                String(item?.id || ""),
-                item?.count || 0,
-                "icon-[lucide--folder]"
-            );
+        const ordered = [...sortedRegular, ...orderedDeferred];
+
+        for (const categoryId of ordered) {
+            createCategoryButton(categoryId, this.formatCategoryLabel(categoryId));
+        }
+
+        this.otherCategoryIds = new Set(dedupe(otherCategories));
+        if (this.otherCategoryIds.size > 0) {
+            createCategoryButton(MODEL_EXPLORER_OTHER_CATEGORY_KEY, "Other");
         }
     }
 
@@ -1022,24 +1492,6 @@ class ModelExplorerDialog {
         const precision = this.normalizePrecision(value);
         if (!precision || precision === "unknown") return "";
         return precision.toUpperCase();
-    }
-
-    renderSelectWithAny(selectEl, values, selected, anyLabel = "Any") {
-        if (!selectEl) return;
-        selectEl.innerHTML = "";
-        const any = document.createElement("option");
-        any.value = "";
-        any.textContent = anyLabel;
-        any.selected = !selected;
-        selectEl.appendChild(any);
-        for (const value of values) {
-            const optionValue = String(value);
-            const option = document.createElement("option");
-            option.value = optionValue;
-            option.textContent = selectEl === this.precisionSelect ? this.formatPrecision(optionValue) : optionValue;
-            option.selected = optionValue === String(selected || "");
-            selectEl.appendChild(option);
-        }
     }
 
     setLoading(isLoading) {
@@ -1067,7 +1519,7 @@ class ModelExplorerDialog {
 
         const rows = [];
         for (const group of this.groups) {
-            const categoryHtml = escapeHtml(group.category || "");
+            const categoryHtml = escapeHtml(this.formatCategoryLabel(group.category || ""));
             const baseLabel = group.base ? escapeHtml(group.base) : "";
             const variants = Array.isArray(group.variants) ? group.variants : [];
             if (!variants.length) continue;
