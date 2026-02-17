@@ -2,11 +2,7 @@ import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
 const MODEL_EXPLORER_SETTING_ID = "downloader.model_explorer_enabled";
-const MODEL_EXPLORER_API_BASES = [
-    "/hf_downloader_model_explorer_v2",
-    "/hf_model_explorer",
-    "/api/hf_downloader/model_explorer",
-];
+const MODEL_EXPLORER_API_BASE = "/hf_downloader_model_explorer_v2";
 const MODEL_TO_NODE_STORE_IMPORT_CANDIDATES = [
     "../../../stores/modelToNodeStore.js",
     "/stores/modelToNodeStore.js",
@@ -163,53 +159,10 @@ class ModelExplorerDialog {
         this.filters = { category: "", base: "", precision: "", search: "" };
         this.loading = false;
         this.searchTimer = null;
-        this.apiBase = "";
-        this.apiBaseProbeError = "";
-    }
-
-    async resolveApiBase(force = false) {
-        if (this.apiBase && !force) {
-            return this.apiBase;
-        }
-
-        const bases = this.apiBase
-            ? [this.apiBase, ...MODEL_EXPLORER_API_BASES.filter((base) => base !== this.apiBase)]
-            : [...MODEL_EXPLORER_API_BASES];
-        const diagnostics = [];
-
-        for (const base of bases) {
-            try {
-                const categoriesResp = await fetchWithTimeout(`${base}/categories`);
-                const groupsResp = await fetchWithTimeout(`${base}/groups?limit=1&offset=0`);
-                diagnostics.push(`${base}: categories=${categoriesResp.status}, groups=${groupsResp.status}`);
-                if (categoriesResp.ok && groupsResp.ok) {
-                    this.apiBase = base;
-                    this.apiBaseProbeError = "";
-                    return base;
-                }
-            } catch (error) {
-                diagnostics.push(`${base}: exception=${String(error)}`);
-            }
-        }
-
-        this.apiBase = "";
-        this.apiBaseProbeError = diagnostics.join(" | ");
-        throw new Error(`No healthy Model Explorer API base. ${this.apiBaseProbeError}`);
     }
 
     async fetchExplorer(pathAndQuery, init = {}) {
-        const primaryBase = await this.resolveApiBase();
-        let response = await fetchWithTimeout(`${primaryBase}${pathAndQuery}`, init);
-        if (response.status !== 404 && response.status < 500) {
-            return response;
-        }
-
-        // Retry once by re-probing healthy bases. This handles route churn after server restarts.
-        const retryBase = await this.resolveApiBase(true);
-        if (retryBase !== primaryBase) {
-            response = await fetchWithTimeout(`${retryBase}${pathAndQuery}`, init);
-        }
-        return response;
+        return await fetchWithTimeout(`${MODEL_EXPLORER_API_BASE}${pathAndQuery}`, init);
     }
 
     async show() {
@@ -227,7 +180,6 @@ class ModelExplorerDialog {
         }
         this.element.style.display = "flex";
         try {
-            await this.resolveApiBase();
             await this.refreshAll();
         } catch (error) {
             this.renderError(`Failed to open Model Explorer: ${error}`);
@@ -464,7 +416,6 @@ class ModelExplorerDialog {
             <div style="padding:20px;border:1px solid color-mix(in srgb, var(--destructive-background,#d44) 45%, var(--border-default,#3c4452) 55%);border-radius:10px;background:color-mix(in srgb, var(--comfy-input-bg,#2b3242) 86%, var(--destructive-background,#d44) 14%);color:var(--input-text,#e5e7eb);">
                 <div style="font-size:14px;font-weight:700;margin-bottom:6px;">Model Explorer request failed</div>
                 <div style="font-size:13px;line-height:1.35;color:var(--descrip-text,#c4c9d4);">${escapeHtml(message)}</div>
-                ${this.apiBaseProbeError ? `<div style="font-size:11px;line-height:1.35;margin-top:8px;color:var(--descrip-text,#a7b0bf);">${escapeHtml(this.apiBaseProbeError)}</div>` : ""}
                 <div style="font-size:12px;margin-top:10px;color:var(--descrip-text,#9aa4b6);">If backend routes were just changed, restart ComfyUI and reopen Model Explorer.</div>
             </div>
         `;
