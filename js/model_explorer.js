@@ -102,7 +102,7 @@ const createDialogCloseIconButton = (onClose) => {
         height: "40px",
         borderRadius: "10px",
         border: "none",
-        background: "var(--modal-panel-background, var(--comfy-input-bg))",
+        background: "var(--secondary-background, var(--comfy-input-bg))",
         color: "var(--input-text)",
         fontSize: "14px",
         lineHeight: "1",
@@ -125,7 +125,7 @@ const createDialogCloseIconButton = (onClose) => {
         closeIconButton.style.background = "var(--secondary-background-hover)";
     };
     closeIconButton.onmouseleave = () => {
-        closeIconButton.style.background = "var(--modal-panel-background, var(--comfy-input-bg))";
+        closeIconButton.style.background = "var(--secondary-background, var(--comfy-input-bg))";
     };
     closeIconButton.onclick = () => {
         if (typeof onClose === "function") {
@@ -230,6 +230,7 @@ class ModelExplorerDialog {
         this.installedOnlyToggle = null;
         this.baseWrap = null;
         this.precisionWrap = null;
+        this.filterWrap = null;
         this.groups = [];
         this.categories = [];
         this.filters = { category: "", base: "", precision: "", search: "", installedOnly: false };
@@ -251,24 +252,22 @@ class ModelExplorerDialog {
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                height: 88px;
+                height: 72px;
                 padding: 0 24px;
                 flex-shrink: 0;
                 border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
             }
             #hf-model-explorer-dialog .hf-me-title {
-                letter-spacing: 0;
                 color: var(--input-text);
                 flex: 1;
                 min-width: 0;
-                font-family: Inter, Arial, sans-serif;
-                font-size: 24px;
+                font-size: 22px;
                 font-weight: 600;
-                line-height: 32px;
+                line-height: 1.2;
             }
             #hf-model-explorer-dialog .hf-me-content {
                 display: grid;
-                grid-template-columns: 242px minmax(0, 1fr);
+                grid-template-columns: 224px minmax(0, 1fr);
                 min-height: 0;
                 flex: 1 1 auto;
                 overflow: hidden;
@@ -277,24 +276,31 @@ class ModelExplorerDialog {
                 display: flex;
                 flex-direction: column;
                 min-height: 0;
-                padding: 14px 10px 12px;
                 border-right: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
-                background: color-mix(in srgb, var(--modal-panel-background, var(--comfy-input-bg)) 82%, var(--base-background, #111319) 18%);
+                background: var(--modal-panel-background, var(--comfy-menu-bg, #1f2128));
+                overflow: hidden;
+            }
+            #hf-model-explorer-dialog .hf-me-sidebar-title-wrap {
+                display: flex;
+                align-items: center;
+                min-height: 72px;
+                padding: 0 24px;
+                flex: 0 0 auto;
             }
             #hf-model-explorer-dialog .hf-me-sidebar-title {
-                font-size: 30px;
-                font-weight: 700;
-                line-height: 1.15;
+                font-size: 16px;
+                font-weight: 600;
+                line-height: 1.1;
                 color: var(--input-text);
-                margin: 0 8px 12px;
             }
             #hf-model-explorer-dialog .hf-me-sidebar-group-label {
                 color: var(--descrip-text, #9aa4b6);
                 font-size: 11px;
                 text-transform: uppercase;
                 letter-spacing: 0.06em;
-                font-weight: 600;
-                margin: 6px 8px 8px;
+                font-weight: 700;
+                margin: 0 0 6px;
+                padding: 0 12px;
             }
             #hf-model-explorer-dialog .hf-me-category-list {
                 display: flex;
@@ -302,33 +308,32 @@ class ModelExplorerDialog {
                 gap: 4px;
                 overflow: auto;
                 min-height: 0;
-                padding-right: 4px;
+                padding: 0 12px 12px;
             }
             #hf-model-explorer-dialog .hf-me-category-item {
                 appearance: none;
-                border: 1px solid transparent;
-                border-radius: 10px;
+                border: none;
+                border-radius: 8px;
                 background: transparent;
                 color: var(--input-text);
-                font-size: 15px;
+                font-size: 14px;
                 font-weight: 500;
-                line-height: 1.2;
+                line-height: 1;
                 text-align: left;
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                gap: 10px;
-                min-height: 42px;
-                padding: 0 12px;
+                gap: 8px;
+                min-height: 40px;
+                padding: 12px 16px;
                 cursor: pointer;
-                transition: background-color 120ms ease, border-color 120ms ease;
+                transition: background-color 120ms ease;
             }
             #hf-model-explorer-dialog .hf-me-category-item:hover {
-                background: var(--secondary-background-hover, #3a4458);
+                background: var(--interface-menu-component-surface-hovered, var(--secondary-background-hover, #3a4458));
             }
             #hf-model-explorer-dialog .hf-me-category-item.is-active {
-                background: var(--secondary-background, #2f3747);
-                border-color: var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
+                background: var(--interface-menu-component-surface-selected, var(--secondary-background, #2f3747));
             }
             #hf-model-explorer-dialog .hf-me-category-name {
                 min-width: 0;
@@ -347,116 +352,87 @@ class ModelExplorerDialog {
                 flex-direction: column;
                 min-width: 0;
                 min-height: 0;
+                background: var(--base-background, var(--comfy-menu-bg, #111319));
             }
             #hf-model-explorer-dialog .hf-me-search-wrap {
-                padding: 14px 16px 10px;
+                display: flex;
+                align-items: center;
+                min-height: 72px;
+                padding: 0 24px;
+            }
+            #hf-model-explorer-dialog .hf-me-search-inner {
+                position: relative;
+                width: 100%;
+            }
+            #hf-model-explorer-dialog .hf-me-search-icon {
+                position: absolute;
+                left: 12px;
+                top: 50%;
+                transform: translateY(-50%);
+                font-size: 14px;
+                color: var(--descrip-text, #9aa4b6);
+                pointer-events: none;
             }
             #hf-model-explorer-dialog .hf-me-filters {
                 display: flex;
                 flex-wrap: wrap;
-                gap: 10px;
-                padding: 0 16px 10px;
+                gap: 12px;
+                padding: 0 24px 12px;
                 align-items: flex-end;
             }
             #hf-model-explorer-dialog .hf-me-field {
                 display: flex;
                 flex-direction: column;
-                gap: 4px;
-                min-width: 180px;
+                gap: 6px;
+                min-width: 176px;
             }
             #hf-model-explorer-dialog .hf-me-field-label {
                 color: var(--descrip-text, #9aa4b6);
                 font-size: 11px;
                 text-transform: uppercase;
                 letter-spacing: 0.05em;
-                font-weight: 600;
+                font-weight: 700;
             }
             #hf-model-explorer-dialog .hf-me-input {
-                background: var(--comfy-input-bg);
-                border: 1px solid var(--border-default);
+                background: var(--comfy-input-bg, #2b3242);
+                border: 2px solid transparent;
                 color: var(--input-text);
-                border-radius: 8px;
-                height: 38px;
-                padding: 0 10px;
+                border-radius: 10px;
+                height: 40px;
+                padding: 0 12px;
                 font-size: 14px;
                 font-family: var(--font-inter, Inter, sans-serif);
                 outline: none;
                 box-sizing: border-box;
                 width: 100%;
             }
+            #hf-model-explorer-dialog .hf-me-search-inner .hf-me-input {
+                padding-left: 36px;
+            }
             #hf-model-explorer-dialog .hf-me-input:focus {
-                border-color: color-mix(in srgb, var(--primary-background, #3b82f6) 70%, var(--border-default, #3c4452) 30%);
-                box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-background, #3b82f6) 35%, transparent);
+                border-color: var(--node-component-border, color-mix(in srgb, var(--primary-background, #3b82f6) 70%, var(--border-default, #3c4452) 30%));
             }
             #hf-model-explorer-dialog .hf-me-toggle-row {
                 display: flex;
                 align-items: center;
                 gap: 10px;
-                padding: 6px 16px 12px;
+                padding: 0 24px 14px;
                 border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
                 color: var(--descrip-text, #9aa4b6);
-                font-size: 13px;
+                font-size: 14px;
             }
             #hf-model-explorer-dialog .hf-me-toggle-label {
                 display: inline-flex;
                 align-items: center;
-                gap: 10px;
+                gap: 12px;
                 cursor: pointer;
                 user-select: none;
             }
-            #hf-model-explorer-dialog .hf-me-toggle.p-toggleswitch {
-                position: relative;
-                display: inline-block;
-                width: 46px;
-                height: 26px;
-                vertical-align: middle;
-                flex-shrink: 0;
-            }
-            #hf-model-explorer-dialog .hf-me-toggle .p-toggleswitch-input {
-                position: absolute;
-                inset: 0;
-                width: 100%;
-                height: 100%;
-                margin: 0;
-                opacity: 0;
-                z-index: 1;
-                cursor: pointer;
-            }
-            #hf-model-explorer-dialog .hf-me-toggle .p-toggleswitch-slider {
-                position: absolute;
-                inset: 0;
-                border-radius: 999px;
-                border: 1px solid var(--border-default, #4b5563);
-                background: var(--secondary-background, #2a2f3a);
-                transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
-                box-sizing: border-box;
-            }
-            #hf-model-explorer-dialog .hf-me-toggle .p-toggleswitch-slider::before {
-                content: "";
-                position: absolute;
-                top: 2px;
-                left: 2px;
-                width: 20px;
-                height: 20px;
-                border-radius: 999px;
-                border: 1px solid color-mix(in srgb, var(--border-default, #4b5563) 85%, #000 15%);
-                background: var(--comfy-input-bg, #1f2128);
-                box-sizing: border-box;
-                transition: transform 120ms ease, background-color 120ms ease, border-color 120ms ease;
-            }
-            #hf-model-explorer-dialog .hf-me-toggle.p-toggleswitch-checked .p-toggleswitch-slider {
-                background: var(--primary-background, #3b82f6);
-                border-color: var(--primary-background, #3b82f6);
-            }
-            #hf-model-explorer-dialog .hf-me-toggle.p-toggleswitch-checked .p-toggleswitch-slider::before {
-                transform: translateX(20px);
-                background: var(--comfy-menu-bg, #111319);
-            }
-            #hf-model-explorer-dialog .hf-me-toggle.p-focus .p-toggleswitch-slider {
-                box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-background, #3b82f6) 40%, transparent);
+            #hf-model-explorer-dialog .hf-me-toggle {
+                flex: 0 0 auto;
             }
             #hf-model-explorer-dialog .hf-me-body {
-                padding: 12px 16px 18px;
+                padding: 8px 12px 12px;
                 overflow: auto;
                 display: flex;
                 flex-direction: column;
@@ -464,27 +440,29 @@ class ModelExplorerDialog {
                 min-height: 0;
                 flex: 1 1 auto;
                 font-size: 13px;
-                line-height: 1.45;
+                line-height: 1.4;
                 font-family: var(--font-inter, Inter, sans-serif);
                 color: var(--base-foreground, #e5e7eb);
             }
             #hf-model-explorer-dialog .hf-me-row {
                 display: grid;
-                grid-template-columns: minmax(0, 1.55fr) minmax(86px, 0.45fr) minmax(130px, 0.55fr) 214px;
+                grid-template-columns: minmax(0, 1fr) minmax(90px, 130px) minmax(130px, 180px) minmax(180px, auto);
                 align-items: center;
-                gap: 8px;
-                min-height: 48px;
-                border-radius: 12px;
-                border: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
-                background: var(--comfy-input-bg, #2b3242);
-                padding: 4px 10px;
+                gap: 10px;
+                min-height: 56px;
+                border-radius: 8px;
+                background: var(--secondary-background, #2f3747);
+                padding: 8px 10px;
                 box-sizing: border-box;
+                transition: background-color 120ms ease;
+            }
+            #hf-model-explorer-dialog .hf-me-row:hover {
+                background: var(--secondary-background-hover, #3a4458);
             }
             #hf-model-explorer-dialog .hf-me-main {
                 min-width: 0;
                 display: flex;
                 flex-direction: column;
-                justify-content: center;
                 gap: 2px;
             }
             #hf-model-explorer-dialog .hf-me-file {
@@ -506,7 +484,7 @@ class ModelExplorerDialog {
                 font-size: 11px;
                 color: #56d78f;
                 font-weight: 700;
-                line-height: 1;
+                line-height: 1.1;
                 letter-spacing: 0.02em;
                 text-transform: uppercase;
             }
@@ -520,7 +498,6 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-category {
                 font-size: 12px;
                 color: var(--descrip-text, #9aa4b6);
-                text-transform: capitalize;
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
@@ -530,14 +507,13 @@ class ModelExplorerDialog {
                 align-items: center;
                 justify-content: flex-end;
                 gap: 8px;
-                width: 100%;
                 min-width: 0;
             }
             #hf-model-explorer-dialog .hf-me-action-btn {
-                min-height: 38px;
-                min-width: 94px;
-                padding: 0.45rem 0.9rem;
-                border-radius: 10px;
+                min-height: 32px;
+                min-width: 84px;
+                padding: 0 12px;
+                border-radius: 8px;
                 border: none;
                 color: var(--base-foreground);
                 font-size: 14px;
@@ -578,8 +554,13 @@ class ModelExplorerDialog {
                 background: var(--destructive-background-hover, #dd5c5c);
             }
             #hf-model-explorer-dialog .hf-me-empty {
-                padding: 30px;
+                padding: 24px 16px;
                 color: var(--descrip-text, #9aa4b6);
+            }
+            @media (max-width: 1280px) {
+                #hf-model-explorer-dialog .hf-me-row {
+                    grid-template-columns: minmax(0, 1fr) minmax(90px, 110px) minmax(110px, 150px) minmax(160px, auto);
+                }
             }
             @media (max-width: 1024px) {
                 #hf-model-explorer-dialog .hf-me-content {
@@ -588,7 +569,7 @@ class ModelExplorerDialog {
                 #hf-model-explorer-dialog .hf-me-sidebar {
                     border-right: none;
                     border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
-                    max-height: 220px;
+                    max-height: 260px;
                 }
                 #hf-model-explorer-dialog .hf-me-row {
                     grid-template-columns: minmax(0, 1fr) auto;
@@ -648,7 +629,7 @@ class ModelExplorerDialog {
 
         const panel = document.createElement("div");
         applyTemplateDialogPanelStyle(panel, {
-            width: "min(1220px, 100%)",
+            width: "min(1400px, 100%)",
             maxHeight: "92vh",
             padding: "0",
         });
@@ -673,7 +654,9 @@ class ModelExplorerDialog {
         const sidebar = document.createElement("div");
         sidebar.className = "hf-me-sidebar";
         sidebar.innerHTML = `
-            <div class="hf-me-sidebar-title">Model Library</div>
+            <div class="hf-me-sidebar-title-wrap">
+                <div class="hf-me-sidebar-title">Model Library</div>
+            </div>
             <div class="hf-me-sidebar-group-label">By type</div>
             <div id="hf-me-category-list" class="hf-me-category-list"></div>
         `;
@@ -685,7 +668,12 @@ class ModelExplorerDialog {
 
         const searchWrap = document.createElement("div");
         searchWrap.className = "hf-me-search-wrap";
-        searchWrap.innerHTML = `<input id="hf-me-search" class="hf-me-input" type="text" placeholder="Search..." />`;
+        searchWrap.innerHTML = `
+            <div class="hf-me-search-inner">
+                <i class="hf-me-search-icon pi pi-search" aria-hidden="true"></i>
+                <input id="hf-me-search" class="hf-me-input" type="text" placeholder="Search..." />
+            </div>
+        `;
         mainPane.appendChild(searchWrap);
 
         const filterWrap = document.createElement("div");
@@ -755,6 +743,7 @@ class ModelExplorerDialog {
         this.installedOnlyToggle = toggleInput;
         this.baseWrap = panel.querySelector("#hf-me-base-wrap");
         this.precisionWrap = panel.querySelector("#hf-me-precision-wrap");
+        this.filterWrap = filterWrap;
         this.baseSelect.onchange = async () => {
             this.filters.base = this.baseSelect.value;
             await this.refreshGroups();
@@ -838,6 +827,9 @@ class ModelExplorerDialog {
         }
         const categoryKey = String(this.filters.category || "").toLowerCase();
         const filterAllowed = ["checkpoints", "diffusion_models", "loras", "controlnet"].includes(categoryKey);
+        if (this.filterWrap) {
+            this.filterWrap.style.display = filterAllowed ? "flex" : "none";
+        }
         this.baseWrap.style.display = filterAllowed ? "flex" : "none";
         this.precisionWrap.style.display = filterAllowed ? "flex" : "none";
         if (!filterAllowed) {
@@ -969,11 +961,11 @@ class ModelExplorerDialog {
                         : "";
                     const actions = installed
                         ? `
-                            <button class="hf-me-action-btn hf-me-action-btn--destructive" data-action="delete" data-key="${variantKey}">Delete</button>
-                            <button class="hf-me-action-btn hf-me-action-btn--primary" data-action="use" data-key="${variantKey}">Use</button>
+                            <button class="hf-me-action-btn p-button p-component hf-me-action-btn--destructive" data-action="delete" data-key="${variantKey}">Delete</button>
+                            <button class="hf-me-action-btn p-button p-component hf-me-action-btn--primary" data-action="use" data-key="${variantKey}">Use</button>
                           `
                         : `
-                            <button class="hf-me-action-btn hf-me-action-btn--secondary" data-action="download" data-key="${variantKey}">Download</button>
+                            <button class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-action="download" data-key="${variantKey}">Download</button>
                           `;
                     const baseRow = baseLabel ? `<div class="hf-me-base">Base: ${baseLabel}</div>` : "";
                     const precisionColumn = showPrecision ? precision : "";
