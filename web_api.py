@@ -2194,16 +2194,23 @@ async def delete_from_hf_backup_endpoint(request):
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
 def setup(app):
-    app.router.add_get("/folder_structure", folder_structure)
-    app.router.add_get("/backup_browser_tree", backup_browser_tree)
-    app.router.add_post("/backup_to_hf", backup_to_hf)
-    app.router.add_post("/backup_selected_to_hf", backup_selected_to_hf_endpoint)
-    app.router.add_post("/restore_from_hf", restore_from_hf)
-    app.router.add_post("/restore_selected_from_hf", restore_selected_from_hf_endpoint)
-    app.router.add_post("/delete_from_hf_backup", delete_from_hf_backup_endpoint)
-    app.router.add_post("/check_missing_models", check_missing_models)
-    app.router.add_post("/relocate_model_file", relocate_model_file)
-    app.router.add_post("/install_models", install_models)
+    def _safe_add_route(method: str, path: str, handler):
+        try:
+            app.router.add_route(method, path, handler)
+        except RuntimeError as e:
+            # Allow extension reload / duplicate installs without aborting setup.
+            print(f"[ComfyUI_HuggingFace_Downloader] Route already exists, skipping: {method} {path} ({e})")
+
+    _safe_add_route("GET", "/folder_structure", folder_structure)
+    _safe_add_route("GET", "/backup_browser_tree", backup_browser_tree)
+    _safe_add_route("POST", "/backup_to_hf", backup_to_hf)
+    _safe_add_route("POST", "/backup_selected_to_hf", backup_selected_to_hf_endpoint)
+    _safe_add_route("POST", "/restore_from_hf", restore_from_hf)
+    _safe_add_route("POST", "/restore_selected_from_hf", restore_selected_from_hf_endpoint)
+    _safe_add_route("POST", "/delete_from_hf_backup", delete_from_hf_backup_endpoint)
+    _safe_add_route("POST", "/check_missing_models", check_missing_models)
+    _safe_add_route("POST", "/relocate_model_file", relocate_model_file)
+    _safe_add_route("POST", "/install_models", install_models)
 
     async def queue_download(request):
         """Queue background downloads with status tracking."""
@@ -2924,27 +2931,27 @@ def setup(app):
         # Reuse the existing queue-based downloader contract.
         return await queue_download(request)
         
-    app.router.add_post("/restart", restart)
-    app.router.add_post("/queue_download", queue_download)
-    app.router.add_post("/api/model_explorer/download", model_explorer_download_proxy)
-    app.router.add_post("/cancel_download", cancel_download)
-    app.router.add_get("/download_status", download_status_endpoint)
-    app.router.add_get("/search_status", search_status_endpoint)
-    app.router.add_get("/model_library", model_library_endpoint)
-    app.router.add_get(MODEL_LIBRARY_ASSET_ROUTE_BASE, hf_model_library_assets_list)
-    app.router.add_get(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/remote-metadata", hf_model_library_remote_metadata)
-    app.router.add_post(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/download", hf_model_library_download)
-    app.router.add_get(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}", hf_model_library_asset_detail)
-    app.router.add_put(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}", hf_model_library_asset_update)
-    app.router.add_post(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_add_tags)
-    app.router.add_delete(f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_remove_tags)
+    _safe_add_route("POST", "/restart", restart)
+    _safe_add_route("POST", "/queue_download", queue_download)
+    _safe_add_route("POST", "/api/model_explorer/download", model_explorer_download_proxy)
+    _safe_add_route("POST", "/cancel_download", cancel_download)
+    _safe_add_route("GET", "/download_status", download_status_endpoint)
+    _safe_add_route("GET", "/search_status", search_status_endpoint)
+    _safe_add_route("GET", "/model_library", model_library_endpoint)
+    _safe_add_route("GET", MODEL_LIBRARY_ASSET_ROUTE_BASE, hf_model_library_assets_list)
+    _safe_add_route("GET", f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/remote-metadata", hf_model_library_remote_metadata)
+    _safe_add_route("POST", f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/download", hf_model_library_download)
+    _safe_add_route("GET", f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}", hf_model_library_asset_detail)
+    _safe_add_route("PUT", f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}", hf_model_library_asset_update)
+    _safe_add_route("POST", f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_add_tags)
+    _safe_add_route("DELETE", f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_remove_tags)
 
     # --- Model Explorer Routes ---
-    app.router.add_get("/api/model_explorer/categories", model_explorer_list_categories)
-    app.router.add_get("/api/model_explorer/filters", model_explorer_get_filters)
-    app.router.add_get("/api/model_explorer/groups", model_explorer_list_groups)
-    app.router.add_post("/api/model_explorer/use", model_explorer_use)
-    app.router.add_post("/api/model_explorer/delete", model_explorer_delete)
+    _safe_add_route("GET", "/api/model_explorer/categories", model_explorer_list_categories)
+    _safe_add_route("GET", "/api/model_explorer/filters", model_explorer_get_filters)
+    _safe_add_route("GET", "/api/model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("POST", "/api/model_explorer/use", model_explorer_use)
+    _safe_add_route("POST", "/api/model_explorer/delete", model_explorer_delete)
 
 
 def _model_explorer_normalize_text(value: str) -> str:
