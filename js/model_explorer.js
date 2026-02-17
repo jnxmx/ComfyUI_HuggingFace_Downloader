@@ -6,7 +6,6 @@ const MODEL_EXPLORER_API_BASES = [
     "/hf_downloader_model_explorer_v2",
     "/hf_model_explorer",
     "/api/hf_downloader/model_explorer",
-    "/api/model_explorer",
 ];
 const MODEL_TO_NODE_STORE_IMPORT_CANDIDATES = [
     "../../../stores/modelToNodeStore.js",

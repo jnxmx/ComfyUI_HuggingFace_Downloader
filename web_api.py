@@ -2197,9 +2197,32 @@ def setup(app):
     def _safe_add_route(method: str, path: str, handler):
         try:
             app.router.add_route(method, path, handler)
-        except RuntimeError as e:
+        except Exception as e:
             # Allow extension reload / duplicate installs without aborting setup.
             print(f"[ComfyUI_HuggingFace_Downloader] Route already exists, skipping: {method} {path} ({e})")
+
+    # Register Model Explorer routes first so this feature still works even if later
+    # route groups collide with other extensions or prior registrations.
+    _safe_add_route("GET", "/hf_downloader_model_explorer_v2/categories", model_explorer_list_categories)
+    _safe_add_route("GET", "/hf_downloader_model_explorer_v2/filters", model_explorer_get_filters)
+    _safe_add_route("GET", "/hf_downloader_model_explorer_v2/groups", model_explorer_list_groups)
+    _safe_add_route("POST", "/hf_downloader_model_explorer_v2/use", model_explorer_use)
+    _safe_add_route("POST", "/hf_downloader_model_explorer_v2/delete", model_explorer_delete)
+    _safe_add_route("GET", "/hf_model_explorer/categories", model_explorer_list_categories)
+    _safe_add_route("GET", "/hf_model_explorer/filters", model_explorer_get_filters)
+    _safe_add_route("GET", "/hf_model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("POST", "/hf_model_explorer/use", model_explorer_use)
+    _safe_add_route("POST", "/hf_model_explorer/delete", model_explorer_delete)
+    _safe_add_route("GET", "/api/hf_downloader/model_explorer/categories", model_explorer_list_categories)
+    _safe_add_route("GET", "/api/hf_downloader/model_explorer/filters", model_explorer_get_filters)
+    _safe_add_route("GET", "/api/hf_downloader/model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("POST", "/api/hf_downloader/model_explorer/use", model_explorer_use)
+    _safe_add_route("POST", "/api/hf_downloader/model_explorer/delete", model_explorer_delete)
+    _safe_add_route("GET", "/api/model_explorer/categories", model_explorer_list_categories)
+    _safe_add_route("GET", "/api/model_explorer/filters", model_explorer_get_filters)
+    _safe_add_route("GET", "/api/model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("POST", "/api/model_explorer/use", model_explorer_use)
+    _safe_add_route("POST", "/api/model_explorer/delete", model_explorer_delete)
 
     _safe_add_route("GET", "/folder_structure", folder_structure)
     _safe_add_route("GET", "/backup_browser_tree", backup_browser_tree)
