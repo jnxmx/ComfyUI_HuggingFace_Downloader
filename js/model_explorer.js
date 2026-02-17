@@ -130,6 +130,73 @@ const applyTemplateDialogPanelStyle = (panel, sizeStyle = {}) => {
     });
 };
 
+const ensureManualToggleStyles = () => {
+    const styleId = "hf-manual-toggle-styles";
+    if (document.getElementById(styleId)) return;
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+        .hf-manual-toggle.p-toggleswitch {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            width: 52px;
+            height: 32px;
+            margin: 0;
+            cursor: pointer;
+            user-select: none;
+            vertical-align: middle;
+            flex: 0 0 auto;
+        }
+        .hf-manual-toggle .p-toggleswitch-input {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            opacity: 0;
+            cursor: pointer;
+            z-index: 2;
+        }
+        .hf-manual-toggle .p-toggleswitch-slider {
+            position: relative;
+            display: block;
+            width: 100%;
+            height: 100%;
+            border-radius: 999px;
+            border: 1px solid var(--border-default, #4b5563);
+            background: var(--comfy-input-bg, #2b3242);
+            box-sizing: border-box;
+            transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+        }
+        .hf-manual-toggle .p-toggleswitch-slider::before {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 3px;
+            width: 24px;
+            height: 24px;
+            border-radius: 999px;
+            transform: translateY(-50%);
+            background: var(--secondary-background, #3a4458);
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+            transition: transform 140ms ease, background-color 140ms ease;
+        }
+        .hf-manual-toggle.p-toggleswitch-checked .p-toggleswitch-slider {
+            background: var(--primary-background, #2786e5);
+            border-color: var(--primary-background, #2786e5);
+        }
+        .hf-manual-toggle.p-toggleswitch-checked .p-toggleswitch-slider::before {
+            transform: translate(20px, -50%);
+            background: var(--base-foreground, #e5e7eb);
+        }
+        .hf-manual-toggle.p-focus .p-toggleswitch-slider {
+            box-shadow: 0 0 0 2px rgba(39, 134, 229, 0.3);
+        }
+    `;
+    document.head.appendChild(style);
+};
+
 const createDialogCloseIconButton = (onClose) => {
     const closeIconButton = document.createElement("button");
     closeIconButton.type = "button";
@@ -390,6 +457,7 @@ class ModelExplorerDialog {
     }
 
     ensureStyles() {
+        ensureManualToggleStyles();
         const styleId = "hf-model-explorer-styles";
         if (document.getElementById(styleId)) return;
         const style = document.createElement("style");
