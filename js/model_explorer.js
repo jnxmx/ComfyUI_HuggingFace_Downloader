@@ -223,7 +223,7 @@ class ModelExplorerDialog {
     constructor() {
         this.element = null;
         this.body = null;
-        this.categorySelect = null;
+        this.categoryList = null;
         this.baseSelect = null;
         this.precisionSelect = null;
         this.searchInput = null;
@@ -266,12 +266,96 @@ class ModelExplorerDialog {
                 font-weight: 600;
                 line-height: 32px;
             }
+            #hf-model-explorer-dialog .hf-me-content {
+                display: grid;
+                grid-template-columns: 242px minmax(0, 1fr);
+                min-height: 0;
+                flex: 1 1 auto;
+                overflow: hidden;
+            }
+            #hf-model-explorer-dialog .hf-me-sidebar {
+                display: flex;
+                flex-direction: column;
+                min-height: 0;
+                padding: 14px 10px 12px;
+                border-right: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
+                background: color-mix(in srgb, var(--modal-panel-background, var(--comfy-input-bg)) 82%, var(--base-background, #111319) 18%);
+            }
+            #hf-model-explorer-dialog .hf-me-sidebar-title {
+                font-size: 30px;
+                font-weight: 700;
+                line-height: 1.15;
+                color: var(--input-text);
+                margin: 0 8px 12px;
+            }
+            #hf-model-explorer-dialog .hf-me-sidebar-group-label {
+                color: var(--descrip-text, #9aa4b6);
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                font-weight: 600;
+                margin: 6px 8px 8px;
+            }
+            #hf-model-explorer-dialog .hf-me-category-list {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                overflow: auto;
+                min-height: 0;
+                padding-right: 4px;
+            }
+            #hf-model-explorer-dialog .hf-me-category-item {
+                appearance: none;
+                border: 1px solid transparent;
+                border-radius: 10px;
+                background: transparent;
+                color: var(--input-text);
+                font-size: 15px;
+                font-weight: 500;
+                line-height: 1.2;
+                text-align: left;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+                min-height: 42px;
+                padding: 0 12px;
+                cursor: pointer;
+                transition: background-color 120ms ease, border-color 120ms ease;
+            }
+            #hf-model-explorer-dialog .hf-me-category-item:hover {
+                background: var(--secondary-background-hover, #3a4458);
+            }
+            #hf-model-explorer-dialog .hf-me-category-item.is-active {
+                background: var(--secondary-background, #2f3747);
+                border-color: var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
+            }
+            #hf-model-explorer-dialog .hf-me-category-name {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            #hf-model-explorer-dialog .hf-me-category-count {
+                color: var(--descrip-text, #9aa4b6);
+                font-size: 12px;
+                font-weight: 600;
+                flex: 0 0 auto;
+            }
+            #hf-model-explorer-dialog .hf-me-main-pane {
+                display: flex;
+                flex-direction: column;
+                min-width: 0;
+                min-height: 0;
+            }
+            #hf-model-explorer-dialog .hf-me-search-wrap {
+                padding: 14px 16px 10px;
+            }
             #hf-model-explorer-dialog .hf-me-filters {
                 display: flex;
                 flex-wrap: wrap;
                 gap: 10px;
-                padding: 14px 22px;
-                border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
+                padding: 0 16px 10px;
                 align-items: flex-end;
             }
             #hf-model-explorer-dialog .hf-me-field {
@@ -279,13 +363,6 @@ class ModelExplorerDialog {
                 flex-direction: column;
                 gap: 4px;
                 min-width: 180px;
-            }
-            #hf-model-explorer-dialog .hf-me-field--category {
-                min-width: 220px;
-            }
-            #hf-model-explorer-dialog .hf-me-field--search {
-                min-width: 260px;
-                flex: 1;
             }
             #hf-model-explorer-dialog .hf-me-field-label {
                 color: var(--descrip-text, #9aa4b6);
@@ -315,7 +392,7 @@ class ModelExplorerDialog {
                 display: flex;
                 align-items: center;
                 gap: 10px;
-                padding: 8px 22px 12px;
+                padding: 6px 16px 12px;
                 border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
                 color: var(--descrip-text, #9aa4b6);
                 font-size: 13px;
@@ -379,13 +456,13 @@ class ModelExplorerDialog {
                 box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-background, #3b82f6) 40%, transparent);
             }
             #hf-model-explorer-dialog .hf-me-body {
-                padding: 12px 22px 18px;
+                padding: 12px 16px 18px;
                 overflow: auto;
                 display: flex;
                 flex-direction: column;
                 gap: 8px;
-                min-height: 260px;
-                max-height: 66vh;
+                min-height: 0;
+                flex: 1 1 auto;
                 font-size: 13px;
                 line-height: 1.45;
                 font-family: var(--font-inter, Inter, sans-serif);
@@ -505,6 +582,14 @@ class ModelExplorerDialog {
                 color: var(--descrip-text, #9aa4b6);
             }
             @media (max-width: 1024px) {
+                #hf-model-explorer-dialog .hf-me-content {
+                    grid-template-columns: minmax(0, 1fr);
+                }
+                #hf-model-explorer-dialog .hf-me-sidebar {
+                    border-right: none;
+                    border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
+                    max-height: 220px;
+                }
                 #hf-model-explorer-dialog .hf-me-row {
                     grid-template-columns: minmax(0, 1fr) auto;
                     gap: 6px;
@@ -581,32 +666,46 @@ class ModelExplorerDialog {
         headerWrap.appendChild(closeIconButton);
         panel.appendChild(headerWrap);
 
+        const contentWrap = document.createElement("div");
+        contentWrap.className = "hf-me-content";
+        panel.appendChild(contentWrap);
+
+        const sidebar = document.createElement("div");
+        sidebar.className = "hf-me-sidebar";
+        sidebar.innerHTML = `
+            <div class="hf-me-sidebar-title">Model Library</div>
+            <div class="hf-me-sidebar-group-label">By type</div>
+            <div id="hf-me-category-list" class="hf-me-category-list"></div>
+        `;
+        contentWrap.appendChild(sidebar);
+
+        const mainPane = document.createElement("div");
+        mainPane.className = "hf-me-main-pane";
+        contentWrap.appendChild(mainPane);
+
+        const searchWrap = document.createElement("div");
+        searchWrap.className = "hf-me-search-wrap";
+        searchWrap.innerHTML = `<input id="hf-me-search" class="hf-me-input" type="text" placeholder="Search..." />`;
+        mainPane.appendChild(searchWrap);
+
         const filterWrap = document.createElement("div");
         filterWrap.className = "hf-me-filters";
         filterWrap.innerHTML = `
-            <label class="hf-me-field hf-me-field--category">
-                <span class="hf-me-field-label">Category</span>
-                <select id="hf-me-category" class="hf-me-input"></select>
-            </label>
-            <label id="hf-me-base-wrap" class="hf-me-field">
-                <span class="hf-me-field-label">Base</span>
-                <select id="hf-me-base" class="hf-me-input"></select>
-            </label>
             <label id="hf-me-precision-wrap" class="hf-me-field">
                 <span class="hf-me-field-label">Precision</span>
                 <select id="hf-me-precision" class="hf-me-input"></select>
             </label>
-            <label class="hf-me-field hf-me-field--search">
-                <span class="hf-me-field-label">Search</span>
-                <input id="hf-me-search" class="hf-me-input" type="text" placeholder="Search models..." />
+            <label id="hf-me-base-wrap" class="hf-me-field">
+                <span class="hf-me-field-label">Base models</span>
+                <select id="hf-me-base" class="hf-me-input"></select>
             </label>
         `;
-        panel.appendChild(filterWrap);
+        mainPane.appendChild(filterWrap);
 
         const installedOnlyRow = document.createElement("div");
         installedOnlyRow.id = "hf-me-installed-only-row";
         installedOnlyRow.className = "hf-me-toggle-row";
-        panel.appendChild(installedOnlyRow);
+        mainPane.appendChild(installedOnlyRow);
 
         const toggleLabel = document.createElement("label");
         toggleLabel.className = "hf-me-toggle-label";
@@ -619,7 +718,7 @@ class ModelExplorerDialog {
         toggleInput.type = "checkbox";
         toggleInput.className = "p-toggleswitch-input";
         toggleInput.setAttribute("role", "switch");
-        toggleInput.setAttribute("aria-label", "Show only installed");
+        toggleInput.setAttribute("aria-label", "Show downloaded only");
 
         const toggleSlider = document.createElement("span");
         toggleSlider.className = "p-toggleswitch-slider";
@@ -628,7 +727,7 @@ class ModelExplorerDialog {
         toggleLabel.appendChild(toggleWrap);
 
         const toggleText = document.createElement("span");
-        toggleText.textContent = "Show only installed";
+        toggleText.textContent = "Show downloaded only";
         toggleLabel.appendChild(toggleText);
         installedOnlyRow.appendChild(toggleLabel);
 
@@ -643,25 +742,19 @@ class ModelExplorerDialog {
         const body = document.createElement("div");
         body.id = "hf-me-body";
         body.className = "hf-me-body";
-        panel.appendChild(body);
+        mainPane.appendChild(body);
 
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
         this.element = overlay;
         this.body = body;
-        this.categorySelect = panel.querySelector("#hf-me-category");
+        this.categoryList = panel.querySelector("#hf-me-category-list");
         this.baseSelect = panel.querySelector("#hf-me-base");
         this.precisionSelect = panel.querySelector("#hf-me-precision");
         this.searchInput = panel.querySelector("#hf-me-search");
         this.installedOnlyToggle = toggleInput;
         this.baseWrap = panel.querySelector("#hf-me-base-wrap");
         this.precisionWrap = panel.querySelector("#hf-me-precision-wrap");
-        this.categorySelect.onchange = async () => {
-            this.filters.category = this.categorySelect.value;
-            this.filters.base = "";
-            this.filters.precision = "";
-            await this.refreshFiltersAndGroups();
-        };
         this.baseSelect.onchange = async () => {
             this.filters.base = this.baseSelect.value;
             await this.refreshGroups();
@@ -738,21 +831,19 @@ class ModelExplorerDialog {
             const precisions = Array.isArray(data?.precisions) ? data.precisions : [];
             this.renderSelectWithAny(this.baseSelect, bases, this.filters.base);
             this.renderSelectWithAny(this.precisionSelect, precisions, this.filters.precision);
-            if (this.precisionWrap) {
-                const showPrecision = precisions.length > 0;
-                this.precisionWrap.style.display = showPrecision ? "flex" : "none";
-                if (!showPrecision) {
-                    this.filters.precision = "";
-                }
-            }
         } catch (error) {
             this.renderSelectWithAny(this.baseSelect, [], "");
             this.renderSelectWithAny(this.precisionSelect, [], "");
             this.renderError(`Failed to fetch filters: ${error}`);
         }
-        const baseAllowed = ["checkpoints", "diffusion_models", "loras"].includes(this.filters.category);
-        this.baseWrap.style.display = baseAllowed ? "flex" : "none";
-        if (!baseAllowed) this.filters.base = "";
+        const categoryKey = String(this.filters.category || "").toLowerCase();
+        const filterAllowed = ["checkpoints", "diffusion_models", "loras", "controlnet"].includes(categoryKey);
+        this.baseWrap.style.display = filterAllowed ? "flex" : "none";
+        this.precisionWrap.style.display = filterAllowed ? "flex" : "none";
+        if (!filterAllowed) {
+            this.filters.base = "";
+            this.filters.precision = "";
+        }
     }
 
     async refreshGroups() {
@@ -783,18 +874,39 @@ class ModelExplorerDialog {
     }
 
     renderCategorySelect() {
-        this.categorySelect.innerHTML = "";
-        const allOption = document.createElement("option");
-        allOption.value = "";
-        allOption.textContent = "All categories";
-        allOption.selected = !this.filters.category;
-        this.categorySelect.appendChild(allOption);
-        for (const item of this.categories) {
-            const option = document.createElement("option");
-            option.value = String(item.id || "");
-            option.textContent = `${item.id} (${item.count})`;
-            option.selected = option.value === this.filters.category;
-            this.categorySelect.appendChild(option);
+        if (!this.categoryList) return;
+        this.categoryList.innerHTML = "";
+
+        const createCategoryButton = (value, label, count) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "hf-me-category-item";
+            if (value === this.filters.category) {
+                button.classList.add("is-active");
+            }
+            button.innerHTML = `
+                <span class="hf-me-category-name">${escapeHtml(label)}</span>
+                <span class="hf-me-category-count">${Number(count || 0)}</span>
+            `;
+            button.onclick = () => {
+                if (this.filters.category === value) return;
+                this.filters.category = value;
+                this.filters.base = "";
+                this.filters.precision = "";
+                this.renderCategorySelect();
+                void this.refreshFiltersAndGroups();
+            };
+            this.categoryList.appendChild(button);
+        };
+
+        const totalCount = this.categories.reduce((sum, item) => sum + Number(item?.count || 0), 0);
+        createCategoryButton("", "All Models", totalCount);
+
+        const sortedCategories = [...this.categories].sort((a, b) =>
+            String(a?.id || "").localeCompare(String(b?.id || ""))
+        );
+        for (const item of sortedCategories) {
+            createCategoryButton(String(item?.id || ""), String(item?.id || ""), item?.count || 0);
         }
     }
 
