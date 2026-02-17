@@ -889,6 +889,15 @@ def _scan_local_models_for_explorer(category_filter: str = "") -> tuple[list[dic
         }
         entries.append(record)
         name_map.setdefault(record["filename_lower"], []).append(record)
+        # Also index by relative path and widget path to support local-only entries
+        # where filename may include subfolders.
+        rel_key = rel_norm.lower()
+        name_map.setdefault(rel_key, []).append(record)
+        root = directory.split("/", 1)[0] if directory else ""
+        if root:
+            widget_path = _strip_category_prefix(rel_norm, root).strip("/")
+            if widget_path:
+                name_map.setdefault(widget_path.lower(), []).append(record)
 
     used_folder_paths = False
     if folder_paths and hasattr(folder_paths, "get_filename_list"):
@@ -3261,6 +3270,82 @@ def _model_explorer_collect_rows() -> list[dict]:
     return [dict(v) for v in rows.values() if isinstance(v, dict)]
 
 
+def _model_explorer_category_from_local_record(record: dict) -> str:
+    directory = _normalize_rel_path(record.get("directory", ""))
+    root = directory.split("/", 1)[0] if directory else ""
+    if root in MODEL_EXPLORER_ALLOWED_CATEGORIES:
+        return root
+    rel_path = _normalize_rel_path(record.get("rel_path", ""))
+    rel_root = rel_path.split("/", 1)[0] if rel_path else ""
+    if rel_root in MODEL_EXPLORER_ALLOWED_CATEGORIES:
+        return rel_root
+    return ""
+
+
+def _model_explorer_filename_from_local_record(record: dict, category: str) -> str:
+    rel_path = _normalize_rel_path(record.get("rel_path", ""))
+    filename = str(record.get("filename") or "").strip()
+    if rel_path and category:
+        widget_path = _strip_category_prefix(rel_path, category).strip("/")
+        if widget_path:
+            return widget_path
+    return filename
+
+
+def _model_explorer_collect_local_only_rows(
+    catalog_rows: list[dict],
+    local_entries: list[dict],
+    local_name_map: dict[str, list[dict]],
+    category_filter: str = "",
+) -> list[dict]:
+    matched_rel_paths = set()
+    for row in catalog_rows:
+        if not isinstance(row, dict):
+            continue
+        installed = _model_explorer_resolve_installed_info(row, local_name_map)
+        if installed.get("installed"):
+            rel_path = _normalize_rel_path(installed.get("rel_path", ""))
+            if rel_path:
+                matched_rel_paths.add(rel_path.lower())
+
+    out: list[dict] = []
+    seen = set()
+    for record in local_entries:
+        if not isinstance(record, dict):
+            continue
+        rel_path = _normalize_rel_path(record.get("rel_path", ""))
+        if not rel_path or rel_path.lower() in matched_rel_paths:
+            continue
+        category = _model_explorer_category_from_local_record(record)
+        if not category:
+            continue
+        if category_filter and category != category_filter:
+            continue
+        filename = _model_explorer_filename_from_local_record(record, category)
+        if not filename:
+            continue
+        key = (category, filename.lower(), rel_path.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        base_value = "unknown" if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES else None
+        out.append({
+            "filename": filename,
+            "source": "local_scan",
+            "provider": "local",
+            "type": _infer_local_type(record.get("directory", "")),
+            "directory": _normalize_rel_path(record.get("directory", "")),
+            "explorer_category": category,
+            "explorer_category_verified": True,
+            "explorer_base": base_value,
+            "explorer_base_verified": False,
+            "explorer_base_applicable": category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES,
+            "explorer_enabled": True,
+            "local_only": True,
+        })
+    return out
+
+
 def _model_explorer_find_row(filename: str, category: str = "") -> dict | None:
     rows = _load_model_explorer_catalog()
     row = rows.get(filename)
@@ -3279,6 +3364,11 @@ async def model_explorer_list_categories(request):
             category = str(row.get("explorer_category") or "").strip()
             if category in MODEL_EXPLORER_ALLOWED_CATEGORIES:
                 counts[category] += 1
+        local_entries, _ = _scan_local_models_for_explorer("")
+        for record in local_entries:
+            category = _model_explorer_category_from_local_record(record)
+            if category in MODEL_EXPLORER_ALLOWED_CATEGORIES:
+                counts[category] += 1
         categories = [
             {"id": category, "count": int(count)}
             for category, count in sorted(counts.items(), key=lambda item: item[0])
@@ -3295,11 +3385,11 @@ async def model_explorer_get_filters(request):
         precisions = set()
         bases = set()
         installed_only = _coerce_bool(request.query.get("installed_only"), default=False)
-        local_name_map = {}
-        if installed_only:
-            _, local_name_map = _scan_local_models_for_explorer(category_filter)
+        local_entries, local_name_map = _scan_local_models_for_explorer(category_filter)
+        local_only_rows = _model_explorer_collect_local_only_rows(rows, local_entries, local_name_map, category_filter)
+        rows_for_filters = rows + local_only_rows
 
-        for row in rows:
+        for row in rows_for_filters:
             category = str(row.get("explorer_category") or "").strip()
             if category_filter and category != category_filter:
                 continue
@@ -3338,10 +3428,12 @@ async def model_explorer_list_groups(request):
         installed_first = _coerce_bool(request.query.get("installed_first"), default=True)
 
         rows = _model_explorer_collect_rows()
-        _, local_name_map = _scan_local_models_for_explorer(category_filter)
+        local_entries, local_name_map = _scan_local_models_for_explorer(category_filter)
+        local_only_rows = _model_explorer_collect_local_only_rows(rows, local_entries, local_name_map, category_filter)
+        all_rows = rows + local_only_rows
 
         grouped: dict[str, dict] = {}
-        for row in rows:
+        for row in all_rows:
             filename = str(row.get("filename") or "").strip()
             if not filename:
                 continue
@@ -3397,6 +3489,7 @@ async def model_explorer_list_groups(request):
                 "content_length": row.get("content_length"),
                 "repo_id": row.get("repo_id"),
                 "directory": row.get("directory"),
+                "local_only": bool(row.get("local_only")),
                 "installed": bool(installed_info.get("installed")),
                 "model_path": installed_info.get("widget_path"),
             }
@@ -3451,10 +3544,14 @@ async def model_explorer_use(request):
         return web.json_response({"error": "Missing filename."}, status=400)
 
     row = _model_explorer_find_row(filename, category=category)
-    if not row:
-        return web.json_response({"error": "Model row not found in explorer catalog."}, status=404)
-
     _, local_name_map = _scan_local_models_for_explorer(category)
+    if not row:
+        row = {
+            "filename": filename,
+            "explorer_category": category,
+            "directory": category,
+            "local_only": True,
+        }
     installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
     if not installed_info.get("installed"):
         return web.json_response({"error": "Model is not installed locally."}, status=400)

@@ -389,6 +389,117 @@ app.registerExtension({
             document.body.appendChild(overlay);
         };
 
+        const showConfirmDialog = ({
+            title = "Please confirm",
+            message = "",
+            confirmLabel = "Confirm",
+            confirmTone = "primary",
+            cancelLabel = "Cancel",
+        } = {}) => new Promise((resolve) => {
+            const existing = document.getElementById("hf-confirm-dialog");
+            if (existing) existing.remove();
+
+            const overlay = document.createElement("div");
+            overlay.id = "hf-confirm-dialog";
+            applyTemplateDialogOverlayStyle(overlay, 10001);
+
+            const panel = document.createElement("div");
+            applyTemplateDialogPanelStyle(panel, {
+                minWidth: "360px",
+                maxWidth: "560px",
+                width: "min(560px, 100%)",
+                padding: "24px",
+                gap: "14px",
+            });
+
+            const heading = document.createElement("div");
+            heading.textContent = title;
+            Object.assign(heading.style, {
+                fontFamily: "Inter, Arial, sans-serif",
+                fontSize: "20px",
+                fontWeight: "600",
+                lineHeight: "1.25",
+                color: "var(--input-text)",
+            });
+
+            const detail = document.createElement("div");
+            detail.textContent = message;
+            Object.assign(detail.style, {
+                fontSize: "14px",
+                lineHeight: "1.4",
+                color: "var(--descrip-text, #c4c9d4)",
+            });
+
+            const actions = document.createElement("div");
+            Object.assign(actions.style, {
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "8px",
+                marginTop: "4px",
+            });
+
+            let settled = false;
+            const onKeyDown = (event) => {
+                if (event.key === "Escape") {
+                    event.preventDefault();
+                    settle(false);
+                }
+            };
+            const settle = (value) => {
+                if (settled) return;
+                settled = true;
+                document.removeEventListener("keydown", onKeyDown);
+                overlay.remove();
+                resolve(Boolean(value));
+            };
+
+            const cancelBtn = createButton(cancelLabel, "default");
+            cancelBtn.onclick = () => settle(false);
+
+            const confirmBtn = createButton(confirmLabel, confirmTone);
+            confirmBtn.onclick = () => settle(true);
+
+            actions.appendChild(cancelBtn);
+            actions.appendChild(confirmBtn);
+
+            panel.appendChild(heading);
+            panel.appendChild(detail);
+            panel.appendChild(actions);
+            overlay.appendChild(panel);
+
+            overlay.addEventListener("click", (event) => {
+                if (event.target === overlay) {
+                    settle(false);
+                }
+            });
+
+            document.addEventListener("keydown", onKeyDown);
+
+            document.body.appendChild(overlay);
+            confirmBtn.focus();
+        });
+
+        const refreshComfyUiState = async () => {
+            try {
+                if (typeof app?.refreshComboInNodes === "function") {
+                    const maybePromise = app.refreshComboInNodes();
+                    if (maybePromise && typeof maybePromise.then === "function") {
+                        await maybePromise;
+                    }
+                }
+                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                    app.graph.setDirtyCanvas(true, true);
+                }
+                if (app?.canvas && typeof app.canvas.setDirty === "function") {
+                    app.canvas.setDirty(true, true);
+                }
+                return true;
+            } catch (error) {
+                console.warn("[HF Backup] Refresh hook failed:", error);
+                return false;
+            }
+        };
+
         const createSelectionState = () => ({
             selected: new Map(),
             checkboxes: new Map(),
@@ -769,8 +880,26 @@ app.registerExtension({
                 const refreshButton = document.createElement("button");
                 refreshButton.type = "button";
                 refreshButton.className = "hf-backup-op-refresh";
-                refreshButton.textContent = "Refresh ComfyUI";
-                refreshButton.onclick = () => window.location.reload();
+                refreshButton.textContent = "Refresh";
+                refreshButton.onclick = async () => {
+                    refreshButton.disabled = true;
+                    const originalLabel = refreshButton.textContent;
+                    refreshButton.textContent = "Refreshing...";
+                    const ok = await refreshComfyUiState();
+                    refreshButton.textContent = ok ? "Refreshed" : "Refresh failed";
+                    if (ok) {
+                        showToast({
+                            severity: "success",
+                            summary: "Refreshed",
+                            detail: "ComfyUI model widgets refreshed without page reload.",
+                            life: 2500,
+                        });
+                    }
+                    setTimeout(() => {
+                        refreshButton.textContent = originalLabel;
+                        refreshButton.disabled = false;
+                    }, 900);
+                };
                 actions.appendChild(refreshButton);
 
                 panel.appendChild(body);
@@ -1330,7 +1459,13 @@ app.registerExtension({
                 const items = getSelectedItems(backupState);
                 if (!items.length) return;
 
-                const confirmed = window.confirm("Delete selected items from the Hugging Face backup repository?");
+                const confirmed = await showConfirmDialog({
+                    title: "Delete selected backup items?",
+                    message: "This will permanently remove selected files from your Hugging Face backup repository.",
+                    confirmLabel: "Delete",
+                    confirmTone: "danger",
+                    cancelLabel: "Cancel",
+                });
                 if (!confirmed) return;
 
                 try {

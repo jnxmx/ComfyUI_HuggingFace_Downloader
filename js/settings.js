@@ -24,20 +24,6 @@ app.registerExtension({
       },
     },
     {
-      id: "downloader.model_explorer_enabled",
-      category: ["Hugging Face Download & Backup", "Model Explorer", "Enable Model Explorer"],
-      name: "Enable Model Explorer",
-      type: "boolean",
-      defaultValue: false,
-      experimental: true,
-      icon: "beaker",
-      tooltip:
-        "Enable the new Model Explorer UI backed by unified popular-models.json with verified cloud/manager rows.",
-      onChange: (newValue) => {
-        console.log(`[HF Downloader] Model Explorer enabled: ${Boolean(newValue)}`);
-      },
-    },
-    {
       id: "downloader.top_menu_button_style",
       category: ["Hugging Face Download & Backup", "Appearance", "Top menu button"],
       name: "Top menu button",
