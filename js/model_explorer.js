@@ -448,14 +448,13 @@ class ModelExplorerDialog {
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
-            #hf-model-explorer-dialog .hf-me-meta-wrap {
-                display: contents;
-            }
             #hf-model-explorer-dialog .hf-me-actions {
-                display: inline-flex;
+                display: flex;
                 align-items: center;
                 justify-content: flex-end;
                 gap: 8px;
+                width: 100%;
+                min-width: 0;
             }
             #hf-model-explorer-dialog .hf-me-action-btn {
                 min-height: 38px;
@@ -508,23 +507,24 @@ class ModelExplorerDialog {
             @media (max-width: 1024px) {
                 #hf-model-explorer-dialog .hf-me-row {
                     grid-template-columns: minmax(0, 1fr) auto;
-                    grid-template-areas:
-                        "main actions"
-                        "meta actions";
                     gap: 6px;
                 }
                 #hf-model-explorer-dialog .hf-me-main {
-                    grid-area: main;
+                    grid-column: 1;
+                    grid-row: 1;
                 }
-                #hf-model-explorer-dialog .hf-me-meta-wrap {
-                    grid-area: meta;
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 12px;
-                    min-width: 0;
+                #hf-model-explorer-dialog .hf-me-precision {
+                    grid-column: 1;
+                    grid-row: 2;
+                }
+                #hf-model-explorer-dialog .hf-me-category {
+                    grid-column: 1;
+                    grid-row: 3;
                 }
                 #hf-model-explorer-dialog .hf-me-actions {
-                    grid-area: actions;
+                    grid-column: 2;
+                    grid-row: 1 / span 3;
+                    align-self: center;
                 }
             }
         `;
@@ -873,10 +873,8 @@ class ModelExplorerDialog {
                                 ${baseRow}
                                 ${installedBadge}
                             </div>
-                            <div class="hf-me-meta-wrap">
-                                <div class="hf-me-precision">${precisionColumn}</div>
-                                <div class="hf-me-category">${categoryHtml}</div>
-                            </div>
+                            <div class="hf-me-precision">${precisionColumn}</div>
+                            <div class="hf-me-category">${categoryHtml}</div>
                             <div class="hf-me-actions">${actions}</div>
                         </div>
                     `;

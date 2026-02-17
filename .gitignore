@@ -9,3 +9,4 @@ __pycache__/model_discovery.cpython-313.pyc
 /metadata/marketplace_extract
 scripts/cloud_marketplace_dump_console.js
 scripts/extract_cloud_marketplace_from_har.py
+/internal_tools
