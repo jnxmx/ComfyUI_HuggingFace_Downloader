@@ -217,17 +217,55 @@ def _load_model_explorer_catalog() -> dict:
             for name, row in raw_models.items():
                 if not isinstance(row, dict):
                     continue
-                source = str(row.get("source") or "").strip()
+                entry = dict(row)
+                source = str(entry.get("source") or "").strip()
                 if source not in MODEL_EXPLORER_VISIBLE_SOURCES:
                     continue
-                if not bool(row.get("explorer_enabled")):
-                    continue
-                category = str(row.get("explorer_category") or "").strip()
-                if category not in MODEL_EXPLORER_ALLOWED_CATEGORIES:
-                    continue
-                entry = dict(row)
+
                 entry["filename"] = str(entry.get("filename") or name or "").strip()
                 if not entry["filename"]:
+                    continue
+
+                category = str(entry.get("explorer_category") or "").strip()
+                if not category:
+                    # Self-heal older unified DB rows where explorer fields were not populated
+                    # (e.g. manager "upscale" rows with save_path=default).
+                    category = (
+                        _canonical_model_library_category(entry.get("directory"))
+                        or _canonical_model_library_category(entry.get("save_path"))
+                        or _canonical_model_library_category(entry.get("manager_type"))
+                        or _canonical_model_library_category(entry.get("type"))
+                        or ""
+                    )
+                category = str(category or "").strip()
+                if category not in MODEL_EXPLORER_ALLOWED_CATEGORIES:
+                    continue
+
+                entry["explorer_category"] = category
+                if not bool(entry.get("explorer_category_verified")):
+                    entry["explorer_category_verified"] = (
+                        source == "cloud_marketplace_export" or source == "comfyui_manager_model_list"
+                    )
+
+                if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES:
+                    base_value = str(entry.get("explorer_base") or "").strip() or str(entry.get("base") or "").strip()
+                    if not base_value:
+                        base_value = "unknown"
+                    entry["explorer_base"] = base_value
+                    entry["explorer_base_applicable"] = True
+                else:
+                    entry["explorer_base_applicable"] = False
+
+                if not bool(entry.get("explorer_enabled")):
+                    entry["explorer_enabled"] = bool(
+                        source in MODEL_EXPLORER_VISIBLE_SOURCES
+                        and category in MODEL_EXPLORER_ALLOWED_CATEGORIES
+                        and (
+                            category not in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES
+                            or bool(str(entry.get("explorer_base") or "").strip())
+                        )
+                    )
+                if not bool(entry.get("explorer_enabled")):
                     continue
                 filtered_models[entry["filename"]] = entry
     except Exception as e:
@@ -348,11 +386,122 @@ VERIFY_AFTER_QUEUE = True
 VERIFY_IDLE_SECONDS = 5
 last_queue_activity = 0.0
 last_queue_activity_lock = threading.Lock()
+HF_REPO_URL_PATTERN = re.compile(r"https?://huggingface\.co/([A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)")
 
 def _touch_queue_activity():
     global last_queue_activity
     with last_queue_activity_lock:
         last_queue_activity = time.time()
+
+
+def _extract_repo_id_from_error(message: str) -> str:
+    text = str(message or "")
+    match = HF_REPO_URL_PATTERN.search(text)
+    if match:
+        return str(match.group(1) or "").strip()
+    return ""
+
+
+def _repo_id_from_item(item: dict) -> str:
+    repo_id = str(item.get("hf_repo") or "").strip()
+    if repo_id:
+        return repo_id
+    url = str(item.get("url") or "").strip()
+    if _is_supported_hf_link(url):
+        try:
+            parsed = parse_link(url)
+            repo_id = str(parsed.get("repo") or "").strip()
+            if repo_id:
+                return repo_id
+        except Exception:
+            pass
+    return ""
+
+
+def _build_retry_payload(item: dict) -> dict:
+    payload: dict = {
+        "download_mode": str(item.get("download_mode") or "file").strip().lower() or "file",
+        "folder": str(item.get("folder") or "checkpoints").strip() or "checkpoints",
+    }
+    filename = str(item.get("filename") or "").strip()
+    if filename:
+        payload["filename"] = filename
+
+    if payload["download_mode"] == "folder":
+        url = str(item.get("url") or "").strip()
+        if url:
+            payload["url"] = url
+        return payload
+
+    url = str(item.get("url") or "").strip()
+    if url:
+        payload["url"] = url
+    hf_repo = str(item.get("hf_repo") or "").strip()
+    hf_path = str(item.get("hf_path") or "").strip()
+    if hf_repo and hf_path:
+        payload["hf_repo"] = hf_repo
+        payload["hf_path"] = hf_path
+    target_filename = _sanitize_filename_hint(item.get("target_filename"))
+    if target_filename:
+        payload["target_filename"] = target_filename
+    if item.get("overwrite"):
+        payload["overwrite"] = True
+    return payload
+
+
+def _classify_download_failure(item: dict, error_message: str) -> dict:
+    message = str(error_message or "").strip()
+    lowered = message.lower()
+    repo_id = _repo_id_from_item(item) or _extract_repo_id_from_error(message)
+    repo_url = f"https://huggingface.co/{repo_id}" if repo_id else ""
+    result = {
+        "retry_payload": _build_retry_payload(item),
+        "retryable": True,
+    }
+    if repo_id:
+        result["repo_id"] = repo_id
+    if repo_url:
+        result["repo_url"] = repo_url
+
+    gated_markers = (
+        " gated",
+        "gated ",
+        "accept its terms",
+        "accept model agreement",
+        "request access",
+    )
+    is_hf_related = bool(repo_id) or "huggingface.co" in lowered or _is_supported_hf_link(str(item.get("url") or ""))
+    if is_hf_related and any(marker in lowered for marker in gated_markers):
+        result.update(
+            {
+                "error_code": "gated_repo",
+                "action_hint": "accept_model_agreement",
+                "action_message": "Accept model agreement on Hugging Face, then retry download.",
+            }
+        )
+        return result
+
+    if "invalid credentials" in lowered or "401" in lowered:
+        result.update(
+            {
+                "error_code": "hf_auth",
+                "action_hint": "check_hf_token",
+                "action_message": "Check Hugging Face token, then retry download.",
+            }
+        )
+        return result
+
+    if "403" in lowered and is_hf_related:
+        result.update(
+            {
+                "error_code": "hf_forbidden",
+                "action_hint": "check_repo_access",
+                "action_message": "Confirm repository access on Hugging Face, then retry download.",
+            }
+        )
+        return result
+
+    return result
 
 def _request_cancel(download_id: str):
     with cancel_requests_lock:
@@ -1848,11 +1997,16 @@ def _download_worker():
                 })
                 _clear_cancel_request(download_id)
                 continue
-            _set_download_status(download_id, {
+            failure_fields = {
                 "status": "failed",
                 "error": str(e),
                 "finished_at": time.time()
-            })
+            }
+            try:
+                failure_fields.update(_classify_download_failure(item, str(e)))
+            except Exception:
+                pass
+            _set_download_status(download_id, failure_fields)
         finally:
             if stop_event:
                 stop_event.set()
@@ -2319,6 +2473,7 @@ def setup(app_or_server):
                 item["target_filename"] = requested_filename or None
                 item["folder"] = folder
                 item["download_mode"] = download_mode
+                retry_payload = _build_retry_payload(item)
                 with download_queue_lock:
                     download_queue.append(item)
                 _set_download_status(download_id, {
@@ -2326,6 +2481,7 @@ def setup(app_or_server):
                     "filename": filename,
                     "folder": folder,
                     "download_mode": download_mode,
+                    "retry_payload": retry_payload,
                     "queued_at": time.time()
                 })
                 queued.append({"download_id": download_id, "filename": filename})
@@ -3026,7 +3182,9 @@ def _model_explorer_normalize_text(value: str) -> str:
 
 
 def _model_explorer_precision(filename: str) -> str:
-    lowered = str(filename or "").lower().replace("-", "_")
+    lowered = os.path.basename(str(filename or "")).lower().replace("-", "_")
+    if "nvfp4" in lowered:
+        return "nvfp4"
     if "fp8" in lowered:
         if "mixed" in lowered:
             return "fp8 mixed"
@@ -3035,7 +3193,10 @@ def _model_explorer_precision(filename: str) -> str:
         return "fp8"
     match = _model_explorer_filename_precision_pattern.search(lowered)
     if match:
-        return str(match.group(1)).lower()
+        precision = str(match.group(1)).lower()
+        if precision.startswith("iq") or precision.startswith("q"):
+            return "gguf"
+        return precision
     return "unknown"
 
 
@@ -3056,24 +3217,42 @@ def _model_explorer_resolve_installed_info(entry: dict, local_name_map: dict[str
     if not filename:
         return {"installed": False}
 
-    candidates = list(local_name_map.get(filename.lower()) or [])
+    filename_norm = _normalize_rel_path(filename)
+    basename = os.path.basename(filename_norm).strip() or filename_norm
+    entry_dir = _normalize_rel_path(str(entry.get("directory") or "").strip())
+    expected_rel = ""
+    if entry_dir and basename:
+        expected_rel = _normalize_rel_path(f"{entry_dir}/{basename}")
+
+    candidates = list(local_name_map.get(filename_norm.lower()) or [])
+    if not candidates and basename:
+        candidates = list(local_name_map.get(basename.lower()) or [])
     if not candidates:
         return {"installed": False}
 
+    preferred = []
+    fallback = []
     for candidate in candidates:
         directory = _normalize_rel_path(candidate.get("directory", ""))
         root = directory.split("/", 1)[0] if directory else ""
         if category and root != category:
             continue
         rel_path = _normalize_rel_path(candidate.get("rel_path", ""))
-        widget_path = _strip_category_prefix(rel_path, category).strip("/") or filename
-        return {
+        candidate_payload = {
             "installed": True,
             "absolute_path": candidate.get("absolute_path"),
             "rel_path": rel_path,
-            "widget_path": widget_path,
+            "widget_path": _strip_category_prefix(rel_path, category).strip("/") or basename or filename,
             "directory": directory,
         }
+        if expected_rel and rel_path.lower() == expected_rel.lower():
+            preferred.append(candidate_payload)
+            continue
+        fallback.append(candidate_payload)
+    if preferred:
+        return preferred[0]
+    if fallback:
+        return fallback[0]
     return {"installed": False}
 
 
@@ -3115,18 +3294,27 @@ async def model_explorer_get_filters(request):
         rows = _model_explorer_collect_rows()
         precisions = set()
         bases = set()
+        installed_only = _coerce_bool(request.query.get("installed_only"), default=False)
+        local_name_map = {}
+        if installed_only:
+            _, local_name_map = _scan_local_models_for_explorer(category_filter)
 
         for row in rows:
             category = str(row.get("explorer_category") or "").strip()
             if category_filter and category != category_filter:
                 continue
+            if installed_only:
+                installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
+                if not installed_info.get("installed"):
+                    continue
             precisions.add(_model_explorer_precision(str(row.get("filename") or "")))
             if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES:
                 base_value = str(row.get("explorer_base") or "").strip() or "unknown"
                 bases.add(base_value)
 
-        precision_values = sorted([x for x in precisions if x and x != "unknown"])
-        if "unknown" in precisions:
+        known_precisions = sorted([x for x in precisions if x and x != "unknown"])
+        precision_values = known_precisions[:]
+        if known_precisions and "unknown" in precisions:
             precision_values.append("unknown")
 
         payload = {
@@ -3143,6 +3331,7 @@ async def model_explorer_list_groups(request):
         category_filter = str(request.query.get("category") or "").strip()
         base_filter = str(request.query.get("base") or "").strip()
         precision_filter = str(request.query.get("precision") or "").strip().lower()
+        installed_only = _coerce_bool(request.query.get("installed_only"), default=False)
         search_query = _model_explorer_normalize_text(str(request.query.get("search") or ""))
         offset = _safe_int(request.query.get("offset"), default=0, minimum=0, maximum=5_000_000)
         limit = _safe_int(request.query.get("limit"), default=150, minimum=1, maximum=2000)
@@ -3182,6 +3371,8 @@ async def model_explorer_list_groups(request):
                     continue
 
             installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
+            if installed_only and not installed_info.get("installed"):
+                continue
             stem = _model_explorer_group_stem(row)
             group_key = f"{stem}|{category}|{base_value}"
             group_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"model-explorer|{group_key}"))
@@ -3205,6 +3396,7 @@ async def model_explorer_list_groups(request):
                 "preview_url": row.get("preview_url"),
                 "content_length": row.get("content_length"),
                 "repo_id": row.get("repo_id"),
+                "directory": row.get("directory"),
                 "installed": bool(installed_info.get("installed")),
                 "model_path": installed_info.get("widget_path"),
             }
@@ -3291,22 +3483,42 @@ async def model_explorer_delete(request):
         return web.json_response({"error": "Missing filename."}, status=400)
 
     _, local_name_map = _scan_local_models_for_explorer(category)
-    candidates = list(local_name_map.get(filename.lower()) or [])
+    filename_norm = _normalize_rel_path(filename)
+    basename = os.path.basename(filename_norm).strip() or filename_norm
+    row = _model_explorer_find_row(filename, category=category)
+    row_directory = _normalize_rel_path(str((row or {}).get("directory") or "").strip())
+    expected_rel = ""
+    if row_directory and basename:
+        expected_rel = _normalize_rel_path(f"{row_directory}/{basename}")
+
+    candidates = list(local_name_map.get(filename_norm.lower()) or [])
+    if not candidates and basename:
+        candidates = list(local_name_map.get(basename.lower()) or [])
     if not candidates:
         return web.json_response({"error": "Model file not found locally."}, status=404)
 
     chosen = None
+    preferred = []
+    fallback = []
     for candidate in candidates:
         directory = _normalize_rel_path(candidate.get("directory", ""))
         root = directory.split("/", 1)[0] if directory else ""
         if category and root != category:
             continue
         rel_path = _normalize_rel_path(candidate.get("rel_path", ""))
-        widget_path = _strip_category_prefix(rel_path, category or root).strip("/") or filename
+        widget_path = _strip_category_prefix(rel_path, category or root).strip("/") or basename or filename
         if requested_model_path and requested_model_path != _normalize_rel_path(widget_path):
             continue
-        chosen = (candidate, rel_path, widget_path)
-        break
+        payload = (candidate, rel_path, widget_path)
+        if expected_rel and rel_path.lower() == expected_rel.lower():
+            preferred.append(payload)
+            continue
+        fallback.append(payload)
+
+    if preferred:
+        chosen = preferred[0]
+    elif fallback:
+        chosen = fallback[0]
 
     if chosen is None:
         return web.json_response({"error": "No matching installed model path found."}, status=404)

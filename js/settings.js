@@ -5,7 +5,7 @@ app.registerExtension({
   settings: [
     {
       id: "downloader.hf_token",
-      category: ["Hugging Face downloader", "Tokens", "Hugging Face Token"],
+      category: ["Hugging Face Download & Backup", "Tokens", "Hugging Face Token"],
       name: "Hugging Face Token",
       type: "password",
       defaultValue: "",
@@ -13,7 +13,7 @@ app.registerExtension({
     },
     {
       id: "downloader.auto_open_missing_models_on_run",
-      category: ["Hugging Face downloader", "Auto download", "Auto-open on native run model checks"],
+      category: ["Hugging Face Download & Backup", "Auto download", "Auto-open on native run model checks"],
       name: "Auto-open on native run model checks",
       type: "boolean",
       defaultValue: true,
@@ -25,7 +25,7 @@ app.registerExtension({
     },
     {
       id: "downloader.model_explorer_enabled",
-      category: ["Hugging Face downloader", "Model Explorer", "Enable Model Explorer"],
+      category: ["Hugging Face Download & Backup", "Model Explorer", "Enable Model Explorer"],
       name: "Enable Model Explorer",
       type: "boolean",
       defaultValue: false,
@@ -39,7 +39,7 @@ app.registerExtension({
     },
     {
       id: "downloader.top_menu_button_style",
-      category: ["Hugging Face downloader", "Appearance", "Top menu button"],
+      category: ["Hugging Face Download & Backup", "Appearance", "Top menu button"],
       name: "Top menu button",
       type: "combo",
       defaultValue: "default",
@@ -52,7 +52,7 @@ app.registerExtension({
     },
     {
       id: "downloaderbackup.repo_name",
-      category: ["Hugging Face downloader", "Backup", "Hugging Face Repo for Backup"],
+      category: ["Hugging Face Download & Backup", "Backup", "Hugging Face Repo for Backup"],
       name: "Hugging Face Repo for Backup",
       type: "text",
       defaultValue: "",
@@ -63,7 +63,7 @@ app.registerExtension({
     },
     {
       id: "downloaderbackup.file_size_limit",
-      category: ["Hugging Face downloader", "Backup", "Limit Individual File Size"],
+      category: ["Hugging Face Download & Backup", "Backup", "Limit Individual File Size"],
       name: "Limit Individual File Size (GB)",
       type: "number",
       defaultValue: 5,

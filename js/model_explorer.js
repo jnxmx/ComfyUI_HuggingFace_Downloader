@@ -154,15 +154,54 @@ class ModelExplorerDialog {
         this.baseSelect = null;
         this.precisionSelect = null;
         this.searchInput = null;
+        this.installedOnlyToggle = null;
+        this.baseWrap = null;
+        this.precisionWrap = null;
         this.groups = [];
         this.categories = [];
-        this.filters = { category: "", base: "", precision: "", search: "" };
+        this.filters = { category: "", base: "", precision: "", search: "", installedOnly: false };
         this.loading = false;
         this.searchTimer = null;
     }
 
     async fetchExplorer(pathAndQuery, init = {}) {
         return await fetchWithTimeout(`${MODEL_EXPLORER_API_BASE}${pathAndQuery}`, init);
+    }
+
+    ensureStyles() {
+        const styleId = "hf-model-explorer-styles";
+        if (document.getElementById(styleId)) return;
+        const style = document.createElement("style");
+        style.id = styleId;
+        style.textContent = `
+            #hf-model-explorer-close {
+                width: 40px;
+                height: 40px;
+                border-radius: 10px;
+                border: 1px solid transparent;
+                background: var(--comfy-input-bg, #2b3242);
+                color: var(--input-text, #e5e7eb);
+                font-size: 20px;
+                font-weight: 600;
+                line-height: 1;
+                cursor: pointer;
+                transition: border 0.2s ease, background 0.2s ease;
+            }
+            #hf-model-explorer-close:hover {
+                border-color: var(--border-default, #3c4452);
+                background: color-mix(in srgb, var(--comfy-menu-bg, #1f2128) 70%, var(--comfy-input-bg, #2b3242) 30%);
+            }
+            #hf-model-explorer-close:focus-visible {
+                outline: 2px solid color-mix(in srgb, var(--primary-foreground, #fff) 70%, var(--border-default, #3c4452) 30%);
+            }
+            #hf-me-body {
+                font-size: 13px;
+                line-height: 1.45;
+                font-family: var(--font-inter, Inter, sans-serif);
+                color: var(--base-foreground, #e5e7eb);
+            }
+        `;
+        document.head.appendChild(style);
     }
 
     async show() {
@@ -193,6 +232,7 @@ class ModelExplorerDialog {
     }
 
     createUi() {
+        this.ensureStyles();
         const overlay = document.createElement("div");
         Object.assign(overlay.style, {
             position: "fixed",
@@ -221,13 +261,13 @@ class ModelExplorerDialog {
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
-            fontFamily: "var(--font-inter, Inter, sans-serif)",
         });
+        panel.id = "hf-me-panel";
 
         panel.innerHTML = `
             <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border-default,#3c4452);">
                 <div style="font-size:24px;font-weight:600;line-height:1.2;">Model Explorer</div>
-                <button type="button" id="hf-model-explorer-close" style="width:40px;height:40px;border:none;border-radius:10px;background:var(--comfy-input-bg);color:var(--input-text);font-size:20px;cursor:pointer;">×</button>
+                <button type="button" id="hf-model-explorer-close" class="hf-model-explorer-close">×</button>
             </div>
             <div style="display:flex;flex-wrap:wrap;gap:10px;padding:14px 22px;border-bottom:1px solid var(--border-default,#3c4452);align-items:end;">
                 <label style="display:flex;flex-direction:column;gap:4px;min-width:200px;">
@@ -238,13 +278,19 @@ class ModelExplorerDialog {
                     <span style="font-size:11px;color:var(--descrip-text,#9aa4b6);text-transform:uppercase;">Base</span>
                     <select id="hf-me-base" style="height:38px;border-radius:8px;border:1px solid var(--border-default);background:var(--comfy-input-bg);color:var(--input-text);padding:0 10px;"></select>
                 </label>
-                <label style="display:flex;flex-direction:column;gap:4px;min-width:180px;">
+                <label id="hf-me-precision-wrap" style="display:flex;flex-direction:column;gap:4px;min-width:180px;">
                     <span style="font-size:11px;color:var(--descrip-text,#9aa4b6);text-transform:uppercase;">Precision</span>
                     <select id="hf-me-precision" style="height:38px;border-radius:8px;border:1px solid var(--border-default);background:var(--comfy-input-bg);color:var(--input-text);padding:0 10px;"></select>
                 </label>
                 <label style="display:flex;flex-direction:column;gap:4px;min-width:260px;flex:1;">
                     <span style="font-size:11px;color:var(--descrip-text,#9aa4b6);text-transform:uppercase;">Search</span>
                     <input id="hf-me-search" type="text" placeholder="Search models..." style="height:38px;border-radius:8px;border:1px solid var(--border-default);background:var(--comfy-input-bg);color:var(--input-text);padding:0 12px;" />
+                </label>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:4px 22px 12px;">
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--descrip-text,#9aa4b6);">
+                    <input id="hf-me-installed-only" type="checkbox" style="width:16px;height:16px;" />
+                    <span>Show only installed</span>
                 </label>
             </div>
             <div id="hf-me-body" style="padding:14px 22px;overflow:auto;display:flex;flex-direction:column;gap:10px;min-height:260px;max-height:66vh;"></div>
@@ -258,7 +304,9 @@ class ModelExplorerDialog {
         this.baseSelect = panel.querySelector("#hf-me-base");
         this.precisionSelect = panel.querySelector("#hf-me-precision");
         this.searchInput = panel.querySelector("#hf-me-search");
+        this.installedOnlyToggle = panel.querySelector("#hf-me-installed-only");
         this.baseWrap = panel.querySelector("#hf-me-base-wrap");
+        this.precisionWrap = panel.querySelector("#hf-me-precision-wrap");
 
         panel.querySelector("#hf-model-explorer-close").onclick = () => this.close();
         this.categorySelect.onchange = async () => {
@@ -282,6 +330,13 @@ class ModelExplorerDialog {
                 void this.refreshGroups();
             }, 220);
         };
+        if (this.installedOnlyToggle) {
+            this.installedOnlyToggle.checked = this.filters.installedOnly;
+            this.installedOnlyToggle.onchange = async () => {
+                this.filters.installedOnly = Boolean(this.installedOnlyToggle.checked);
+                await this.refreshFiltersAndGroups();
+            };
+        }
     }
 
     async refreshAll() {
@@ -324,6 +379,7 @@ class ModelExplorerDialog {
         try {
             const params = new URLSearchParams();
             if (this.filters.category) params.set("category", this.filters.category);
+            if (this.filters.installedOnly) params.set("installed_only", "true");
             const resp = await this.fetchExplorer(`/filters?${params.toString()}`);
             if (!resp.ok) {
                 this.renderSelectWithAny(this.baseSelect, [], "");
@@ -336,6 +392,13 @@ class ModelExplorerDialog {
             const precisions = Array.isArray(data?.precisions) ? data.precisions : [];
             this.renderSelectWithAny(this.baseSelect, bases, this.filters.base);
             this.renderSelectWithAny(this.precisionSelect, precisions, this.filters.precision);
+            if (this.precisionWrap) {
+                const showPrecision = precisions.length > 0;
+                this.precisionWrap.style.display = showPrecision ? "flex" : "none";
+                if (!showPrecision) {
+                    this.filters.precision = "";
+                }
+            }
         } catch (error) {
             this.renderSelectWithAny(this.baseSelect, [], "");
             this.renderSelectWithAny(this.precisionSelect, [], "");
@@ -354,6 +417,7 @@ class ModelExplorerDialog {
             if (this.filters.base) params.set("base", this.filters.base);
             if (this.filters.precision) params.set("precision", this.filters.precision);
             if (this.filters.search) params.set("search", this.filters.search);
+            if (this.filters.installedOnly) params.set("installed_only", "true");
             params.set("installed_first", "true");
             params.set("offset", "0");
             params.set("limit", "300");
@@ -427,56 +491,63 @@ class ModelExplorerDialog {
             return;
         }
 
-        const chunks = [];
+        const rows = [];
         for (const group of this.groups) {
-            const title = escapeHtml(group.group_name || "Model");
-            const category = escapeHtml(group.category || "");
-            const base = group.base ? `<span style="font-size:11px;color:#c8d2e0;">base: ${escapeHtml(group.base)}</span>` : "";
-            const installedBadge = group.installed
-                ? `<span style="font-size:11px;color:#56d78f;font-weight:700;">INSTALLED</span>`
-                : "";
+            const categoryHtml = escapeHtml(group.category || "");
+            const baseLabel = group.base ? escapeHtml(group.base) : "";
+            const variants = Array.isArray(group.variants) ? group.variants : [];
+            if (!variants.length) continue;
 
-            const variantsHtml = (Array.isArray(group.variants) ? group.variants : [])
+            const variantRows = variants
                 .map((variant, index) => {
                     const filename = escapeHtml(variant.filename || "");
-                    const precision = escapeHtml(variant.precision || "unknown");
-                    const source = escapeHtml(variant.source || "");
+                    const precisionRaw = String(variant.precision || "").trim().toLowerCase();
+                    const showPrecision = precisionRaw && precisionRaw !== "unknown";
+                    const precision = showPrecision ? escapeHtml(precisionRaw) : "";
                     const installed = Boolean(variant.installed);
                     const variantKey = `${group.group_id}:${index}`;
+                    const installedBadge = installed
+                        ? `<span style="font-size:11px;color:#56d78f;font-weight:700;">INSTALLED</span>`
+                        : "";
                     const actions = installed
                         ? `
-                            <button data-action="use" data-key="${variantKey}" style="height:34px;padding:0 12px;border:none;border-radius:8px;background:var(--primary-background);color:var(--base-foreground);font-weight:600;cursor:pointer;">Use</button>
                             <button data-action="delete" data-key="${variantKey}" style="height:34px;padding:0 12px;border:none;border-radius:8px;background:var(--destructive-background,#e44);color:#fff;font-weight:600;cursor:pointer;">Delete</button>
+                            <button data-action="use" data-key="${variantKey}" style="height:34px;padding:0 12px;border:none;border-radius:8px;background:var(--primary-background);color:var(--base-foreground);font-weight:600;cursor:pointer;">Use</button>
                           `
                         : `
                             <button data-action="download" data-key="${variantKey}" style="height:34px;padding:0 12px;border:none;border-radius:8px;background:var(--secondary-background,#3a4458);color:var(--base-foreground);font-weight:600;cursor:pointer;">Download</button>
                           `;
+                    const precisionColumn = showPrecision
+                        ? `<div style="font-size:12px;color:var(--descrip-text,#9aa4b6);text-transform:uppercase;letter-spacing:0.02em;">${precision}</div>`
+                        : `<div></div>`;
 
                     return `
-                        <div style="display:grid;grid-template-columns:minmax(340px,1.5fr) minmax(120px,0.5fr) minmax(160px,0.7fr) auto;gap:10px;align-items:center;padding:9px 10px;border-radius:8px;background:color-mix(in srgb, var(--comfy-input-bg) 88%, transparent);">
-                            <div style="font-size:13px;line-height:1.25;word-break:break-word;">${filename}</div>
-                            <div style="font-size:12px;color:var(--descrip-text,#9aa4b6);">${precision}</div>
-                            <div style="font-size:12px;color:var(--descrip-text,#9aa4b6);">${source}</div>
+                        <div style="display:grid;grid-template-columns:minmax(320px,1.6fr) minmax(120px,0.6fr) minmax(120px,0.6fr) auto;gap:12px;align-items:center;padding:10px;border-radius:8px;background:color-mix(in srgb, var(--comfy-input-bg,#2b3242) 80%, transparent);">
+                            <div style="display:flex;flex-direction:column;gap:4px;word-break:break-word;font-size:13px;line-height:1.3;">
+                                <div style="font-weight:600;">${filename}</div>
+                                ${baseLabel ? `<div style="font-size:11px;color:var(--descrip-text,#9aa4b6);">Base: ${baseLabel}</div>` : ""}
+                                ${installedBadge}
+                            </div>
+                            ${precisionColumn}
+                            <div style="font-size:12px;color:var(--descrip-text,#9aa4b6);text-transform:capitalize;">${categoryHtml}</div>
                             <div style="display:flex;gap:8px;justify-content:flex-end;">${actions}</div>
                         </div>
                     `;
                 })
                 .join("");
-
-            chunks.push(`
-                <div style="border:1px solid var(--border-default,#3c4452);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px;">
-                    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-                        <div style="display:flex;flex-direction:column;gap:2px;">
-                            <div style="font-size:15px;font-weight:700;line-height:1.2;">${title}</div>
-                            <div style="display:flex;gap:10px;align-items:center;">${base}<span style="font-size:11px;color:#9aa4b6;">${category}</span></div>
-                        </div>
-                        ${installedBadge}
+            if (variantRows) {
+                rows.push(`
+                    <div style="border:1px solid var(--border-default,#3c4452);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:10px;background:color-mix(in srgb, var(--comfy-input-bg,#2b3242) 100%, transparent);">
+                        ${variantRows}
                     </div>
-                    ${variantsHtml}
-                </div>
-            `);
+                `);
+            }
         }
-        this.body.innerHTML = chunks.join("");
+        if (!rows.length) {
+            this.body.innerHTML = `<div style="padding:30px;color:var(--descrip-text,#9aa4b6);">No models found for current filters.</div>`;
+        } else {
+            this.body.innerHTML = rows.join("");
+        }
         this.bindGroupActions();
     }
 
@@ -522,7 +593,7 @@ class ModelExplorerDialog {
                 {
                     filename: variant.filename,
                     url: variant.url,
-                    folder: group.category,
+                    folder: variant.directory || group.category,
                 },
             ],
         };

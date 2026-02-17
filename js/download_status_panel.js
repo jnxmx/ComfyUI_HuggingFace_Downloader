@@ -253,10 +253,21 @@ app.registerExtension({
                     max-height: 48px;
                     box-sizing: border-box;
                 }
+                #${PANEL_ID} .hf-downloader-item.has-detail {
+                    height: auto;
+                    min-height: 74px;
+                    max-height: none;
+                    align-items: flex-start;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                }
                 #${PANEL_ID} .hf-downloader-content {
                     min-width: 0;
                     flex: 1 1 auto;
                     padding-right: 48px;
+                }
+                #${PANEL_ID} .hf-downloader-item.has-detail .hf-downloader-content {
+                    padding-right: 56px;
                 }
                 #${PANEL_ID} .hf-downloader-name {
                     font-weight: 600;
@@ -321,7 +332,33 @@ app.registerExtension({
                     visibility: hidden;
                 }
                 #${PANEL_ID} .hf-downloader-error {
-                    display: none !important;
+                    margin-top: 6px;
+                    font-size: 11px;
+                    line-height: 1.25;
+                    color: #ffb4b4;
+                    white-space: normal;
+                    word-break: break-word;
+                    display: none;
+                }
+                #${PANEL_ID} .hf-downloader-actions {
+                    margin-top: 6px;
+                    display: none;
+                    flex-wrap: wrap;
+                    align-items: center;
+                    gap: 8px;
+                }
+                #${PANEL_ID} .hf-downloader-actions.visible {
+                    display: inline-flex;
+                }
+                #${PANEL_ID} .hf-downloader-agreement-hint {
+                    font-size: 11px;
+                    color: var(--descrip-text, #9aa4b6);
+                }
+                #${PANEL_ID} .hf-downloader-repo-link {
+                    font-size: 11px;
+                    color: #9ad6ff;
+                    text-decoration: underline;
+                    cursor: pointer;
                 }
                 #${PANEL_ID} .hf-downloader-footer {
                     display: none;
@@ -516,6 +553,24 @@ app.registerExtension({
             }
         };
 
+        const retryDownload = async (payload) => {
+            if (!payload || typeof payload !== "object") return null;
+            try {
+                const resp = await fetch("/queue_download", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ models: [payload] })
+                });
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                const queued = Array.isArray(data?.queued) ? data.queued : [];
+                return queued[0] || null;
+            } catch (err) {
+                console.warn("[HF Downloader] Retry request failed:", err);
+                return null;
+            }
+        };
+
         const isDismissedEntry = (entry) => {
             if (!dismissedEntryIds.has(entry.id)) return false;
             return SUCCESS_STATUSES.has(entry.status) || entry.status === "cancelled";
@@ -618,11 +673,36 @@ app.registerExtension({
             error.className = "hf-downloader-error";
             error.style.display = "none";
 
+            const actions = document.createElement("div");
+            actions.className = "hf-downloader-actions";
+
+            const agreementHint = document.createElement("span");
+            agreementHint.className = "hf-downloader-agreement-hint";
+            agreementHint.textContent = "Accept model agreement and retry download.";
+
+            const repoLink = document.createElement("a");
+            repoLink.className = "hf-downloader-repo-link";
+            repoLink.textContent = "Open model page";
+            repoLink.target = "_blank";
+            repoLink.rel = "noopener noreferrer";
+            repoLink.style.display = "none";
+
+            const retryBtn = document.createElement("button");
+            retryBtn.type = "button";
+            retryBtn.className = "hf-downloader-retry p-button p-component p-button-sm p-button-warning";
+            retryBtn.textContent = "Retry";
+            retryBtn.style.display = "none";
+
+            actions.appendChild(agreementHint);
+            actions.appendChild(repoLink);
+            actions.appendChild(retryBtn);
+
             item.appendChild(leading);
             item.appendChild(content);
             item.appendChild(status);
             item.appendChild(cancelBtn);
-            item.appendChild(error);
+            content.appendChild(error);
+            content.appendChild(actions);
 
             return {
                 root: item,
@@ -631,7 +711,11 @@ app.registerExtension({
                 stateIcon,
                 sizeText,
                 status,
-                error
+                error,
+                actions,
+                agreementHint,
+                repoLink,
+                retryBtn
             };
         };
 
@@ -670,15 +754,59 @@ app.registerExtension({
             refs.status.style.color = statusColor(info.status);
 
             const errorText = String(info.error || "").trim();
-            if (errorText) {
-                refs.error.textContent = errorText;
-                refs.error.title = errorText;
+            const isFailed = info.status === "failed";
+            const errorCode = String(info.error_code || "").trim().toLowerCase();
+            const hasGatedMarkers = /gated|accept (its|model) terms|request access|agreement/i.test(errorText);
+            const isGated = isFailed && (errorCode === "gated_repo" || hasGatedMarkers);
+            const repoUrl = String(info.repo_url || "").trim();
+            const actionMessage = String(info.action_message || "").trim();
+            const retryPayload = info.retry_payload && typeof info.retry_payload === "object" ? info.retry_payload : null;
+
+            if (isFailed && errorText) {
+                const renderedError = isGated
+                    ? "Gated repository. Accept the model agreement on Hugging Face, then retry."
+                    : errorText;
+                refs.error.textContent = renderedError;
+                refs.error.title = renderedError;
                 refs.error.style.display = "block";
             } else {
                 refs.error.textContent = "";
                 refs.error.title = "";
                 refs.error.style.display = "none";
             }
+
+            refs.root.classList.toggle("has-detail", isFailed && !!errorText);
+            refs.actions.classList.toggle("visible", isGated);
+            refs.agreementHint.textContent = actionMessage || "Accept model agreement and retry download.";
+            refs.agreementHint.style.display = isGated ? "inline" : "none";
+
+            if (isGated && repoUrl) {
+                refs.repoLink.href = repoUrl;
+                refs.repoLink.style.display = "inline";
+            } else {
+                refs.repoLink.removeAttribute("href");
+                refs.repoLink.style.display = "none";
+            }
+
+            refs.retryBtn.style.display = isGated ? "inline-flex" : "none";
+            refs.retryBtn.disabled = !retryPayload;
+            refs.retryBtn.onclick = isGated
+                ? async (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (!retryPayload || refs.retryBtn.disabled) return;
+                      refs.retryBtn.disabled = true;
+                      refs.retryBtn.textContent = "Retrying...";
+                      const queued = await retryDownload(retryPayload);
+                      if (queued?.download_id) {
+                          dismissedEntryIds.add(info.id);
+                      }
+                      refs.retryBtn.textContent = queued?.download_id ? "Queued" : "Retry";
+                      if (!queued?.download_id) {
+                          refs.retryBtn.disabled = false;
+                      }
+                  }
+                : null;
         };
 
         const handleRefresh = async () => {
