@@ -12,3 +12,4 @@ scripts/extract_cloud_marketplace_from_har.py
 __pycache__/
 *.pyc
 /internal_tools
+/metadata/manual-curation-backups
