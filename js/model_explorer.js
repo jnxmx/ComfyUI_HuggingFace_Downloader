@@ -2,7 +2,10 @@ import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
 const MODEL_EXPLORER_SETTING_ID = "downloader.model_explorer_enabled";
-const MODEL_EXPLORER_API_BASE = "/api/model_explorer";
+const MODEL_EXPLORER_API_BASES = [
+    "/api/hf_downloader/model_explorer",
+    "/api/model_explorer",
+];
 const MODEL_TO_NODE_STORE_IMPORT_CANDIDATES = [
     "../../../stores/modelToNodeStore.js",
     "/stores/modelToNodeStore.js",
@@ -159,6 +162,34 @@ class ModelExplorerDialog {
         this.filters = { category: "", base: "", precision: "", search: "" };
         this.loading = false;
         this.searchTimer = null;
+        this.apiBase = "";
+    }
+
+    async fetchExplorer(pathAndQuery, init = {}) {
+        const bases = this.apiBase
+            ? [this.apiBase, ...MODEL_EXPLORER_API_BASES.filter((base) => base !== this.apiBase)]
+            : [...MODEL_EXPLORER_API_BASES];
+        let fallback404Response = null;
+        let lastError = null;
+
+        for (const base of bases) {
+            try {
+                const response = await fetchWithTimeout(`${base}${pathAndQuery}`, init);
+                if (response.status === 404) {
+                    fallback404Response = response;
+                    continue;
+                }
+                this.apiBase = base;
+                return response;
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        if (fallback404Response) {
+            return fallback404Response;
+        }
+        throw lastError || new Error("Model Explorer API is unreachable.");
     }
 
     async show() {
@@ -292,7 +323,7 @@ class ModelExplorerDialog {
 
     async fetchCategories() {
         try {
-            const resp = await fetchWithTimeout(`${MODEL_EXPLORER_API_BASE}/categories`);
+            const resp = await this.fetchExplorer("/categories");
             if (!resp.ok) {
                 this.categories = [];
                 this.renderCategorySelect();
@@ -320,7 +351,7 @@ class ModelExplorerDialog {
         try {
             const params = new URLSearchParams();
             if (this.filters.category) params.set("category", this.filters.category);
-            const resp = await fetchWithTimeout(`${MODEL_EXPLORER_API_BASE}/filters?${params.toString()}`);
+            const resp = await this.fetchExplorer(`/filters?${params.toString()}`);
             if (!resp.ok) {
                 this.renderSelectWithAny(this.baseSelect, [], "");
                 this.renderSelectWithAny(this.precisionSelect, [], "");
@@ -353,7 +384,7 @@ class ModelExplorerDialog {
             params.set("installed_first", "true");
             params.set("offset", "0");
             params.set("limit", "300");
-            const resp = await fetchWithTimeout(`${MODEL_EXPLORER_API_BASE}/groups?${params.toString()}`);
+            const resp = await this.fetchExplorer(`/groups?${params.toString()}`);
             if (!resp.ok) {
                 this.renderError(`Model Explorer groups failed (HTTP ${resp.status}).`);
                 return;
@@ -522,7 +553,7 @@ class ModelExplorerDialog {
                 },
             ],
         };
-        const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/download`, {
+        const resp = await this.fetchExplorer("/download", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -542,7 +573,7 @@ class ModelExplorerDialog {
         button.disabled = true;
         button.textContent = "Using...";
         try {
-            const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/use`, {
+            const resp = await this.fetchExplorer("/use", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -583,7 +614,7 @@ class ModelExplorerDialog {
         button.disabled = true;
         button.textContent = "Deleting...";
         try {
-            const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/delete`, {
+            const resp = await this.fetchExplorer("/delete", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({

@@ -2934,6 +2934,7 @@ def setup(app):
     _safe_add_route("POST", "/restart", restart)
     _safe_add_route("POST", "/queue_download", queue_download)
     _safe_add_route("POST", "/api/model_explorer/download", model_explorer_download_proxy)
+    _safe_add_route("POST", "/api/hf_downloader/model_explorer/download", model_explorer_download_proxy)
     _safe_add_route("POST", "/cancel_download", cancel_download)
     _safe_add_route("GET", "/download_status", download_status_endpoint)
     _safe_add_route("GET", "/search_status", search_status_endpoint)
@@ -2952,6 +2953,11 @@ def setup(app):
     _safe_add_route("GET", "/api/model_explorer/groups", model_explorer_list_groups)
     _safe_add_route("POST", "/api/model_explorer/use", model_explorer_use)
     _safe_add_route("POST", "/api/model_explorer/delete", model_explorer_delete)
+    _safe_add_route("GET", "/api/hf_downloader/model_explorer/categories", model_explorer_list_categories)
+    _safe_add_route("GET", "/api/hf_downloader/model_explorer/filters", model_explorer_get_filters)
+    _safe_add_route("GET", "/api/hf_downloader/model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("POST", "/api/hf_downloader/model_explorer/use", model_explorer_use)
+    _safe_add_route("POST", "/api/hf_downloader/model_explorer/delete", model_explorer_delete)
 
 
 def _model_explorer_normalize_text(value: str) -> str:
