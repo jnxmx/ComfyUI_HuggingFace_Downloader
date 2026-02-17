@@ -262,17 +262,7 @@ const ensureMenu = () => {
 
     menu.appendChild(createMenuItem("Backup Manager", "showBackupDialog"));
     menu.appendChild(createMenuItem("Auto-download models", "runAutoDownload"));
-
-    // Model Database (Temporarily disabled)
-    /*
-    const dbItem = createMenuItem("Model database", null);
-    dbItem.onclick = (e) => {
-        e.stopPropagation();
-        hideMenu();
-        modelDatabaseDialog.show();
-    };
-    menu.appendChild(dbItem);
-    */
+    menu.appendChild(createMenuItem("Model Explorer", "showModelExplorer"));
 
     menu.appendChild(createMenuItem("Download new model", "showManualDownloadDialog"));
 

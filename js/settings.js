@@ -20,7 +20,7 @@ app.registerExtension({
       tooltip: "Choose the Hugging Face top menu button style.",
       options: [
         { value: "default", text: "Default" },
-        { value: "yellow", text: "Yellow logo" },
+        { value: "yellow", text: "Yellow" },
         { value: "disabled", text: "Disabled" }
       ]
     },
@@ -57,6 +57,20 @@ app.registerExtension({
         "After pressing Run, if native ComfyUI opens missing-models or reports model value-not-in-list validation errors, automatically open Auto-download.",
       onChange: (newValue) => {
         console.log(`[HF Downloader] Auto-open on native run model checks: ${Boolean(newValue)}`);
+      },
+    },
+    {
+      id: "downloader.model_explorer_enabled",
+      category: ["Hugging Face downloader", "Model Explorer", "Enable Model Explorer"],
+      name: "Enable Model Explorer",
+      type: "boolean",
+      defaultValue: false,
+      experimental: true,
+      icon: "beaker",
+      tooltip:
+        "Enable the new Model Explorer UI backed by unified popular-models.json with verified cloud/manager rows.",
+      onChange: (newValue) => {
+        console.log(`[HF Downloader] Model Explorer enabled: ${Boolean(newValue)}`);
       },
     },
     {
