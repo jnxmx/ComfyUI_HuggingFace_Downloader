@@ -14,6 +14,13 @@ __all__ = ["NODE_CLASS_MAPPINGS", "WEB_DIRECTORY"]
 try:
     from . import web_api
     import server
-    web_api.setup(server.PromptServer.instance.app)
+    prompt_instance = getattr(server.PromptServer, "instance", None)
+    if prompt_instance is not None:
+        # Primary path (aiohttp app router)
+        web_api.setup(getattr(prompt_instance, "app", None))
+        # Fallback path for environments that expose route table differently
+        web_api.setup(prompt_instance)
+    else:
+        print("[ComfyUI_HuggingFace_Downloader] PromptServer.instance is not available; web API not registered.")
 except Exception as e:
     print(f"[ComfyUI_HuggingFace_Downloader] Web API not loaded: {e}")

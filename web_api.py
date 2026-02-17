@@ -2193,13 +2193,36 @@ async def delete_from_hf_backup_endpoint(request):
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
-def setup(app):
+def _bind_route_target(target, method: str, path: str, handler):
+    if target is None:
+        raise RuntimeError("Route target is None.")
+
+    # aiohttp Application
+    router = getattr(target, "router", None)
+    if router is not None and hasattr(router, "add_route"):
+        router.add_route(method, path, handler)
+        return
+
+    # PromptServer instance (has .routes RouteTableDef)
+    routes_obj = getattr(target, "routes", None)
+    if routes_obj is None:
+        routes_obj = target
+
+    route_adder = getattr(routes_obj, method.lower(), None)
+    if callable(route_adder):
+        route_adder(path)(handler)
+        return
+
+    raise RuntimeError("Unsupported route target type.")
+
+
+def setup(app_or_server):
     def _safe_add_route(method: str, path: str, handler):
         try:
-            app.router.add_route(method, path, handler)
+            _bind_route_target(app_or_server, method, path, handler)
         except Exception as e:
             # Allow extension reload / duplicate installs without aborting setup.
-            print(f"[ComfyUI_HuggingFace_Downloader] Route already exists, skipping: {method} {path} ({e})")
+            print(f"[ComfyUI_HuggingFace_Downloader] Route register skipped: {method} {path} ({e})")
 
     # Register Model Explorer routes first so this feature still works even if later
     # route groups collide with other extensions or prior registrations.
