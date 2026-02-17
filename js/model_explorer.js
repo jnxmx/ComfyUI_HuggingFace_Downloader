@@ -423,9 +423,9 @@ class ModelExplorerDialog {
                 flex: 1 1 auto;
                 user-select: none;
                 font-family: var(--font-inter, Inter, sans-serif);
-                font-size: 1.7rem;
-                font-weight: 600;
-                line-height: 1.15;
+                font-size: 16px;
+                font-weight: 700;
+                line-height: 1.2;
                 color: var(--base-foreground, var(--input-text, #e5e7eb));
                 white-space: nowrap;
                 overflow: hidden;
@@ -721,7 +721,8 @@ class ModelExplorerDialog {
                 display: flex;
                 align-items: center;
                 gap: 0.55rem;
-                height: 38px;
+                min-height: 40px;
+                height: 40px;
                 padding: 0 0.5rem;
                 border-radius: 0.45rem;
                 background: transparent;
@@ -729,6 +730,8 @@ class ModelExplorerDialog {
                 text-align: left;
                 font-size: 0.92rem;
                 cursor: pointer;
+                line-height: 1.2;
+                box-sizing: border-box;
             }
             #hf-model-explorer-dialog .hf-me-filter-option:hover {
                 background: var(--secondary-background-hover, #3a4458);
@@ -750,6 +753,8 @@ class ModelExplorerDialog {
                 color: var(--base-foreground, #fff);
             }
             #hf-model-explorer-dialog .hf-me-filter-option-label {
+                display: block;
+                line-height: 1.2;
                 min-width: 0;
                 overflow: hidden;
                 text-overflow: ellipsis;
