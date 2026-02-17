@@ -21,6 +21,15 @@ const FALLBACK_NODE_PROVIDER_BY_CATEGORY = {
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const fetchWithTimeout = async (url, init = {}, timeoutMs = 15000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error(`timeout_${timeoutMs}`)), timeoutMs);
+    try {
+        return await api.fetchApi(url, { ...init, signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+};
 
 const showToast = (options, type = "info") => {
     let payload = options;
@@ -166,7 +175,11 @@ class ModelExplorerDialog {
             this.createUi();
         }
         this.element.style.display = "flex";
-        await this.refreshAll();
+        try {
+            await this.refreshAll();
+        } catch (error) {
+            this.renderError(`Failed to open Model Explorer: ${error}`);
+        }
     }
 
     close() {
@@ -278,54 +291,90 @@ class ModelExplorerDialog {
     }
 
     async fetchCategories() {
-        const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/categories`);
-        if (!resp.ok) return;
-        const data = await resp.json();
-        this.categories = Array.isArray(data?.categories) ? data.categories : [];
-        if (!this.filters.category && this.categories.length) {
-            this.filters.category = String(this.categories[0].id || "");
+        try {
+            const resp = await fetchWithTimeout(`${MODEL_EXPLORER_API_BASE}/categories`);
+            if (!resp.ok) {
+                this.categories = [];
+                this.renderCategorySelect();
+                this.renderError(`Categories request failed (HTTP ${resp.status}).`);
+                return;
+            }
+            const data = await resp.json();
+            this.categories = Array.isArray(data?.categories) ? data.categories : [];
+            const categoryIds = new Set(this.categories.map((item) => String(item?.id || "")));
+            if (this.filters.category && !categoryIds.has(this.filters.category)) {
+                this.filters.category = "";
+            }
+            if (!this.filters.category && this.categories.length) {
+                this.filters.category = String(this.categories[0]?.id || "");
+            }
+            this.renderCategorySelect();
+        } catch (error) {
+            this.categories = [];
+            this.renderCategorySelect();
+            this.renderError(`Failed to fetch categories: ${error}`);
         }
-        this.renderCategorySelect();
     }
 
     async fetchFilters() {
-        const params = new URLSearchParams();
-        if (this.filters.category) params.set("category", this.filters.category);
-        const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/filters?${params.toString()}`);
-        if (!resp.ok) return;
-        const data = await resp.json();
-        const bases = Array.isArray(data?.bases) ? data.bases : [];
-        const precisions = Array.isArray(data?.precisions) ? data.precisions : [];
-        this.renderSelectWithAny(this.baseSelect, bases, this.filters.base);
-        this.renderSelectWithAny(this.precisionSelect, precisions, this.filters.precision);
-        const baseAllowed = this.filters.category === "checkpoints" || this.filters.category === "diffusion_models";
+        try {
+            const params = new URLSearchParams();
+            if (this.filters.category) params.set("category", this.filters.category);
+            const resp = await fetchWithTimeout(`${MODEL_EXPLORER_API_BASE}/filters?${params.toString()}`);
+            if (!resp.ok) {
+                this.renderSelectWithAny(this.baseSelect, [], "");
+                this.renderSelectWithAny(this.precisionSelect, [], "");
+                this.renderError(`Filters request failed (HTTP ${resp.status}).`);
+                return;
+            }
+            const data = await resp.json();
+            const bases = Array.isArray(data?.bases) ? data.bases : [];
+            const precisions = Array.isArray(data?.precisions) ? data.precisions : [];
+            this.renderSelectWithAny(this.baseSelect, bases, this.filters.base);
+            this.renderSelectWithAny(this.precisionSelect, precisions, this.filters.precision);
+        } catch (error) {
+            this.renderSelectWithAny(this.baseSelect, [], "");
+            this.renderSelectWithAny(this.precisionSelect, [], "");
+            this.renderError(`Failed to fetch filters: ${error}`);
+        }
+        const baseAllowed = ["checkpoints", "diffusion_models", "loras"].includes(this.filters.category);
         this.baseWrap.style.display = baseAllowed ? "flex" : "none";
         if (!baseAllowed) this.filters.base = "";
     }
 
     async refreshGroups() {
         this.setLoading(true);
-        const params = new URLSearchParams();
-        if (this.filters.category) params.set("category", this.filters.category);
-        if (this.filters.base) params.set("base", this.filters.base);
-        if (this.filters.precision) params.set("precision", this.filters.precision);
-        if (this.filters.search) params.set("search", this.filters.search);
-        params.set("installed_first", "true");
-        params.set("offset", "0");
-        params.set("limit", "300");
-        const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/groups?${params.toString()}`);
-        if (!resp.ok) {
+        try {
+            const params = new URLSearchParams();
+            if (this.filters.category) params.set("category", this.filters.category);
+            if (this.filters.base) params.set("base", this.filters.base);
+            if (this.filters.precision) params.set("precision", this.filters.precision);
+            if (this.filters.search) params.set("search", this.filters.search);
+            params.set("installed_first", "true");
+            params.set("offset", "0");
+            params.set("limit", "300");
+            const resp = await fetchWithTimeout(`${MODEL_EXPLORER_API_BASE}/groups?${params.toString()}`);
+            if (!resp.ok) {
+                this.renderError(`Model Explorer groups failed (HTTP ${resp.status}).`);
+                return;
+            }
+            const data = await resp.json();
+            this.groups = Array.isArray(data?.groups) ? data.groups : [];
+            this.renderGroups();
+        } catch (error) {
+            this.renderError(`Failed to fetch groups: ${error}`);
+        } finally {
             this.setLoading(false);
-            return;
         }
-        const data = await resp.json();
-        this.groups = Array.isArray(data?.groups) ? data.groups : [];
-        this.renderGroups();
-        this.setLoading(false);
     }
 
     renderCategorySelect() {
         this.categorySelect.innerHTML = "";
+        const allOption = document.createElement("option");
+        allOption.value = "";
+        allOption.textContent = "All categories";
+        allOption.selected = !this.filters.category;
+        this.categorySelect.appendChild(allOption);
         for (const item of this.categories) {
             const option = document.createElement("option");
             option.value = String(item.id || "");
@@ -356,6 +405,16 @@ class ModelExplorerDialog {
         if (this.loading) {
             this.body.innerHTML = `<div style="padding:30px;color:var(--descrip-text,#9aa4b6);">Loading Model Explorer...</div>`;
         }
+    }
+
+    renderError(message) {
+        this.body.innerHTML = `
+            <div style="padding:20px;border:1px solid color-mix(in srgb, var(--destructive-background,#d44) 45%, var(--border-default,#3c4452) 55%);border-radius:10px;background:color-mix(in srgb, var(--comfy-input-bg,#2b3242) 86%, var(--destructive-background,#d44) 14%);color:var(--input-text,#e5e7eb);">
+                <div style="font-size:14px;font-weight:700;margin-bottom:6px;">Model Explorer request failed</div>
+                <div style="font-size:13px;line-height:1.35;color:var(--descrip-text,#c4c9d4);">${escapeHtml(message)}</div>
+                <div style="font-size:12px;margin-top:10px;color:var(--descrip-text,#9aa4b6);">If backend routes were just changed, restart ComfyUI and reopen Model Explorer.</div>
+            </div>
+        `;
     }
 
     renderGroups() {

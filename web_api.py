@@ -166,7 +166,7 @@ MODEL_EXPLORER_ALLOWED_CATEGORIES = {
     "ipadapter",
 }
 
-MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES = {"checkpoints", "diffusion_models"}
+MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES = {"checkpoints", "diffusion_models", "loras"}
 MODEL_EXPLORER_VISIBLE_SOURCES = {
     "cloud_marketplace_export",
     "comfyui_manager_model_list",
@@ -330,6 +330,8 @@ model_library_local_cache = {
     "name_map": {},
 }
 model_library_local_cache_lock = threading.Lock()
+model_explorer_local_cache: dict[str, dict] = {}
+model_explorer_local_cache_lock = threading.Lock()
 model_library_assets_cache = {"timestamp": 0.0, "assets": [], "id_map": {}}
 model_library_assets_cache_lock = threading.Lock()
 model_library_asset_overrides = {}
@@ -337,6 +339,7 @@ model_library_asset_overrides_lock = threading.Lock()
 settings_cache = {"path": None, "mtime": None, "settings": {}}
 settings_cache_lock = threading.Lock()
 MODEL_LIBRARY_LOCAL_CACHE_TTL_SECONDS = 3.0
+MODEL_EXPLORER_LOCAL_CACHE_TTL_SECONDS = 30.0
 
 # Defer verification until the download queue is empty (default on).
 VERIFY_AFTER_QUEUE = True
@@ -691,6 +694,99 @@ def _scan_local_models() -> tuple[list[dict], dict[str, list[dict]]]:
             "entries": entries,
             "name_map": name_map,
         }
+    return entries, name_map
+
+def _scan_local_models_for_explorer(category_filter: str = "") -> tuple[list[dict], dict[str, list[dict]]]:
+    models_root = _get_models_root()
+    category = str(category_filter or "").strip()
+    cache_key = category or "__all__"
+    now = time.time()
+
+    with model_explorer_local_cache_lock:
+        cached = model_explorer_local_cache.get(cache_key)
+        if cached and (now - float(cached.get("timestamp", 0.0)) <= MODEL_EXPLORER_LOCAL_CACHE_TTL_SECONDS):
+            return cached.get("entries", []), cached.get("name_map", {})
+
+    entries: list[dict] = []
+    name_map: dict[str, list[dict]] = {}
+
+    def _add_record(rel_path: str):
+        rel_norm = _normalize_rel_path(rel_path)
+        if not rel_norm:
+            return
+        filename = os.path.basename(rel_norm)
+        if not filename:
+            return
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in MODEL_LIBRARY_EXTENSIONS:
+            return
+        absolute_path = os.path.join(models_root, rel_norm)
+        directory = _normalize_rel_path(os.path.dirname(rel_norm))
+        stat = None
+        try:
+            if os.path.exists(absolute_path):
+                stat = os.stat(absolute_path)
+        except Exception:
+            stat = None
+        record = {
+            "filename": filename,
+            "filename_lower": filename.lower(),
+            "absolute_path": absolute_path,
+            "rel_path": rel_norm,
+            "directory": directory,
+            "size_bytes": int(stat.st_size) if stat else None,
+            "modified_at": float(stat.st_mtime) if stat else None,
+        }
+        entries.append(record)
+        name_map.setdefault(record["filename_lower"], []).append(record)
+
+    used_folder_paths = False
+    if folder_paths and hasattr(folder_paths, "get_filename_list"):
+        categories = [category] if category else sorted(MODEL_EXPLORER_ALLOWED_CATEGORIES)
+        for cat in categories:
+            try:
+                names = folder_paths.get_filename_list(cat) or []
+            except Exception:
+                continue
+            used_folder_paths = True
+            for rel_name in names:
+                rel_in_category = _normalize_rel_path(str(rel_name or ""))
+                if not rel_in_category:
+                    continue
+                rel_path = _normalize_rel_path(f"{cat}/{rel_in_category}")
+                _add_record(rel_path)
+
+    if not used_folder_paths:
+        all_entries, all_name_map = _scan_local_models()
+        if category:
+            filtered_entries = []
+            filtered_name_map: dict[str, list[dict]] = {}
+            for item in all_entries:
+                directory = _normalize_rel_path(item.get("directory", ""))
+                root = directory.split("/", 1)[0] if directory else ""
+                if root != category:
+                    continue
+                filtered_entries.append(item)
+                key = str(item.get("filename_lower") or "")
+                if key:
+                    filtered_name_map.setdefault(key, []).append(item)
+            entries = filtered_entries
+            name_map = filtered_name_map
+        else:
+            entries = all_entries
+            name_map = all_name_map
+
+    entries.sort(key=lambda item: (item.get("filename_lower", ""), item.get("rel_path", "")))
+    for key in list(name_map.keys()):
+        name_map[key] = sorted(name_map[key], key=lambda item: item.get("rel_path", ""))
+
+    with model_explorer_local_cache_lock:
+        model_explorer_local_cache[cache_key] = {
+            "timestamp": now,
+            "entries": entries,
+            "name_map": name_map,
+        }
+
     return entries, name_map
 
 def _resolve_model_library_cloud_catalog_path() -> str | None:
@@ -1851,9 +1947,11 @@ def _is_within_directory(base_dir: str, candidate_path: str) -> bool:
 
 
 def _invalidate_model_library_local_cache() -> None:
-    global model_library_local_cache
+    global model_library_local_cache, model_explorer_local_cache
     with model_library_local_cache_lock:
         model_library_local_cache = {"timestamp": 0.0, "entries": [], "name_map": {}}
+    with model_explorer_local_cache_lock:
+        model_explorer_local_cache = {}
 
 
 async def relocate_model_file(request):
@@ -2977,7 +3075,7 @@ async def model_explorer_list_groups(request):
         installed_first = _coerce_bool(request.query.get("installed_first"), default=True)
 
         rows = _model_explorer_collect_rows()
-        _, local_name_map = _scan_local_models()
+        _, local_name_map = _scan_local_models_for_explorer(category_filter)
 
         grouped: dict[str, dict] = {}
         for row in rows:
@@ -3090,7 +3188,7 @@ async def model_explorer_use(request):
     if not row:
         return web.json_response({"error": "Model row not found in explorer catalog."}, status=404)
 
-    _, local_name_map = _scan_local_models()
+    _, local_name_map = _scan_local_models_for_explorer(category)
     installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
     if not installed_info.get("installed"):
         return web.json_response({"error": "Model is not installed locally."}, status=400)
@@ -3118,7 +3216,7 @@ async def model_explorer_delete(request):
     if not filename:
         return web.json_response({"error": "Missing filename."}, status=400)
 
-    _, local_name_map = _scan_local_models()
+    _, local_name_map = _scan_local_models_for_explorer(category)
     candidates = list(local_name_map.get(filename.lower()) or [])
     if not candidates:
         return web.json_response({"error": "Model file not found locally."}, status=404)

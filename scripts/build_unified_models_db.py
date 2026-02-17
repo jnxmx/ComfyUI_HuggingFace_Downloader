@@ -42,7 +42,7 @@ ALLOWED_EXPLORER_CATEGORIES = {
     "ipadapter",
 }
 
-BASE_APPLICABLE_CATEGORIES = {"checkpoints", "diffusion_models"}
+BASE_APPLICABLE_CATEGORIES = {"checkpoints", "diffusion_models", "loras"}
 
 SOURCE_RANKS = {
     "comfyui_manager_model_list": 1,
@@ -306,4 +306,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
