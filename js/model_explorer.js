@@ -3,6 +3,7 @@ import { api } from "../../../scripts/api.js";
 
 const MODEL_EXPLORER_SETTING_ID = "downloader.model_explorer_enabled";
 const MODEL_EXPLORER_API_BASES = [
+    "/hf_downloader_model_explorer_v2",
     "/hf_model_explorer",
     "/api/hf_downloader/model_explorer",
     "/api/model_explorer",
