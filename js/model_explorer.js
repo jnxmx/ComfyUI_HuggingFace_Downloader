@@ -173,6 +173,112 @@ const createDialogCloseIconButton = (onClose) => {
     return closeIconButton;
 };
 
+const createConfirmDialogButton = (label, tone = "default") => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.className = "p-button p-component hf-me-confirm-btn";
+    if (tone === "success") {
+        button.classList.add("p-button-success");
+    } else if (tone === "primary") {
+        button.classList.add("hf-btn-primary");
+    } else if (tone === "danger") {
+        button.classList.add("p-button-danger");
+    }
+    return button;
+};
+
+const showConfirmDialog = ({
+    title = "Please confirm",
+    message = "",
+    confirmLabel = "Confirm",
+    confirmTone = "primary",
+    cancelLabel = "Cancel",
+} = {}) =>
+    new Promise((resolve) => {
+        const existing = document.getElementById("hf-model-explorer-confirm-dialog");
+        if (existing) existing.remove();
+
+        const overlay = document.createElement("div");
+        overlay.id = "hf-model-explorer-confirm-dialog";
+        applyTemplateDialogOverlayStyle(overlay, 10001);
+
+        const panel = document.createElement("div");
+        applyTemplateDialogPanelStyle(panel, {
+            minWidth: "360px",
+            maxWidth: "560px",
+            width: "min(560px, 100%)",
+            padding: "24px",
+            gap: "14px",
+        });
+
+        const heading = document.createElement("div");
+        heading.textContent = title;
+        Object.assign(heading.style, {
+            fontFamily: "Inter, Arial, sans-serif",
+            fontSize: "20px",
+            fontWeight: "600",
+            lineHeight: "1.25",
+            color: "var(--input-text)",
+        });
+
+        const detail = document.createElement("div");
+        detail.textContent = message;
+        Object.assign(detail.style, {
+            fontSize: "14px",
+            lineHeight: "1.4",
+            color: "var(--descrip-text, #c4c9d4)",
+        });
+
+        const actions = document.createElement("div");
+        Object.assign(actions.style, {
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "8px",
+            marginTop: "4px",
+        });
+
+        let settled = false;
+        const onKeyDown = (event) => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                settle(false);
+            }
+        };
+        const settle = (value) => {
+            if (settled) return;
+            settled = true;
+            document.removeEventListener("keydown", onKeyDown);
+            overlay.remove();
+            resolve(Boolean(value));
+        };
+
+        const cancelBtn = createConfirmDialogButton(cancelLabel, "default");
+        cancelBtn.onclick = () => settle(false);
+
+        const confirmBtn = createConfirmDialogButton(confirmLabel, confirmTone);
+        confirmBtn.onclick = () => settle(true);
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(confirmBtn);
+
+        panel.appendChild(heading);
+        panel.appendChild(detail);
+        panel.appendChild(actions);
+        overlay.appendChild(panel);
+
+        overlay.addEventListener("click", (event) => {
+            if (event.target === overlay) {
+                settle(false);
+            }
+        });
+
+        document.addEventListener("keydown", onKeyDown);
+
+        document.body.appendChild(overlay);
+        confirmBtn.focus();
+    });
+
 let modelToNodeStorePromise = null;
 const resolveModelToNodeStore = async () => {
     if (modelToNodeStorePromise) {
@@ -270,6 +376,7 @@ class ModelExplorerDialog {
         this.precisionWrap = null;
         this.filterWrap = null;
         this.activeFilterPanel = null;
+        this.pendingFilterSelectionRefresh = false;
         this.otherCategoryIds = new Set();
         this.groups = [];
         this.categories = [];
@@ -315,8 +422,10 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-left-title {
                 flex: 1 1 auto;
                 user-select: none;
-                font-size: 1.95rem;
+                font-family: var(--font-inter, Inter, sans-serif);
+                font-size: 1.7rem;
                 font-weight: 600;
+                line-height: 1.15;
                 color: var(--base-foreground, var(--input-text, #e5e7eb));
                 white-space: nowrap;
                 overflow: hidden;
@@ -696,7 +805,7 @@ class ModelExplorerDialog {
             }
             #hf-model-explorer-dialog .hf-me-row {
                 display: grid;
-                grid-template-columns: minmax(0, 1fr) 8rem 9.5rem 12rem;
+                grid-template-columns: minmax(0, 1fr) 7.6rem 5.2rem 8.8rem 12rem;
                 align-items: center;
                 gap: 8px;
                 min-height: 50px;
@@ -725,13 +834,14 @@ class ModelExplorerDialog {
                 text-overflow: ellipsis;
                 color: var(--base-foreground, var(--input-text, #e5e7eb));
             }
-            #hf-model-explorer-dialog .hf-me-base {
+            #hf-model-explorer-dialog .hf-me-base-col {
                 font-size: 0.63rem;
                 line-height: 1.2;
                 color: var(--text-secondary, var(--descrip-text, #9aa4b6));
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
+                text-transform: none;
             }
             #hf-model-explorer-dialog .hf-me-installed {
                 font-size: 0.62rem;
@@ -811,6 +921,45 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-action-btn--destructive:hover:not(:disabled) {
                 background: var(--destructive-background-hover, #dd5c5c);
             }
+            .hf-me-confirm-btn.p-button {
+                min-height: 40px;
+                padding: 0.5rem 0.8rem;
+                font-size: 14px;
+                font-weight: 600;
+                font-family: var(--font-inter, Inter, sans-serif);
+                border-radius: 10px;
+                border: none !important;
+                box-shadow: none !important;
+                background: var(--secondary-background) !important;
+                color: var(--base-foreground) !important;
+                transition: background-color 120ms ease, opacity 120ms ease;
+                display: inline-flex !important;
+                align-items: center;
+                justify-content: center;
+                gap: 0.35rem;
+                line-height: 1.1;
+            }
+            .hf-me-confirm-btn.p-button:hover {
+                background: var(--secondary-background-hover) !important;
+            }
+            .hf-me-confirm-btn.p-button.p-button-success {
+                background: var(--success-background, #43c06b) !important;
+            }
+            .hf-me-confirm-btn.p-button.p-button-success:hover {
+                background: var(--success-background-hover, #55d17c) !important;
+            }
+            .hf-me-confirm-btn.p-button.hf-btn-primary {
+                background: var(--primary-background) !important;
+            }
+            .hf-me-confirm-btn.p-button.hf-btn-primary:hover {
+                background: var(--primary-background-hover) !important;
+            }
+            .hf-me-confirm-btn.p-button.p-button-danger {
+                background: var(--destructive-background) !important;
+            }
+            .hf-me-confirm-btn.p-button.p-button-danger:hover {
+                background: var(--destructive-background-hover) !important;
+            }
             #hf-model-explorer-dialog .hf-me-empty {
                 padding: 22px 10px;
                 color: var(--text-secondary, var(--descrip-text, #9aa4b6));
@@ -818,7 +967,7 @@ class ModelExplorerDialog {
             }
             @media (max-width: 1200px) {
                 #hf-model-explorer-dialog .hf-me-row {
-                    grid-template-columns: minmax(0, 1fr) 7rem 8rem 10.8rem;
+                    grid-template-columns: minmax(0, 1fr) 6.8rem 4.8rem 7.2rem 10.8rem;
                 }
             }
             @media (max-width: 1024px) {
@@ -838,17 +987,21 @@ class ModelExplorerDialog {
                     grid-column: 1;
                     grid-row: 1;
                 }
-                #hf-model-explorer-dialog .hf-me-precision {
+                #hf-model-explorer-dialog .hf-me-base-col {
                     grid-column: 1;
                     grid-row: 2;
                 }
-                #hf-model-explorer-dialog .hf-me-category {
+                #hf-model-explorer-dialog .hf-me-precision {
                     grid-column: 1;
                     grid-row: 3;
                 }
+                #hf-model-explorer-dialog .hf-me-category {
+                    grid-column: 1;
+                    grid-row: 4;
+                }
                 #hf-model-explorer-dialog .hf-me-actions {
                     grid-column: 2;
-                    grid-row: 1 / span 3;
+                    grid-row: 1 / span 4;
                     align-self: center;
                 }
             }
@@ -871,7 +1024,7 @@ class ModelExplorerDialog {
     close() {
         if (this.element) {
             this.element.style.display = "none";
-            this.closeFilterPopover();
+            this.closeFilterPopover(null, false);
         }
     }
 
@@ -890,6 +1043,8 @@ class ModelExplorerDialog {
         const panel = document.createElement("div");
         applyTemplateDialogPanelStyle(panel, {
             width: "min(1600px, 100%)",
+            height: "92vh",
+            minHeight: "92vh",
             maxHeight: "92vh",
             padding: "0",
         });
@@ -1071,6 +1226,7 @@ class ModelExplorerDialog {
     }
 
     async refreshFiltersAndGroups() {
+        this.pendingFilterSelectionRefresh = false;
         await this.fetchFilters();
         await this.refreshGroups();
     }
@@ -1128,7 +1284,7 @@ class ModelExplorerDialog {
             }
             this.filters[key] = [];
             this.renderFilterControl(control);
-            void this.refreshGroups();
+            this.pendingFilterSelectionRefresh = true;
         });
 
         optionsEl.addEventListener("click", (event) => {
@@ -1149,13 +1305,13 @@ class ModelExplorerDialog {
             }
             this.filters[key] = current;
             this.renderFilterControl(control);
-            void this.refreshGroups();
+            this.pendingFilterSelectionRefresh = true;
         });
 
         return control;
     }
 
-    closeFilterPopover(keepOpenKey = null) {
+    closeFilterPopover(keepOpenKey = null, refreshOnClose = true) {
         const controls = [this.baseControl, this.precisionControl].filter(Boolean);
         controls.forEach((control) => {
             const shouldKeepOpen = keepOpenKey && control.key === keepOpenKey;
@@ -1170,6 +1326,10 @@ class ModelExplorerDialog {
         });
         if (!keepOpenKey) {
             this.activeFilterPanel = null;
+            if (refreshOnClose && this.pendingFilterSelectionRefresh) {
+                this.pendingFilterSelectionRefresh = false;
+                void this.refreshGroups();
+            }
         }
     }
 
@@ -1182,16 +1342,29 @@ class ModelExplorerDialog {
         for (const rawValue of Array.isArray(options) ? options : []) {
             const value = key === "precision"
                 ? this.normalizePrecision(rawValue)
-                : String(rawValue || "").trim();
+                : this.normalizeBase(rawValue);
+            const dedupeKey = key === "precision" ? value : value.toLowerCase();
             if (!value || (key === "precision" && value === "unknown")) continue;
-            if (seen.has(value)) continue;
-            seen.add(value);
+            if (seen.has(dedupeKey)) continue;
+            seen.add(dedupeKey);
             normalized.push(value);
         }
+        normalized.sort((a, b) =>
+            this.formatFilterValueLabel(key, a).localeCompare(this.formatFilterValueLabel(key, b), undefined, {
+                sensitivity: "base",
+            })
+        );
 
         control.options = normalized;
         const selected = Array.isArray(this.filters[key]) ? this.filters[key] : [];
-        this.filters[key] = selected.filter((value) => normalized.includes(value));
+        if (key === "base") {
+            const canonicalByLower = new Map(normalized.map((value) => [value.toLowerCase(), value]));
+            this.filters[key] = selected
+                .map((value) => canonicalByLower.get(String(value || "").toLowerCase()) || "")
+                .filter(Boolean);
+        } else {
+            this.filters[key] = selected.filter((value) => normalized.includes(value));
+        }
         this.renderFilterControl(control);
     }
 
@@ -1207,9 +1380,7 @@ class ModelExplorerDialog {
             control.labelEl.textContent = control.label;
         } else if (count === 1) {
             const value = selected[0];
-            control.labelEl.textContent = control.key === "precision"
-                ? this.formatPrecision(value)
-                : value;
+            control.labelEl.textContent = this.formatFilterValueLabel(control.key, value);
         } else {
             control.labelEl.textContent = `${control.label} (${count})`;
         }
@@ -1224,7 +1395,7 @@ class ModelExplorerDialog {
         const selected = new Set(Array.isArray(this.filters[control.key]) ? this.filters[control.key] : []);
         const visibleOptions = control.options.filter((value) => {
             if (!query) return true;
-            const label = control.key === "precision" ? this.formatPrecision(value) : String(value);
+            const label = this.formatFilterValueLabel(control.key, value);
             return label.toLowerCase().includes(query);
         });
         if (!visibleOptions.length) {
@@ -1234,7 +1405,7 @@ class ModelExplorerDialog {
         control.optionsEl.innerHTML = visibleOptions
             .map((value) => {
                 const isSelected = selected.has(value);
-                const label = control.key === "precision" ? this.formatPrecision(value) : String(value);
+                const label = this.formatFilterValueLabel(control.key, value);
                 return `
                     <button type="button" class="hf-me-filter-option${isSelected ? " is-selected" : ""}" data-value="${escapeHtml(value)}">
                         <span class="hf-me-filter-option-check">${isSelected ? '<i class="icon-[lucide--check]" aria-hidden="true"></i>' : ""}</span>
@@ -1438,7 +1609,7 @@ class ModelExplorerDialog {
                 this.filters.category = value;
                 this.filters.base = [];
                 this.filters.precision = [];
-                this.closeFilterPopover();
+                this.closeFilterPopover(null, false);
                 this.renderCategorySelect();
                 void this.refreshFiltersAndGroups();
             };
@@ -1486,6 +1657,27 @@ class ModelExplorerDialog {
         if (!normalized) return "";
         if (normalized.startsWith("q")) return "gguf";
         return normalized;
+    }
+
+    normalizeBase(value) {
+        return String(value || "").trim();
+    }
+
+    formatBase(value) {
+        const base = this.normalizeBase(value);
+        if (!base) return "";
+        if (base.toLowerCase() === "unknown") return "Unknown";
+        return base.replaceAll("_", " ");
+    }
+
+    formatFilterValueLabel(key, value) {
+        if (key === "precision") {
+            return this.formatPrecision(value);
+        }
+        if (key === "base") {
+            return this.formatBase(value);
+        }
+        return String(value || "");
     }
 
     formatPrecision(value) {
@@ -1543,16 +1735,16 @@ class ModelExplorerDialog {
                         : `
                             <button class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-action="download" data-key="${variantKey}">Download</button>
                           `;
-                    const baseRow = baseLabel ? `<div class="hf-me-base">Base: ${baseLabel}</div>` : "";
+                    const baseColumn = baseLabel || "";
                     const precisionColumn = showPrecision ? precision : "";
 
                     return `
                         <div class="hf-me-row">
                             <div class="hf-me-main">
                                 <div class="hf-me-file">${filename}</div>
-                                ${baseRow}
                                 ${installedBadge}
                             </div>
+                            <div class="hf-me-base-col">${baseColumn}</div>
                             <div class="hf-me-precision">${precisionColumn}</div>
                             <div class="hf-me-category">${categoryHtml}</div>
                             <div class="hf-me-actions">${actions}</div>
@@ -1674,7 +1866,13 @@ class ModelExplorerDialog {
     }
 
     async deleteVariant(group, variant, button) {
-        const ok = window.confirm(`Delete local file for "${variant.filename}"?`);
+        const ok = await showConfirmDialog({
+            title: "Delete model",
+            message: `Delete local file for "${variant.filename}"?`,
+            confirmLabel: "Delete",
+            confirmTone: "danger",
+            cancelLabel: "Cancel",
+        });
         if (!ok) return;
         button.disabled = true;
         button.textContent = "Deleting...";
@@ -1691,11 +1889,6 @@ class ModelExplorerDialog {
             if (!resp.ok) {
                 throw new Error(`HTTP ${resp.status}`);
             }
-            showToast({
-                severity: "success",
-                summary: "Deleted",
-                detail: `${variant.filename} removed from local models.`,
-            });
             await this.refreshGroups();
         } catch (error) {
             showToast({
