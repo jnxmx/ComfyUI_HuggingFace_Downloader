@@ -2,6 +2,7 @@ import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
 const MODEL_EXPLORER_SETTING_ID = "downloader.model_explorer_enabled";
+const MODEL_EXPLORER_API_BASE = "/api/model_explorer";
 const MODEL_TO_NODE_STORE_IMPORT_CANDIDATES = [
     "../../../stores/modelToNodeStore.js",
     "/stores/modelToNodeStore.js",
@@ -277,7 +278,7 @@ class ModelExplorerDialog {
     }
 
     async fetchCategories() {
-        const resp = await api.fetchApi("/model_explorer/categories");
+        const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/categories`);
         if (!resp.ok) return;
         const data = await resp.json();
         this.categories = Array.isArray(data?.categories) ? data.categories : [];
@@ -290,7 +291,7 @@ class ModelExplorerDialog {
     async fetchFilters() {
         const params = new URLSearchParams();
         if (this.filters.category) params.set("category", this.filters.category);
-        const resp = await api.fetchApi(`/model_explorer/filters?${params.toString()}`);
+        const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/filters?${params.toString()}`);
         if (!resp.ok) return;
         const data = await resp.json();
         const bases = Array.isArray(data?.bases) ? data.bases : [];
@@ -312,7 +313,7 @@ class ModelExplorerDialog {
         params.set("installed_first", "true");
         params.set("offset", "0");
         params.set("limit", "300");
-        const resp = await api.fetchApi(`/model_explorer/groups?${params.toString()}`);
+        const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/groups?${params.toString()}`);
         if (!resp.ok) {
             this.setLoading(false);
             return;
@@ -462,7 +463,7 @@ class ModelExplorerDialog {
                 },
             ],
         };
-        const resp = await api.fetchApi("/model_explorer/download", {
+        const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/download`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -482,7 +483,7 @@ class ModelExplorerDialog {
         button.disabled = true;
         button.textContent = "Using...";
         try {
-            const resp = await api.fetchApi("/model_explorer/use", {
+            const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/use`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -523,7 +524,7 @@ class ModelExplorerDialog {
         button.disabled = true;
         button.textContent = "Deleting...";
         try {
-            const resp = await api.fetchApi("/model_explorer/delete", {
+            const resp = await api.fetchApi(`${MODEL_EXPLORER_API_BASE}/delete`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -569,4 +570,3 @@ app.registerExtension({
         });
     },
 });
-

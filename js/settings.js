@@ -12,42 +12,6 @@ app.registerExtension({
       tooltip: "Enter your Hugging Face token to enable downloads from gated repos.",
     },
     {
-      id: "downloader.top_menu_button_style",
-      category: ["Hugging Face downloader", "Appearance", "Top menu button"],
-      name: "Top menu button",
-      type: "combo",
-      defaultValue: "default",
-      tooltip: "Choose the Hugging Face top menu button style.",
-      options: [
-        { value: "default", text: "Default" },
-        { value: "yellow", text: "Yellow" },
-        { value: "disabled", text: "Disabled" }
-      ]
-    },
-    {
-      id: "downloader.model_library_backend_enabled",
-      category: ["Hugging Face downloader", "Model Library", "Use as Model Library backend"],
-      name: "Use as Model Library backend",
-      type: "boolean",
-      defaultValue: false,
-      experimental: true,
-      icon: "beaker",
-      tooltip:
-        "Route native Model Library Asset API calls through this node pack backend (HuggingFace-only catalog + local installed-model discovery).",
-      onChange: (newValue) => {
-        console.log(`[HF Downloader] Model Library backend enabled: ${Boolean(newValue)}`);
-        if (!newValue) return;
-        try {
-          const settingsUi = app?.ui?.settings;
-          if (settingsUi?.setSettingValue) {
-            settingsUi.setSettingValue("Comfy.Assets.UseAssetAPI", true);
-          }
-        } catch (error) {
-          console.warn("[HF Downloader] Failed to force Comfy.Assets.UseAssetAPI:", error);
-        }
-      },
-    },
-    {
       id: "downloader.auto_open_missing_models_on_run",
       category: ["Hugging Face downloader", "Auto download", "Auto-open on native run model checks"],
       name: "Auto-open on native run model checks",
@@ -72,6 +36,19 @@ app.registerExtension({
       onChange: (newValue) => {
         console.log(`[HF Downloader] Model Explorer enabled: ${Boolean(newValue)}`);
       },
+    },
+    {
+      id: "downloader.top_menu_button_style",
+      category: ["Hugging Face downloader", "Appearance", "Top menu button"],
+      name: "Top menu button",
+      type: "combo",
+      defaultValue: "default",
+      tooltip: "Choose the Hugging Face top menu button style.",
+      options: [
+        { value: "default", text: "Default" },
+        { value: "yellow", text: "Yellow" },
+        { value: "disabled", text: "Disabled" }
+      ]
     },
     {
       id: "downloaderbackup.repo_name",
