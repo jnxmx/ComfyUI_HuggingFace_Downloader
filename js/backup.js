@@ -17,12 +17,15 @@ app.registerExtension({
                 toastOptions = { detail: options, severity: type };
             }
 
+            const life = toastOptions.life ?? 5000;
+            const closable = toastOptions.closable ?? true;
+
             const payload = {
                 severity: toastOptions.severity || type,
                 summary: toastOptions.summary,
                 detail: toastOptions.detail,
-                life: toastOptions.life,
-                closable: toastOptions.closable,
+                life,
+                closable,
             };
 
             Object.keys(payload).forEach((key) => {
@@ -203,33 +206,91 @@ app.registerExtension({
     position: fixed;
     right: 16px;
     top: 16px;
-    width: 360px;
+    width: 350px;
+    min-width: 310px;
     max-width: calc(100vw - 32px);
-    background: var(--base-background, var(--interface-panel-surface, var(--comfy-menu-bg, #1f2128)));
-    border: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
-    border-radius: 16px;
-    box-shadow: var(--shadow-interface, 0 12px 28px rgba(0, 0, 0, 0.45));
-    color: var(--input-text);
+    max-height: 60vh;
+    background: var(--interface-panel-surface, var(--hf-queue-bg, var(--p-content-background, var(--comfy-menu-bg, #1f2128))));
+    border: 1px solid var(--interface-stroke, var(--hf-queue-border, var(--border-color, var(--p-content-border-color, #3c4452))));
+    border-radius: 8px;
+    color: var(--fg-color, var(--p-text-color, #ddd));
     font-size: 12px;
     z-index: 10002;
     display: none;
     flex-direction: column;
     overflow: hidden;
 }
-#hf-backup-op-panel .hf-backup-op-body {
-    padding: 10px;
+#hf-backup-op-panel .hf-backup-op-header {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
     gap: 8px;
+    min-height: 48px;
+    padding: 0 8px;
+    border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--p-content-border-color, #333)));
+    background: transparent;
 }
-#hf-backup-op-panel .hf-backup-op-item {
-    background: var(--modal-panel-background, var(--comfy-input-bg, #222));
-    border: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
+#hf-backup-op-panel .hf-backup-op-header-title {
+    padding: 0 8px;
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-color, var(--input-text, var(--p-text-color, #e5e7eb)));
+}
+#hf-backup-op-panel .hf-backup-op-header-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+#hf-backup-op-panel .hf-backup-op-count {
+    min-width: 24px;
+    height: 24px;
+    background: var(--secondary-background, var(--p-surface-800, #2f323a));
+    color: var(--text-color, var(--input-text, var(--p-text-color, #e5e7eb)));
+    padding: 0 8px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 700;
+    opacity: 0.9;
+}
+#hf-backup-op-panel .hf-backup-op-minimize {
+    width: 32px;
+    height: 32px;
+    border: none;
     border-radius: 6px;
-    padding: 8px;
+    background: transparent;
+    color: var(--text-color, var(--input-text, #e5e7eb));
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+}
+#hf-backup-op-panel .hf-backup-op-minimize:hover {
+    background: var(--secondary-background-hover, rgba(255, 255, 255, 0.08));
+}
+#hf-backup-op-panel .hf-backup-op-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 6px 10px;
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+#hf-backup-op-panel .hf-backup-op-item {
+    background: var(--secondary-background, var(--p-surface-800, #222));
+    border: 1px solid var(--secondary-background, var(--border-color, var(--border-default, #3c4452)));
+    border-radius: 8px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 48px;
+    box-sizing: border-box;
 }
 #hf-backup-op-panel .hf-backup-op-main {
     display: flex;
@@ -237,54 +298,62 @@ app.registerExtension({
     gap: 8px;
 }
 #hf-backup-op-panel .hf-backup-op-spinner {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
-    border: 2px solid #2a2d36;
+    border: 2px solid rgba(255, 255, 255, 0.22);
     border-top-color: #4aa3ff;
     animation: hf-backup-op-spin 0.9s linear infinite;
     flex: 0 0 auto;
 }
 #hf-backup-op-panel .hf-backup-op-spinner.done {
     animation: none;
-    border-top-color: #5bd98c;
+    border-color: #5bd98c;
 }
 #hf-backup-op-panel .hf-backup-op-spinner.error {
     animation: none;
-    border-top-color: #ff6b6b;
+    border-color: #ff6b6b;
 }
 @keyframes hf-backup-op-spin {
     to { transform: rotate(360deg); }
 }
 #hf-backup-op-panel .hf-backup-op-title {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
-    color: #e8ebf2;
+    color: var(--text-color, var(--input-text, #e3e5ea));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 #hf-backup-op-panel .hf-backup-op-detail {
     font-size: 11px;
-    color: #aab1bc;
+    color: var(--descrip-text, var(--p-text-muted-color, #aab1bc));
     min-height: 15px;
+    line-height: 1.25;
 }
 #hf-backup-op-panel .hf-backup-op-actions {
     display: none;
     justify-content: flex-end;
-    padding: 8px 10px;
-    border-top: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
-    background: var(--base-background, var(--interface-panel-surface, var(--comfy-menu-bg, #1f2128)));
+    padding: 8px 12px 10px;
+    border-top: 1px solid var(--interface-stroke, var(--border-color, var(--p-content-border-color, #333)));
+    background: transparent;
 }
 #hf-backup-op-panel .hf-backup-op-refresh {
-    border: 1px solid #3f8d4d;
-    background: #38a84f;
-    color: #fff;
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 12px;
+    border-radius: 8px;
+    padding: 0.55rem 1.15rem;
+    font-size: 14px;
     cursor: pointer;
     font-weight: 600;
+    min-height: 40px;
+    font-family: var(--font-inter, Inter, sans-serif);
 }
-#hf-backup-op-panel .hf-backup-op-refresh:hover {
-    background: #43b95c;
+#hf-backup-op-panel .hf-backup-op-refresh:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+#hf-backup-op-panel.hf-backup-op-minimized .hf-backup-op-body,
+#hf-backup-op-panel.hf-backup-op-minimized .hf-backup-op-actions {
+    display: none !important;
 }
 `;
             document.head.appendChild(style);
@@ -832,6 +901,8 @@ app.registerExtension({
         let currentDialogCleanup = null;
         let opStatusRotateTimer = null;
         let opStatusHideTimer = null;
+        let opStatusPanelMinimized = false;
+        let opStatusPositionHandlersAttached = false;
 
         const clearOpStatusTimers = () => {
             if (opStatusRotateTimer) {
@@ -844,11 +915,134 @@ app.registerExtension({
             }
         };
 
+        const getOperationPanelTopAnchor = () => {
+            const appAnchor = app?.menu?.settingsGroup?.element?.parentElement;
+            if (appAnchor?.getBoundingClientRect) return appAnchor;
+
+            const selectors = [
+                ".comfyui-menu-bar",
+                ".comfyui-menu",
+                ".comfyui-header",
+                ".p-menubar",
+                "header",
+            ];
+            for (const selector of selectors) {
+                const element = document.querySelector(selector);
+                if (element?.getBoundingClientRect) return element;
+            }
+            return null;
+        };
+
+        const syncOperationPanelThemeFromJobQueue = (panel) => {
+            if (!panel || typeof window === "undefined" || !window.getComputedStyle) return;
+            const textNodes = document.querySelectorAll("h1, h2, h3, h4, span, div");
+            let jobQueueTitle = null;
+            for (const node of textNodes) {
+                if ((node.textContent || "").trim() !== "Job Queue") continue;
+                if (node.closest("#hf-backup-op-panel")) continue;
+                jobQueueTitle = node;
+                break;
+            }
+
+            if (!jobQueueTitle) {
+                panel.style.removeProperty("--hf-queue-bg");
+                panel.style.removeProperty("--hf-queue-border");
+                return;
+            }
+
+            const candidates = [
+                jobQueueTitle.closest("[class*='panel']"),
+                jobQueueTitle.closest("[class*='queue']"),
+                jobQueueTitle.closest("[role='dialog']"),
+                jobQueueTitle.closest("section"),
+                jobQueueTitle.parentElement,
+            ];
+            const nativePanel = candidates.find((el) => el && el !== panel);
+            if (!nativePanel) return;
+
+            const styles = window.getComputedStyle(nativePanel);
+            const bg = styles.backgroundColor;
+            const border = styles.borderColor;
+            if (bg && bg !== "rgba(0, 0, 0, 0)") {
+                panel.style.setProperty("--hf-queue-bg", bg);
+            }
+            if (border && border !== "rgba(0, 0, 0, 0)") {
+                panel.style.setProperty("--hf-queue-border", border);
+            }
+        };
+
+        const updateOperationPanelPosition = () => {
+            const panel = document.getElementById("hf-backup-op-panel");
+            if (!panel) return;
+            const anchor = getOperationPanelTopAnchor();
+            let top = 16;
+            if (anchor) {
+                const rect = anchor.getBoundingClientRect();
+                if (Number.isFinite(rect.bottom)) {
+                    top = Math.max(8, Math.round(rect.bottom + 10));
+                }
+            }
+            panel.style.top = `${top}px`;
+            panel.style.right = "16px";
+            panel.style.bottom = "auto";
+            panel.style.left = "auto";
+            panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
+            syncOperationPanelThemeFromJobQueue(panel);
+        };
+
+        const setOperationPanelMinimized = (value) => {
+            opStatusPanelMinimized = Boolean(value);
+            const panel = document.getElementById("hf-backup-op-panel");
+            if (!panel) return;
+            panel.classList.toggle("hf-backup-op-minimized", opStatusPanelMinimized);
+
+            const minimizeBtn = panel.querySelector(".hf-backup-op-minimize");
+            if (minimizeBtn) {
+                minimizeBtn.innerHTML = opStatusPanelMinimized ? "<i class=\"pi pi-plus\"></i>" : "<i class=\"pi pi-minus\"></i>";
+                minimizeBtn.title = opStatusPanelMinimized ? "Expand backup uploads" : "Minimize backup uploads";
+            }
+        };
+
+        const hideOperationStatusPanel = () => {
+            const panel = document.getElementById("hf-backup-op-panel");
+            if (!panel) return;
+            panel.style.display = "none";
+            setOperationPanelMinimized(false);
+        };
+
         const ensureOperationStatusPanel = () => {
             let panel = document.getElementById("hf-backup-op-panel");
             if (!panel) {
                 panel = document.createElement("div");
                 panel.id = "hf-backup-op-panel";
+
+                const header = document.createElement("div");
+                header.className = "hf-backup-op-header";
+
+                const headerTitle = document.createElement("div");
+                headerTitle.className = "hf-backup-op-header-title";
+                headerTitle.textContent = "Backup Uploads";
+
+                const controls = document.createElement("div");
+                controls.className = "hf-backup-op-header-controls";
+
+                const count = document.createElement("div");
+                count.className = "hf-backup-op-count";
+                count.textContent = "1";
+
+                const minimizeBtn = document.createElement("button");
+                minimizeBtn.type = "button";
+                minimizeBtn.className = "hf-backup-op-minimize";
+                minimizeBtn.innerHTML = "<i class=\"pi pi-minus\"></i>";
+                minimizeBtn.title = "Minimize backup uploads";
+                minimizeBtn.addEventListener("click", () => {
+                    setOperationPanelMinimized(!opStatusPanelMinimized);
+                });
+
+                controls.appendChild(count);
+                controls.appendChild(minimizeBtn);
+                header.appendChild(headerTitle);
+                header.appendChild(controls);
 
                 const body = document.createElement("div");
                 body.className = "hf-backup-op-body";
@@ -879,7 +1073,7 @@ app.registerExtension({
                 actions.className = "hf-backup-op-actions";
                 const refreshButton = document.createElement("button");
                 refreshButton.type = "button";
-                refreshButton.className = "hf-backup-op-refresh";
+                refreshButton.className = "hf-backup-op-refresh p-button p-component p-button-success";
                 refreshButton.textContent = "Refresh";
                 refreshButton.onclick = async () => {
                     refreshButton.disabled = true;
@@ -894,6 +1088,12 @@ app.registerExtension({
                             detail: "ComfyUI model widgets refreshed without page reload.",
                             life: 2500,
                         });
+                        setTimeout(() => {
+                            refreshButton.textContent = originalLabel;
+                            refreshButton.disabled = false;
+                            hideOperationStatusPanel();
+                        }, 700);
+                        return;
                     }
                     setTimeout(() => {
                         refreshButton.textContent = originalLabel;
@@ -902,10 +1102,20 @@ app.registerExtension({
                 };
                 actions.appendChild(refreshButton);
 
+                panel.appendChild(header);
                 panel.appendChild(body);
                 panel.appendChild(actions);
                 document.body.appendChild(panel);
+
+                if (!opStatusPositionHandlersAttached) {
+                    window.addEventListener("resize", updateOperationPanelPosition, { passive: true });
+                    window.addEventListener("scroll", updateOperationPanelPosition, { passive: true });
+                    opStatusPositionHandlersAttached = true;
+                }
             }
+
+            updateOperationPanelPosition();
+            setOperationPanelMinimized(opStatusPanelMinimized);
 
             return {
                 panel,
@@ -973,6 +1183,8 @@ app.registerExtension({
             clearOpStatusTimers();
             const refs = ensureOperationStatusPanel();
             refs.panel.style.display = "flex";
+            setOperationPanelMinimized(false);
+            updateOperationPanelPosition();
             refs.title.textContent = title || "Backup in progress. Please wait.";
             refs.spinner.classList.remove("done", "error");
             refs.actions.style.display = "none";
@@ -996,6 +1208,8 @@ app.registerExtension({
             clearOpStatusTimers();
             const refs = ensureOperationStatusPanel();
             refs.panel.style.display = "flex";
+            setOperationPanelMinimized(false);
+            updateOperationPanelPosition();
             refs.title.textContent = title || "Operation complete.";
             refs.detail.textContent = detail || "";
             refs.spinner.classList.remove("error");
@@ -1007,13 +1221,15 @@ app.registerExtension({
             clearOpStatusTimers();
             const refs = ensureOperationStatusPanel();
             refs.panel.style.display = "flex";
+            setOperationPanelMinimized(false);
+            updateOperationPanelPosition();
             refs.title.textContent = title || "Backup operation failed.";
             refs.detail.textContent = detail || "";
             refs.spinner.classList.remove("done");
             refs.spinner.classList.add("error");
             refs.actions.style.display = "none";
             opStatusHideTimer = setTimeout(() => {
-                refs.panel.style.display = "none";
+                hideOperationStatusPanel();
             }, 7000);
         };
 

@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "updated_at": "2026-02-17T21:22:06.831259+00:00",
+  "updated_at": "2026-02-19T13:38:27.345244+00:00",
   "overrides": {
     "2511-AnyPose-base-000006250.safetensors": {
       "explorer_base": "Qwen Image Edit"
@@ -450,7 +450,7 @@
       "explorer_base": "FLUX.1 [dev]"
     },
     "Qwen-Edit-2509-Multiple-angles.safetensors": {
-      "explorer_base": "Wan2.1"
+      "explorer_base": "Qwen Image Edit"
     },
     "Qwen-Image-Edit-2509-Anything2RealAlpha.safetensors": {
       "explorer_base": "Wan2.1"
@@ -471,7 +471,7 @@
       "explorer_base": "Wan2.1"
     },
     "Qwen-Image-Edit-2509-Light-Migration.safetensors": {
-      "explorer_base": "Wan2.1"
+      "explorer_base": "Qwen Image Edit"
     },
     "Qwen-Image-Edit-2509-Light_restoration.safetensors": {
       "explorer_base": "Wan2.1"
@@ -489,10 +489,10 @@
       "explorer_base": "Wan2.1"
     },
     "Qwen-Image-Edit-2509-Relight.safetensors": {
-      "explorer_base": "Wan2.1"
+      "explorer_base": "Qwen Image Edit"
     },
     "Qwen-Image-Edit-2509-Upscale-LoRA.safetensors": {
-      "explorer_base": "Wan2.1"
+      "explorer_base": "Qwen Image Edit"
     },
     "Qwen-Image-Edit-2509-White_to_Scene.safetensors": {
       "explorer_base": "Wan2.1"
@@ -555,7 +555,7 @@
       "explorer_base": "Wan2.1"
     },
     "Qwen_Image_Edit_2511-LightningRemap_Alpha0.2.safetensors": {
-      "explorer_base": "Wan2.1"
+      "explorer_base": "Qwen Image Edit"
     },
     "Qwen_Image_Edit_2511-SYSTMS_INFL8.safetensors": {
       "explorer_base": "Wan2.1"

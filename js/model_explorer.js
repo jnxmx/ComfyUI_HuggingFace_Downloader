@@ -71,12 +71,15 @@ const showToast = (options, type = "info") => {
     if (typeof options === "string") {
         payload = { detail: options, severity: type };
     }
+    const life = payload.life ?? 5000;
+    const closable = payload.closable ?? true;
     if (app?.extensionManager?.toast?.add) {
         app.extensionManager.toast.add({
             severity: payload.severity || type,
             summary: payload.summary,
             detail: payload.detail,
-            life: payload.life,
+            life,
+            closable,
         });
     }
 };

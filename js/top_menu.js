@@ -31,12 +31,15 @@ const showToast = (options, type = "info") => {
         toastOptions = { detail: options, severity: type };
     }
 
+    const life = toastOptions.life ?? 5000;
+    const closable = toastOptions.closable ?? true;
+
     const payload = {
         severity: toastOptions.severity || type,
         summary: toastOptions.summary,
         detail: toastOptions.detail,
-        life: toastOptions.life,
-        closable: toastOptions.closable,
+        life,
+        closable,
     };
 
     Object.keys(payload).forEach((key) => {

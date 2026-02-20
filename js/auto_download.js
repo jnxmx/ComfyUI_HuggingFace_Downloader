@@ -235,12 +235,16 @@ app.registerExtension({
                 toastOptions = { detail: options, severity: type };
             }
 
+            const sticky = Boolean(toastOptions.sticky);
+            const life = toastOptions.life ?? (sticky ? undefined : 5000);
+            const closable = toastOptions.closable ?? !sticky;
+
             const payload = {
                 severity: toastOptions.severity || type,
                 summary: toastOptions.summary,
                 detail: toastOptions.detail,
-                closable: toastOptions.closable,
-                life: toastOptions.life,
+                closable,
+                life,
                 sticky: toastOptions.sticky,
                 group: toastOptions.group,
                 styleClass: toastOptions.styleClass,
@@ -2512,6 +2516,7 @@ app.registerExtension({
                     setStatus(`Queued ${downloadIds.length} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
                     const statusMap = {};
                     const pending = new Set(downloadIds);
+                    let statusErrorToastShown = false;
 
                     const poll = async () => {
                         try {
@@ -2519,6 +2524,7 @@ app.registerExtension({
                             if (statusResp.status !== 200) return;
                             const statusData = await statusResp.json();
                             const downloads = statusData.downloads || {};
+                            statusErrorToastShown = false;
 
                             for (const id of downloadIds) {
                                 const info = downloads[id];
@@ -2544,7 +2550,14 @@ app.registerExtension({
                                 }
                             }
                         } catch (e) {
-                            showToast({ severity: "error", summary: "Status error", detail: String(e) });
+                            if (!statusErrorToastShown) {
+                                showToast({
+                                    severity: "error",
+                                    summary: "Status error",
+                                    detail: "Status polling failed. Retrying in background."
+                                });
+                                statusErrorToastShown = true;
+                            }
                             setStatus("Status polling error.", "#ff6b6b");
                         }
                     };
