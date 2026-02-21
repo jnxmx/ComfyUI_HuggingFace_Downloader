@@ -240,7 +240,7 @@ def _load_model_explorer_catalog() -> dict:
                         or ""
                     )
                 category = str(category or "").strip()
-                if category not in MODEL_EXPLORER_ALLOWED_CATEGORIES:
+                if not category:
                     continue
 
                 entry["explorer_category"] = category
@@ -261,7 +261,7 @@ def _load_model_explorer_catalog() -> dict:
                 if not bool(entry.get("explorer_enabled")):
                     entry["explorer_enabled"] = bool(
                         source in MODEL_EXPLORER_VISIBLE_SOURCES
-                        and category in MODEL_EXPLORER_ALLOWED_CATEGORIES
+                        and bool(entry.get("library_visible", True))
                         and (
                             category not in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES
                             or bool(str(entry.get("explorer_base") or "").strip())
@@ -902,8 +902,8 @@ def _scan_local_models_for_explorer(category_filter: str = "") -> tuple[list[dic
                 name_map.setdefault(widget_path.lower(), []).append(record)
 
     used_folder_paths = False
-    if folder_paths and hasattr(folder_paths, "get_filename_list"):
-        categories = [category] if category else sorted(MODEL_EXPLORER_ALLOWED_CATEGORIES)
+    if folder_paths and hasattr(folder_paths, "get_filename_list") and category:
+        categories = [category]
         for cat in categories:
             try:
                 names = folder_paths.get_filename_list(cat) or []
@@ -3192,6 +3192,39 @@ def _model_explorer_normalize_text(value: str) -> str:
     return str(value or "").lower().replace("_", " ").replace("-", " ").replace(".", " ").strip()
 
 
+def _model_explorer_compact_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _model_explorer_search_matches(query: str, fields: list[str]) -> bool:
+    query_normalized = _model_explorer_normalize_text(query)
+    if not query_normalized:
+        return True
+
+    searchable = " ".join(
+        _model_explorer_normalize_text(value) for value in fields if str(value or "").strip()
+    ).strip()
+    if not searchable:
+        return False
+
+    # Fast path: contiguous match.
+    if query_normalized in searchable:
+        return True
+
+    # Fuzzy token match: all query tokens must appear, not necessarily adjacent.
+    tokens = [token for token in query_normalized.split() if token]
+    if tokens and all(token in searchable for token in tokens):
+        return True
+
+    # Compact match to bridge separator differences (e.g. "qwenedit" vs "qwen-image-edit").
+    query_compact = _model_explorer_compact_text(query_normalized)
+    searchable_compact = _model_explorer_compact_text(searchable)
+    if query_compact and query_compact in searchable_compact:
+        return True
+
+    return False
+
+
 def _model_explorer_precision(filename: str) -> str:
     lowered = os.path.basename(str(filename or "")).lower().replace("-", "_")
     if lowered.endswith(".gguf"):
@@ -3278,12 +3311,14 @@ def _model_explorer_collect_rows() -> list[dict]:
 def _model_explorer_category_from_local_record(record: dict) -> str:
     directory = _normalize_rel_path(record.get("directory", ""))
     root = directory.split("/", 1)[0] if directory else ""
-    if root in MODEL_EXPLORER_ALLOWED_CATEGORIES:
-        return root
+    if root:
+        mapped = _canonical_model_library_category(root)
+        return mapped or root
     rel_path = _normalize_rel_path(record.get("rel_path", ""))
     rel_root = rel_path.split("/", 1)[0] if rel_path else ""
-    if rel_root in MODEL_EXPLORER_ALLOWED_CATEGORIES:
-        return rel_root
+    if rel_root:
+        mapped = _canonical_model_library_category(rel_root)
+        return mapped or rel_root
     return ""
 
 
@@ -3367,12 +3402,12 @@ async def model_explorer_list_categories(request):
         counts = Counter()
         for row in rows:
             category = str(row.get("explorer_category") or "").strip()
-            if category in MODEL_EXPLORER_ALLOWED_CATEGORIES:
+            if category:
                 counts[category] += 1
         local_entries, _ = _scan_local_models_for_explorer("")
         for record in local_entries:
             category = _model_explorer_category_from_local_record(record)
-            if category in MODEL_EXPLORER_ALLOWED_CATEGORIES:
+            if category:
                 counts[category] += 1
         categories = [
             {"id": category, "count": int(count)}
@@ -3457,15 +3492,18 @@ async def model_explorer_list_groups(request):
             if precision_filter and precision_filter != "any" and precision != precision_filter:
                 continue
 
-            if search_query:
-                searchable = " ".join([
-                    _model_explorer_normalize_text(filename),
-                    _model_explorer_normalize_text(base_value),
-                    _model_explorer_normalize_text(category),
-                    _model_explorer_normalize_text(str(row.get("provider") or "")),
-                ])
-                if search_query not in searchable:
-                    continue
+            if search_query and not _model_explorer_search_matches(
+                search_query,
+                [
+                    filename,
+                    base_value,
+                    category,
+                    str(row.get("provider") or ""),
+                    str(row.get("repo_id") or ""),
+                    str(row.get("directory") or ""),
+                ],
+            ):
+                continue
 
             installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
             if installed_only and not installed_info.get("installed"):
