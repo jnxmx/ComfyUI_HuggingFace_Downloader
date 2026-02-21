@@ -3192,6 +3192,8 @@ def _model_explorer_normalize_text(value: str) -> str:
 
 def _model_explorer_precision(filename: str) -> str:
     lowered = os.path.basename(str(filename or "")).lower().replace("-", "_")
+    if lowered.endswith(".gguf"):
+        return "gguf"
     if "nvfp4" in lowered:
         return "nvfp4"
     if "fp8" in lowered:
@@ -3253,6 +3255,7 @@ def _model_explorer_resolve_installed_info(entry: dict, local_name_map: dict[str
             "rel_path": rel_path,
             "widget_path": _strip_category_prefix(rel_path, category).strip("/") or basename or filename,
             "directory": directory,
+            "size_bytes": candidate.get("size_bytes"),
         }
         if expected_rel and rel_path.lower() == expected_rel.lower():
             preferred.append(candidate_payload)
@@ -3487,6 +3490,7 @@ async def model_explorer_list_groups(request):
                 "provider": row.get("provider"),
                 "preview_url": row.get("preview_url"),
                 "content_length": row.get("content_length"),
+                "size_bytes": installed_info.get("size_bytes") if installed_info.get("installed") else row.get("content_length"),
                 "repo_id": row.get("repo_id"),
                 "directory": row.get("directory"),
                 "local_only": bool(row.get("local_only")),

@@ -854,6 +854,13 @@ class ModelExplorerDialog {
                 font-size: 0.9rem;
                 font-weight: 500;
             }
+            #hf-model-explorer-dialog .hf-me-filter-row {
+                margin-left: auto;
+                padding: 0;
+                gap: 0.5rem;
+                flex-wrap: wrap;
+                justify-content: flex-end;
+            }
             #hf-model-explorer-dialog .hf-me-installed-toggle {
                 flex: 0 0 auto;
                 margin: 0;
@@ -880,14 +887,13 @@ class ModelExplorerDialog {
                 gap: 6px;
             }
             #hf-model-explorer-dialog .hf-me-row {
-                display: grid;
-                grid-template-columns: minmax(0, 1fr) 7.6rem 5.2rem 8.8rem 12rem;
+                display: flex;
                 align-items: center;
-                gap: 8px;
-                min-height: 50px;
+                gap: 10px;
+                min-height: 52px;
                 border-radius: 12px;
                 background: var(--secondary-background, #2f3747);
-                padding: 5px 10px;
+                padding: 8px 10px;
                 transition: background-color 120ms ease;
                 box-sizing: border-box;
                 overflow: hidden;
@@ -895,14 +901,20 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-row:hover {
                 background: var(--secondary-background-hover, #3a4458);
             }
+            #hf-model-explorer-dialog .hf-me-row.hf-me-row--grouped {
+                border-radius: 0;
+                background: transparent;
+            }
+            #hf-model-explorer-dialog .hf-me-row.hf-me-row--grouped:hover {
+                background: color-mix(in srgb, var(--secondary-background-hover, #3a4458) 40%, transparent);
+            }
             #hf-model-explorer-dialog .hf-me-main {
                 min-width: 0;
                 display: flex;
-                flex-direction: column;
-                gap: 1px;
+                flex: 1 1 auto;
             }
             #hf-model-explorer-dialog .hf-me-file {
-                font-size: 1.05rem;
+                font-size: 0.98rem;
                 font-weight: 600;
                 line-height: 1.2;
                 white-space: nowrap;
@@ -910,39 +922,37 @@ class ModelExplorerDialog {
                 text-overflow: ellipsis;
                 color: var(--base-foreground, var(--input-text, #e5e7eb));
             }
-            #hf-model-explorer-dialog .hf-me-base-col {
-                font-size: 0.63rem;
-                line-height: 1.2;
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                text-transform: none;
+            #hf-model-explorer-dialog .hf-me-meta {
+                margin-left: auto;
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                min-width: 0;
             }
-            #hf-model-explorer-dialog .hf-me-installed {
-                font-size: 0.62rem;
-                color: #56d78f;
+            #hf-model-explorer-dialog .hf-me-tags {
+                display: inline-flex;
+                align-items: center;
+                justify-content: flex-end;
+                flex-wrap: wrap;
+                gap: 6px;
+                min-width: 0;
+            }
+            #hf-model-explorer-dialog .hf-me-tag {
+                display: inline-flex;
+                align-items: center;
+                border-radius: 6px;
+                background: color-mix(in srgb, var(--secondary-background, #2f3747) 50%, var(--border-default, #4b5563) 50%);
+                color: var(--base-foreground, var(--input-text, #e5e7eb));
+                font-size: 0.8rem;
+                line-height: 1;
+                text-transform: uppercase;
                 font-weight: 700;
-                line-height: 1.1;
-                text-transform: uppercase;
-            }
-            #hf-model-explorer-dialog .hf-me-precision {
-                font-size: 0.6rem;
-                line-height: 1.1;
-                letter-spacing: 0.02em;
-                text-transform: uppercase;
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
+                padding: 6px 9px;
                 white-space: nowrap;
-                text-align: left;
             }
-            #hf-model-explorer-dialog .hf-me-category {
-                font-size: 0.6rem;
-                line-height: 1.1;
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
+            #hf-model-explorer-dialog .hf-me-tag--size {
                 text-transform: none;
+                font-weight: 600;
             }
             #hf-model-explorer-dialog .hf-me-actions {
                 display: flex;
@@ -984,18 +994,33 @@ class ModelExplorerDialog {
                 background: var(--secondary-background-hover, #4a5469);
             }
             #hf-model-explorer-dialog .hf-me-action-btn--primary {
-                background: var(--primary-background, #2786e5);
+                background: var(--secondary-background, #3a4458);
                 color: var(--base-foreground, #e5e7eb);
             }
             #hf-model-explorer-dialog .hf-me-action-btn--primary:hover:not(:disabled) {
-                background: var(--primary-background-hover, #3f98ef);
+                background: var(--secondary-background-hover, #4a5469);
             }
             #hf-model-explorer-dialog .hf-me-action-btn--destructive {
                 background: var(--destructive-background, #d24a4a);
                 color: #fff;
+                min-width: 2.1rem;
+                width: 2.1rem;
+                padding: 0;
             }
             #hf-model-explorer-dialog .hf-me-action-btn--destructive:hover:not(:disabled) {
                 background: var(--destructive-background-hover, #dd5c5c);
+            }
+            #hf-model-explorer-dialog .hf-me-group-blob {
+                border-radius: 12px;
+                border: 1px solid color-mix(in srgb, var(--border-default, #4b5563) 65%, transparent);
+                background: var(--secondary-background, #2f3747);
+                overflow: hidden;
+            }
+            #hf-model-explorer-dialog .hf-me-group-blob .hf-me-row {
+                border-radius: 0;
+            }
+            #hf-model-explorer-dialog .hf-me-group-blob .hf-me-row + .hf-me-row {
+                border-top: 1px solid color-mix(in srgb, var(--border-default, #4b5563) 58%, transparent);
             }
             .hf-me-confirm-btn.p-button {
                 min-height: 40px;
@@ -1041,11 +1066,6 @@ class ModelExplorerDialog {
                 color: var(--text-secondary, var(--descrip-text, #9aa4b6));
                 font-size: 14px;
             }
-            @media (max-width: 1200px) {
-                #hf-model-explorer-dialog .hf-me-row {
-                    grid-template-columns: minmax(0, 1fr) 6.8rem 4.8rem 7.2rem 10.8rem;
-                }
-            }
             @media (max-width: 1024px) {
                 #hf-model-explorer-dialog .hf-me-shell {
                     grid-template-columns: minmax(0, 1fr);
@@ -1055,30 +1075,24 @@ class ModelExplorerDialog {
                     border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
                     max-height: 230px;
                 }
+                #hf-model-explorer-dialog .hf-me-toggle-row {
+                    flex-wrap: wrap;
+                    align-items: flex-start;
+                }
+                #hf-model-explorer-dialog .hf-me-filter-row {
+                    margin-left: 0;
+                    justify-content: flex-start;
+                    width: 100%;
+                }
                 #hf-model-explorer-dialog .hf-me-row {
-                    grid-template-columns: minmax(0, 1fr) auto;
-                    gap: 6px;
+                    flex-wrap: wrap;
                 }
                 #hf-model-explorer-dialog .hf-me-main {
-                    grid-column: 1;
-                    grid-row: 1;
+                    flex: 1 1 100%;
                 }
-                #hf-model-explorer-dialog .hf-me-base-col {
-                    grid-column: 1;
-                    grid-row: 2;
-                }
-                #hf-model-explorer-dialog .hf-me-precision {
-                    grid-column: 1;
-                    grid-row: 3;
-                }
-                #hf-model-explorer-dialog .hf-me-category {
-                    grid-column: 1;
-                    grid-row: 4;
-                }
-                #hf-model-explorer-dialog .hf-me-actions {
-                    grid-column: 2;
-                    grid-row: 1 / span 4;
-                    align-self: center;
+                #hf-model-explorer-dialog .hf-me-meta {
+                    width: 100%;
+                    justify-content: space-between;
                 }
             }
         `;
@@ -1210,8 +1224,6 @@ class ModelExplorerDialog {
                 </div>
             </div>
         `;
-        mainPanel.appendChild(filterWrap);
-
         const installedOnlyRow = document.createElement("div");
         installedOnlyRow.id = "hf-me-installed-only-row";
         installedOnlyRow.className = "hf-me-toggle-row";
@@ -1224,6 +1236,7 @@ class ModelExplorerDialog {
                 <span>Show downloaded only</span>
             </div>
         `;
+        installedOnlyRow.appendChild(filterWrap);
         mainPanel.appendChild(installedOnlyRow);
 
         const bodyScroll = document.createElement("div");
@@ -1262,6 +1275,9 @@ class ModelExplorerDialog {
         }
         installedOnlyRow.addEventListener("click", (event) => {
             const target = event?.target;
+            if (target instanceof Element && target.closest(".hf-me-filter-row")) {
+                return;
+            }
             if (target === toggleInput || (toggleWrap && toggleWrap.contains(target))) {
                 return;
             }
@@ -1420,7 +1436,13 @@ class ModelExplorerDialog {
                 ? this.normalizePrecision(rawValue)
                 : this.normalizeBase(rawValue);
             const dedupeKey = key === "precision" ? value : value.toLowerCase();
-            if (!value || (key === "precision" && value === "unknown")) continue;
+            if (
+                !value ||
+                (key === "precision" && value === "unknown") ||
+                (key === "base" && value.toLowerCase() === "unknown")
+            ) {
+                continue;
+            }
             if (seen.has(dedupeKey)) continue;
             seen.add(dedupeKey);
             normalized.push(value);
@@ -1731,6 +1753,8 @@ class ModelExplorerDialog {
     normalizePrecision(value) {
         const normalized = String(value || "").trim().toLowerCase();
         if (!normalized) return "";
+        if (normalized === "gguf") return "gguf";
+        if (normalized.endsWith(".gguf")) return "gguf";
         if (normalized.startsWith("q")) return "gguf";
         return normalized;
     }
@@ -1742,7 +1766,7 @@ class ModelExplorerDialog {
     formatBase(value) {
         const base = this.normalizeBase(value);
         if (!base) return "";
-        if (base.toLowerCase() === "unknown") return "Unknown";
+        if (base.toLowerCase() === "unknown") return "";
         return base.replaceAll("_", " ");
     }
 
@@ -1759,7 +1783,76 @@ class ModelExplorerDialog {
     formatPrecision(value) {
         const precision = this.normalizePrecision(value);
         if (!precision || precision === "unknown") return "";
+        if (precision === "gguf") return "GGUF";
         return precision.toUpperCase();
+    }
+
+    parseSizeBytes(variant) {
+        if (!variant || typeof variant !== "object") return null;
+        const candidates = [variant.size_bytes, variant.content_length];
+        for (const candidate of candidates) {
+            if (Number.isFinite(candidate) && candidate > 0) return Number(candidate);
+            if (typeof candidate === "string") {
+                const parsed = Number.parseInt(candidate, 10);
+                if (Number.isFinite(parsed) && parsed > 0) return parsed;
+            }
+        }
+        return null;
+    }
+
+    formatSizeGb(bytes) {
+        if (!Number.isFinite(bytes) || bytes <= 0) return "";
+        const valueGb = bytes / (1024 * 1024 * 1024);
+        const fixed = valueGb >= 1 ? valueGb.toFixed(1) : valueGb.toFixed(2);
+        return `${fixed.replace(".", ",")}Gb`;
+    }
+
+    renderVariantRow(group, variant, index, { grouped = false, showCategoryTag = false } = {}) {
+        const filename = escapeHtml(variant.filename || "");
+        const normalizedPrecision = this.normalizePrecision(variant.precision);
+        const precision = this.formatPrecision(normalizedPrecision);
+        const baseLabel = this.formatBase(group.base || "");
+        const categoryLabel = showCategoryTag ? this.formatCategoryLabel(group.category || "") : "";
+        const sizeLabel = this.formatSizeGb(this.parseSizeBytes(variant));
+        const variantKey = `${group.group_id}:${index}`;
+        const installed = Boolean(variant.installed);
+
+        const tags = [];
+        if (categoryLabel) {
+            tags.push(`<span class="hf-me-tag">${escapeHtml(categoryLabel)}</span>`);
+        }
+        if (baseLabel) {
+            tags.push(`<span class="hf-me-tag">${escapeHtml(baseLabel)}</span>`);
+        }
+        if (precision) {
+            tags.push(`<span class="hf-me-tag">${escapeHtml(precision)}</span>`);
+        }
+        if (sizeLabel) {
+            tags.push(`<span class="hf-me-tag hf-me-tag--size">${escapeHtml(sizeLabel)}</span>`);
+        }
+
+        const actions = installed
+            ? `
+                <button class="hf-me-action-btn p-button p-component hf-me-action-btn--destructive" data-action="delete" data-key="${variantKey}" aria-label="Delete model">
+                    <i class="pi pi-times" aria-hidden="true"></i>
+                </button>
+                <button class="hf-me-action-btn p-button p-component hf-me-action-btn--primary" data-action="use" data-key="${variantKey}">Use</button>
+              `
+            : `
+                <button class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-action="download" data-key="${variantKey}">Download</button>
+              `;
+
+        return `
+            <div class="hf-me-row${grouped ? " hf-me-row--grouped" : ""}">
+                <div class="hf-me-main">
+                    <div class="hf-me-file">${filename}</div>
+                </div>
+                <div class="hf-me-meta">
+                    <div class="hf-me-tags">${tags.join("")}</div>
+                    <div class="hf-me-actions">${actions}</div>
+                </div>
+            </div>
+        `;
     }
 
     setLoading(isLoading) {
@@ -1785,57 +1878,41 @@ class ModelExplorerDialog {
             return;
         }
 
-        const rows = [];
+        const installedRows = [];
+        const groupedRows = [];
+        const showCategoryTag = !this.filters.category || this.filters.category === MODEL_EXPLORER_OTHER_CATEGORY_KEY;
         for (const group of this.groups) {
-            const categoryHtml = escapeHtml(this.formatCategoryLabel(group.category || ""));
-            const baseLabel = group.base ? escapeHtml(group.base) : "";
             const variants = Array.isArray(group.variants) ? group.variants : [];
             if (!variants.length) continue;
-
-            const variantRows = variants
-                .map((variant, index) => {
-                    const filename = escapeHtml(variant.filename || "");
-                    const normalizedPrecision = this.normalizePrecision(variant.precision);
-                    const showPrecision = normalizedPrecision && normalizedPrecision !== "unknown";
-                    const precision = showPrecision ? escapeHtml(this.formatPrecision(normalizedPrecision)) : "";
-                    const installed = Boolean(variant.installed);
-                    const variantKey = `${group.group_id}:${index}`;
-                    const installedBadge = installed
-                        ? `<span class="hf-me-installed">Installed</span>`
-                        : "";
-                    const actions = installed
-                        ? `
-                            <button class="hf-me-action-btn p-button p-component hf-me-action-btn--destructive" data-action="delete" data-key="${variantKey}">Delete</button>
-                            <button class="hf-me-action-btn p-button p-component hf-me-action-btn--primary" data-action="use" data-key="${variantKey}">Use</button>
-                          `
-                        : `
-                            <button class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-action="download" data-key="${variantKey}">Download</button>
-                          `;
-                    const baseColumn = baseLabel || "";
-                    const precisionColumn = showPrecision ? precision : "";
-
-                    return `
-                        <div class="hf-me-row">
-                            <div class="hf-me-main">
-                                <div class="hf-me-file">${filename}</div>
-                                ${installedBadge}
-                            </div>
-                            <div class="hf-me-base-col">${baseColumn}</div>
-                            <div class="hf-me-precision">${precisionColumn}</div>
-                            <div class="hf-me-category">${categoryHtml}</div>
-                            <div class="hf-me-actions">${actions}</div>
-                        </div>
-                    `;
-                })
-                .join("");
-            if (variantRows) {
-                rows.push(variantRows);
+            const nonInstalledRows = [];
+            for (let index = 0; index < variants.length; index += 1) {
+                const variant = variants[index];
+                if (!variant) continue;
+                if (variant.installed) {
+                    installedRows.push(
+                        this.renderVariantRow(group, variant, index, {
+                            grouped: false,
+                            showCategoryTag,
+                        })
+                    );
+                    continue;
+                }
+                nonInstalledRows.push(
+                    this.renderVariantRow(group, variant, index, {
+                        grouped: true,
+                        showCategoryTag,
+                    })
+                );
+            }
+            if (nonInstalledRows.length) {
+                groupedRows.push(`<div class="hf-me-group-blob">${nonInstalledRows.join("")}</div>`);
             }
         }
-        if (!rows.length) {
+        const htmlRows = [...installedRows, ...groupedRows];
+        if (!htmlRows.length) {
             this.body.innerHTML = `<div class="hf-me-empty">No models found for current filters.</div>`;
         } else {
-            this.body.innerHTML = rows.join("");
+            this.body.innerHTML = htmlRows.join("");
         }
         this.bindGroupActions();
     }
@@ -1951,7 +2028,7 @@ class ModelExplorerDialog {
         });
         if (!ok) return;
         button.disabled = true;
-        button.textContent = "Deleting...";
+        button.innerHTML = `<i class="pi pi-spin pi-spinner" aria-hidden="true"></i>`;
         try {
             const resp = await this.fetchExplorer("/delete", {
                 method: "POST",
@@ -1973,7 +2050,7 @@ class ModelExplorerDialog {
                 detail: String(error),
             });
             button.disabled = false;
-            button.textContent = "Delete";
+            button.innerHTML = `<i class="pi pi-times" aria-hidden="true"></i>`;
         }
     }
 }
