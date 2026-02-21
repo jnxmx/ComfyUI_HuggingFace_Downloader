@@ -843,6 +843,7 @@ class ModelExplorerDialog {
                 padding: 0 24px 10px;
                 border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
                 flex-shrink: 0;
+                min-height: 56px;
             }
             #hf-model-explorer-dialog .hf-me-toggle-label {
                 display: inline-flex;
@@ -858,7 +859,7 @@ class ModelExplorerDialog {
                 margin-left: auto;
                 padding: 0;
                 gap: 0.5rem;
-                flex-wrap: wrap;
+                flex-wrap: nowrap;
                 justify-content: flex-end;
             }
             #hf-model-explorer-dialog .hf-me-installed-toggle {
@@ -890,10 +891,10 @@ class ModelExplorerDialog {
                 display: flex;
                 align-items: center;
                 gap: 10px;
-                min-height: 52px;
+                height: 52px;
                 border-radius: 12px;
                 background: var(--secondary-background, #2f3747);
-                padding: 8px 10px;
+                padding: 0 10px;
                 transition: background-color 120ms ease;
                 box-sizing: border-box;
                 overflow: hidden;
@@ -924,18 +925,21 @@ class ModelExplorerDialog {
             }
             #hf-model-explorer-dialog .hf-me-meta {
                 margin-left: auto;
-                display: inline-flex;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) 170px;
                 align-items: center;
                 gap: 8px;
                 min-width: 0;
+                flex: 0 1 60%;
             }
             #hf-model-explorer-dialog .hf-me-tags {
-                display: inline-flex;
+                display: flex;
                 align-items: center;
                 justify-content: flex-end;
-                flex-wrap: wrap;
+                flex-wrap: nowrap;
                 gap: 6px;
                 min-width: 0;
+                overflow: hidden;
             }
             #hf-model-explorer-dialog .hf-me-tag {
                 display: inline-flex;
@@ -949,6 +953,7 @@ class ModelExplorerDialog {
                 font-weight: 700;
                 padding: 6px 9px;
                 white-space: nowrap;
+                flex: 0 0 auto;
             }
             #hf-model-explorer-dialog .hf-me-tag--size {
                 text-transform: none;
@@ -960,7 +965,9 @@ class ModelExplorerDialog {
                 justify-content: flex-end;
                 gap: 6px;
                 align-self: stretch;
-                width: 100%;
+                width: 170px;
+                min-width: 170px;
+                max-width: 170px;
             }
             #hf-model-explorer-dialog .hf-me-action-btn {
                 position: relative;
@@ -994,11 +1001,11 @@ class ModelExplorerDialog {
                 background: var(--secondary-background-hover, #4a5469);
             }
             #hf-model-explorer-dialog .hf-me-action-btn--primary {
-                background: var(--secondary-background, #3a4458);
+                background: var(--primary-background, #2786e5);
                 color: var(--base-foreground, #e5e7eb);
             }
             #hf-model-explorer-dialog .hf-me-action-btn--primary:hover:not(:disabled) {
-                background: var(--secondary-background-hover, #4a5469);
+                background: var(--primary-background-hover, #3f98ef);
             }
             #hf-model-explorer-dialog .hf-me-action-btn--destructive {
                 background: var(--destructive-background, #d24a4a);
@@ -1006,6 +1013,19 @@ class ModelExplorerDialog {
                 min-width: 2.1rem;
                 width: 2.1rem;
                 padding: 0;
+                opacity: 0;
+                pointer-events: none;
+                transform: scale(0.95);
+                transition: opacity 120ms ease, transform 120ms ease, background-color 120ms ease;
+            }
+            #hf-model-explorer-dialog .hf-me-row:hover .hf-me-action-btn--destructive,
+            #hf-model-explorer-dialog .hf-me-row:focus-within .hf-me-action-btn--destructive {
+                opacity: 1;
+                pointer-events: auto;
+                transform: none;
+            }
+            #hf-model-explorer-dialog .hf-me-action-btn--destructive:disabled {
+                opacity: 1;
             }
             #hf-model-explorer-dialog .hf-me-action-btn--destructive:hover:not(:disabled) {
                 background: var(--destructive-background-hover, #dd5c5c);
@@ -1083,16 +1103,17 @@ class ModelExplorerDialog {
                     margin-left: 0;
                     justify-content: flex-start;
                     width: 100%;
+                    flex-wrap: nowrap;
                 }
                 #hf-model-explorer-dialog .hf-me-row {
-                    flex-wrap: wrap;
+                    height: 52px;
                 }
                 #hf-model-explorer-dialog .hf-me-main {
-                    flex: 1 1 100%;
+                    flex: 1 1 auto;
                 }
                 #hf-model-explorer-dialog .hf-me-meta {
-                    width: 100%;
-                    justify-content: space-between;
+                    width: auto;
+                    justify-content: initial;
                 }
             }
         `;
@@ -1617,13 +1638,16 @@ class ModelExplorerDialog {
         const filterAllowed = ["checkpoints", "diffusion_models", "loras", "controlnet"].includes(categoryKey);
         const precisionAllowed = filterAllowed && precisionOptions.length > 0;
         if (this.filterWrap) {
-            this.filterWrap.style.display = filterAllowed ? "flex" : "none";
+            this.filterWrap.style.display = "flex";
+            this.filterWrap.style.visibility = "visible";
         }
         if (this.baseWrap) {
-            this.baseWrap.style.display = filterAllowed ? "inline-flex" : "none";
+            this.baseWrap.style.visibility = filterAllowed ? "visible" : "hidden";
+            this.baseWrap.style.pointerEvents = filterAllowed ? "auto" : "none";
         }
         if (this.precisionWrap) {
-            this.precisionWrap.style.display = precisionAllowed ? "inline-flex" : "none";
+            this.precisionWrap.style.visibility = precisionAllowed ? "visible" : "hidden";
+            this.precisionWrap.style.pointerEvents = precisionAllowed ? "auto" : "none";
         }
         if (!filterAllowed) {
             this.filters.base = [];
@@ -1802,9 +1826,12 @@ class ModelExplorerDialog {
 
     formatSizeGb(bytes) {
         if (!Number.isFinite(bytes) || bytes <= 0) return "";
-        const valueGb = bytes / (1024 * 1024 * 1024);
-        const fixed = valueGb >= 1 ? valueGb.toFixed(1) : valueGb.toFixed(2);
-        return `${fixed.replace(".", ",")}Gb`;
+        const gb = bytes / (1024 * 1024 * 1024);
+        if (gb >= 1) {
+            return `${gb.toFixed(1).replace(".", ",")}Gb`;
+        }
+        const mb = bytes / (1024 * 1024);
+        return `${mb.toFixed(mb >= 100 ? 0 : 1).replace(".", ",")}Mb`;
     }
 
     renderVariantRow(group, variant, index, { grouped = false, showCategoryTag = false } = {}) {
