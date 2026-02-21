@@ -219,7 +219,9 @@ def _load_model_explorer_catalog() -> dict:
                     continue
                 entry = dict(row)
                 source = str(entry.get("source") or "").strip()
-                if source not in MODEL_EXPLORER_VISIBLE_SOURCES:
+                # Keep strict default source policy, but allow explicitly enabled
+                # priority rows (e.g. curated GGUF quantizations) into Explorer.
+                if source not in MODEL_EXPLORER_VISIBLE_SOURCES and not bool(entry.get("explorer_enabled")):
                     continue
 
                 entry["filename"] = str(entry.get("filename") or name or "").strip()

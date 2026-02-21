@@ -856,11 +856,11 @@ class ModelExplorerDialog {
                 font-weight: 500;
             }
             #hf-model-explorer-dialog .hf-me-filter-row {
-                margin-left: auto;
+                margin-left: 0;
                 padding: 0;
                 gap: 0.5rem;
                 flex-wrap: nowrap;
-                justify-content: flex-end;
+                justify-content: flex-start;
             }
             #hf-model-explorer-dialog .hf-me-installed-toggle {
                 flex: 0 0 auto;
@@ -1226,8 +1226,8 @@ class ModelExplorerDialog {
                 </div>
             </div>
             <div id="hf-me-base-wrap" class="hf-me-filter" data-filter-key="base">
-                <button type="button" class="hf-me-filter-trigger" aria-label="Base models filter">
-                    <span class="hf-me-filter-label">Base models</span>
+                <button type="button" class="hf-me-filter-trigger" aria-label="Base model filter">
+                    <span class="hf-me-filter-label">Base model</span>
                     <span class="hf-me-filter-badge" style="display:none;">0</span>
                     <i class="icon-[lucide--chevron-down] hf-me-filter-caret" aria-hidden="true"></i>
                 </button>
@@ -1254,7 +1254,7 @@ class ModelExplorerDialog {
                     <input id="hf-me-installed-only" type="checkbox" class="p-toggleswitch-input" role="switch" aria-label="Show downloaded only" />
                     <span class="p-toggleswitch-slider"></span>
                 </label>
-                <span>Show downloaded only</span>
+                <label for="hf-me-installed-only">Show downloaded only</label>
             </div>
         `;
         installedOnlyRow.appendChild(filterWrap);
@@ -1273,7 +1273,7 @@ class ModelExplorerDialog {
         this.element = overlay;
         this.body = body;
         this.categoryList = panel.querySelector("#hf-me-category-list");
-        this.baseControl = this.createFilterControl(panel.querySelector("#hf-me-base-wrap"), "base", "Base models");
+        this.baseControl = this.createFilterControl(panel.querySelector("#hf-me-base-wrap"), "base", "Base model");
         this.precisionControl = this.createFilterControl(panel.querySelector("#hf-me-precision-wrap"), "precision", "Precision");
         this.searchInput = panel.querySelector("#hf-me-search");
         this.installedOnlyToggle = panel.querySelector("#hf-me-installed-only");
@@ -1294,19 +1294,6 @@ class ModelExplorerDialog {
             toggleInput.addEventListener("change", () => updateSliderState());
             updateSliderState();
         }
-        installedOnlyRow.addEventListener("click", (event) => {
-            const target = event?.target;
-            if (target instanceof Element && target.closest(".hf-me-filter-row")) {
-                return;
-            }
-            if (target === toggleInput || (toggleWrap && toggleWrap.contains(target))) {
-                return;
-            }
-            if (!toggleInput) return;
-            toggleInput.checked = !toggleInput.checked;
-            toggleInput.dispatchEvent(new Event("change", { bubbles: true }));
-        });
-
         this.searchInput.oninput = () => {
             clearTimeout(this.searchTimer);
             this.searchTimer = setTimeout(() => {
