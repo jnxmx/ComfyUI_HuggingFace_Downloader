@@ -191,12 +191,7 @@ app.registerExtension({
             document.head.appendChild(style);
         };
 
-        const NATIVE_SCROLLBAR_CLASS_CANDIDATES = Object.freeze([
-            "comfy-scrollbar",
-            "comfyui-scrollbar",
-            "styled-scrollbar",
-            "p-scrollpanel-content",
-        ]);
+        const NATIVE_SCROLLBAR_CLASS_CANDIDATES = Object.freeze([]);
         let detectedNativeScrollbarClasses = null;
         const applyNativeScrollbarClasses = (el) => {
             if (!el || !el.classList || typeof document === "undefined") return;

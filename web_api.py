@@ -175,6 +175,7 @@ MODEL_EXPLORER_VISIBLE_SOURCES = {
     "cloud_marketplace_export",
     "comfyui_manager_model_list",
 }
+MODEL_EXPLORER_PRIORITY_GGUF_VISIBLE_OWNERS = {"city96", "quantstack", "unsloth"}
 MODEL_EXPLORER_DB_PATH = os.path.join(
     os.path.dirname(__file__),
     "metadata",
@@ -202,6 +203,10 @@ _model_explorer_filename_precision_pattern = re.compile(
     r"(fp32|fp16|bf16|fp8|int8|int4|fp4|q\d(?:_[a-z0-9]+)*|iq\d(?:_[a-z0-9]+)*)",
     re.IGNORECASE,
 )
+_model_explorer_fp8_compact_pattern = re.compile(
+    r"(?:^|_)(fp8(?:mixed|scaled)|fp8_(?:mixed|scaled))(?:_|$)",
+    re.IGNORECASE,
+)
 
 
 def _is_model_explorer_filename_allowed(filename: str) -> bool:
@@ -214,6 +219,31 @@ def _is_model_explorer_filename_allowed(filename: str) -> bool:
     if ext in MODEL_EXPLORER_EXCLUDED_EXTENSIONS:
         return False
     return True
+
+
+def _model_explorer_extract_hf_owner(entry: dict) -> str:
+    repo_id = str(entry.get("repo_id") or "").strip()
+    if "/" in repo_id:
+        return repo_id.split("/", 1)[0].strip().lower()
+    url = str(entry.get("url") or "").strip()
+    marker = "huggingface.co/"
+    idx = url.lower().find(marker)
+    if idx < 0:
+        return ""
+    tail = url[idx + len(marker):]
+    parts = [p for p in tail.split("/") if p]
+    if len(parts) >= 2:
+        return parts[0].strip().lower()
+    return ""
+
+
+def _model_explorer_infer_wan_base(filename: str, base_value: str = "") -> str:
+    text = f"{filename} {base_value}".lower().replace("_", "-")
+    if not any(token in text for token in ("wan2.2", "wan2-2", "wan 2.2", "wan22")):
+        return ""
+    if "ti2v" in text and "5b" in text:
+        return "Wab-5B TI2V"
+    return "Wan2.2"
 
 def _load_model_explorer_catalog() -> dict:
     global _model_explorer_catalog_cache
@@ -270,10 +300,18 @@ def _load_model_explorer_catalog() -> dict:
                     or type_value == "gguf"
                     or manager_type_value == "gguf"
                 )
+                priority_owner = _model_explorer_extract_hf_owner(entry)
+                allow_priority_gguf = (
+                    source == "priority_repo_scrape"
+                    and is_gguf_variant
+                    and priority_owner in MODEL_EXPLORER_PRIORITY_GGUF_VISIBLE_OWNERS
+                )
                 priority_manager_enabled = (
                     source == "priority_repo_scrape"
-                    and bool(entry.get("library_visible"))
-                    and (not is_curated_category or is_gguf_variant)
+                    and (
+                        (bool(entry.get("library_visible")) and (not is_curated_category or is_gguf_variant))
+                        or allow_priority_gguf
+                    )
                 )
 
                 # Keep strict default source policy, but allow explicitly enabled
@@ -296,10 +334,23 @@ def _load_model_explorer_catalog() -> dict:
                     base_value = _canonical_model_explorer_base(
                         str(entry.get("explorer_base") or "").strip() or str(entry.get("base") or "").strip()
                     )
+                    inferred_wan_base = _model_explorer_infer_wan_base(entry.get("filename") or "", base_value)
+                    if inferred_wan_base and (
+                        not base_value
+                        or base_value == "unknown"
+                        or (base_value == "Wan2.2" and inferred_wan_base != "Wan2.2")
+                    ):
+                        base_value = inferred_wan_base
                     if not base_value:
                         base_value = "unknown"
                     entry["explorer_base"] = base_value
                     existing_base = _canonical_model_explorer_base(str(entry.get("base") or "").strip())
+                    if inferred_wan_base and (
+                        not existing_base
+                        or existing_base == "unknown"
+                        or (existing_base == "Wan2.2" and inferred_wan_base != "Wan2.2")
+                    ):
+                        existing_base = inferred_wan_base
                     if existing_base and existing_base != "unknown":
                         entry["base"] = existing_base
                     entry["explorer_base_applicable"] = True
@@ -307,9 +358,10 @@ def _load_model_explorer_catalog() -> dict:
                     entry["explorer_base_applicable"] = False
 
                 if not bool(entry.get("explorer_enabled")):
+                    library_gate = bool(entry.get("library_visible", True)) or allow_priority_gguf
                     entry["explorer_enabled"] = bool(
                         (source in MODEL_EXPLORER_VISIBLE_SOURCES or priority_manager_enabled)
-                        and bool(entry.get("library_visible", True))
+                        and library_gate
                         and (
                             category not in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES
                             or bool(str(entry.get("explorer_base") or "").strip())
@@ -318,6 +370,7 @@ def _load_model_explorer_catalog() -> dict:
                 if not bool(entry.get("explorer_enabled")):
                     continue
                 filtered_models[entry["filename"]] = entry
+            _model_explorer_apply_sibling_base_inference(filtered_models)
     except Exception as e:
         print(f"[ERROR] Failed to load unified Model Explorer DB: {e}")
         filtered_models = {}
@@ -973,6 +1026,10 @@ def _scan_local_models_for_explorer(category_filter: str = "") -> tuple[list[dic
             filtered_entries = []
             filtered_name_map: dict[str, list[dict]] = {}
             for item in all_entries:
+                filename = str(item.get("filename") or "")
+                ext = os.path.splitext(filename)[1].lower()
+                if ext in MODEL_EXPLORER_EXCLUDED_EXTENSIONS:
+                    continue
                 directory = _normalize_rel_path(item.get("directory", ""))
                 root = directory.split("/", 1)[0] if directory else ""
                 if root != category:
@@ -984,8 +1041,26 @@ def _scan_local_models_for_explorer(category_filter: str = "") -> tuple[list[dic
             entries = filtered_entries
             name_map = filtered_name_map
         else:
-            entries = all_entries
-            name_map = all_name_map
+            entries = []
+            name_map = {}
+            for item in all_entries:
+                filename = str(item.get("filename") or "")
+                ext = os.path.splitext(filename)[1].lower()
+                if ext in MODEL_EXPLORER_EXCLUDED_EXTENSIONS:
+                    continue
+                entries.append(item)
+                key = str(item.get("filename_lower") or "")
+                if key:
+                    name_map.setdefault(key, []).append(item)
+                rel_norm = _normalize_rel_path(item.get("rel_path", ""))
+                if rel_norm:
+                    name_map.setdefault(rel_norm.lower(), []).append(item)
+                    directory = _normalize_rel_path(item.get("directory", ""))
+                    root = directory.split("/", 1)[0] if directory else ""
+                    if root:
+                        widget_path = _strip_category_prefix(rel_norm, root).strip("/")
+                        if widget_path:
+                            name_map.setdefault(widget_path.lower(), []).append(item)
 
     entries.sort(key=lambda item: (item.get("filename_lower", ""), item.get("rel_path", "")))
     for key in list(name_map.keys()):
@@ -3330,15 +3405,56 @@ def _model_explorer_precision(filename: str) -> str:
     return "unknown"
 
 
-def _model_explorer_group_stem(entry: dict) -> str:
-    provided = str(entry.get("explorer_group_stem") or "").strip().lower()
-    if provided:
-        return provided
-    filename = str(entry.get("filename") or "").strip()
-    stem = os.path.splitext(filename)[0].lower().replace("-", "_")
+def _model_explorer_normalize_group_stem(filename: str) -> str:
+    stem = os.path.splitext(str(filename or ""))[0].lower().replace("-", "_")
+    stem = _model_explorer_fp8_compact_pattern.sub("_", stem)
     stem = _model_explorer_precision_pattern.sub("_", stem)
+    stem = re.sub(r"(?:^|_)(?:mixed|scaled)(?:_|$)", "_", stem)
     stem = re.sub(r"_+", "_", stem).strip("_")
-    return stem or os.path.splitext(filename)[0].lower()
+    return stem or os.path.splitext(str(filename or ""))[0].lower()
+
+
+def _model_explorer_group_stem(entry: dict) -> str:
+    filename = str(entry.get("filename") or "").strip()
+    return _model_explorer_normalize_group_stem(filename)
+
+
+def _model_explorer_apply_sibling_base_inference(rows: dict[str, dict]) -> None:
+    known_bases: dict[tuple[str, str], set[str]] = {}
+    for entry in rows.values():
+        if not isinstance(entry, dict):
+            continue
+        category = str(entry.get("explorer_category") or "").strip()
+        if category not in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES:
+            continue
+        stem = _model_explorer_group_stem(entry)
+        if not stem:
+            continue
+        base_value = _canonical_model_explorer_base(str(entry.get("explorer_base") or "").strip())
+        if not base_value or base_value == "unknown":
+            continue
+        known_bases.setdefault((category, stem), set()).add(base_value)
+
+    for entry in rows.values():
+        if not isinstance(entry, dict):
+            continue
+        category = str(entry.get("explorer_category") or "").strip()
+        if category not in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES:
+            continue
+        current_base = _canonical_model_explorer_base(str(entry.get("explorer_base") or "").strip())
+        if current_base and current_base != "unknown":
+            continue
+        stem = _model_explorer_group_stem(entry)
+        if not stem:
+            continue
+        family_bases = known_bases.get((category, stem)) or set()
+        if len(family_bases) != 1:
+            continue
+        inferred_base = next(iter(family_bases))
+        entry["explorer_base"] = inferred_base
+        existing_base = _canonical_model_explorer_base(str(entry.get("base") or "").strip())
+        if not existing_base or existing_base == "unknown":
+            entry["base"] = inferred_base
 
 
 def _model_explorer_resolve_installed_info(entry: dict, local_name_map: dict[str, list[dict]]) -> dict:

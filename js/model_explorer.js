@@ -77,12 +77,7 @@ const escapeHtml = (value) =>
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
 
-const NATIVE_SCROLLBAR_CLASS_CANDIDATES = Object.freeze([
-    "comfy-scrollbar",
-    "comfyui-scrollbar",
-    "styled-scrollbar",
-    "p-scrollpanel-content",
-]);
+const NATIVE_SCROLLBAR_CLASS_CANDIDATES = Object.freeze([]);
 let detectedNativeScrollbarClasses = null;
 
 const applyNativeScrollbarClasses = (el) => {
@@ -513,6 +508,7 @@ class ModelExplorerDialog {
                 flex: 1 1 auto;
                 min-height: 0;
                 overflow-y: auto;
+                scrollbar-gutter: stable;
                 gap: 0.25rem;
                 flex-direction: column;
                 background: var(--modal-panel-background, var(--comfy-menu-bg, #1f2128));
@@ -786,6 +782,7 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-filter-options {
                 max-height: min(18rem, 45vh);
                 overflow-y: auto;
+                scrollbar-gutter: stable;
                 display: flex;
                 flex-direction: column;
                 gap: 0.15rem;
@@ -880,7 +877,8 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-content-scroll {
                 flex: 1 1 auto;
                 overflow-y: auto;
-                padding: 0 8px 12px 8px;
+                scrollbar-gutter: stable;
+                padding: 0 10px 12px 8px;
             }
             #hf-model-explorer-dialog .hf-me-body {
                 min-height: 0;
