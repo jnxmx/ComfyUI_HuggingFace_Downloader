@@ -529,7 +529,7 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-category-list {
                 display: flex;
                 flex-direction: column;
-                gap: 0.15rem;
+                gap: 0.25rem;
                 min-height: 0;
             }
             #hf-model-explorer-dialog .hf-me-nav-item {
@@ -974,20 +974,25 @@ class ModelExplorerDialog {
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                gap: 0.5rem;
+                gap: 0.35rem;
                 cursor: pointer;
                 white-space: nowrap;
                 appearance: none;
                 border: none;
-                border-radius: 0.5rem;
+                border-radius: 0.25rem;
                 text-align: center;
-                min-height: 2.1rem;
-                min-width: 5.4rem;
-                padding: 0 0.85rem;
-                font-size: 1rem;
-                font-weight: 600;
+                height: 1.5rem;
+                min-height: 1.5rem;
+                min-width: 4.4rem;
+                padding: 0 0.5rem;
+                font-size: 0.75rem;
+                font-weight: 500;
                 font-family: var(--font-inter, Inter, sans-serif);
                 transition: background-color 120ms ease, opacity 120ms ease;
+            }
+            #hf-model-explorer-dialog .hf-me-action-btn i {
+                font-size: 0.9rem;
+                line-height: 1;
             }
             #hf-model-explorer-dialog .hf-me-action-btn:disabled {
                 opacity: 0.6;
@@ -1010,8 +1015,8 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-action-btn--destructive {
                 background: var(--destructive-background, #d24a4a);
                 color: #fff;
-                min-width: 2.1rem;
-                width: 2.1rem;
+                min-width: 1.5rem;
+                width: 1.5rem;
                 padding: 0;
                 opacity: 0;
                 pointer-events: none;
@@ -1206,9 +1211,9 @@ class ModelExplorerDialog {
         filterWrap.className = "hf-me-filter-row";
         filterWrap.style.display = "none";
         filterWrap.innerHTML = `
-            <div id="hf-me-precision-wrap" class="hf-me-filter" data-filter-key="precision">
-                <button type="button" class="hf-me-filter-trigger" aria-label="Precision filter">
-                    <span class="hf-me-filter-label">Precision</span>
+            <div id="hf-me-base-wrap" class="hf-me-filter" data-filter-key="base">
+                <button type="button" class="hf-me-filter-trigger" aria-label="Base model filter">
+                    <span class="hf-me-filter-label">Base model</span>
                     <span class="hf-me-filter-badge" style="display:none;">0</span>
                     <i class="icon-[lucide--chevron-down] hf-me-filter-caret" aria-hidden="true"></i>
                 </button>
@@ -1225,9 +1230,9 @@ class ModelExplorerDialog {
                     <div class="hf-me-filter-options"></div>
                 </div>
             </div>
-            <div id="hf-me-base-wrap" class="hf-me-filter" data-filter-key="base">
-                <button type="button" class="hf-me-filter-trigger" aria-label="Base model filter">
-                    <span class="hf-me-filter-label">Base model</span>
+            <div id="hf-me-precision-wrap" class="hf-me-filter" data-filter-key="precision">
+                <button type="button" class="hf-me-filter-trigger" aria-label="Precision filter">
+                    <span class="hf-me-filter-label">Precision</span>
                     <span class="hf-me-filter-badge" style="display:none;">0</span>
                     <i class="icon-[lucide--chevron-down] hf-me-filter-caret" aria-hidden="true"></i>
                 </button>
@@ -1853,7 +1858,10 @@ class ModelExplorerDialog {
                 <button class="hf-me-action-btn p-button p-component hf-me-action-btn--primary" data-action="use" data-key="${variantKey}">Use</button>
               `
             : `
-                <button class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-action="download" data-key="${variantKey}">Download</button>
+                <button class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-action="download" data-key="${variantKey}">
+                    <i class="icon-[lucide--download]" aria-hidden="true"></i>
+                    <span>Download</span>
+                </button>
               `;
 
         return `
