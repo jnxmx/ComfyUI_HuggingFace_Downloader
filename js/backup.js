@@ -42,6 +42,25 @@ app.registerExtension({
             }
         };
 
+        const NATIVE_SCROLLBAR_CLASS_CANDIDATES = Object.freeze([
+            "comfy-scrollbar",
+            "comfyui-scrollbar",
+            "styled-scrollbar",
+            "p-scrollpanel-content",
+        ]);
+        let detectedNativeScrollbarClasses = null;
+        const applyNativeScrollbarClasses = (el) => {
+            if (!el || !el.classList || typeof document === "undefined") return;
+            if (!detectedNativeScrollbarClasses) {
+                detectedNativeScrollbarClasses = NATIVE_SCROLLBAR_CLASS_CANDIDATES.filter((className) =>
+                    Boolean(document.querySelector(`.${className}`))
+                );
+            }
+            for (const className of detectedNativeScrollbarClasses) {
+                el.classList.add(className);
+            }
+        };
+
         const TEMPLATE_DIALOG_TOKENS = Object.freeze({
             surface: "var(--base-background, var(--interface-panel-surface, var(--comfy-menu-bg, #1f2128)))",
             panel: "var(--modal-panel-background, var(--base-background, var(--comfy-menu-bg, #1f2128)))",
@@ -1046,6 +1065,7 @@ app.registerExtension({
 
                 const body = document.createElement("div");
                 body.className = "hf-backup-op-body";
+                applyNativeScrollbarClasses(body);
 
                 const item = document.createElement("div");
                 item.className = "hf-backup-op-item";
@@ -1348,6 +1368,7 @@ app.registerExtension({
                 overflow: "auto",
                 padding: "16px 24px 0",
             });
+            applyNativeScrollbarClasses(body);
 
             const updatePanelColumns = () => {
                 body.style.gridTemplateColumns = window.innerWidth < 980 ? "1fr" : "1fr 1fr";
@@ -1417,6 +1438,7 @@ app.registerExtension({
                     padding: "6px",
                     background: TEMPLATE_DIALOG_TOKENS.panel,
                 });
+                applyNativeScrollbarClasses(tree);
                 tree.textContent = "Loading...";
                 root.appendChild(tree);
 

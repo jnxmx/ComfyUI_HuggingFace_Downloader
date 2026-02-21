@@ -77,6 +77,26 @@ const escapeHtml = (value) =>
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
 
+const NATIVE_SCROLLBAR_CLASS_CANDIDATES = Object.freeze([
+    "comfy-scrollbar",
+    "comfyui-scrollbar",
+    "styled-scrollbar",
+    "p-scrollpanel-content",
+]);
+let detectedNativeScrollbarClasses = null;
+
+const applyNativeScrollbarClasses = (el) => {
+    if (!el || !el.classList || typeof document === "undefined") return;
+    if (!detectedNativeScrollbarClasses) {
+        detectedNativeScrollbarClasses = NATIVE_SCROLLBAR_CLASS_CANDIDATES.filter((className) =>
+            Boolean(document.querySelector(`.${className}`))
+        );
+    }
+    for (const className of detectedNativeScrollbarClasses) {
+        el.classList.add(className);
+    }
+};
+
 const TEMPLATE_DIALOG_TOKENS = Object.freeze({
     surface: "var(--base-background, var(--interface-panel-surface, var(--comfy-menu-bg, #1f2128)))",
     panel: "var(--modal-panel-background, var(--base-background, var(--comfy-menu-bg, #1f2128)))",
@@ -867,7 +887,6 @@ class ModelExplorerDialog {
                 width: 100%;
                 box-sizing: border-box;
                 padding: 6px 0 10px;
-                scrollbar-color: var(--secondary-background-hover, #3a4458) transparent;
                 display: flex;
                 flex-direction: column;
                 gap: 6px;
@@ -911,7 +930,7 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-meta {
                 margin-left: auto;
                 display: grid;
-                grid-template-columns: minmax(0, 1fr) 170px;
+                grid-template-columns: minmax(0, 1fr) calc(1.5rem + 4.4rem + 6px);
                 align-items: center;
                 gap: 8px;
                 min-width: 0;
@@ -950,9 +969,9 @@ class ModelExplorerDialog {
                 justify-content: flex-end;
                 gap: 6px;
                 align-self: stretch;
-                width: 170px;
-                min-width: 170px;
-                max-width: 170px;
+                width: calc(1.5rem + 4.4rem + 6px);
+                min-width: calc(1.5rem + 4.4rem + 6px);
+                max-width: calc(1.5rem + 4.4rem + 6px);
             }
             #hf-model-explorer-dialog .hf-me-action-btn {
                 position: relative;
@@ -1252,6 +1271,7 @@ class ModelExplorerDialog {
 
         const bodyScroll = document.createElement("div");
         bodyScroll.className = "hf-me-content-scroll";
+        applyNativeScrollbarClasses(bodyScroll);
         const body = document.createElement("div");
         body.id = "hf-me-body";
         body.className = "hf-me-body";
@@ -1270,6 +1290,8 @@ class ModelExplorerDialog {
         this.baseWrap = panel.querySelector("#hf-me-base-wrap");
         this.precisionWrap = panel.querySelector("#hf-me-precision-wrap");
         this.filterWrap = filterWrap;
+        const leftScroll = leftPanel.querySelector(".hf-me-left-scroll");
+        applyNativeScrollbarClasses(leftScroll);
         const toggleWrap = installedOnlyRow.querySelector(".hf-me-installed-toggle-wrap");
         const toggleInput = this.installedOnlyToggle;
 
@@ -1334,6 +1356,7 @@ class ModelExplorerDialog {
         if (!trigger || !labelEl || !badgeEl || !popover || !searchInput || !metaText || !clearBtn || !optionsEl) {
             return null;
         }
+        applyNativeScrollbarClasses(optionsEl);
 
         const control = {
             key,

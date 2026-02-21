@@ -191,6 +191,25 @@ app.registerExtension({
             document.head.appendChild(style);
         };
 
+        const NATIVE_SCROLLBAR_CLASS_CANDIDATES = Object.freeze([
+            "comfy-scrollbar",
+            "comfyui-scrollbar",
+            "styled-scrollbar",
+            "p-scrollpanel-content",
+        ]);
+        let detectedNativeScrollbarClasses = null;
+        const applyNativeScrollbarClasses = (el) => {
+            if (!el || !el.classList || typeof document === "undefined") return;
+            if (!detectedNativeScrollbarClasses) {
+                detectedNativeScrollbarClasses = NATIVE_SCROLLBAR_CLASS_CANDIDATES.filter((className) =>
+                    Boolean(document.querySelector(`.${className}`))
+                );
+            }
+            for (const className of detectedNativeScrollbarClasses) {
+                el.classList.add(className);
+            }
+        };
+
         const createInput = (value, placeholder, options = {}) => {
             const { highlightMissingUrl = true } = options;
             const inp = document.createElement("input");
@@ -409,6 +428,7 @@ app.registerExtension({
                 display: "none",
                 borderRadius: "0 0 8px 8px"
             });
+            applyNativeScrollbarClasses(dropdown);
 
             const buildList = () => {
                 dropdown.innerHTML = "";
@@ -1551,6 +1571,7 @@ app.registerExtension({
                 gap: "6px",
                 padding: "8px 24px 12px",
             });
+            applyNativeScrollbarClasses(content);
             loadFolderList();
 
             const makeSectionTitle = (text, color = "#9aa4b6") => {

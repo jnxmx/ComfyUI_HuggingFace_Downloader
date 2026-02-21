@@ -82,6 +82,9 @@ MODEL_LIBRARY_EXTENSIONS = {
     ".torchscript",
     ".zip",
 }
+MODEL_EXPLORER_BASE_CANONICAL_SPACE_RE = re.compile(r"[\s_-]+")
+MODEL_EXPLORER_BASE_CANONICAL_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+MODEL_EXPLORER_HUNYUAN_VIDEO_15_RE = re.compile(r"\b1(?:[.\s_-]?5)\b")
 MODEL_LIBRARY_LOCAL_TYPE_MAP = {
     "checkpoints": "checkpoint",
     "diffusion_models": "diffusion_model",
@@ -177,6 +180,11 @@ MODEL_EXPLORER_DB_PATH = os.path.join(
     "metadata",
     "popular-models.json",
 )
+MODEL_EXPLORER_EXCLUDED_EXTENSIONS = {
+    ".json",
+    ".yaml",
+    ".yml",
+}
 
 _model_explorer_catalog_cache = {"mtime": 0.0, "models": {}}
 _model_explorer_catalog_lock = threading.Lock()
@@ -194,6 +202,18 @@ _model_explorer_filename_precision_pattern = re.compile(
     r"(fp32|fp16|bf16|fp8|int8|int4|fp4|q\d(?:_[a-z0-9]+)*|iq\d(?:_[a-z0-9]+)*)",
     re.IGNORECASE,
 )
+
+
+def _is_model_explorer_filename_allowed(filename: str) -> bool:
+    name = str(filename or "").strip()
+    if not name:
+        return False
+    ext = os.path.splitext(os.path.basename(name))[1].lower()
+    if ext not in MODEL_LIBRARY_EXTENSIONS:
+        return False
+    if ext in MODEL_EXPLORER_EXCLUDED_EXTENSIONS:
+        return False
+    return True
 
 def _load_model_explorer_catalog() -> dict:
     global _model_explorer_catalog_cache
@@ -222,6 +242,8 @@ def _load_model_explorer_catalog() -> dict:
 
                 entry["filename"] = str(entry.get("filename") or name or "").strip()
                 if not entry["filename"]:
+                    continue
+                if not _is_model_explorer_filename_allowed(entry["filename"]):
                     continue
 
                 category = str(entry.get("explorer_category") or "").strip()
@@ -271,10 +293,15 @@ def _load_model_explorer_catalog() -> dict:
                     )
 
                 if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES:
-                    base_value = str(entry.get("explorer_base") or "").strip() or str(entry.get("base") or "").strip()
+                    base_value = _canonical_model_explorer_base(
+                        str(entry.get("explorer_base") or "").strip() or str(entry.get("base") or "").strip()
+                    )
                     if not base_value:
                         base_value = "unknown"
                     entry["explorer_base"] = base_value
+                    existing_base = _canonical_model_explorer_base(str(entry.get("base") or "").strip())
+                    if existing_base and existing_base != "unknown":
+                        entry["base"] = existing_base
                     entry["explorer_base_applicable"] = True
                 else:
                     entry["explorer_base_applicable"] = False
@@ -893,6 +920,8 @@ def _scan_local_models_for_explorer(category_filter: str = "") -> tuple[list[dic
         ext = os.path.splitext(filename)[1].lower()
         if ext not in MODEL_LIBRARY_EXTENSIONS:
             return
+        if ext in MODEL_EXPLORER_EXCLUDED_EXTENSIONS:
+            return
         absolute_path = os.path.join(models_root, rel_norm)
         directory = _normalize_rel_path(os.path.dirname(rel_norm))
         stat = None
@@ -1315,6 +1344,40 @@ def _resolve_model_library_category(entry: dict) -> str | None:
     if directory_top_level:
         return directory_top_level
     return None
+
+
+def _canonical_model_explorer_base(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    lowered = raw.lower().strip()
+    if lowered == "unknown":
+        return "unknown"
+
+    normalized = MODEL_EXPLORER_BASE_CANONICAL_SPACE_RE.sub(" ", lowered).strip()
+    compact = normalized.replace(" ", "")
+    alnum = MODEL_EXPLORER_BASE_CANONICAL_ALNUM_RE.sub("", lowered)
+
+    if "qwen" in normalized:
+        if (
+            "imageedit" in compact
+            or "umageedit" in compact
+            or (("image" in normalized or "umage" in normalized) and "edit" in normalized)
+        ):
+            return "Qwen Image Edit"
+        if "image" in normalized or "umage" in normalized:
+            return "Qwen Image"
+
+    if "pixart" in compact:
+        return "PixArt"
+
+    if "hunyuanvideo15" in alnum:
+        return "HunyuanVideo-1.5"
+    if "hunyuanvideo" in compact or "hunyuan video" in normalized:
+        if MODEL_EXPLORER_HUNYUAN_VIDEO_15_RE.search(normalized) or normalized in {"hunyuan video", "hunyuanvideo"}:
+            return "HunyuanVideo-1.5"
+
+    return raw
 
 def _split_csv_query(value: str | None) -> list[str]:
     if not isinstance(value, str):
@@ -3460,7 +3523,7 @@ async def model_explorer_get_filters(request):
                     continue
             precisions.add(_model_explorer_precision(str(row.get("filename") or "")))
             if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES:
-                base_value = str(row.get("explorer_base") or "").strip() or "unknown"
+                base_value = _canonical_model_explorer_base(str(row.get("explorer_base") or "").strip()) or "unknown"
                 bases.add(base_value)
 
         known_precisions = sorted([x for x in precisions if x and x != "unknown"])
@@ -3503,7 +3566,7 @@ async def model_explorer_list_groups(request):
             if category_filter and category != category_filter:
                 continue
 
-            base_value = str(row.get("explorer_base") or "").strip() or (
+            base_value = _canonical_model_explorer_base(str(row.get("explorer_base") or "").strip()) or (
                 "unknown" if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES else ""
             )
             if base_filter and category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES and base_value != base_filter:
