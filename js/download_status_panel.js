@@ -371,12 +371,19 @@ app.registerExtension({
                     border-top: 1px solid var(--interface-stroke, var(--border-color, var(--p-content-border-color, #333)));
                 }
                 #${PANEL_ID} .hf-downloader-refresh.p-button {
-                    min-height: 40px;
-                    padding: 0.55rem 1.15rem;
-                    font-size: 14px;
-                    font-weight: 600;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 0.35rem;
+                    height: 1.5rem;
+                    min-height: 1.5rem;
+                    min-width: 4.4rem;
+                    padding: 0 0.5rem;
+                    font-size: 0.75rem;
+                    line-height: 1;
+                    font-weight: 500;
                     font-family: var(--font-inter, Inter, sans-serif);
-                    border-radius: 8px;
+                    border-radius: 0.25rem;
                     cursor: pointer;
                 }
                 #${PANEL_ID} .hf-downloader-refresh:disabled {
@@ -823,6 +830,17 @@ app.registerExtension({
                     if (id) justCompletedIds.push(id);
                 }
             }
+            for (const id of justCompletedIds) {
+                dismissedEntryIds.add(id);
+            }
+            if (listBody) {
+                listBody.replaceChildren();
+            }
+            itemNodes.clear();
+            lastVisibleCount = 0;
+            lastHasRunning = false;
+            applyPanelVisibility();
+            publishPanelState();
 
             let refreshSucceeded = false;
             try {
@@ -839,11 +857,6 @@ app.registerExtension({
             } catch (err) {
                 console.warn("[HF Downloader] Comfy refresh hook failed:", err);
             } finally {
-                if (refreshSucceeded) {
-                    for (const id of justCompletedIds) {
-                        dismissedEntryIds.add(id);
-                    }
-                }
                 refreshBusy = false;
                 if (refreshBtn) {
                     refreshBtn.disabled = false;
