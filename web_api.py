@@ -219,10 +219,6 @@ def _load_model_explorer_catalog() -> dict:
                     continue
                 entry = dict(row)
                 source = str(entry.get("source") or "").strip()
-                # Keep strict default source policy, but allow explicitly enabled
-                # priority rows (e.g. curated GGUF quantizations) into Explorer.
-                if source not in MODEL_EXPLORER_VISIBLE_SOURCES and not bool(entry.get("explorer_enabled")):
-                    continue
 
                 entry["filename"] = str(entry.get("filename") or name or "").strip()
                 if not entry["filename"]:
@@ -243,6 +239,31 @@ def _load_model_explorer_catalog() -> dict:
                 if not category:
                     continue
 
+                is_curated_category = category in MODEL_EXPLORER_ALLOWED_CATEGORIES
+                type_value = str(entry.get("type") or "").strip().lower()
+                manager_type_value = str(entry.get("manager_type") or "").strip().lower()
+                filename_lower = str(entry.get("filename") or "").strip().lower()
+                is_gguf_variant = (
+                    filename_lower.endswith(".gguf")
+                    or type_value == "gguf"
+                    or manager_type_value == "gguf"
+                )
+                priority_manager_enabled = (
+                    source == "priority_repo_scrape"
+                    and bool(entry.get("library_visible"))
+                    and (not is_curated_category or is_gguf_variant)
+                )
+
+                # Keep strict default source policy, but allow explicitly enabled
+                # priority rows and manager-enabled priority rows for uncurated
+                # categories / GGUF quantizations.
+                if (
+                    source not in MODEL_EXPLORER_VISIBLE_SOURCES
+                    and not bool(entry.get("explorer_enabled"))
+                    and not priority_manager_enabled
+                ):
+                    continue
+
                 entry["explorer_category"] = category
                 if not bool(entry.get("explorer_category_verified")):
                     entry["explorer_category_verified"] = (
@@ -260,7 +281,7 @@ def _load_model_explorer_catalog() -> dict:
 
                 if not bool(entry.get("explorer_enabled")):
                     entry["explorer_enabled"] = bool(
-                        source in MODEL_EXPLORER_VISIBLE_SOURCES
+                        (source in MODEL_EXPLORER_VISIBLE_SOURCES or priority_manager_enabled)
                         and bool(entry.get("library_visible", True))
                         and (
                             category not in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES

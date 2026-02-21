@@ -24,17 +24,11 @@ const MODEL_EXPLORER_DEFERRED_CATEGORY_ORDER = Object.freeze([
 ]);
 const MODEL_EXPLORER_PRIMARY_CATEGORIES = new Set([
     "checkpoints",
-    "configs",
     "controlnet",
-    "clip",
     "clip_vision",
-    "custom_nodes",
-    "diffusers",
     "diffusion_models",
-    "embeddings",
-    "gligen",
-    "hypernetworks",
     "ipadapter",
+    "latent_upscale_models",
     "loras",
     "model_patches",
     "style_models",
@@ -42,17 +36,8 @@ const MODEL_EXPLORER_PRIMARY_CATEGORIES = new Set([
     "upscale_models",
     "vae",
     "vae_approx",
-    "audio_encoders",
     "animatediff_models",
     "animatediff_motion_lora",
-    "sams",
-    "ultralytics",
-    "depthanything",
-    "photomaker",
-    "prompt_expansion",
-    "tokenizers",
-    "unet",
-    "onnx",
 ]);
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
