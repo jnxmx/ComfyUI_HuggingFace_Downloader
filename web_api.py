@@ -3419,6 +3419,13 @@ def _model_explorer_group_stem(entry: dict) -> str:
     return _model_explorer_normalize_group_stem(filename)
 
 
+def _model_explorer_variant_format_rank(filename: str) -> int:
+    ext = os.path.splitext(os.path.basename(str(filename or "")))[1].lower()
+    if ext == ".gguf":
+        return 1
+    return 0
+
+
 def _model_explorer_apply_sibling_base_inference(rows: dict[str, dict]) -> None:
     known_bases: dict[tuple[str, str], set[str]] = {}
     for entry in rows.values():
@@ -3746,6 +3753,7 @@ async def model_explorer_list_groups(request):
             group["variants"].sort(
                 key=lambda item: (
                     0 if item.get("installed") else 1,
+                    _model_explorer_variant_format_rank(str(item.get("filename") or "")),
                     str(item.get("filename") or "").lower(),
                 )
             )
