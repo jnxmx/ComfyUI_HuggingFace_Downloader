@@ -291,7 +291,6 @@ def _load_model_explorer_catalog() -> dict:
                 if not category:
                     continue
 
-                is_curated_category = category in MODEL_EXPLORER_ALLOWED_CATEGORIES
                 type_value = str(entry.get("type") or "").strip().lower()
                 manager_type_value = str(entry.get("manager_type") or "").strip().lower()
                 filename_lower = str(entry.get("filename") or "").strip().lower()
@@ -306,21 +305,16 @@ def _load_model_explorer_catalog() -> dict:
                     and is_gguf_variant
                     and priority_owner in MODEL_EXPLORER_PRIORITY_GGUF_VISIBLE_OWNERS
                 )
-                priority_manager_enabled = (
-                    source == "priority_repo_scrape"
-                    and (
-                        (bool(entry.get("library_visible")) and (not is_curated_category or is_gguf_variant))
-                        or allow_priority_gguf
-                    )
-                )
+                is_priority_source = source == "priority_repo_scrape"
 
                 # Keep strict default source policy, but allow explicitly enabled
-                # priority rows and manager-enabled priority rows for uncurated
-                # categories / GGUF quantizations.
+                # priority rows. Priority rows must be explicitly enabled by the
+                # unified DB builder (no runtime self-enabling).
+                if is_priority_source and not bool(entry.get("explorer_enabled")):
+                    continue
                 if (
                     source not in MODEL_EXPLORER_VISIBLE_SOURCES
                     and not bool(entry.get("explorer_enabled"))
-                    and not priority_manager_enabled
                 ):
                     continue
 
@@ -360,7 +354,7 @@ def _load_model_explorer_catalog() -> dict:
                 if not bool(entry.get("explorer_enabled")):
                     library_gate = bool(entry.get("library_visible", True)) or allow_priority_gguf
                     entry["explorer_enabled"] = bool(
-                        (source in MODEL_EXPLORER_VISIBLE_SOURCES or priority_manager_enabled)
+                        source in MODEL_EXPLORER_VISIBLE_SOURCES
                         and library_gate
                         and (
                             category not in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES
@@ -3831,6 +3825,14 @@ async def model_explorer_use(request):
     installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
     if not installed_info.get("installed"):
         return web.json_response({"error": "Model is not installed locally."}, status=400)
+    model_filename = str(row.get("filename") or filename or "").strip()
+    type_value = str(row.get("type") or "").strip().lower()
+    manager_type_value = str(row.get("manager_type") or "").strip().lower()
+    is_gguf = (
+        model_filename.lower().endswith(".gguf")
+        or type_value in {"gguf", "gguf_model"}
+        or manager_type_value == "gguf"
+    )
 
     return web.json_response({
         "status": "ok",
@@ -3839,6 +3841,9 @@ async def model_explorer_use(request):
         "model_path": installed_info.get("widget_path"),
         "node_hint": {
             "category": row.get("explorer_category"),
+            "is_gguf": bool(is_gguf),
+            "type": row.get("type"),
+            "manager_type": row.get("manager_type"),
         },
     })
 

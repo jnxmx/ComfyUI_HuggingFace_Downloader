@@ -17,6 +17,21 @@ const FALLBACK_NODE_PROVIDER_BY_CATEGORY = {
     clip_vision: { nodeType: "CLIPVisionLoader", key: "clip_name" },
     upscale_models: { nodeType: "UpscaleModelLoader", key: "model_name" },
 };
+const GGUF_NODE_PROVIDER_CANDIDATES_BY_CATEGORY = {
+    diffusion_models: [
+        { nodeType: "UNETLoaderGGUF", key: "unet_name" },
+        { nodeType: "UnetLoaderGGUF", key: "unet_name" },
+    ],
+    checkpoints: [
+        { nodeType: "UNETLoaderGGUF", key: "unet_name" },
+        { nodeType: "UnetLoaderGGUF", key: "unet_name" },
+    ],
+    text_encoders: [
+        { nodeType: "CLIPLoaderGGUF", key: "clip_name" },
+        { nodeType: "DualCLIPLoaderGGUF", key: "clip_name1" },
+        { nodeType: "TripleCLIPLoaderGGUF", key: "clip_name1" },
+    ],
+};
 const MODEL_EXPLORER_OTHER_CATEGORY_KEY = "__other__";
 const MODEL_EXPLORER_DEFERRED_CATEGORY_ORDER = Object.freeze([
     "animatediff_models",
@@ -388,49 +403,129 @@ const placeNodeNearCanvasCenter = (node) => {
     }
 };
 
-const addModelNodeFromSelection = async (category, modelPath) => {
+const isGgufModelSelection = (modelPath, nodeHint = null) => {
+    if (nodeHint && typeof nodeHint === "object") {
+        if (nodeHint.is_gguf === true) return true;
+        const hintType = String(nodeHint.type || "").trim().toLowerCase();
+        const hintManagerType = String(nodeHint.manager_type || "").trim().toLowerCase();
+        if (hintType === "gguf" || hintType === "gguf_model" || hintManagerType === "gguf") {
+            return true;
+        }
+    }
+    return String(modelPath || "").trim().toLowerCase().endsWith(".gguf");
+};
+
+const normalizeProviderCandidate = (provider) => {
+    if (!provider || typeof provider !== "object") return null;
+    const nodeType = String(provider?.nodeDef?.name || provider?.nodeType || "").trim();
+    if (!nodeType) return null;
+    return {
+        nodeType,
+        nodeDisplayName: provider?.nodeDef?.display_name || null,
+        widgetKey: String(provider?.key || "").trim() || null,
+    };
+};
+
+const assignModelPathToNode = (node, modelPath, preferredWidgetKey = null) => {
+    if (!node || !Array.isArray(node.widgets)) return false;
+
+    const widgetByName = (name) => node.widgets.find((w) => String(w?.name || "").trim() === name);
+
+    const setWidgetValue = (widget) => {
+        if (!widget) return false;
+        widget.value = modelPath;
+        return true;
+    };
+
+    if (preferredWidgetKey && setWidgetValue(widgetByName(preferredWidgetKey))) {
+        return true;
+    }
+
+    const fallbackKeys = [
+        "unet_name",
+        "ckpt_name",
+        "model_name",
+        "clip_name",
+        "clip_name1",
+        "vae_name",
+        "lora_name",
+        "control_net_name",
+    ];
+    for (const key of fallbackKeys) {
+        if (setWidgetValue(widgetByName(key))) {
+            return true;
+        }
+    }
+    return false;
+};
+
+const addModelNodeFromSelection = async (category, modelPath, nodeHint = null) => {
     const graph = app?.graph || app?.canvas?.graph;
     if (!graph || !globalThis?.LiteGraph?.createNode) {
         throw new Error("Graph/LiteGraph is not available.");
     }
 
     const modelToNodeStore = await resolveModelToNodeStore();
-    let provider = null;
+    const isGguf = isGgufModelSelection(modelPath, nodeHint);
+    const candidates = [];
+    if (isGguf) {
+        const ggufCandidates = GGUF_NODE_PROVIDER_CANDIDATES_BY_CATEGORY[category] || [];
+        candidates.push(...ggufCandidates);
+    }
+
     if (modelToNodeStore?.getNodeProvider) {
-        provider = modelToNodeStore.getNodeProvider(category);
-    }
-    if (!provider) {
-        provider = FALLBACK_NODE_PROVIDER_BY_CATEGORY[category] || null;
-    }
-    if (!provider) {
-        throw new Error(`No node provider for category "${category}".`);
-    }
-
-    const nodeType = provider?.nodeDef?.name || provider?.nodeType;
-    const nodeDisplayName = provider?.nodeDef?.display_name;
-    const widgetKey = provider?.key;
-    if (!nodeType) {
-        throw new Error(`Missing node type for category "${category}".`);
-    }
-
-    const node = globalThis.LiteGraph.createNode(nodeType, nodeDisplayName);
-    if (!node) {
-        throw new Error(`Failed to create node "${nodeType}".`);
-    }
-
-    if (widgetKey) {
-        const widget = Array.isArray(node.widgets)
-            ? node.widgets.find((w) => w?.name === widgetKey)
-            : null;
-        if (widget) {
-            widget.value = modelPath;
+        const storeProvider = modelToNodeStore.getNodeProvider(category);
+        if (storeProvider) {
+            candidates.push(storeProvider);
         }
     }
 
-    graph.add(node);
-    placeNodeNearCanvasCenter(node);
-    node.setDirtyCanvas?.(true, true);
+    const fallback = FALLBACK_NODE_PROVIDER_BY_CATEGORY[category] || null;
+    if (fallback) {
+        candidates.push(fallback);
+    }
+
+    const normalizedCandidates = [];
+    const seenNodeTypes = new Set();
+    for (const provider of candidates) {
+        const normalized = normalizeProviderCandidate(provider);
+        if (!normalized) continue;
+        const key = normalized.nodeType.toLowerCase();
+        if (seenNodeTypes.has(key)) continue;
+        seenNodeTypes.add(key);
+        normalizedCandidates.push(normalized);
+    }
+
+    if (!normalizedCandidates.length) {
+        throw new Error(`No node provider for category "${category}".`);
+    }
+
+    let chosenNode = null;
+    let chosenNodeType = "";
+    let chosenWidgetKey = null;
+    for (const candidate of normalizedCandidates) {
+        const node = globalThis.LiteGraph.createNode(candidate.nodeType, candidate.nodeDisplayName || undefined);
+        if (!node) continue;
+        chosenNode = node;
+        chosenNodeType = candidate.nodeType;
+        chosenWidgetKey = candidate.widgetKey;
+        break;
+    }
+
+    if (!chosenNode) {
+        const ggufSuffix = isGguf
+            ? ' (install/enable ComfyUI-GGUF nodes like "UNETLoaderGGUF")'
+            : "";
+        throw new Error(`Failed to create a compatible loader node for "${category}"${ggufSuffix}.`);
+    }
+
+    assignModelPathToNode(chosenNode, modelPath, chosenWidgetKey);
+
+    graph.add(chosenNode);
+    placeNodeNearCanvasCenter(chosenNode);
+    chosenNode.setDirtyCanvas?.(true, true);
     app?.canvas?.setDirty?.(true, true);
+    return chosenNodeType;
 };
 
 class ModelExplorerDialog {
@@ -2028,7 +2123,7 @@ class ModelExplorerDialog {
             if (!modelPath) {
                 throw new Error("Missing model path from backend.");
             }
-            await addModelNodeFromSelection(category, modelPath);
+            await addModelNodeFromSelection(category, modelPath, data?.node_hint || null);
             showToast({
                 severity: "success",
                 summary: "Model node added",

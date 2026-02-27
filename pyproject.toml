@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI_HuggingFace_Downloader"
 description = "ComfyUI tools to auto-download missing workflow models from Hugging Face and backup or restore ComfyUI data."
-version = "0.99.2.beta"
+version = "0.99.3.beta"
 
 dependencies = ["huggingface_hub>=0.32.0"]
 
