@@ -3,6 +3,7 @@
 ComfyUI node pack and UI tools for:
 
 - downloading models and folders from Hugging Face
+- downloading direct model files from non-HF HTTP(S) URLs
 - auto-detecting missing workflow models and queueing downloads
 - backing up and restoring ComfyUI content to/from a Hugging Face repo
 
@@ -13,8 +14,10 @@ ComfyUI node pack and UI tools for:
   - `Hugging Face Download Folder`
 - top-menu integration with:
   - `Auto-download models`
+  - `Model Explorer`
   - `Download new model`
   - `Backup ComfyUI to Hugging Face`
+- native Model Library (cloud-style) backed by this node pack via Asset API shim
 - queued downloader with cancel + status panel
 - missing-model dialog integration (`Auto-search and download missing models`)
 - selective backup/restore/delete browser for HF backups
@@ -27,6 +30,7 @@ ComfyUI node pack and UI tools for:
 - Download a single file or a full folder/subfolder.
 - Output `model name` / `folder name` for downstream node wiring.
 - Choose standard model folders or custom paths.
+- Manual `Download new model` also supports direct non-HF HTTP(S) file URLs.
 
 ### 2) Workflow Auto-Discovery + Missing Model Resolution
 
@@ -68,6 +72,20 @@ ComfyUI node pack and UI tools for:
 - `POST /cancel_download`
 - `GET /download_status`
 - `GET /search_status`
+- `GET /model_library`
+- `GET /api/model_explorer/categories`
+- `GET /api/model_explorer/filters`
+- `GET /api/model_explorer/groups`
+- `POST /api/model_explorer/download`
+- `POST /api/model_explorer/use`
+- `POST /api/model_explorer/delete`
+- `GET /api/hf_model_library_assets`
+- `GET /api/hf_model_library_assets/{asset_id}`
+- `PUT /api/hf_model_library_assets/{asset_id}`
+- `POST /api/hf_model_library_assets/{asset_id}/tags`
+- `DELETE /api/hf_model_library_assets/{asset_id}/tags`
+- `GET /api/hf_model_library_assets/remote-metadata`
+- `POST /api/hf_model_library_assets/download`
 - `GET /backup_browser_tree`
 - `POST /backup_to_hf`
 - `POST /backup_selected_to_hf`
@@ -81,8 +99,12 @@ ComfyUI node pack and UI tools for:
 Configured in ComfyUI settings:
 
 - `downloader.hf_token` (Hugging Face token)
+- `downloader.model_library_backend_enabled` (enable/disable native Model Library backend shim, default `false`)
+- `downloader.auto_open_missing_models_on_run` (after Run, auto-opens downloader only when native ComfyUI missing-models dialog appears)
 - `downloaderbackup.repo_name` (target HF repo for backup/restore)
 - `downloaderbackup.file_size_limit` (max single file size in GB for backup)
+
+Model Explorer is always enabled and has no separate toggle in settings.
 
 Environment variables:
 
@@ -108,6 +130,9 @@ pip install -r requirements.txt
 
 ## Notes and Current Limits
 
-- Queue download flow is Hugging Face focused.
-- CivitAI URLs are rejected in the queued single-file backend path.
+- Queue download flow is hybrid for file mode:
+  - Hugging Face links use the Hugging Face engine.
+  - Non-HF `http(s)` file URLs use direct streaming download.
+- Folder/full-repo mode remains Hugging Face-only.
+- Model library backend routes remain Hugging Face-only.
 - For gated repos, set a valid token via `downloader.hf_token` or `HF_TOKEN`.
