@@ -3410,6 +3410,8 @@ def _model_explorer_normalize_group_stem(filename: str) -> str:
     stem = _model_explorer_fp8_compact_pattern.sub("_", stem)
     stem = _model_explorer_precision_pattern.sub("_", stem)
     stem = re.sub(r"(?:^|_)(?:mixed|scaled)(?:_|$)", "_", stem)
+    stem = re.sub(r"(?<=[a-z])_(?=\d)", "", stem)
+    stem = re.sub(r"(?<=\d)_(?=[a-z])", "", stem)
     stem = re.sub(r"_+", "_", stem).strip("_")
     return stem or os.path.splitext(str(filename or ""))[0].lower()
 
@@ -3421,9 +3423,30 @@ def _model_explorer_group_stem(entry: dict) -> str:
 
 def _model_explorer_variant_format_rank(filename: str) -> int:
     ext = os.path.splitext(os.path.basename(str(filename or "")))[1].lower()
+    if ext == ".safetensors":
+        return 0
     if ext == ".gguf":
+        return 2
+    return 1
+
+
+def _model_explorer_variant_precision_rank(precision: str) -> int:
+    normalized = str(precision or "").strip().lower()
+    if normalized == "fp8 mixed":
+        return 0
+    if normalized == "fp8 scaled":
         return 1
-    return 0
+    if normalized == "fp8":
+        return 2
+    if normalized.startswith("fp8"):
+        return 3
+    if normalized in {"bf16", "fp16", "fp32", "int8", "int4", "fp4"}:
+        return 10
+    if normalized == "gguf":
+        return 50
+    if normalized == "unknown":
+        return 60
+    return 40
 
 
 def _model_explorer_apply_sibling_base_inference(rows: dict[str, dict]) -> None:
@@ -3754,6 +3777,7 @@ async def model_explorer_list_groups(request):
                 key=lambda item: (
                     0 if item.get("installed") else 1,
                     _model_explorer_variant_format_rank(str(item.get("filename") or "")),
+                    _model_explorer_variant_precision_rank(str(item.get("precision") or "")),
                     str(item.get("filename") or "").lower(),
                 )
             )
