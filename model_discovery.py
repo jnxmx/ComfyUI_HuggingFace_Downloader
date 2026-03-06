@@ -925,6 +925,7 @@ NODE_TYPE_MAPPING = {
     "DualCLIPLoader": "text_encoders",
     "CLIPVisionLoader": "clip_vision",
     "UpscaleModelLoader": "upscale_models",
+    "LatentUpscaleModelLoader": "latent_upscale_models",
     "ESAModelLoader": "upscale_models",
     "StyleModelLoader": "style_models",
     "GligenLoader": "gligen",
@@ -1082,6 +1083,10 @@ def resolve_proxy_widget_folder(widget_name: str | None) -> str | None:
     if not widget_name:
         return None
     name = widget_name.lower()
+    if "latent" in name and "upscale" in name:
+        return "latent_upscale_models"
+    if "upscale" in name:
+        return "upscale_models"
     if "clip_vision" in name or "clip vision" in name:
         return "clip_vision"
     if "text_encoder" in name or "text encoder" in name or "textencode" in name:

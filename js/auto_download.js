@@ -124,6 +124,26 @@ app.registerExtension({
             });
         };
 
+        const bindBackdropClose = (overlay, onClose) => {
+            let pointerDownOnBackdrop = false;
+
+            overlay.addEventListener("pointerdown", (event) => {
+                pointerDownOnBackdrop = event.target === overlay;
+            });
+
+            overlay.addEventListener("pointercancel", () => {
+                pointerDownOnBackdrop = false;
+            });
+
+            overlay.addEventListener("click", (event) => {
+                const shouldClose = event.target === overlay && pointerDownOnBackdrop;
+                pointerDownOnBackdrop = false;
+                if (shouldClose && typeof onClose === "function") {
+                    onClose();
+                }
+            });
+        };
+
         const ensureManualToggleStyles = () => {
             const styleId = "hf-manual-toggle-styles";
             if (document.getElementById(styleId)) return;
@@ -1431,11 +1451,7 @@ app.registerExtension({
                 }
             };
 
-            dlg.addEventListener("click", (e) => {
-                if (e.target === dlg) {
-                    closeDialog();
-                }
-            });
+            bindBackdropClose(dlg, closeDialog);
 
             const panel = document.createElement("div");
             applyTemplateDialogPanelStyle(panel, {
@@ -2198,11 +2214,7 @@ app.registerExtension({
                 }
             };
 
-            dlg.addEventListener("click", (e) => {
-                if (e.target === dlg) {
-                    closeDialog();
-                }
-            });
+            bindBackdropClose(dlg, closeDialog);
 
             const panel = document.createElement("div");
             applyTemplateDialogPanelStyle(panel, {
