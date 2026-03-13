@@ -1306,14 +1306,10 @@ const installLocalAssetsStoreBridge = () => {
 app.registerExtension({
   name: "hfDownloaderModelLibraryBackend",
   async setup() {
-    console.log("[HF Model Library] UI/backend hack is temporarily disabled.");
-    return;
-
     installFetchApiOverride();
     installNativeModelLibraryCommandOverrides();
     installLocalAssetsStoreBridge();
     installModelLibraryUiObserver();
     installModelLibraryActionInterceptors();
-    await ensureAssetApiEnabledForNativeLibrary();
   },
 });

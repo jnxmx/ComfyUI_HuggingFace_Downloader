@@ -24,6 +24,18 @@ app.registerExtension({
       },
     },
     {
+      id: "downloader.model_library_backend_enabled",
+      category: ["Hugging Face Download & Backup", "Model Library", "Enable native Model Library backend"],
+      name: "Enable native Model Library backend",
+      type: "boolean",
+      defaultValue: true,
+      tooltip:
+        "Back the native ComfyUI Model Library and model asset browser with this extension's Hugging Face model catalog.",
+      onChange: (newValue) => {
+        console.log(`[HF Downloader] Native Model Library backend enabled: ${Boolean(newValue)}`);
+      },
+    },
+    {
       id: "downloader.top_menu_button_style",
       category: ["Hugging Face Download & Backup", "Appearance", "Top menu button"],
       name: "Top menu button",
