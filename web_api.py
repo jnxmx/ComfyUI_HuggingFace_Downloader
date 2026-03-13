@@ -66,7 +66,6 @@ MODEL_LIBRARY_CLOUD_CATALOG_PATH_CANDIDATES = [
 MODEL_LIBRARY_PRIORITY_CATALOG_PATH = os.path.join(
     os.path.dirname(__file__), "metadata", "popular-models.json"
 )
-MODEL_LIBRARY_BACKEND_SETTING = "downloader.model_library_backend_enabled"
 HUGGINGFACE_HOST = "huggingface.co"
 MODEL_LIBRARY_EXTENSIONS = {
     ".safetensors",
@@ -874,12 +873,8 @@ def _read_settings_dict() -> dict:
         settings_cache = {"path": settings_path, "mtime": mtime, "settings": payload}
     return payload
 
-def _read_setting_bool(setting_id: str, default: bool) -> bool:
-    settings = _read_settings_dict()
-    return _coerce_bool(settings.get(setting_id), default=default)
-
 def _is_model_library_backend_enabled() -> bool:
-    return _read_setting_bool(MODEL_LIBRARY_BACKEND_SETTING, default=True)
+    return False
 
 def _get_models_root() -> str:
     base_path = getattr(folder_paths, "base_path", None) if folder_paths else None
@@ -2773,8 +2768,7 @@ def setup(app_or_server):
             return web.json_response(
                 {
                     "backend_enabled": False,
-                    "error": "Model library backend is disabled in settings.",
-                    "setting_id": MODEL_LIBRARY_BACKEND_SETTING,
+                    "error": "Model library backend is disabled.",
                 },
                 status=403,
             )
@@ -2929,8 +2923,7 @@ def setup(app_or_server):
         if not _is_model_library_backend_enabled():
             return web.json_response(
                 {
-                    "error": "Model library backend is disabled in settings.",
-                    "setting_id": MODEL_LIBRARY_BACKEND_SETTING,
+                    "error": "Model library backend is disabled.",
                 },
                 status=403,
             )
