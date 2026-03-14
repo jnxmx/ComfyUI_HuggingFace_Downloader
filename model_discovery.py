@@ -586,15 +586,31 @@ def _lookup_known_directory_for_filename(filename: str | None) -> str | None:
     if not base:
         return None
 
+    filename_hint = _guess_folder_from_filename(base)
+
     popular = load_popular_models_registry()
     entry = _lookup_popular_entry(popular, base)
     if entry and entry.get("directory"):
-        return normalize_save_path(entry.get("directory")) or entry.get("directory")
+        known_dir = normalize_save_path(entry.get("directory")) or entry.get("directory")
+        if (
+            known_dir in {"checkpoints", "diffusion_models"}
+            and filename_hint
+            and _is_specific_model_bucket(filename_hint)
+        ):
+            return filename_hint
+        return known_dir
 
     manager = load_comfyui_manager_model_list()
     manager_entry = manager.get(base.lower())
     if manager_entry and manager_entry.get("directory"):
-        return normalize_save_path(manager_entry.get("directory")) or manager_entry.get("directory")
+        known_dir = normalize_save_path(manager_entry.get("directory")) or manager_entry.get("directory")
+        if (
+            known_dir in {"checkpoints", "diffusion_models"}
+            and filename_hint
+            and _is_specific_model_bucket(filename_hint)
+        ):
+            return filename_hint
+        return known_dir
     return None
 
 def _guess_folder_from_filename(filename: str | None) -> str | None:
@@ -608,7 +624,14 @@ def _guess_folder_from_filename(filename: str | None) -> str | None:
         return "controlnet"
     if "lora" in name:
         return "loras"
-    if "clip_vision" in name or ("clip" in name and "vision" in name):
+    if (
+        "clip_vision" in name
+        or ("clip" in name and "vision" in name)
+        or "clip-vit-" in name
+        or "clip_vit_" in name
+        or "clipvith" in re.sub(r"[^a-z0-9]+", "", name)
+        or "clipvitg" in re.sub(r"[^a-z0-9]+", "", name)
+    ):
         return "clip_vision"
     if "whisper" in name:
         return "audio_encoders"
@@ -1562,6 +1585,48 @@ def recursive_find_file_by_stem(stem: str, root_dir: str) -> str | None:
                 return os.path.join(dirpath, file)
     return None
 
+def _clip_vision_alias_family(value: str | None) -> str | None:
+    base = os.path.basename(str(value or "").replace("\\", "/")).lower()
+    if not base:
+        return None
+    stem = os.path.splitext(base)[0]
+    compact = re.sub(r"[^a-z0-9]+", "", stem)
+    if "unclip" in compact:
+        return None
+    if "sigclipvision" in compact:
+        return "sigclip_vision"
+    if "clipvisionh" in compact or "clipvith" in compact:
+        return "clip_vision_h"
+    if "clipvisiong" in compact or "clipvitg" in compact:
+        return "clip_vision_g"
+    return None
+
+def recursive_find_equivalent_model_file(filename: str, root_dir: str, folder_type: str | None = None) -> str | None:
+    folder_norm = normalize_save_path(folder_type) or folder_type or ""
+    if folder_norm != "clip_vision":
+        return None
+
+    family = _clip_vision_alias_family(filename)
+    if not family:
+        return None
+
+    best_match = None
+    best_score = None
+    for dirpath, _, filenames in os.walk(root_dir):
+        for file in filenames:
+            if _clip_vision_alias_family(file) != family:
+                continue
+            candidate_path = os.path.join(dirpath, file)
+            score = (
+                0 if normalize_filename_key(file).startswith(family) else 1,
+                len(file),
+                len(candidate_path),
+            )
+            if best_score is None or score < best_score:
+                best_match = candidate_path
+                best_score = score
+    return best_match
+
 def recursive_find_dir(dirname: str, root_dir: str) -> str | None:
     """Recursively searches for a directory."""
     for dirpath, dirnames, _ in os.walk(root_dir):
@@ -1635,6 +1700,16 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
                  
              # 2. Recursive search (e.g., "model.safetensors" in "models/checkpoints/subfolder/model.safetensors")
              found_file = recursive_find_file(filename, root_path)
+             if found_file:
+                 found_path = found_file
+                 found_root = root_path
+                 break
+
+             # Some ComfyUI ecosystems refer to CLIP vision encoders by different but
+             # equivalent filenames (for example CLIP-ViT-H-* vs clip_vision_h).
+             # Treat those as present so the workflow can be auto-fixed as a path mismatch
+             # instead of re-downloading the same weights.
+             found_file = recursive_find_equivalent_model_file(filename, root_path, folder_type)
              if found_file:
                  found_path = found_file
                  found_root = root_path
