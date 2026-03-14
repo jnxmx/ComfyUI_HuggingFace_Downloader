@@ -27,6 +27,7 @@ app.registerExtension({
             "../../../scripts/stores/executionStore.js",
             "/scripts/stores/executionStore.js"
         ];
+        let runHookBypassRemaining = 0;
 
         /* ──────────────── Helper Functions ──────────────── */
         const createButton = (text, className, onClick) => {
@@ -1559,10 +1560,22 @@ app.registerExtension({
                     severity: "success",
                     summary: "No downloads needed",
                     detail: autoMismatchFix.fixedRows > 0
-                        ? "Resolved path mismatches. Press Run again."
+                        ? (typeof options?.resumeRun === "function"
+                            ? "Resolved path mismatches and resumed the workflow run."
+                            : "Resolved path mismatches. Press Run again.")
                         : "All required model files are already available.",
                     life: 3200,
                 });
+                const resume = options?.resumeRun;
+                if (typeof resume === "function") {
+                    setTimeout(() => {
+                        try {
+                            resume();
+                        } catch (resumeErr) {
+                            console.error("[AutoDownload] Failed to resume run after no-download result:", resumeErr);
+                        }
+                    }, 0);
+                }
                 return;
             }
 
@@ -2627,6 +2640,17 @@ app.registerExtension({
             let aborted = false;
             let skipRequested = false;
             let statusTimer = null;
+            const resumeRunIfPossible = () => {
+                const resume = options?.resumeRun;
+                if (typeof resume !== "function") {
+                    return;
+                }
+                try {
+                    resume();
+                } catch (resumeErr) {
+                    console.error("[AutoDownload] Failed to resume run after scan:", resumeErr);
+                }
+            };
             try {
                 // Show loading dialog immediately
                 const controller = new AbortController();
@@ -2794,6 +2818,7 @@ app.registerExtension({
                             detail: "Run hook detected missing-model signals, but scan returned no actionable models.",
                             life: 4200
                         });
+                        resumeRunIfPossible();
                         return;
                     }
                 }
@@ -3991,7 +4016,7 @@ app.registerExtension({
             return [];
         };
 
-        const triggerAutoDownloadFromRunHook = (reason = "missing-dialog", failures = []) => {
+        const triggerAutoDownloadFromRunHook = (reason = "missing-dialog", failures = [], extraOptions = {}) => {
             const isValidationReason = reason === "model-validation";
             const now = Date.now();
             if (now - runHookLastTriggeredAt < RUN_HOOK_COOLDOWN_MS) {
@@ -4022,6 +4047,7 @@ app.registerExtension({
                 triggeredByRunHook: true,
                 reason,
                 runHookFailures: Array.isArray(failures) ? failures : [],
+                ...extraOptions,
             });
             if (isValidationReason) {
                 void clearModelValidationErrorsFromFrontendState();
@@ -4076,6 +4102,26 @@ app.registerExtension({
                     if (typeof fallback !== "function") {
                         return undefined;
                     }
+                    if (runHookBypassRemaining > 0) {
+                        runHookBypassRemaining = Math.max(0, runHookBypassRemaining - 1);
+                        return fallback(metadata);
+                    }
+
+                    let resumeQueued = false;
+                    const resumeRun = () => {
+                        if (resumeQueued) {
+                            return;
+                        }
+                        resumeQueued = true;
+                        runHookBypassRemaining += 1;
+                        setTimeout(async () => {
+                            try {
+                                await fallback(metadata);
+                            } catch (resumeErr) {
+                                console.error("[AutoDownload] Failed to resume original run:", resumeErr);
+                            }
+                        }, 0);
+                    };
 
                     const hookEnabled = getRunHookEnabled();
                     const graphData = app?.graph?.serialize?.();
@@ -4097,7 +4143,7 @@ app.registerExtension({
                                 missingValue: String(model?.name || "").trim(),
                                 details: `${String(model?.directory || "").trim()}/${String(model?.name || "").trim()}`
                             }));
-                            if (triggerAutoDownloadFromRunHook("native-missing-models", preRunFailures)) {
+                            if (triggerAutoDownloadFromRunHook("native-missing-models", preRunFailures, { resumeRun })) {
                                 return false;
                             }
                         }
@@ -4127,12 +4173,12 @@ app.registerExtension({
                                 preRunEligibleMissingModels.length > 0;
                             if (shouldTriggerMissingDialog) {
                                 triggeredImmediately =
-                                    triggerAutoDownloadFromRunHook("missing-dialog") || triggeredImmediately;
+                                    triggerAutoDownloadFromRunHook("missing-dialog", [], { resumeRun }) || triggeredImmediately;
                             }
                         }
                         if (immediateValidationFailures.length) {
                             triggeredImmediately =
-                                triggerAutoDownloadFromRunHook("model-validation", immediateValidationFailures) ||
+                                triggerAutoDownloadFromRunHook("model-validation", immediateValidationFailures, { resumeRun }) ||
                                 triggeredImmediately;
                         }
 
@@ -4157,11 +4203,11 @@ app.registerExtension({
                                             !shouldSuppressFlashVsrDialogTrigger ||
                                             preRunEligibleMissingModels.length > 0;
                                         if (shouldTriggerMissingDialog) {
-                                            triggerAutoDownloadFromRunHook("missing-dialog");
+                                            triggerAutoDownloadFromRunHook("missing-dialog", [], { resumeRun });
                                         }
                                     }
                                     if (validationFailures.length) {
-                                        triggerAutoDownloadFromRunHook("model-validation", validationFailures);
+                                        triggerAutoDownloadFromRunHook("model-validation", validationFailures, { resumeRun });
                                     }
                                 } catch (_) {
                                     // No-op: run behavior must remain native even if hook observation fails.
