@@ -1704,6 +1704,14 @@ app.registerExtension({
                     if (downloadMode === "folder") {
                         folderPicker.input.placeholder = "Root";
                     }
+                    const folderLocked = Boolean(m.folder_locked) && downloadMode !== "folder";
+                    if (folderLocked) {
+                        folderPicker.input.value = String(m.suggested_folder || defaultFolder || "").trim();
+                        folderPicker.input.readOnly = true;
+                        folderPicker.input.disabled = true;
+                        folderPicker.input.title = "Locked to the requesting node's model folder";
+                        folderPicker.wrapper.style.opacity = "0.9";
+                    }
 
                     row.appendChild(cb);
                     row.appendChild(infoDiv);
@@ -1726,6 +1734,10 @@ app.registerExtension({
                         nodeId: m.node_id,
                         downloadMode,
                         skipWorkflowUpdate: downloadMode === "folder",
+                        folderLocked,
+                        lockedFolder: folderLocked
+                            ? String(m.suggested_folder || defaultFolder || "").trim()
+                            : "",
                     };
                     rowInputs.push(rowData);
 
@@ -1789,7 +1801,7 @@ app.registerExtension({
                                     rowData.resolvedUrl = alt.url;
                                     cb.checked = true;
                                 }
-                                if (alt.suggested_folder) {
+                                if (alt.suggested_folder && !rowData.folderLocked) {
                                     rowData.folderInput.value = alt.suggested_folder;
                                 }
                                 rowData.nameEl.textContent = rowData.filename;
@@ -2049,10 +2061,15 @@ app.registerExtension({
             const downloadBtn = createButton("Download Selected", "p-button p-component p-button-success", async () => {
                 const selectedRows = rowInputs.filter((r) => r.checkbox.checked);
                 const toDownload = selectedRows.map((r) => {
+                    const effectiveFolder = r.folderLocked
+                        ? (r.lockedFolder || r.folderInput.value.trim())
+                        : r.folderInput.value.trim();
                     const item = {
                         filename: r.filename,
                         url: r.urlInput.value.trim(),
-                        folder: r.folderInput.value.trim(),
+                        folder: effectiveFolder,
+                        folder_locked: Boolean(r.folderLocked),
+                        locked_folder: r.lockedFolder || "",
                     };
                     if (String(r.downloadMode || "").toLowerCase() === "folder") {
                         item.download_mode = "folder";

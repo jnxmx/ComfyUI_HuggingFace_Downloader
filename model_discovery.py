@@ -1060,6 +1060,34 @@ def _is_strict_node_folder_mapping(node_type: str | None, folder: str | None) ->
     folder_norm = normalize_save_path(folder) or folder
     return mapped_norm == folder_norm
 
+def _get_strict_node_folder(node_type: str | None) -> str | None:
+    if not node_type:
+        return None
+    mapped = NODE_TYPE_MAPPING.get(node_type)
+    if not mapped:
+        return None
+    return normalize_save_path(mapped) or mapped
+
+def _lock_model_to_node_folder(model: dict) -> None:
+    strict_folder = _get_strict_node_folder(model.get("node_type"))
+    if not strict_folder:
+        return
+
+    current = normalize_save_path(model.get("suggested_folder")) or ""
+    locked_folder = strict_folder
+    strict_prefix = f"{strict_folder}/"
+    if current.startswith(strict_prefix):
+        locked_folder = current
+
+    model["suggested_folder"] = locked_folder
+    model["folder_locked"] = True
+    model["authoritative_folder"] = strict_folder
+
+def enforce_authoritative_node_folders(models: list[dict]) -> None:
+    for model in models:
+        if isinstance(model, dict):
+            _lock_model_to_node_folder(model)
+
 
 def _build_links_map(raw_links: list[Any]) -> dict:
     links_map = {}
@@ -2434,6 +2462,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     _hf_rate_limited_until = None
     _hf_repo_files_cache = {}
     required_models = extract_models_from_workflow(workflow_json)
+    enforce_authoritative_node_folders(required_models)
 
     def _normalize_dedupe_path(value: str | None) -> str:
         if not value:
@@ -2672,6 +2701,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         base_folder = model.get("suggested_folder") or "checkpoints"
         if not base_folder.replace("\\", "/").endswith(subfolder):
             model["suggested_folder"] = f"{base_folder}/{subfolder}"
+    enforce_authoritative_node_folders(missing_models)
 
     # 3. Check curated popular models registry
     if missing_models:
@@ -2973,6 +3003,9 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             _run_hf_stage("priority", "priority")
 
     final_missing = missing_models
+    enforce_authoritative_node_folders(final_missing)
+    enforce_authoritative_node_folders(existing_models)
+    enforce_authoritative_node_folders(path_mismatches)
 
     # 6. Quantized variant detection for unresolved models (no URL)
     if final_missing:

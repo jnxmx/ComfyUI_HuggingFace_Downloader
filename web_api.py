@@ -2365,7 +2365,9 @@ async def install_models(request):
         for model in models_to_install:
             url = model.get("url")
             filename = model.get("filename")
-            folder = model.get("folder", "checkpoints") # Default to checkpoints
+            folder_locked = bool(model.get("folder_locked"))
+            locked_folder = str(model.get("locked_folder") or "").strip()
+            folder = locked_folder if folder_locked and locked_folder else model.get("folder", "checkpoints") # Default to checkpoints
             
             if not url and not (model.get("hf_repo") and model.get("hf_path")):
                 results.append({"filename": filename, "status": "failed", "error": "No URL provided"})
@@ -2583,10 +2585,16 @@ def setup(app_or_server):
                 filename = model.get("filename")
                 url = model.get("url")
                 download_mode = str(model.get("download_mode") or "").strip().lower()
+                folder_locked = bool(model.get("folder_locked"))
+                locked_folder = str(model.get("locked_folder") or "").strip()
                 is_hf_file_download = False
 
                 if download_mode == "folder":
-                    folder = str(model.get("folder", "") or "").replace("\\", "/").strip().strip("/")
+                    folder = (
+                        locked_folder
+                        if folder_locked and locked_folder
+                        else str(model.get("folder", "") or "")
+                    ).replace("\\", "/").strip().strip("/")
                     if not url:
                         rejected.append({
                             "filename": filename or "",
@@ -2605,7 +2613,7 @@ def setup(app_or_server):
                         filename = folder_info.get("display_name") or ""
                 else:
                     download_mode = "file"
-                    folder = model.get("folder", "checkpoints")
+                    folder = locked_folder if folder_locked and locked_folder else model.get("folder", "checkpoints")
                     has_hf_repo_path = bool(model.get("hf_repo") and model.get("hf_path"))
                     is_hf_file_download = has_hf_repo_path or (url and _is_supported_hf_link(url))
                     if not url and not has_hf_repo_path:
