@@ -992,7 +992,14 @@ app.registerExtension({
             return `${parts.join("/")}/`;
         };
 
-        const normalizeWorkflowPath = (value) => String(value || "").replace(/\\/g, "/").trim();
+        const normalizeWorkflowPath = (value) => {
+            let normalized = String(value || "").replace(/\\/g, "/").trim();
+            if (!normalized) return "";
+            normalized = normalized.replace(/\/+/g, "/");
+            normalized = normalized.replace(/^(?:\.\/)+/, "");
+            if (normalized === ".") return "";
+            return normalized;
+        };
 
         const getPathBasename = (value) => {
             const normalized = normalizeWorkflowPath(value).replace(/\/+$/, "");

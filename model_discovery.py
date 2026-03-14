@@ -150,6 +150,16 @@ def normalize_save_path(save_path: str | None) -> str | None:
         normalized = normalized.split("/", 1)[1]
     return normalized or None
 
+def normalize_relative_model_path(value: str | None) -> str:
+    normalized = str(value or "").replace("\\", "/").strip()
+    if not normalized:
+        return ""
+    normalized = re.sub(r"/+", "/", normalized)
+    normalized = re.sub(r"^(?:\./)+", "", normalized)
+    if normalized == ".":
+        return ""
+    return normalized.strip("/")
+
 def normalize_filename_key(name: str) -> str:
     base = os.path.basename(name.replace("\\", "/")).strip()
     return base.lower()
@@ -1196,15 +1206,18 @@ def _collect_models_from_nodes(
 
         linked_widget_indices = set()
         linked_widget_names = set()
+        widget_names_by_index = {}
         widget_pos = 0
         has_linked_widget_input = False
         for input_item in node.get("inputs", []):
             if "widget" in input_item:
+                input_name = input_item.get("name")
+                if isinstance(input_name, str) and input_name:
+                    widget_names_by_index[widget_pos] = input_name
                 link_id = input_item.get("link")
                 if link_id is not None:
                     linked_widget_indices.add(widget_pos)
                     has_linked_widget_input = True
-                    input_name = input_item.get("name")
                     if isinstance(input_name, str) and input_name:
                         linked_widget_names.add(input_name)
                 widget_pos += 1
@@ -1373,6 +1386,7 @@ def _collect_models_from_nodes(
                                     suggested_folder = resolve_node_folder_for_widget(
                                         node,
                                         widget_index=idx,
+                                        widget_name=widget_names_by_index.get(idx),
                                         widget_value=parsed_filename
                                     )
                                     found_models.append({
@@ -1396,6 +1410,7 @@ def _collect_models_from_nodes(
                             suggested_folder = resolve_node_folder_for_widget(
                                 node,
                                 widget_index=idx,
+                                widget_name=widget_names_by_index.get(idx),
                                 widget_value=filename
                             )
                             found_models.append({
@@ -1647,9 +1662,10 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             except ValueError: # If paths are on different drives, relpath can fail
                 rel_path = os.path.basename(found_path) # Fallback to just filename
                 
-            # Normalize for comparison (e.g., "subfolder\file.safetensors" vs "subfolder/file.safetensors")
-            req_norm = requested_path.replace("\\", "/")
-            found_norm = rel_path.replace("\\", "/")
+            # Normalize logical relative paths so slash style, duplicate separators,
+            # and leading "./" do not create false mismatch reports.
+            req_norm = normalize_relative_model_path(requested_path)
+            found_norm = normalize_relative_model_path(rel_path)
             
             model_entry = model.copy()
             model_entry["found_path"] = found_path
@@ -2572,7 +2588,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         requested_path = model.get("requested_path")
         if not requested_path:
             continue
-        normalized = requested_path.replace("\\", "/").strip("/")
+        normalized = normalize_relative_model_path(requested_path)
         if "/" not in normalized:
             continue
         subfolder = "/".join(normalized.split("/")[:-1])
