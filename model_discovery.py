@@ -2730,8 +2730,22 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     break
 
             if not live_url:
-                print(f"[DEBUG] Skipping stale curated URLs for {model.get('filename')}; falling back to other sources")
-                continue
+                trusted_curated_source = (entry.get("source") or "") in {
+                    "cloud_marketplace_export",
+                    "comfyui_manager_model_list",
+                }
+                if trusted_curated_source:
+                    live_url = next(
+                        (url for url in candidate_urls if "/resolve/" in url),
+                        candidate_urls[0],
+                    )
+                    print(
+                        f"[DEBUG] Curated URL verification failed for {model.get('filename')}; "
+                        f"using trusted fallback URL: {live_url}"
+                    )
+                else:
+                    print(f"[DEBUG] Skipping stale curated URLs for {model.get('filename')}; falling back to other sources")
+                    continue
 
             enrich_model_with_url(
                 model,
