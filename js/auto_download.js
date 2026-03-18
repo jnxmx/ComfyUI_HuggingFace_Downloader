@@ -3432,6 +3432,77 @@ app.registerExtension({
             return Array.from(uniqueByKey.values());
         };
 
+        const MODELISH_FILENAME_PATTERN =
+            /\.(safetensors|gguf|ckpt|pt|pth|bin|onnx|engine|tflite|pb)(?:$|\?)/i;
+
+        const workflowLikelyContainsModelReferences = (graphData) => {
+            if (!graphData || typeof graphData !== "object") {
+                return false;
+            }
+
+            const nodesToScan = [];
+            const pushNodes = (nodes) => {
+                if (!Array.isArray(nodes)) return;
+                nodesToScan.push(...nodes);
+            };
+
+            pushNodes(graphData?.nodes);
+            const subgraphs = graphData?.definitions?.subgraphs;
+            if (Array.isArray(subgraphs)) {
+                for (const subgraph of subgraphs) {
+                    pushNodes(subgraph?.nodes);
+                }
+            }
+
+            for (const node of nodesToScan) {
+                if (!node || typeof node !== "object") continue;
+
+                const nodeModels = Array.isArray(node?.properties?.models) ? node.properties.models : [];
+                if (nodeModels.length) {
+                    return true;
+                }
+
+                const proxyWidgets = Array.isArray(node?.properties?.proxyWidgets)
+                    ? node.properties.proxyWidgets
+                    : [];
+                for (const proxy of proxyWidgets) {
+                    const widgetName = String(
+                        Array.isArray(proxy) && proxy.length >= 2 ? proxy[1] : ""
+                    )
+                        .trim()
+                        .toLowerCase();
+                    if (widgetName && MODEL_VALIDATION_INPUT_NAMES.has(widgetName)) {
+                        return true;
+                    }
+                }
+
+                const inputs = Array.isArray(node?.inputs) ? node.inputs : [];
+                for (const input of inputs) {
+                    const widgetName = String(input?.widget?.name || input?.name || "")
+                        .trim()
+                        .toLowerCase();
+                    if (widgetName && MODEL_VALIDATION_INPUT_NAMES.has(widgetName)) {
+                        return true;
+                    }
+                }
+
+                const widgetValuesRaw = node?.widgets_values;
+                const widgetValues = Array.isArray(widgetValuesRaw)
+                    ? widgetValuesRaw
+                    : Object.values(widgetValuesRaw || {});
+                for (const value of widgetValues) {
+                    if (typeof value !== "string") continue;
+                    const text = value.trim();
+                    if (!text) continue;
+                    if (MODELISH_FILENAME_PATTERN.test(text)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        };
+
         const getRegisteredNodeTypesMap = () => {
             const candidates = [
                 globalThis?.LiteGraph?.registered_node_types,
@@ -3537,6 +3608,42 @@ app.registerExtension({
             }
 
             return missing;
+        };
+
+        const getPreRunMissingModelsBackendFallback = async (graphData = null) => {
+            if (!graphData || typeof graphData !== "object") {
+                graphData = app?.graph?.serialize?.();
+            }
+            if (!graphData || typeof graphData !== "object") {
+                return { missing: [], pathMismatches: [] };
+            }
+            if (!workflowLikelyContainsModelReferences(graphData)) {
+                return { missing: [], pathMismatches: [] };
+            }
+
+            try {
+                const resp = await doFetch("/check_missing_models", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        ...graphData,
+                        request_id: `run-hook-preflight-${Date.now()}`,
+                        skip_hf_search: true,
+                    }),
+                });
+                if (resp.status !== 200) {
+                    return { missing: [], pathMismatches: [] };
+                }
+                const data = await resp.json();
+                return {
+                    missing: filterRunHookEligibleMissingModels(
+                        Array.isArray(data?.missing) ? data.missing : []
+                    ),
+                    pathMismatches: Array.isArray(data?.path_mismatches) ? data.path_mismatches : [],
+                };
+            } catch (_) {
+                return { missing: [], pathMismatches: [] };
+            }
         };
 
         const isLikelyModelLoaderClass = (classType) => {
@@ -4148,19 +4255,39 @@ app.registerExtension({
                     const hadValidationDialogBeforeRun = hasNativePromptValidationDialog();
                     const beforeNodeErrorSignature = getNodeErrorsSignature(getNodeErrorsSnapshot());
                     let preRunEligibleMissingModels = [];
+                    let preRunPathMismatches = [];
 
                     if (hookEnabled && !hasMissingNodes) {
                         const preRunMissingModels = await getPreRunMissingModelsNativeLike(graphData);
                         preRunEligibleMissingModels =
                             filterRunHookEligibleMissingModels(preRunMissingModels);
-                        if (preRunEligibleMissingModels.length) {
+                        if (!preRunEligibleMissingModels.length) {
+                            const backendPreflight =
+                                await getPreRunMissingModelsBackendFallback(graphData);
+                            preRunEligibleMissingModels = backendPreflight.missing;
+                            preRunPathMismatches = backendPreflight.pathMismatches;
+                        }
+                        if (preRunEligibleMissingModels.length || preRunPathMismatches.length) {
                             const preRunFailures = preRunEligibleMissingModels.map((model) => ({
                                 classType: "",
                                 inputName: "",
                                 missingValue: String(model?.name || "").trim(),
                                 details: `${String(model?.directory || "").trim()}/${String(model?.name || "").trim()}`
-                            }));
-                            if (triggerAutoDownloadFromRunHook("native-missing-models", preRunFailures, { resumeRun })) {
+                            })).concat(
+                                preRunPathMismatches.map((item) => ({
+                                    classType: "",
+                                    inputName: "",
+                                    missingValue:
+                                        String(item?.filename || item?.requested_path || "").trim(),
+                                    details:
+                                        String(item?.expected_path || item?.requested_path || "").trim() ||
+                                        String(item?.actual_path || "").trim()
+                                }))
+                            );
+                            const preRunReason = preRunEligibleMissingModels.length
+                                ? "native-missing-models"
+                                : "missing-dialog";
+                            if (triggerAutoDownloadFromRunHook(preRunReason, preRunFailures, { resumeRun })) {
                                 return false;
                             }
                         }
