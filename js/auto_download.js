@@ -929,7 +929,160 @@ app.registerExtension({
                 .filter(Boolean);
         };
 
-        const createRunHookFallbackMissingModels = (failures = []) => {
+        const RUN_HOOK_INPUT_FOLDER_HINTS = Object.freeze({
+            ckpt_name: "checkpoints",
+            unet_name: "diffusion_models",
+            vae_name: "vae",
+            clip_name: "text_encoders",
+            text_encoder: "text_encoders",
+            text_encoder_name: "text_encoders",
+            lora_name: "loras",
+            control_net_name: "controlnet",
+            controlnet_name: "controlnet",
+            clip_vision: "clip_vision",
+            clip_vision_name: "clip_vision",
+            style_model_name: "style_models",
+            gligen_name: "gligen",
+            audio_encoder_name: "audio_encoders",
+        });
+
+        const guessSuggestedFolderFromRunHookFilename = (value) => {
+            const lower = String(value || "").trim().toLowerCase();
+            if (!lower) return "";
+            const compact = lower.replace(/[^a-z0-9]+/g, "");
+
+            if (lower.includes("controlnet")) return "controlnet";
+            if (lower.includes("lora")) return "loras";
+            if (
+                lower.includes("clip_vision") ||
+                lower.includes("clip vision") ||
+                lower.includes("clip-vit-") ||
+                compact.includes("clipvisionh") ||
+                compact.includes("clipvisiong") ||
+                compact.includes("clipvith") ||
+                compact.includes("clipvitg")
+            ) {
+                return "clip_vision";
+            }
+            if (
+                lower.includes("text_encoder") ||
+                lower.includes("text-encoder") ||
+                lower.includes("umt5") ||
+                lower.startsWith("t5_") ||
+                lower.startsWith("t5-") ||
+                lower.includes("qwen")
+            ) {
+                return "text_encoders";
+            }
+            if (lower.includes("vae_approx") || lower.includes("tinyvae") || lower.includes("taesd")) {
+                return "vae_approx";
+            }
+            if (lower.includes("vae")) return "vae";
+            return "";
+        };
+
+        const inferSuggestedFolderFromRunHookSignals = (signals = {}) => {
+            const inputNameLower = String(signals?.inputName || "").trim().toLowerCase();
+            if (inputNameLower && RUN_HOOK_INPUT_FOLDER_HINTS[inputNameLower]) {
+                return RUN_HOOK_INPUT_FOLDER_HINTS[inputNameLower];
+            }
+
+            const classTypeLower = String(signals?.classType || "").trim().toLowerCase();
+            if (classTypeLower) {
+                if (classTypeLower.includes("clipvision")) return "clip_vision";
+                if (classTypeLower.includes("style")) return "style_models";
+                if (classTypeLower.includes("controlnet")) return "controlnet";
+                if (classTypeLower.includes("lora")) return "loras";
+                if (classTypeLower.includes("vae")) return "vae";
+                if (classTypeLower.includes("clip")) return "text_encoders";
+                if (classTypeLower.includes("unet")) return "diffusion_models";
+                if (classTypeLower.includes("checkpoint") || classTypeLower.includes("ckpt")) return "checkpoints";
+                if (classTypeLower.includes("upscale")) return "upscale_models";
+            }
+
+            return guessSuggestedFolderFromRunHookFilename(
+                signals?.filename || signals?.missingValue || ""
+            );
+        };
+
+        const findEmbeddedModelMetadataForRunHookFailure = (graphData, filename, preferredDirectory = "") => {
+            if (!graphData || typeof graphData !== "object" || !filename) {
+                return null;
+            }
+            const targetFilename = String(filename || "").trim().toLowerCase();
+            const targetDirectory = String(preferredDirectory || "").trim().toLowerCase();
+            if (!targetFilename) {
+                return null;
+            }
+
+            const embeddedModels = collectEmbeddedModelsNativeLike(graphData);
+            if (!embeddedModels.length) {
+                return null;
+            }
+
+            const matches = embeddedModels.filter((model) => {
+                const modelName = getPathBasename(model?.name || "").toLowerCase();
+                return modelName === targetFilename;
+            });
+            if (!matches.length) {
+                return null;
+            }
+
+            const exactDirectoryMatch = matches.find((model) =>
+                String(model?.directory || "").trim().toLowerCase() === targetDirectory
+            );
+            return exactDirectoryMatch || matches[0] || null;
+        };
+
+        const createGenericValidationFailureMissingModelEntry = (signals = {}, graphData = null) => {
+            const filename = getPathBasename(
+                signals?.filename || signals?.missingValue || parseMissingValueFromDetails(signals?.details || "")
+            );
+            if (!filename || !MODELISH_FILENAME_PATTERN.test(filename)) {
+                return null;
+            }
+
+            const inferredFolder = inferSuggestedFolderFromRunHookSignals({
+                ...signals,
+                filename,
+            });
+            if (!inferredFolder) {
+                return null;
+            }
+
+            const embedded = findEmbeddedModelMetadataForRunHookFailure(
+                graphData,
+                filename,
+                inferredFolder
+            );
+            const suggestedFolder =
+                String(embedded?.directory || "").trim() ||
+                inferredFolder;
+            const nodeTitle =
+                String(signals.nodeTitle || "").trim() ||
+                String(signals.classType || "").trim() ||
+                "Unknown Node";
+            const nodeId = Number(signals.nodeId);
+
+            return {
+                filename,
+                name: filename,
+                requested_path: filename,
+                directory: suggestedFolder,
+                suggested_folder: suggestedFolder,
+                url: String(embedded?.url || "").trim(),
+                hash: String(embedded?.hash || "").trim(),
+                hash_type: String(embedded?.hash_type || "").trim(),
+                node_title: nodeTitle,
+                node_id: Number.isFinite(nodeId) ? nodeId : undefined,
+                input_name: String(signals?.inputName || "").trim(),
+                details: String(signals?.details || "").trim(),
+                source: "run_hook_validation_inferred",
+                type: "",
+            };
+        };
+
+        const createRunHookFallbackMissingModels = (failures = [], graphData = null) => {
             if (!Array.isArray(failures) || !failures.length) {
                 return [];
             }
@@ -957,7 +1110,8 @@ app.registerExtension({
                     inputName: failure?.inputName,
                     details: failure?.details,
                     missingValue: failure?.missingValue,
-                    nodeTitle: failure?.classType,
+                    nodeId: failure?.nodeId,
+                    nodeTitle: failure?.nodeTitle || failure?.classType,
                 };
 
                 const repoEntry = createRepoFolderMissingModelEntry(signals);
@@ -975,6 +1129,14 @@ app.registerExtension({
                         source: "run_hook_fallback",
                     });
                 });
+
+                const genericEntry = createGenericValidationFailureMissingModelEntry(
+                    signals,
+                    graphData
+                );
+                if (genericEntry) {
+                    pushEntry(genericEntry);
+                }
             }
 
             return collected;
@@ -982,9 +1144,25 @@ app.registerExtension({
 
         const createRunHookFallbackMissingModelsFromFrontendStore = async () => {
             const store = await resolveMissingModelStore();
-            const candidates = Array.isArray(store?.missingModelCandidates)
+            let candidates = Array.isArray(store?.missingModelCandidates)
                 ? store.missingModelCandidates
                 : [];
+            if (!candidates.length) {
+                let workflowStore = app?.extensionManager?.workflow;
+                workflowStore =
+                    workflowStore && typeof workflowStore === "object" && "value" in workflowStore
+                        ? workflowStore.value
+                        : workflowStore;
+                let activeWorkflow = workflowStore?.activeWorkflow;
+                activeWorkflow =
+                    activeWorkflow && typeof activeWorkflow === "object" && "value" in activeWorkflow
+                        ? activeWorkflow.value
+                        : activeWorkflow;
+                const pendingCandidates = activeWorkflow?.pendingWarnings?.missingModelCandidates;
+                if (Array.isArray(pendingCandidates)) {
+                    candidates = pendingCandidates;
+                }
+            }
             if (!candidates.length) {
                 return [];
             }
@@ -1105,6 +1283,45 @@ app.registerExtension({
             if (!normalized) return "";
             const idx = normalized.lastIndexOf("/");
             return idx === -1 ? "" : normalized.slice(0, idx);
+        };
+
+        const serializeWorkflowForModelScan = () => {
+            try {
+                let workflowStore = app?.extensionManager?.workflow;
+                workflowStore =
+                    workflowStore && typeof workflowStore === "object" && "value" in workflowStore
+                        ? workflowStore.value
+                        : workflowStore;
+                let activeWorkflow = workflowStore?.activeWorkflow;
+                activeWorkflow =
+                    activeWorkflow && typeof activeWorkflow === "object" && "value" in activeWorkflow
+                        ? activeWorkflow.value
+                        : activeWorkflow;
+                const activeState = activeWorkflow?.activeState;
+                if (activeState && typeof activeState === "object") {
+                    return activeState;
+                }
+            } catch (_) {
+                // Fall through to graph serialization.
+            }
+
+            try {
+                if (typeof app?.rootGraph?.serialize === "function") {
+                    return app.rootGraph.serialize();
+                }
+            } catch (_) {
+                // Fall through to deprecated graph alias.
+            }
+
+            try {
+                if (typeof app?.graph?.serialize === "function") {
+                    return app.graph.serialize();
+                }
+            } catch (_) {
+                // No serialized workflow available.
+            }
+
+            return null;
         };
 
         const formatFoundModelPath = (value) => {
@@ -1615,7 +1832,9 @@ app.registerExtension({
             });
 
             const foundModels = Array.isArray(data.found) ? data.found : [];
-            let mismatchModels = Array.isArray(data.mismatches) ? [...data.mismatches] : [];
+            let mismatchModels = Array.isArray(data.mismatches)
+                ? [...data.mismatches]
+                : (Array.isArray(data.path_mismatches) ? [...data.path_mismatches] : []);
             const autoMismatchFix = autoApplyPathMismatches(mismatchModels);
             mismatchModels = autoMismatchFix.remaining;
 
@@ -2859,7 +3078,10 @@ app.registerExtension({
                 statusTimer = setInterval(pollStatus, 600);
                 pollStatus();
 
-                const workflow = app.graph.serialize();
+                const workflow = serializeWorkflowForModelScan();
+                if (!workflow || typeof workflow !== "object") {
+                    throw new Error("Workflow is not ready for missing-model scan.");
+                }
                 console.log("[AutoDownload] Scanning workflow:", workflow);
 
                 // Call backend
@@ -2901,7 +3123,7 @@ app.registerExtension({
                 const suppressEmptyResults = Boolean(options?.suppressEmptyResults);
                 if (suppressEmptyResults) {
                     const fallbackMissingFromFailures =
-                        createRunHookFallbackMissingModels(options?.runHookFailures || []);
+                        createRunHookFallbackMissingModels(options?.runHookFailures || [], workflow);
                     const fallbackMissingFromFrontendStore =
                         await createRunHookFallbackMissingModelsFromFrontendStore();
                     if (fallbackMissingFromFailures.length) {
@@ -2922,7 +3144,9 @@ app.registerExtension({
                         (Array.isArray(split?.curatedMissing) ? split.curatedMissing.length : 0) +
                         (Array.isArray(split?.regularMissing) ? split.regularMissing.length : 0);
                     const foundCount = Array.isArray(data?.found) ? data.found.length : 0;
-                    const mismatchCount = Array.isArray(data?.mismatches) ? data.mismatches.length : 0;
+                    const mismatchCount = Array.isArray(data?.mismatches)
+                        ? data.mismatches.length
+                        : (Array.isArray(data?.path_mismatches) ? data.path_mismatches.length : 0);
                     const hasAnyResults = totalMissing > 0 || foundCount > 0 || mismatchCount > 0;
 
                     if (!hasAnyResults) {
@@ -3673,7 +3897,7 @@ app.registerExtension({
 
         const getPreRunMissingModelsNativeLike = async (graphData = null) => {
             if (!graphData || typeof graphData !== "object") {
-                graphData = app?.graph?.serialize?.();
+                graphData = serializeWorkflowForModelScan();
             }
             if (!graphData || typeof graphData !== "object") {
                 return [];
@@ -3736,7 +3960,7 @@ app.registerExtension({
 
         const getPreRunMissingModelsBackendFallback = async (graphData = null) => {
             if (!graphData || typeof graphData !== "object") {
-                graphData = app?.graph?.serialize?.();
+                graphData = serializeWorkflowForModelScan();
             }
             if (!graphData || typeof graphData !== "object") {
                 return { missing: [], pathMismatches: [] };
@@ -3763,7 +3987,9 @@ app.registerExtension({
                     missing: filterRunHookEligibleMissingModels(
                         Array.isArray(data?.missing) ? data.missing : []
                     ),
-                    pathMismatches: Array.isArray(data?.path_mismatches) ? data.path_mismatches : [],
+                    pathMismatches: Array.isArray(data?.mismatches)
+                        ? data.mismatches
+                        : (Array.isArray(data?.path_mismatches) ? data.path_mismatches : []),
                 };
             } catch (_) {
                 return { missing: [], pathMismatches: [] };
@@ -3956,9 +4182,11 @@ app.registerExtension({
             }
 
             const failures = [];
-            for (const nodeError of Object.values(nodeErrors)) {
+            for (const [executionId, nodeError] of Object.entries(nodeErrors)) {
                 const classType = String(nodeError?.class_type || "");
                 const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
+                const nodeId = parseNodeIdFromExecutionId(executionId);
+                const nodeTitle = getGraphNodeTitleById(nodeId, classType || "Unknown Node");
                 for (const reason of reasons) {
                     if (!isModelValidationReason(reason, classType)) {
                         continue;
@@ -3973,7 +4201,9 @@ app.registerExtension({
                         classType,
                         inputName,
                         missingValue: parseMissingValueFromDetails(details),
-                        details
+                        details,
+                        nodeId,
+                        nodeTitle,
                     });
                 }
             }
@@ -4372,7 +4602,7 @@ app.registerExtension({
                     };
 
                     const hookEnabled = getRunHookEnabled();
-                    const graphData = app?.graph?.serialize?.();
+                    const graphData = serializeWorkflowForModelScan();
                     const missingNodeTypes = getMissingNodeTypesNativeLike(graphData);
                     const hasMissingNodes = missingNodeTypes.length > 0;
                     const hadDialogBeforeRun = hasNativeMissingModelsDialog();
