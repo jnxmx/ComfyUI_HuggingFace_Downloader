@@ -1105,6 +1105,64 @@ def _build_links_map(raw_links: list[Any]) -> dict:
                 links_map[link_id] = (start_node_id, start_slot)
     return links_map
 
+def _collect_all_subgraph_defs(root_defs: list[Any]) -> list[dict]:
+    result: list[dict] = []
+    seen: set[str] = set()
+
+    def collect(defs: list[Any]) -> None:
+        if not isinstance(defs, list):
+            return
+        for subgraph_def in defs:
+            if not isinstance(subgraph_def, dict):
+                continue
+            def_id = str(subgraph_def.get("id") or "").strip()
+            if not def_id or def_id in seen:
+                continue
+            seen.add(def_id)
+            result.append(subgraph_def)
+            nested_defs = (subgraph_def.get("definitions") or {}).get("subgraphs", [])
+            if isinstance(nested_defs, list) and nested_defs:
+                collect(nested_defs)
+
+    collect(root_defs)
+    return result
+
+def _build_subgraph_execution_paths(root_nodes: list[dict], all_subgraph_defs: list[dict]) -> dict[str, list[str]]:
+    subgraph_def_map = {
+        str(subgraph_def.get("id") or "").strip(): subgraph_def
+        for subgraph_def in all_subgraph_defs
+        if isinstance(subgraph_def, dict) and str(subgraph_def.get("id") or "").strip()
+    }
+    path_map: dict[str, list[str]] = {}
+    visited: set[str] = set()
+
+    def build(nodes: list[dict], parent_prefix: str) -> None:
+        if not isinstance(nodes, list):
+            return
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            node_type = str(node.get("type") or "").strip()
+            if not node_type or node_type not in subgraph_def_map:
+                continue
+
+            node_id = node.get("id")
+            if node_id is None:
+                continue
+            path = f"{parent_prefix}:{node_id}" if parent_prefix else str(node_id)
+            path_map.setdefault(node_type, []).append(path)
+
+            if node_type in visited:
+                continue
+            visited.add(node_type)
+            inner_def = subgraph_def_map.get(node_type)
+            if inner_def:
+                build(inner_def.get("nodes", []), path)
+            visited.remove(node_type)
+
+    build(root_nodes, "")
+    return path_map
+
 def resolve_node_folder(node: dict) -> str | None:
     node_type = node.get("type", "")
     if node_type in NODE_TYPE_MAPPING:
@@ -1231,7 +1289,8 @@ def _collect_models_from_nodes(
     found_models: list[dict],
     note_links: dict,
     note_links_normalized: dict,
-    node_title_fallback: str
+    node_title_fallback: str,
+    node_id_prefix: str = ""
 ) -> None:
     for node in nodes:
         # Skip disabled/muted nodes
@@ -1242,7 +1301,8 @@ def _collect_models_from_nodes(
         if mode == 2 or mode == 4:
             continue
             
-        node_id = node.get("id")
+        raw_node_id = node.get("id")
+        node_id = f"{node_id_prefix}:{raw_node_id}" if node_id_prefix and raw_node_id is not None else raw_node_id
         # Skip disabled/muted nodes
         if node.get("mode") == 2:
             continue
@@ -1537,24 +1597,6 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
     note_links = {}  # {normalized_filename: url}
     note_links_normalized = {}  # {compact_filename: url}
 
-    definitions = workflow.get("definitions", {})
-    subgraphs = definitions.get("subgraphs", [])
-    for subgraph in subgraphs:
-        sub_nodes = subgraph.get("nodes", [])
-        sub_links = subgraph.get("links", [])
-        sub_links_map = _build_links_map(sub_links)
-        sub_nodes_by_id = {n.get("id"): n for n in sub_nodes}
-        subgraph_name = subgraph.get("name", "Subgraph")
-        _collect_models_from_nodes(
-            sub_nodes,
-            sub_links_map,
-            sub_nodes_by_id,
-            found_models,
-            note_links,
-            note_links_normalized,
-            f"Subgraph Node ({subgraph_name})"
-        )
-
     links_map = _build_links_map(workflow.get("links", []))
     nodes = workflow.get("nodes", [])
     nodes_by_id = {n.get("id"): n for n in nodes}
@@ -1567,6 +1609,35 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
         note_links_normalized,
         "Unknown Node"
     )
+
+    definitions = workflow.get("definitions", {})
+    root_subgraphs = definitions.get("subgraphs", [])
+    all_subgraph_defs = _collect_all_subgraph_defs(root_subgraphs)
+    path_map = _build_subgraph_execution_paths(nodes, all_subgraph_defs)
+    for subgraph in all_subgraph_defs:
+        def_id = str(subgraph.get("id") or "").strip()
+        if not def_id:
+            continue
+        instance_paths = path_map.get(def_id, [])
+        if not instance_paths:
+            continue
+
+        sub_nodes = subgraph.get("nodes", [])
+        sub_links = subgraph.get("links", [])
+        sub_links_map = _build_links_map(sub_links)
+        sub_nodes_by_id = {n.get("id"): n for n in sub_nodes}
+        subgraph_name = subgraph.get("name", "Subgraph")
+        for instance_path in instance_paths:
+            _collect_models_from_nodes(
+                sub_nodes,
+                sub_links_map,
+                sub_nodes_by_id,
+                found_models,
+                note_links,
+                note_links_normalized,
+                f"Subgraph Node ({subgraph_name})",
+                instance_path
+            )
 
     # Enrich found_models with URLs from note_links.
     # Note links should never override an already valid file URL from loader metadata.

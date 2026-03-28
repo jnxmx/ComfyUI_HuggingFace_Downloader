@@ -1142,6 +1142,72 @@ app.registerExtension({
             return collected;
         };
 
+        const createLastChanceRunHookMissingModels = (failures = [], graphData = null) => {
+            if (!Array.isArray(failures) || !failures.length) {
+                return [];
+            }
+
+            const collected = [];
+            const seen = new Set();
+            for (const failure of failures) {
+                const filename = getPathBasename(
+                    failure?.missingValue || parseMissingValueFromDetails(failure?.details || "")
+                );
+                if (!filename || !MODELISH_FILENAME_PATTERN.test(filename)) {
+                    continue;
+                }
+
+                const inferredFolder = inferSuggestedFolderFromRunHookSignals({
+                    classType: failure?.classType,
+                    inputName: failure?.inputName,
+                    filename,
+                    missingValue: filename,
+                }) || "checkpoints";
+                const embedded = findEmbeddedModelMetadataForRunHookFailure(
+                    graphData,
+                    filename,
+                    inferredFolder
+                );
+                const suggestedFolder =
+                    String(embedded?.directory || "").trim() ||
+                    inferredFolder;
+                const nodeTitle =
+                    String(failure?.nodeTitle || failure?.classType || "").trim() ||
+                    "Unknown Node";
+                const nodeId = Number(failure?.nodeId);
+                const entry = {
+                    filename,
+                    name: filename,
+                    requested_path: filename,
+                    directory: suggestedFolder,
+                    suggested_folder: suggestedFolder,
+                    url: String(embedded?.url || "").trim(),
+                    hash: String(embedded?.hash || "").trim(),
+                    hash_type: String(embedded?.hash_type || "").trim(),
+                    node_title: nodeTitle,
+                    node_id: Number.isFinite(nodeId) ? nodeId : undefined,
+                    input_name: String(failure?.inputName || "").trim(),
+                    details: String(failure?.details || "").trim(),
+                    source: "run_hook_last_chance",
+                    type: "",
+                };
+                const key = [
+                    entry.filename.toLowerCase(),
+                    entry.suggested_folder.toLowerCase(),
+                    entry.url.toLowerCase(),
+                    String(entry.node_id || "").toLowerCase(),
+                    entry.input_name.toLowerCase(),
+                ].join("|");
+                if (seen.has(key)) {
+                    continue;
+                }
+                seen.add(key);
+                collected.push(entry);
+            }
+
+            return filterRunHookEligibleMissingModels(collected);
+        };
+
         const createRunHookFallbackMissingModelsFromFrontendStore = async () => {
             const store = await resolveMissingModelStore();
             let candidates = Array.isArray(store?.missingModelCandidates)
@@ -3139,15 +3205,42 @@ app.registerExtension({
                         Array.isArray(data?.missing) ? data.missing : [],
                         getNodeErrorsSnapshot()
                     );
-                    const totalMissing =
+                    let totalMissing =
                         (Array.isArray(split?.repoFolderMissing) ? split.repoFolderMissing.length : 0) +
                         (Array.isArray(split?.curatedMissing) ? split.curatedMissing.length : 0) +
                         (Array.isArray(split?.regularMissing) ? split.regularMissing.length : 0);
                     const foundCount = Array.isArray(data?.found) ? data.found.length : 0;
-                    const mismatchCount = Array.isArray(data?.mismatches)
+                    let mismatchCount = Array.isArray(data?.mismatches)
                         ? data.mismatches.length
                         : (Array.isArray(data?.path_mismatches) ? data.path_mismatches.length : 0);
-                    const hasAnyResults = totalMissing > 0 || foundCount > 0 || mismatchCount > 0;
+                    let hasAnyResults = totalMissing > 0 || foundCount > 0 || mismatchCount > 0;
+
+                    if (!hasAnyResults) {
+                        const lastChanceMissing = createLastChanceRunHookMissingModels(
+                            options?.runHookFailures || [],
+                            workflow
+                        );
+                        if (lastChanceMissing.length) {
+                            const existingMissing = Array.isArray(data?.missing) ? data.missing : [];
+                            data.missing = [...existingMissing, ...lastChanceMissing];
+                            const recoveredSplit = splitMissingModelsForRepoFolderSection(
+                                data.missing,
+                                getNodeErrorsSnapshot()
+                            );
+                            totalMissing =
+                                (Array.isArray(recoveredSplit?.repoFolderMissing) ? recoveredSplit.repoFolderMissing.length : 0) +
+                                (Array.isArray(recoveredSplit?.curatedMissing) ? recoveredSplit.curatedMissing.length : 0) +
+                                (Array.isArray(recoveredSplit?.regularMissing) ? recoveredSplit.regularMissing.length : 0);
+                            mismatchCount = Array.isArray(data?.mismatches)
+                                ? data.mismatches.length
+                                : (Array.isArray(data?.path_mismatches) ? data.path_mismatches.length : 0);
+                            hasAnyResults = totalMissing > 0 || foundCount > 0 || mismatchCount > 0;
+                            console.info(
+                                "[AutoDownload] Recovered actionable models from last-chance run-hook fallback:",
+                                lastChanceMissing
+                            );
+                        }
+                    }
 
                     if (!hasAnyResults) {
                         showToast({
