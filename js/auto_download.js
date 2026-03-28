@@ -27,6 +27,12 @@ app.registerExtension({
             "../../../scripts/stores/executionStore.js",
             "/scripts/stores/executionStore.js"
         ];
+        const MISSING_MODEL_STORE_IMPORT_CANDIDATES = [
+            "../../../platform/missingModel/missingModelStore.js",
+            "/platform/missingModel/missingModelStore.js",
+            "../../../scripts/platform/missingModel/missingModelStore.js",
+            "/scripts/platform/missingModel/missingModelStore.js"
+        ];
         let runHookBypassRemaining = 0;
 
         /* ──────────────── Helper Functions ──────────────── */
@@ -972,6 +978,91 @@ app.registerExtension({
             }
 
             return collected;
+        };
+
+        const createRunHookFallbackMissingModelsFromFrontendStore = async () => {
+            const store = await resolveMissingModelStore();
+            const candidates = Array.isArray(store?.missingModelCandidates)
+                ? store.missingModelCandidates
+                : [];
+            if (!candidates.length) {
+                return [];
+            }
+
+            const modelStore = await resolveModelStore();
+            const folderNamesCache = new Map();
+            if (modelStore && typeof modelStore.loadModelFolders === "function") {
+                try {
+                    await modelStore.loadModelFolders();
+                } catch (_) {
+                    // Keep going; stale frontend candidates are still better than nothing.
+                }
+            }
+
+            const collected = [];
+            const seen = new Set();
+            for (const candidate of candidates) {
+                if (!candidate || candidate.isMissing !== true) {
+                    continue;
+                }
+                const filename = String(candidate?.name || "").trim();
+                if (!filename) {
+                    continue;
+                }
+                const directory = String(candidate?.directory || "").trim() || "checkpoints";
+
+                if (modelStore && directory) {
+                    if (!folderNamesCache.has(directory)) {
+                        let nameSet = null;
+                        try {
+                            const folder = await modelStore.getLoadedModelFolder(directory);
+                            const values = folder?.models ? Object.values(folder.models) : [];
+                            nameSet = new Set(
+                                values
+                                    .map((entry) => String(entry?.file_name || "").trim())
+                                    .filter(Boolean)
+                            );
+                        } catch (_) {
+                            nameSet = null;
+                        }
+                        folderNamesCache.set(directory, nameSet);
+                    }
+                    const namesInFolder = folderNamesCache.get(directory);
+                    if (namesInFolder && namesInFolder.has(filename)) {
+                        continue;
+                    }
+                }
+
+                const entry = {
+                    filename,
+                    name: filename,
+                    requested_path: filename,
+                    suggested_folder: directory,
+                    directory,
+                    url: String(candidate?.url || "").trim(),
+                    hash: String(candidate?.hash || "").trim(),
+                    hash_type: String(candidate?.hashType || "").trim(),
+                    node_id: candidate?.nodeId,
+                    node_title: String(candidate?.nodeType || "").trim(),
+                    input_name: String(candidate?.widgetName || "").trim(),
+                    source: "frontend_missing_model_store",
+                    type: "",
+                };
+                const key = [
+                    entry.filename.toLowerCase(),
+                    entry.suggested_folder.toLowerCase(),
+                    entry.url.toLowerCase(),
+                    String(entry.node_id || "").toLowerCase(),
+                    entry.input_name.toLowerCase(),
+                ].join("|");
+                if (seen.has(key)) {
+                    continue;
+                }
+                seen.add(key);
+                collected.push(entry);
+            }
+
+            return filterRunHookEligibleMissingModels(collected);
         };
 
         const normalizeFolderPathInput = (value) =>
@@ -2811,9 +2902,15 @@ app.registerExtension({
                 if (suppressEmptyResults) {
                     const fallbackMissingFromFailures =
                         createRunHookFallbackMissingModels(options?.runHookFailures || []);
+                    const fallbackMissingFromFrontendStore =
+                        await createRunHookFallbackMissingModelsFromFrontendStore();
                     if (fallbackMissingFromFailures.length) {
                         const existingMissing = Array.isArray(data?.missing) ? data.missing : [];
                         data.missing = [...existingMissing, ...fallbackMissingFromFailures];
+                    }
+                    if (fallbackMissingFromFrontendStore.length) {
+                        const existingMissing = Array.isArray(data?.missing) ? data.missing : [];
+                        data.missing = [...existingMissing, ...fallbackMissingFromFrontendStore];
                     }
 
                     const split = splitMissingModelsForRepoFolderSection(
@@ -3308,6 +3405,7 @@ app.registerExtension({
 
         let resolvedModelStorePromise = null;
         let resolvedExecutionStorePromise = null;
+        let resolvedMissingModelStorePromise = null;
 
         const resolveModelStore = async () => {
             if (resolvedModelStorePromise) {
@@ -3363,6 +3461,32 @@ app.registerExtension({
             })();
 
             return resolvedExecutionStorePromise;
+        };
+
+        const resolveMissingModelStore = async () => {
+            if (resolvedMissingModelStorePromise) {
+                return resolvedMissingModelStorePromise;
+            }
+
+            resolvedMissingModelStorePromise = (async () => {
+                for (const candidate of MISSING_MODEL_STORE_IMPORT_CANDIDATES) {
+                    try {
+                        const module = await import(candidate);
+                        const useMissingModelStore = module?.useMissingModelStore;
+                        if (typeof useMissingModelStore === "function") {
+                            const store = useMissingModelStore();
+                            if (store && typeof store === "object" && ("missingModelCandidates" in store)) {
+                                return store;
+                            }
+                        }
+                    } catch (_) {
+                        // Try next import candidate.
+                    }
+                }
+                return null;
+            })();
+
+            return resolvedMissingModelStorePromise;
         };
 
         const getSelectedModelsMetadataNativeLike = (node) => {
