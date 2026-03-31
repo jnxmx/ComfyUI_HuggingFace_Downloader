@@ -1141,7 +1141,14 @@ app.registerExtension({
                 const mode = String(entry.download_mode || "file").toLowerCase();
                 const key = mode === "folder"
                     ? `folder|${String(entry.exception_id || "").toLowerCase()}|${String(entry.repo_id || "").toLowerCase()}|${String(entry.url || "").toLowerCase()}`
-                    : `file|${String(entry.filename || "").toLowerCase()}|${String(entry.url || "").toLowerCase()}|${String(entry.suggested_folder || entry.folder || "").toLowerCase()}`;
+                    : [
+                        "file",
+                        String(entry.filename || "").toLowerCase(),
+                        String(entry.requested_path || "").toLowerCase(),
+                        String(entry.url || "").toLowerCase(),
+                        String(entry.suggested_folder || entry.folder || "").toLowerCase(),
+                        String(entry.node_id || "").toLowerCase(),
+                    ].join("|");
                 if (!key || seen.has(key)) {
                     return;
                 }
@@ -1238,6 +1245,7 @@ app.registerExtension({
                 };
                 const key = [
                     entry.filename.toLowerCase(),
+                    String(entry.requested_path || "").toLowerCase(),
                     entry.suggested_folder.toLowerCase(),
                     entry.url.toLowerCase(),
                     String(entry.node_id || "").toLowerCase(),
@@ -1527,33 +1535,243 @@ app.registerExtension({
             return parts.join("||");
         };
 
-        const mergeMissingEntries = (existingEntries, newEntries) => {
-            const merged = [];
-            const seen = new Set();
-            const append = (entry) => {
+        const getMissingEntryDestinationFolder = (entry) => {
+            const downloadMode = String(entry?.download_mode || "file").trim().toLowerCase();
+            if (downloadMode === "folder") {
+                return normalizeWorkflowPath(
+                    entry?.locked_folder ||
+                    entry?.suggested_folder ||
+                    entry?.directory ||
+                    entry?.folder ||
+                    ""
+                );
+            }
+
+            const lockedFolder = normalizeWorkflowPath(entry?.locked_folder || "");
+            let folder = normalizeWorkflowPath(
+                lockedFolder ||
+                entry?.suggested_folder ||
+                entry?.directory ||
+                entry?.folder ||
+                ""
+            );
+            const requestedPath = normalizeWorkflowPath(
+                entry?.requested_path ||
+                entry?.requestedPath ||
+                entry?.display_name ||
+                entry?.name ||
+                entry?.filename ||
+                ""
+            );
+            const requestedDir = getPathDirname(requestedPath);
+            if (requestedDir) {
+                const folderLower = folder.toLowerCase();
+                const requestedLower = requestedDir.toLowerCase();
+                if (!folder) {
+                    folder = requestedDir;
+                } else if (folderLower !== requestedLower && !folderLower.endsWith(`/${requestedLower}`)) {
+                    folder = normalizeWorkflowPath(`${folder}/${requestedDir}`);
+                }
+            }
+            return folder;
+        };
+
+        const getMissingEntryDestinationKey = (entry) => {
+            if (!entry || typeof entry !== "object") {
+                return "";
+            }
+            const downloadMode = String(entry?.download_mode || "file").trim().toLowerCase();
+            if (downloadMode === "folder") {
+                const repoId = String(entry?.repo_id || "").trim().toLowerCase();
+                const url = String(entry?.url || "").trim().toLowerCase();
+                const folder = getMissingEntryDestinationFolder(entry).toLowerCase();
+                return `folder|${repoId}|${url}|${folder}`;
+            }
+
+            const filename = getPathBasename(
+                entry?.filename ||
+                entry?.requested_path ||
+                entry?.requestedPath ||
+                entry?.name ||
+                entry?.display_name ||
+                ""
+            ).toLowerCase();
+            if (!filename) {
+                return "";
+            }
+            const folder = getMissingEntryDestinationFolder(entry).toLowerCase();
+            return `file|${folder}|${filename}`;
+        };
+
+        const getMissingEntryMergeScore = (entry) => {
+            const nodeLabel = [
+                String(entry?.node_title || ""),
+                String(entry?.node_type || ""),
+            ].join(" ").toLowerCase();
+            const source = String(entry?.source || "").trim().toLowerCase();
+            const requestedPath = normalizeWorkflowPath(
+                entry?.requested_path ||
+                entry?.requestedPath ||
+                entry?.display_name ||
+                entry?.name ||
+                entry?.filename ||
+                ""
+            );
+
+            let score = 0;
+            if (entry?.url) score += 40;
+            if (entry?.hf_repo || entry?.repo_id) score += 10;
+            if (nodeLabel.includes("hugging face download model")) score += 20;
+            if (source === "workflow_metadata") score += 16;
+            if (source === "frontend_missing_model_store") score += 10;
+            if (source === "run_hook_validation_inferred" || source === "run_hook_fallback") score += 6;
+            if (entry?.folder_locked || entry?.locked_folder) score += 6;
+            if (requestedPath.includes("/")) score += 4;
+
+            return [score, requestedPath.length];
+        };
+
+        const coalesceMissingEntriesByDestination = (entries = []) => {
+            if (!Array.isArray(entries) || !entries.length) {
+                return [];
+            }
+
+            const groups = new Map();
+            const passthrough = [];
+            for (const entry of entries) {
                 if (!entry || typeof entry !== "object") {
-                    return;
+                    continue;
                 }
-                const key = [
-                    String(entry?.filename || entry?.name || "").trim().toLowerCase(),
-                    String(entry?.suggested_folder || entry?.directory || "").trim().toLowerCase(),
-                    String(entry?.requested_path || "").trim().toLowerCase(),
-                    String(entry?.url || "").trim().toLowerCase(),
-                    String(entry?.node_id || "").trim().toLowerCase()
-                ].join("|");
-                if (seen.has(key)) {
-                    return;
+                const key = getMissingEntryDestinationKey(entry);
+                if (!key) {
+                    passthrough.push(entry);
+                    continue;
                 }
-                seen.add(key);
-                merged.push(entry);
-            };
-            for (const entry of Array.isArray(existingEntries) ? existingEntries : []) {
-                append(entry);
+                if (!groups.has(key)) {
+                    groups.set(key, []);
+                }
+                groups.get(key).push(entry);
             }
-            for (const entry of Array.isArray(newEntries) ? newEntries : []) {
-                append(entry);
+
+            const merged = [...passthrough];
+            for (const group of groups.values()) {
+                if (group.length === 1) {
+                    merged.push(group[0]);
+                    continue;
+                }
+
+                const best = [...group].sort((a, b) => {
+                    const aScore = getMissingEntryMergeScore(a);
+                    const bScore = getMissingEntryMergeScore(b);
+                    if (bScore[0] !== aScore[0]) return bScore[0] - aScore[0];
+                    return bScore[1] - aScore[1];
+                })[0];
+                const next = { ...best };
+
+                if (!next.url) {
+                    const firstWithUrl = group.find((entry) => entry?.url);
+                    if (firstWithUrl?.url) {
+                        next.url = firstWithUrl.url;
+                    }
+                }
+                if (!next.hf_repo) {
+                    const firstWithRepo = group.find((entry) => entry?.hf_repo);
+                    if (firstWithRepo?.hf_repo) {
+                        next.hf_repo = firstWithRepo.hf_repo;
+                    }
+                }
+                if (!next.hf_path) {
+                    const firstWithPath = group.find((entry) => entry?.hf_path);
+                    if (firstWithPath?.hf_path) {
+                        next.hf_path = firstWithPath.hf_path;
+                    }
+                }
+                if (!next.locked_folder) {
+                    const firstLocked = group.find((entry) => entry?.locked_folder);
+                    if (firstLocked?.locked_folder) {
+                        next.locked_folder = firstLocked.locked_folder;
+                        next.folder_locked = true;
+                    }
+                }
+                if (!next.suggested_folder) {
+                    const firstFolder = group.find((entry) => entry?.suggested_folder || entry?.directory || entry?.folder);
+                    if (firstFolder) {
+                        next.suggested_folder =
+                            firstFolder.suggested_folder ||
+                            firstFolder.directory ||
+                            firstFolder.folder;
+                    }
+                }
+                if (!next.directory && next.suggested_folder) {
+                    next.directory = next.suggested_folder;
+                }
+
+                const longestRequested = [...group].sort((a, b) => {
+                    const aPath = normalizeWorkflowPath(
+                        a?.requested_path || a?.requestedPath || a?.display_name || a?.name || a?.filename || ""
+                    );
+                    const bPath = normalizeWorkflowPath(
+                        b?.requested_path || b?.requestedPath || b?.display_name || b?.name || b?.filename || ""
+                    );
+                    return bPath.length - aPath.length;
+                })[0];
+                const longestRequestedPath = normalizeWorkflowPath(
+                    longestRequested?.requested_path ||
+                    longestRequested?.requestedPath ||
+                    longestRequested?.display_name ||
+                    longestRequested?.name ||
+                    longestRequested?.filename ||
+                    ""
+                );
+                if (longestRequestedPath) {
+                    next.requested_path = longestRequestedPath;
+                    if (!next.display_name || String(next.display_name).trim().length < longestRequestedPath.length) {
+                        next.display_name = longestRequestedPath;
+                    }
+                }
+
+                const normalizedFilename = getPathBasename(
+                    next?.filename || next?.requested_path || next?.display_name || next?.name || ""
+                );
+                if (normalizedFilename) {
+                    next.filename = normalizedFilename;
+                }
+
+                const alternatives = [];
+                const seenAlternatives = new Set();
+                for (const entry of group) {
+                    const altList = Array.isArray(entry?.alternatives) ? entry.alternatives : [];
+                    for (const alt of altList) {
+                        if (!alt || typeof alt !== "object") {
+                            continue;
+                        }
+                        const altKey = [
+                            String(alt?.filename || "").trim().toLowerCase(),
+                            String(alt?.url || "").trim().toLowerCase(),
+                            String(alt?.suggested_folder || alt?.directory || "").trim().toLowerCase(),
+                        ].join("|");
+                        if (seenAlternatives.has(altKey)) {
+                            continue;
+                        }
+                        seenAlternatives.add(altKey);
+                        alternatives.push(alt);
+                    }
+                }
+                if (alternatives.length) {
+                    next.alternatives = alternatives;
+                }
+
+                merged.push(next);
             }
+
             return merged;
+        };
+
+        const mergeMissingEntries = (existingEntries, newEntries) => {
+            return coalesceMissingEntriesByDestination([
+                ...(Array.isArray(existingEntries) ? existingEntries : []),
+                ...(Array.isArray(newEntries) ? newEntries : []),
+            ]);
         };
 
         const createRunHookFallbackMissingModelsFromFrontendStore = async (providedCandidates = null) => {
@@ -1583,7 +1801,14 @@ app.registerExtension({
                 if (!isMissingModelCandidate(candidate)) {
                     continue;
                 }
-                const filename = String(candidate?.name || candidate?.filename || "").trim();
+                const requestedPath = normalizeWorkflowPath(
+                    candidate?.requested_path ||
+                    candidate?.requestedPath ||
+                    candidate?.name ||
+                    candidate?.filename ||
+                    ""
+                );
+                const filename = getPathBasename(requestedPath);
                 if (!filename) {
                     continue;
                 }
@@ -1614,7 +1839,7 @@ app.registerExtension({
                 const entry = {
                     filename,
                     name: filename,
-                    requested_path: filename,
+                    requested_path: requestedPath || filename,
                     suggested_folder: directory,
                     directory,
                     url: String(candidate?.url || "").trim(),
@@ -2277,7 +2502,9 @@ app.registerExtension({
             headerWrap.appendChild(createDialogCloseIconButton(closeDialog));
             panel.appendChild(headerWrap);
 
-            const rawMissingModels = Array.isArray(data.missing) ? [...data.missing] : [];
+            const rawMissingModels = coalesceMissingEntriesByDestination(
+                Array.isArray(data.missing) ? [...data.missing] : []
+            );
             const {
                 repoFolderMissing: repoFolderMissingModelsRaw,
                 curatedMissing: curatedMissingModelsRaw,
@@ -3634,6 +3861,9 @@ app.registerExtension({
                     throw new Error("Failed to scan models: " + detail + " (" + resp.status + ")");
                 }
                 const data = await resp.json();
+                data.missing = coalesceMissingEntriesByDestination(
+                    Array.isArray(data?.missing) ? data.missing : []
+                );
                 console.log("[AutoDownload] Scan results:", data);
 
                 if (!countActionableScanResults(data)) {
@@ -3664,11 +3894,11 @@ app.registerExtension({
                         );
                     if (fallbackMissingFromFailures.length) {
                         const existingMissing = Array.isArray(data?.missing) ? data.missing : [];
-                        data.missing = [...existingMissing, ...fallbackMissingFromFailures];
+                        data.missing = mergeMissingEntries(existingMissing, fallbackMissingFromFailures);
                     }
                     if (fallbackMissingFromFrontendStore.length) {
                         const existingMissing = Array.isArray(data?.missing) ? data.missing : [];
-                        data.missing = [...existingMissing, ...fallbackMissingFromFrontendStore];
+                        data.missing = mergeMissingEntries(existingMissing, fallbackMissingFromFrontendStore);
                     }
 
                     const split = splitMissingModelsForRepoFolderSection(
@@ -3692,7 +3922,7 @@ app.registerExtension({
                         );
                         if (lastChanceMissing.length) {
                             const existingMissing = Array.isArray(data?.missing) ? data.missing : [];
-                            data.missing = [...existingMissing, ...lastChanceMissing];
+                            data.missing = mergeMissingEntries(existingMissing, lastChanceMissing);
                             const recoveredSplit = splitMissingModelsForRepoFolderSection(
                                 data.missing,
                                 getNodeErrorsSnapshot()
@@ -3728,6 +3958,9 @@ app.registerExtension({
                 }
 
                 // Show results
+                data.missing = coalesceMissingEntriesByDestination(
+                    Array.isArray(data?.missing) ? data.missing : []
+                );
                 showResultsDialog(data, options || {});
 
             } catch (e) {

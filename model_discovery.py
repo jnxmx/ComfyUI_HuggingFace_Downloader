@@ -53,12 +53,19 @@ HF_SEARCH_SKIP_FILENAMES = {
     "pytorch_model.bin",
     "adapter_model.bin",
     "diffusion_pytorch_model.bin",
+    "diffusion_pytorch_model.safetensors",
     "model.safetensors",
     "model.bin",
     "model.ckpt",
     "model.pt",
     "config.json",
     "tokenizer.json",
+}
+
+AMBIGUOUS_REGISTRY_FILENAMES = set(HF_SEARCH_SKIP_FILENAMES) | {
+    "adapter_model.safetensors",
+    "consolidated.safetensors",
+    "weights.safetensors",
 }
 
 class HFSearchBudgetError(Exception):
@@ -167,6 +174,32 @@ def normalize_filename_key(name: str) -> str:
 def normalize_filename_compact(name: str) -> str:
     base = normalize_filename_key(name)
     return re.sub(r'[-_]+', '', base)
+
+def _compact_lookup_text(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+def _tokenize_lookup_context(value: str | None) -> set[str]:
+    text = normalize_relative_model_path(value)
+    if not text:
+        return set()
+    tokens: set[str] = set()
+    for chunk in re.split(r"[^a-z0-9]+", text.lower()):
+        compact = _compact_lookup_text(chunk)
+        if len(compact) >= 4:
+            tokens.add(compact)
+    compact_text = _compact_lookup_text(text)
+    if len(compact_text) >= 8:
+        tokens.add(compact_text)
+    return tokens
+
+def _is_ambiguous_registry_filename(filename: str | None, requested_path: str | None = None) -> bool:
+    base = normalize_filename_key(filename or requested_path or "")
+    if not base:
+        return True
+    if base in AMBIGUOUS_REGISTRY_FILENAMES:
+        return True
+    requested_norm = normalize_relative_model_path(requested_path)
+    return bool(requested_norm and "/" in requested_norm and base == "diffusion_pytorch_model.safetensors")
 
 def split_model_identifier(value: str) -> Tuple[str, str | None]:
     normalized = value.replace("\\", "/").strip()
@@ -381,15 +414,130 @@ def load_comfyui_manager_model_list() -> dict:
                 entry = {
                     "filename": filename,
                     "url": url,
+                    "name": model.get("name"),
                     "directory": normalize_save_path(model.get("save_path")),
                     "save_path": model.get("save_path"),
                 }
-                model_map[filename_lower] = entry
+                hf_repo, hf_path = extract_huggingface_info(url)
+                if hf_repo:
+                    entry["hf_repo"] = hf_repo
+                    entry["hf_path"] = hf_path
+                existing = model_map.get(filename_lower)
+                if not existing:
+                    model_map[filename_lower] = entry
+                    continue
+                alternatives = existing.setdefault("alternatives", [])
+                candidate_key = (
+                    str(entry.get("url") or "").strip().lower(),
+                    str(entry.get("save_path") or "").strip().lower(),
+                )
+                existing_keys = {
+                    (
+                        str(candidate.get("url") or "").strip().lower(),
+                        str(candidate.get("save_path") or "").strip().lower(),
+                    )
+                    for candidate in [existing, *alternatives]
+                    if isinstance(candidate, dict)
+                }
+                if candidate_key not in existing_keys:
+                    alternatives.append(entry)
         except Exception as e:
             print(f"[ERROR] Failed to load manager model list {path}: {e}")
 
     _manager_model_list_cache = model_map
     return _manager_model_list_cache
+
+def _iter_manager_entries_for_filename(manager_map: dict, filename: str | None) -> list[dict]:
+    key = normalize_filename_key(filename or "")
+    if not key:
+        return []
+    entry = manager_map.get(key)
+    if not isinstance(entry, dict):
+        return []
+
+    candidates: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for candidate in [entry, *(entry.get("alternatives") or [])]:
+        if not isinstance(candidate, dict):
+            continue
+        dedupe_key = (
+            str(candidate.get("url") or "").strip().lower(),
+            str(candidate.get("save_path") or "").strip().lower(),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        candidates.append(candidate)
+    return candidates
+
+def _score_manager_entry_for_model(candidate: dict, model: dict) -> int:
+    candidate_text = " ".join(
+        str(candidate.get(field) or "")
+        for field in ("name", "save_path", "directory", "url", "hf_repo", "hf_path")
+    )
+    candidate_compact = _compact_lookup_text(candidate_text)
+    if not candidate_compact:
+        return 0
+
+    requested_path = normalize_relative_model_path(model.get("requested_path") or model.get("filename"))
+    requested_dir = normalize_relative_model_path(os.path.dirname(requested_path))
+    folder = normalize_save_path(
+        model.get("locked_folder") or model.get("suggested_folder") or model.get("directory")
+    ) or ""
+    folder = normalize_relative_model_path(folder)
+    folder_tail = normalize_relative_model_path(os.path.basename(folder))
+    requested_tail = normalize_relative_model_path(os.path.basename(requested_dir))
+    save_path = normalize_relative_model_path(candidate.get("save_path") or candidate.get("directory"))
+
+    score = 0
+    if folder and save_path:
+        if save_path.lower() == folder.lower():
+            score += 60
+        elif save_path.lower().endswith("/" + folder.lower()) or folder.lower().endswith("/" + save_path.lower()):
+            score += 40
+
+    anchor_values = [requested_dir, requested_tail, folder, folder_tail]
+    anchor_tokens = [
+        token
+        for value in anchor_values
+        for token in _tokenize_lookup_context(value)
+        if len(token) >= 8
+    ]
+
+    anchor_matched = False
+    for token in anchor_tokens:
+        if token and token in candidate_compact:
+            score += 35 if token == _compact_lookup_text(requested_dir or folder) else 22
+            anchor_matched = True
+
+    for token in _tokenize_lookup_context(model.get("display_name")) | _tokenize_lookup_context(model.get("filename")):
+        if len(token) < 6:
+            continue
+        if token in candidate_compact:
+            score += 4
+
+    if anchor_matched:
+        score += 8
+
+    if _is_ambiguous_registry_filename(model.get("filename"), model.get("requested_path")) and not anchor_matched and score < 40:
+        return 0
+    return score
+
+def _lookup_manager_entry_for_model(manager_map: dict, model: dict) -> dict | None:
+    candidates = _iter_manager_entries_for_filename(manager_map, model.get("filename"))
+    if not candidates:
+        return None
+    if len(candidates) == 1 and not _is_ambiguous_registry_filename(model.get("filename"), model.get("requested_path")):
+        return candidates[0]
+
+    best = None
+    best_score = 0
+    for candidate in candidates:
+        score = _score_manager_entry_for_model(candidate, model)
+        if score > best_score:
+            best = candidate
+            best_score = score
+    return best if best_score > 0 else None
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
     seen: set[str] = set()
@@ -825,6 +973,120 @@ def enrich_model_with_url(model: Dict[str, Any], url: str, source: str, director
         model["hf_path"] = hf_path
     print(f"[DEBUG] Found URL for {model.get('filename')} via {source}: {url}")
 
+def _missing_model_destination_key(model: dict) -> tuple[str, str]:
+    filename = normalize_filename_key(model.get("filename") or "")
+    requested_path = normalize_relative_model_path(model.get("requested_path") or filename)
+    requested_dir = normalize_relative_model_path(os.path.dirname(requested_path))
+    folder = normalize_save_path(
+        model.get("locked_folder") or model.get("suggested_folder") or model.get("directory")
+    ) or ""
+    folder = normalize_relative_model_path(folder)
+    if requested_dir and folder and not folder.lower().endswith(requested_dir.lower()):
+        folder = normalize_relative_model_path(f"{folder}/{requested_dir}")
+    elif requested_dir and not folder:
+        folder = requested_dir
+    return folder.lower(), filename
+
+def _missing_model_merge_score(model: dict) -> tuple[int, int, int]:
+    source = str(model.get("source") or "").strip().lower()
+    node_type = str(model.get("node_type") or "").strip().lower()
+    requested_path = normalize_relative_model_path(model.get("requested_path") or "")
+
+    score = 0
+    if model.get("url"):
+        score += 30
+    if model.get("hf_repo") and model.get("hf_path"):
+        score += 10
+    if "hugging face download model" in node_type:
+        score += 16
+    if source in {"workflow_metadata", "frontend_missing_model_store"}:
+        score += 12
+    if source in {"manager_model_list", "comfyui_manager_model_list", "popular_models"}:
+        score += 4
+    if model.get("folder_locked") or model.get("locked_folder"):
+        score += 3
+
+    return (
+        score,
+        len(requested_path),
+        1 if _is_ambiguous_registry_filename(model.get("filename"), model.get("requested_path")) else 0,
+    )
+
+def coalesce_missing_models_by_destination(missing_models: list[dict]) -> list[dict]:
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    passthrough: list[dict] = []
+    for model in missing_models:
+        if not isinstance(model, dict):
+            continue
+        key = _missing_model_destination_key(model)
+        if not key[1]:
+            passthrough.append(model)
+            continue
+        grouped.setdefault(key, []).append(model)
+
+    merged_models: list[dict] = list(passthrough)
+    for group in grouped.values():
+        if len(group) == 1:
+            merged_models.append(group[0])
+            continue
+
+        best = max(group, key=_missing_model_merge_score)
+        merged = dict(best)
+
+        if not merged.get("url"):
+            for candidate in group:
+                if candidate.get("url"):
+                    merged["url"] = candidate.get("url")
+                    merged["source"] = candidate.get("source") or merged.get("source")
+                    if candidate.get("hf_repo"):
+                        merged["hf_repo"] = candidate.get("hf_repo")
+                    if candidate.get("hf_path"):
+                        merged["hf_path"] = candidate.get("hf_path")
+                    break
+
+        if not merged.get("locked_folder"):
+            for candidate in group:
+                if candidate.get("locked_folder"):
+                    merged["locked_folder"] = candidate.get("locked_folder")
+                    merged["folder_locked"] = candidate.get("folder_locked", True)
+                    break
+
+        if not merged.get("suggested_folder"):
+            for candidate in group:
+                if candidate.get("suggested_folder"):
+                    merged["suggested_folder"] = candidate.get("suggested_folder")
+                    break
+
+        longest_requested = max(
+            group,
+            key=lambda item: len(normalize_relative_model_path(item.get("requested_path") or "")),
+        )
+        if longest_requested.get("requested_path"):
+            merged["requested_path"] = longest_requested.get("requested_path")
+        if longest_requested.get("display_name"):
+            merged["display_name"] = longest_requested.get("display_name")
+
+        alternatives: list[dict] = []
+        seen_alternatives: set[tuple[str, str]] = set()
+        for candidate in group:
+            for alt in candidate.get("alternatives") or []:
+                if not isinstance(alt, dict):
+                    continue
+                alt_key = (
+                    str(alt.get("url") or "").strip().lower(),
+                    str(alt.get("filename") or "").strip().lower(),
+                )
+                if alt_key in seen_alternatives:
+                    continue
+                seen_alternatives.add(alt_key)
+                alternatives.append(alt)
+        if alternatives:
+            merged["alternatives"] = alternatives
+
+        merged_models.append(merged)
+
+    return merged_models
+
 def is_quant_variant_filename(filename: str) -> bool:
     name = os.path.splitext(filename.lower())[0]
     quant_patterns = [
@@ -908,9 +1170,7 @@ def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]], status_cb=N
                 "filename": model.get("filename")
             })
         filename = model["filename"]
-        requested_path = model.get("requested_path") or filename
-        filename_key = filename.lower()
-        entry = manager_map.get(filename_key) or manager_map.get(os.path.basename(filename_key))
+        entry = _lookup_manager_entry_for_model(manager_map, model)
         if entry and entry.get("url"):
             enrich_model_with_url(
                 model,
@@ -2611,7 +2871,11 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         score = 0
         if entry.get("url"):
             score += 10
-        if entry.get("node_title") and "hugging face download model" in entry.get("node_title", "").lower():
+        node_label = " ".join(
+            str(entry.get(field) or "")
+            for field in ("node_title", "node_type")
+        ).lower()
+        if "hugging face download model" in node_label:
             score += 5
         requested_path = _normalize_dedupe_path(entry.get("requested_path"))
         if "/" in requested_path:
@@ -2842,6 +3106,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         if not base_folder.replace("\\", "/").endswith(subfolder):
             model["suggested_folder"] = f"{base_folder}/{subfolder}"
     enforce_authoritative_node_folders(missing_models)
+    missing_models = coalesce_missing_models_by_destination(missing_models)
 
     # 3. Check curated popular models registry
     if missing_models:

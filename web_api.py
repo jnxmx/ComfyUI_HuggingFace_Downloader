@@ -551,6 +551,80 @@ def _build_retry_payload(item: dict) -> dict:
     return payload
 
 
+def _download_destination_filename(item: dict) -> str:
+    target_filename = _sanitize_filename_hint(item.get("target_filename"))
+    if target_filename:
+        return target_filename
+    filename = _sanitize_filename_hint(item.get("filename"))
+    if filename:
+        return filename
+    hf_path = _sanitize_filename_hint(item.get("hf_path"))
+    if hf_path:
+        return hf_path
+    requested_path = _sanitize_filename_hint(item.get("requested_path"))
+    if requested_path:
+        return requested_path
+    return ""
+
+
+def _download_destination_folder(item: dict) -> str:
+    folder_locked = bool(item.get("folder_locked"))
+    locked_folder = str(item.get("locked_folder") or "").strip()
+    folder = locked_folder if folder_locked and locked_folder else str(item.get("folder") or "checkpoints").strip()
+    return _normalize_rel_path(folder or "checkpoints")
+
+
+def _download_destination_key(item: dict) -> str:
+    mode = str(item.get("download_mode") or "file").strip().lower() or "file"
+    folder = _download_destination_folder(item).lower()
+    if mode == "folder":
+        repo_id = _repo_id_from_item(item).lower()
+        url = str(item.get("url") or "").strip().lower()
+        return f"folder|{folder}|{repo_id}|{url}"
+
+    filename = _download_destination_filename(item).lower()
+    if not filename:
+        return ""
+    return f"file|{folder}|{filename}"
+
+
+def _find_existing_active_download(destination_key: str) -> dict | None:
+    if not destination_key:
+        return None
+
+    with download_status_lock:
+        status_snapshot = dict(download_status)
+
+    for download_id, info in status_snapshot.items():
+        if str(info.get("destination_key") or "").strip() != destination_key:
+            continue
+        status = str(info.get("status") or "").strip().lower()
+        if status in {"failed", "cancelled", "completed"}:
+            continue
+        return {
+            "download_id": download_id,
+            "status": status,
+            "filename": info.get("filename"),
+        }
+
+    with download_queue_lock:
+        queue_snapshot = list(download_queue)
+
+    for item in queue_snapshot:
+        if _download_destination_key(item) != destination_key:
+            continue
+        download_id = str(item.get("download_id") or "").strip()
+        if not download_id:
+            continue
+        return {
+            "download_id": download_id,
+            "status": "queued",
+            "filename": item.get("filename"),
+        }
+
+    return None
+
+
 def _classify_download_failure(item: dict, error_message: str) -> dict:
     message = str(error_message or "").strip()
     lowered = message.lower()
@@ -2667,6 +2741,16 @@ def setup(app_or_server):
                 item["target_filename"] = requested_filename or None
                 item["folder"] = folder
                 item["download_mode"] = download_mode
+                destination_key = _download_destination_key(item)
+                existing_active = _find_existing_active_download(destination_key)
+                if existing_active:
+                    queued.append({
+                        "download_id": existing_active["download_id"],
+                        "filename": existing_active.get("filename") or filename,
+                        "deduplicated": True,
+                    })
+                    continue
+                item["destination_key"] = destination_key
                 retry_payload = _build_retry_payload(item)
                 with download_queue_lock:
                     download_queue.append(item)
@@ -2677,6 +2761,7 @@ def setup(app_or_server):
                     "requested_path": item.get("requested_path"),
                     "folder": folder,
                     "download_mode": download_mode,
+                    "destination_key": destination_key,
                     "retry_payload": retry_payload,
                     "queued_at": time.time()
                 })
