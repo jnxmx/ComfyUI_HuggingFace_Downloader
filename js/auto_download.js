@@ -3254,6 +3254,37 @@ app.registerExtension({
                 }
                 console.log("[AutoDownload] Scanning workflow:", workflow);
 
+                const frontendStoreFallbackMissing =
+                    await createRunHookFallbackMissingModelsFromFrontendStore(
+                        Array.isArray(options?.frontendMissingModelCandidates)
+                            ? options.frontendMissingModelCandidates
+                            : null
+                    );
+                if (frontendStoreFallbackMissing.length) {
+                    if (loadingDlg) {
+                        if (statusTimer) {
+                            clearInterval(statusTimer);
+                            statusTimer = null;
+                        }
+                        loadingDlg.cleanup();
+                        loadingDlg.remove();
+                    }
+                    console.info(
+                        "[AutoDownload] Using frontend missing-model store fast path:",
+                        frontendStoreFallbackMissing
+                    );
+                    showResultsDialog(
+                        {
+                            request_id: requestId,
+                            missing: frontendStoreFallbackMissing,
+                            found: [],
+                            mismatches: []
+                        },
+                        options || {}
+                    );
+                    return;
+                }
+
                 // Call backend
                 const resp = await doFetch("/check_missing_models", {
                     method: "POST",
