@@ -33,6 +33,14 @@ except Exception:
     _sha_max_val = 0
 SHA_VERIFY_MAX_BYTES = _sha_max_val if _sha_max_val > 0 else None
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+VERIFY_EXISTING_DOWNLOADS = _env_flag("HF_DOWNLOADER_VERIFY_EXISTING", default=False)
+
 def folder_size(directory: str) -> int:
     total = 0
     for dirpath, _, filenames in os.walk(directory):
@@ -217,6 +225,33 @@ def _verify_file_integrity(dest_path: str,
             raise RuntimeError("SHA256 mismatch")
 
 
+def _existing_file_result(
+    dest_path: str,
+    target_name: str,
+    *,
+    sync: bool,
+    return_info: bool,
+    expected_size: Optional[int] = None,
+    expected_sha: Optional[str] = None,
+    skip_verify: bool = False,
+) -> tuple:
+    size_gb = os.path.getsize(dest_path) / (1024 ** 3)
+    message = f"{target_name} already exists | {size_gb:.3f} GB"
+    print("[DEBUG]", message)
+    if return_info:
+        return (
+            message,
+            dest_path,
+            {
+                "expected_size": expected_size,
+                "expected_sha": expected_sha,
+                "skip_verify": skip_verify,
+                "existing_file": True,
+            },
+        )
+    return (message, dest_path) if sync else ("", "")
+
+
 def _sanitize_download_filename(value: str) -> str:
     text = str(value or "").replace("\\", "/").strip()
     if not text:
@@ -315,13 +350,22 @@ def run_download(parsed_data: dict,
     target_name = os.path.basename(str(target_filename or "").replace("\\", "/").strip())
     if not target_name:
         target_name = os.path.basename(remote_filename)
+    expected_size = None
+    expected_sha = None
+    metadata_loaded = False
 
-    expected_size, expected_sha, _ = get_remote_file_metadata(
-        parsed_data["repo"],
-        remote_filename,
-        revision=parsed_data.get("revision"),
-        token=token or None
-    )
+    def ensure_remote_metadata() -> tuple[Optional[int], Optional[str]]:
+        nonlocal expected_size, expected_sha, metadata_loaded
+        if metadata_loaded:
+            return expected_size, expected_sha
+        expected_size, expected_sha, _ = get_remote_file_metadata(
+            parsed_data["repo"],
+            remote_filename,
+            revision=parsed_data.get("revision"),
+            token=token or None
+        )
+        metadata_loaded = True
+        return expected_size, expected_sha
 
     dest_path = ""
     copy_tmp_path = ""
@@ -335,17 +379,31 @@ def run_download(parsed_data: dict,
                 print("[DEBUG] Overwrite requested, deleting existing file before download.")
                 _safe_remove(dest_path)
             else:
+                if not VERIFY_EXISTING_DOWNLOADS:
+                    return _existing_file_result(
+                        dest_path,
+                        target_name,
+                        sync=sync,
+                        return_info=return_info,
+                        skip_verify=True,
+                    )
                 try:
+                    ensure_remote_metadata()
                     _verify_file_integrity(dest_path, expected_size, expected_sha)
-                    size_gb = os.path.getsize(dest_path) / (1024 ** 3)
-                    message = f"{target_name} already exists | {size_gb:.3f} GB"
-                    print("[DEBUG]", message)
-                    if return_info:
-                        return (message, dest_path, {"expected_size": expected_size, "expected_sha": expected_sha})
-                    return (message, dest_path) if sync else ("", "")
+                    return _existing_file_result(
+                        dest_path,
+                        target_name,
+                        sync=sync,
+                        return_info=return_info,
+                        expected_size=expected_size,
+                        expected_sha=expected_sha,
+                    )
                 except Exception as e:
                     print(f"[DEBUG] Existing file failed verification, re-downloading: {e}")
                     _safe_remove(dest_path)
+
+        if not defer_verify or return_info:
+            ensure_remote_metadata()
 
         def run_file_download_with_cancel(download_kwargs: dict) -> str:
             if not cancel_check:

@@ -2204,14 +2204,16 @@ def _download_worker():
                     "updated_at": time.time()
                 })
                 _touch_queue_activity()
-                with pending_verifications_lock:
-                    pending_verifications.append({
-                        "download_id": download_id,
-                        "dest_path": path,
-                        "expected_size": info.get("expected_size"),
-                        "expected_sha": info.get("expected_sha"),
-                        "message": msg
-                    })
+                should_enqueue_verify = bool(path) and not bool(info.get("skip_verify"))
+                if should_enqueue_verify:
+                    with pending_verifications_lock:
+                        pending_verifications.append({
+                            "download_id": download_id,
+                            "dest_path": path,
+                            "expected_size": info.get("expected_size"),
+                            "expected_sha": info.get("expected_sha"),
+                            "message": msg
+                        })
             else:
                 msg, path = run_download(
                     parsed,
