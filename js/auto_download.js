@@ -1253,21 +1253,139 @@ app.registerExtension({
             return filterRunHookEligibleMissingModels(collected);
         };
 
-        const getFrontendMissingModelCandidates = async () => {
-            const store = await resolveMissingModelStore();
-            const storeCandidates = unwrapStoreValue(store?.missingModelCandidates);
-            let candidates = Array.isArray(storeCandidates)
-                ? storeCandidates
-                : [];
-            if (!candidates.length) {
-                const activeWorkflow = getActiveWorkflowEntry();
-                const pendingWarnings = unwrapStoreValue(activeWorkflow?.pendingWarnings);
-                const pendingCandidates = unwrapStoreValue(pendingWarnings?.missingModelCandidates);
-                if (Array.isArray(pendingCandidates)) {
-                    candidates = pendingCandidates;
+        const resolveComboWidgetOptionsNativeLike = (widget) => {
+            try {
+                const values = widget?.options?.values;
+                if (!values) return [];
+                if (typeof values === "function") {
+                    const result = values(widget);
+                    return Array.isArray(result) ? result : [];
                 }
+                if (Array.isArray(values)) {
+                    return values;
+                }
+                if (typeof values === "object") {
+                    return Object.keys(values);
+                }
+            } catch (_) {
+                // Ignore malformed widget option providers.
             }
-            return Array.isArray(candidates) ? candidates : [];
+            return [];
+        };
+
+        const collectLiveGraphMissingModelCandidatesNativeLike = (graph = null, graphData = null) => {
+            const rootGraph = graph || app?.rootGraph;
+            if (!rootGraph || typeof rootGraph !== "object") {
+                return [];
+            }
+
+            const collected = [];
+            const seen = new Set();
+            const visitGraph = (currentGraph, prefix = "") => {
+                const nodes = Array.isArray(currentGraph?.nodes) ? currentGraph.nodes : [];
+                for (const node of nodes) {
+                    if (!node || typeof node !== "object") {
+                        continue;
+                    }
+
+                    const nodeId = String(node?.id ?? "").trim();
+                    const executionId = prefix
+                        ? `${prefix}:${nodeId}`
+                        : nodeId;
+
+                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
+                        visitGraph(node.subgraph, executionId);
+                        continue;
+                    }
+
+                    const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
+                    for (const widget of widgets) {
+                        const value = typeof widget?.value === "string"
+                            ? widget.value.trim()
+                            : "";
+                        if (!value || !MODELISH_FILENAME_PATTERN.test(value)) {
+                            continue;
+                        }
+
+                        const widgetType = String(widget?.type || "").trim().toLowerCase();
+                        const options = resolveComboWidgetOptionsNativeLike(widget);
+                        const isComboLike =
+                            widgetType === "combo" ||
+                            Array.isArray(options) && options.length > 0;
+                        if (!isComboLike) {
+                            continue;
+                        }
+
+                        const inOptions = Array.isArray(options) && options.includes(value);
+                        if (inOptions) {
+                            continue;
+                        }
+
+                        const widgetName = String(widget?.name || "").trim();
+                        const directory =
+                            String(widget?.options?.model_folder || widget?.options?.folder || "").trim() ||
+                            inferSuggestedFolderFromRunHookSignals({
+                                classType: node?.type,
+                                inputName: widgetName,
+                                filename: value,
+                                missingValue: value,
+                            }) ||
+                            "";
+                        const embedded = findEmbeddedModelMetadataForRunHookFailure(
+                            graphData,
+                            value,
+                            directory
+                        );
+                        const candidate = {
+                            nodeId: executionId,
+                            nodeType: String(node?.type || "").trim(),
+                            widgetName,
+                            isAssetSupported: false,
+                            name: value,
+                            directory,
+                            url: String(embedded?.url || "").trim(),
+                            hash: String(embedded?.hash || "").trim(),
+                            hashType: String(embedded?.hash_type || "").trim(),
+                            isMissing: true,
+                        };
+                        const key = [
+                            String(candidate?.nodeId || "").trim().toLowerCase(),
+                            String(candidate?.widgetName || "").trim().toLowerCase(),
+                            String(candidate?.name || "").trim().toLowerCase(),
+                            String(candidate?.directory || "").trim().toLowerCase(),
+                        ].join("|");
+                        if (seen.has(key)) {
+                            continue;
+                        }
+                        seen.add(key);
+                        collected.push(candidate);
+                    }
+                }
+            };
+
+            visitGraph(rootGraph, "");
+            return collected;
+        };
+
+        const getFrontendPendingWarningCandidates = () => {
+            const activeWorkflow = getActiveWorkflowEntry();
+            const pendingWarnings = unwrapStoreValue(activeWorkflow?.pendingWarnings);
+            const pendingCandidates = unwrapStoreValue(pendingWarnings?.missingModelCandidates);
+            return Array.isArray(pendingCandidates) ? pendingCandidates : [];
+        };
+
+        const getFrontendMissingModelCandidates = async () => {
+            let candidates = getFrontendPendingWarningCandidates();
+            if (candidates.length) {
+                return candidates;
+            }
+
+            const graphData = serializeWorkflowForModelScan();
+            candidates = collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, graphData);
+            if (candidates.length) {
+                return candidates;
+            }
+            return [];
         };
 
         const countActionableScanResults = (data) => {
@@ -3556,6 +3674,7 @@ app.registerExtension({
         let workflowOpenLastTriggeredAt = 0;
         let workflowOpenMissingModelsTimer = null;
         let workflowOpenLastHandledSignature = "";
+        let workflowOpenLastHandledPath = "";
 
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -4854,16 +4973,23 @@ app.registerExtension({
                     .filter((candidate) => isMissingModelCandidate(candidate))
                     .map((candidate) => ({ ...candidate }))
                 : [];
+            console.log(
+                "[AutoDownload] Workflow-open candidates:",
+                workflowOpenCandidates.map((candidate) => ({
+                    name: candidate?.name || candidate?.filename || "",
+                    directory: candidate?.directory || candidate?.folder || "",
+                    nodeId: candidate?.nodeId ?? candidate?.node_id ?? "",
+                    widgetName: candidate?.widgetName || candidate?.input_name || "",
+                }))
+            );
             const now = Date.now();
             if (now - workflowOpenLastTriggeredAt < WORKFLOW_OPEN_TRIGGER_COOLDOWN_MS) {
                 clearMissingModelNodeHighlights(workflowOpenCandidates);
-                void clearMissingModelStoreState(workflowOpenCandidates);
                 void clearModelValidationErrorsFromFrontendState();
                 return false;
             }
             if (document.getElementById("auto-download-dialog")) {
                 clearMissingModelNodeHighlights(workflowOpenCandidates);
-                void clearMissingModelStoreState(workflowOpenCandidates);
                 void clearModelValidationErrorsFromFrontendState();
                 return false;
             }
@@ -4874,6 +5000,14 @@ app.registerExtension({
 
             const frontendMissingEntries =
                 await createRunHookFallbackMissingModelsFromFrontendStore(workflowOpenCandidates);
+            console.log(
+                "[AutoDownload] Workflow-open actionable entries:",
+                frontendMissingEntries.map((entry) => ({
+                    filename: entry?.filename || entry?.name || "",
+                    folder: entry?.suggested_folder || entry?.directory || "",
+                    url: entry?.url || "",
+                }))
+            );
             if (frontendMissingEntries.length) {
                 showResultsDialog(
                     {
@@ -4917,6 +5051,67 @@ app.registerExtension({
                 detail: "Opened Auto-download from ComfyUI's workflow-open missing-model scan.",
                 life: 3200,
             });
+            return true;
+        };
+
+        const installWorkflowOpenLoadGraphHook = () => {
+            const comfyApp = app;
+            if (!comfyApp || typeof comfyApp.loadGraphData !== "function") {
+                return false;
+            }
+            if (comfyApp.__hfAutoDownloadLoadGraphHookInstalled) {
+                return true;
+            }
+
+            const originalLoadGraphData = comfyApp.loadGraphData.bind(comfyApp);
+            comfyApp.loadGraphData = async (...args) => {
+                const result = await originalLoadGraphData(...args);
+                try {
+                    if (!getWorkflowOpenAutoEnabled()) {
+                        return result;
+                    }
+
+                    setTimeout(async () => {
+                        try {
+                            if (!isWorkflowReadyForModelScan()) {
+                                return;
+                            }
+                            const activeWorkflow = getActiveWorkflowEntry();
+                            const activePath = String(activeWorkflow?.path || activeWorkflow?.key || "").trim();
+                            const candidates = await getFrontendMissingModelCandidates();
+                            const signature = buildMissingModelCandidatesSignature(candidates);
+                            console.log(
+                                "[AutoDownload] Workflow-open loadGraph hook candidates:",
+                                Array.isArray(candidates) ? candidates.length : 0,
+                                activePath || "(no active path)"
+                            );
+                            if (!signature) {
+                                if (activePath) {
+                                    workflowOpenLastHandledPath = activePath;
+                                }
+                                workflowOpenLastHandledSignature = "";
+                                return;
+                            }
+                            if (
+                                signature === workflowOpenLastHandledSignature &&
+                                (!activePath || activePath === workflowOpenLastHandledPath)
+                            ) {
+                                return;
+                            }
+                            workflowOpenLastHandledSignature = signature;
+                            workflowOpenLastHandledPath = activePath;
+                            await triggerAutoDownloadFromWorkflowOpen(candidates);
+                        } catch (hookErr) {
+                            console.warn("[AutoDownload] Workflow-open loadGraph hook failed:", hookErr);
+                        }
+                    }, 0);
+                } catch (_) {
+                    // Keep native load behavior intact.
+                }
+                return result;
+            };
+
+            comfyApp.__hfAutoDownloadLoadGraphHookInstalled = true;
             return true;
         };
 
@@ -5331,7 +5526,7 @@ app.registerExtension({
         registerGlobalAction("runAutoDownload", runAutoDownload);
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
         setupMissingModelsDialogObserver();
-        void installNativeMissingModelsSurfaceHook();
+        installWorkflowOpenLoadGraphHook();
         installWorkflowOpenMissingModelsWatcher();
         installRunQueueCommandHooksNativeAware();
     }
