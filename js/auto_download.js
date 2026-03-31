@@ -1488,6 +1488,41 @@ app.registerExtension({
             return missing + found + mismatches;
         };
 
+        const buildScanResultsSignature = (data = null) => {
+            if (!data || typeof data !== "object") {
+                return "";
+            }
+            const parts = [];
+            const pushParts = (items, kind, projector) => {
+                if (!Array.isArray(items)) return;
+                for (const item of items) {
+                    const value = projector(item);
+                    if (!value) continue;
+                    parts.push(`${kind}|${value}`);
+                }
+            };
+            pushParts(data?.missing, "missing", (item) => [
+                String(item?.filename || item?.name || "").trim().toLowerCase(),
+                String(item?.suggested_folder || item?.directory || "").trim().toLowerCase(),
+                String(item?.url || "").trim().toLowerCase(),
+            ].join("|"));
+            pushParts(data?.found, "found", (item) => [
+                String(item?.filename || item?.name || "").trim().toLowerCase(),
+                String(item?.path || item?.actual_path || "").trim().toLowerCase(),
+            ].join("|"));
+            pushParts(
+                Array.isArray(data?.mismatches) ? data.mismatches : data?.path_mismatches,
+                "mismatch",
+                (item) => [
+                    String(item?.filename || item?.requested_path || "").trim().toLowerCase(),
+                    String(item?.expected_path || "").trim().toLowerCase(),
+                    String(item?.actual_path || "").trim().toLowerCase(),
+                ].join("|")
+            );
+            parts.sort();
+            return parts.join("||");
+        };
+
         const mergeMissingEntries = (existingEntries, newEntries) => {
             const merged = [];
             const seen = new Set();
@@ -4797,22 +4832,30 @@ app.registerExtension({
             }
         };
 
-        const forEachGraphNodeRecursive = (graph, callback) => {
+        const forEachGraphNodeRecursive = (graph, callback, visited = new Set()) => {
             if (!graph || typeof callback !== "function") return;
-            const nodes = Array.isArray(graph?._nodes) ? graph._nodes : [];
+            if (visited.has(graph)) {
+                return;
+            }
+            visited.add(graph);
+
+            const nodes = Array.isArray(graph?.nodes)
+                ? graph.nodes
+                : (Array.isArray(graph?._nodes) ? graph._nodes : []);
             for (const node of nodes) {
                 callback(node);
-            }
-            const subgraphs = graph?.subgraphs;
-            if (subgraphs && typeof subgraphs.values === "function") {
-                for (const subgraph of subgraphs.values()) {
-                    forEachGraphNodeRecursive(subgraph, callback);
+                try {
+                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
+                        forEachGraphNodeRecursive(node.subgraph, callback, visited);
+                    }
+                } catch (_) {
+                    // Ignore malformed subgraph nodes.
                 }
             }
         };
 
         const applyNodeErrorsFallback = (nodeErrors) => {
-            forEachGraphNodeRecursive(app?.graph, (node) => {
+            forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
                 if (!node || typeof node !== "object") return;
                 node.has_errors = false;
                 const inputs = Array.isArray(node.inputs) ? node.inputs : [];
@@ -5022,7 +5065,7 @@ app.registerExtension({
             }
 
             let clearedCount = 0;
-            forEachGraphNodeRecursive(app?.graph, (node) => {
+            forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
                 const numericNodeId = Number(node?.id);
                 if (!Number.isFinite(numericNodeId) || !nodeInputNames.has(numericNodeId)) {
                     return;
@@ -5143,6 +5186,62 @@ app.registerExtension({
             return true;
         };
 
+        const getWorkflowOpenBackendResults = async (graphData = null) => {
+            if (!graphData || typeof graphData !== "object") {
+                return null;
+            }
+            if (!workflowLikelyContainsModelReferences(graphData)) {
+                return null;
+            }
+
+            const controller =
+                typeof AbortController !== "undefined" ? new AbortController() : null;
+            const timeoutId = controller
+                ? setTimeout(() => controller.abort(), 4000)
+                : null;
+
+            try {
+                const requestPayload = {
+                    ...graphData,
+                    request_id: `workflow-open-preflight-${Date.now()}`,
+                    skip_hf_search: true,
+                };
+                const resp = api && typeof api.fetchApi === "function"
+                    ? await api.fetchApi("/check_missing_models", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(requestPayload),
+                        signal: controller?.signal,
+                    })
+                    : await fetch("/check_missing_models", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(requestPayload),
+                        signal: controller?.signal,
+                    });
+                if (resp.status !== 200) {
+                    return null;
+                }
+                const data = await resp.json();
+                return {
+                    request_id: data?.request_id || `workflow_open_backend_${Date.now()}`,
+                    missing: filterRunHookEligibleMissingModels(
+                        Array.isArray(data?.missing) ? data.missing : []
+                    ),
+                    found: Array.isArray(data?.found) ? data.found : [],
+                    mismatches: Array.isArray(data?.mismatches)
+                        ? data.mismatches
+                        : (Array.isArray(data?.path_mismatches) ? data.path_mismatches : []),
+                };
+            } catch (_) {
+                return null;
+            } finally {
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                }
+            }
+        };
+
         const normalizeWorkflowOpenGraphDataArg = (value) => {
             if (!value) {
                 return null;
@@ -5187,13 +5286,46 @@ app.registerExtension({
                             const activeWorkflow = getActiveWorkflowEntry();
                             const activePath = String(activeWorkflow?.path || activeWorkflow?.key || "").trim();
                             const candidates = await getFrontendMissingModelCandidates(loadedGraphData);
-                            const signature = buildMissingModelCandidatesSignature(candidates);
+                            let signature = buildMissingModelCandidatesSignature(candidates);
                             console.log(
                                 "[AutoDownload] Workflow-open loadGraph hook candidates:",
                                 Array.isArray(candidates) ? candidates.length : 0,
                                 activePath || "(no active path)"
                             );
                             if (!signature) {
+                                const backendResults = await getWorkflowOpenBackendResults(
+                                    loadedGraphData || serializeWorkflowForModelScan()
+                                );
+                                const backendSignature = buildScanResultsSignature(backendResults);
+                                console.log(
+                                    "[AutoDownload] Workflow-open backend fallback results:",
+                                    countActionableScanResults(backendResults || {})
+                                );
+                                if (backendSignature) {
+                                    if (
+                                        backendSignature === workflowOpenLastHandledSignature &&
+                                        (!activePath || activePath === workflowOpenLastHandledPath)
+                                    ) {
+                                        return;
+                                    }
+                                    workflowOpenLastHandledSignature = backendSignature;
+                                    workflowOpenLastHandledPath = activePath;
+                                    showResultsDialog(
+                                        backendResults,
+                                        {
+                                            suppressEmptyResults: true,
+                                            triggeredByWorkflowOpen: true,
+                                            reason: "workflow-open-missing-models",
+                                        }
+                                    );
+                                    showToast({
+                                        severity: "info",
+                                        summary: "Missing models detected",
+                                        detail: "Opened Auto-download from workflow-open backend preflight.",
+                                        life: 3200,
+                                    });
+                                    return;
+                                }
                                 if (activePath) {
                                     workflowOpenLastHandledPath = activePath;
                                 }
