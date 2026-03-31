@@ -4920,6 +4920,43 @@ app.registerExtension({
             return true;
         };
 
+        const installNativeMissingModelsSurfaceHook = async () => {
+            const executionErrorStore = await resolveExecutionErrorStore();
+            if (!executionErrorStore || typeof executionErrorStore !== "object") {
+                return;
+            }
+            if (executionErrorStore.__hfAutoDownloadSurfaceMissingModelsPatched) {
+                return;
+            }
+            if (typeof executionErrorStore.surfaceMissingModels !== "function") {
+                return;
+            }
+
+            const originalSurfaceMissingModels =
+                executionErrorStore.surfaceMissingModels.bind(executionErrorStore);
+
+            executionErrorStore.surfaceMissingModels = (models) => {
+                const result = originalSurfaceMissingModels(models);
+                try {
+                    if (getWorkflowOpenAutoEnabled() && Array.isArray(models) && models.length) {
+                        const signature = buildMissingModelCandidatesSignature(models);
+                        if (signature) {
+                            workflowOpenLastHandledSignature = signature;
+                        }
+                        void triggerAutoDownloadFromWorkflowOpen(models);
+                    }
+                } catch (err) {
+                    console.warn(
+                        "[AutoDownload] Failed to trigger from native missing-model surface hook:",
+                        err
+                    );
+                }
+                return result;
+            };
+
+            executionErrorStore.__hfAutoDownloadSurfaceMissingModelsPatched = true;
+        };
+
         const installWorkflowOpenMissingModelsWatcher = () => {
             if (workflowOpenMissingModelsTimer) {
                 return;
@@ -5294,6 +5331,7 @@ app.registerExtension({
         registerGlobalAction("runAutoDownload", runAutoDownload);
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
         setupMissingModelsDialogObserver();
+        void installNativeMissingModelsSurfaceHook();
         installWorkflowOpenMissingModelsWatcher();
         installRunQueueCommandHooksNativeAware();
     }
