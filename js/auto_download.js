@@ -1396,7 +1396,24 @@ app.registerExtension({
             return idx === -1 ? "" : normalized.slice(0, idx);
         };
 
+        const hasSerializableSubgraphDefinitions = (graphData) => {
+            const defs = graphData?.definitions?.subgraphs;
+            return Array.isArray(defs) && defs.length > 0;
+        };
+
         const serializeWorkflowForModelScan = () => {
+            let rootGraphData = null;
+            try {
+                if (typeof app?.rootGraph?.serialize === "function") {
+                    rootGraphData = app.rootGraph.serialize();
+                    if (rootGraphData && typeof rootGraphData === "object") {
+                        return rootGraphData;
+                    }
+                }
+            } catch (_) {
+                // Fall through to workflow store state.
+            }
+
             try {
                 const activeWorkflow = getActiveWorkflowEntry();
                 const activeState = activeWorkflow?.activeState;
@@ -1404,26 +1421,25 @@ app.registerExtension({
                     return activeState;
                 }
             } catch (_) {
-                // Fall through to graph serialization.
-            }
-
-            try {
-                if (typeof app?.rootGraph?.serialize === "function") {
-                    return app.rootGraph.serialize();
-                }
-            } catch (_) {
                 // Fall through to deprecated graph alias.
             }
 
             try {
                 if (typeof app?.graph?.serialize === "function") {
-                    return app.graph.serialize();
+                    const legacyGraphData = app.graph.serialize();
+                    if (
+                        legacyGraphData &&
+                        typeof legacyGraphData === "object" &&
+                        (!rootGraphData || hasSerializableSubgraphDefinitions(legacyGraphData))
+                    ) {
+                        return legacyGraphData;
+                    }
                 }
             } catch (_) {
                 // No serialized workflow available.
             }
 
-            return null;
+            return rootGraphData;
         };
 
         const isWorkflowReadyForModelScan = () => {
