@@ -522,6 +522,12 @@ def _build_retry_payload(item: dict) -> dict:
     filename = str(item.get("filename") or "").strip()
     if filename:
         payload["filename"] = filename
+    display_name = _normalize_display_name(item.get("display_name"))
+    if display_name:
+        payload["display_name"] = display_name
+    requested_path = _normalize_display_name(item.get("requested_path"))
+    if requested_path:
+        payload["requested_path"] = requested_path
 
     if payload["download_mode"] == "folder":
         url = str(item.get("url") or "").strip()
@@ -663,7 +669,23 @@ def _sanitize_filename_hint(value: str | None) -> str:
     return base
 
 
+def _normalize_display_name(value: str | None) -> str:
+    text = str(value or "").replace("\\", "/").strip()
+    if not text:
+        return ""
+    text = re.sub(r"/+", "/", text)
+    return text.strip("/")
+
+
 def _derive_file_display_name(model: dict) -> str:
+    display_name = _normalize_display_name(model.get("display_name"))
+    if display_name:
+        return display_name
+
+    requested_path = _normalize_display_name(model.get("requested_path"))
+    if requested_path:
+        return requested_path
+
     explicit = _sanitize_filename_hint(model.get("filename"))
     if explicit:
         return explicit
@@ -2083,7 +2105,7 @@ def _download_worker():
                     defer_verify=True,
                     overwrite=overwrite,
                     return_info=True,
-                    target_filename=item.get("filename"),
+                    target_filename=item.get("target_filename"),
                     status_cb=status_cb,
                     cancel_check=lambda: _is_cancel_requested(download_id),
                 )
@@ -2122,7 +2144,7 @@ def _download_worker():
                     item["folder"],
                     sync=True,
                     overwrite=overwrite,
-                    target_filename=item.get("filename"),
+                    target_filename=item.get("target_filename"),
                     status_cb=status_cb,
                     cancel_check=lambda: _is_cancel_requested(download_id),
                 )
@@ -2365,6 +2387,7 @@ async def install_models(request):
         for model in models_to_install:
             url = model.get("url")
             filename = model.get("filename")
+            target_filename = _sanitize_filename_hint(model.get("target_filename")) or _sanitize_filename_hint(filename)
             folder_locked = bool(model.get("folder_locked"))
             locked_folder = str(model.get("locked_folder") or "").strip()
             folder = locked_folder if folder_locked and locked_folder else model.get("folder", "checkpoints") # Default to checkpoints
@@ -2385,7 +2408,7 @@ async def install_models(request):
                         folder,
                         sync=True,
                         overwrite=overwrite,
-                        target_filename=filename,
+                        target_filename=target_filename,
                     )
                 else:
                     if not _is_direct_http_url(url):
@@ -2395,7 +2418,7 @@ async def install_models(request):
                         folder,
                         sync=True,
                         overwrite=overwrite,
-                        target_filename=filename,
+                        target_filename=target_filename,
                     )
                 results.append({"filename": filename, "status": "success", "path": path, "message": msg})
                 
@@ -2635,8 +2658,12 @@ def setup(app_or_server):
                 requested_filename = _sanitize_filename_hint(model.get("target_filename"))
                 if not requested_filename and download_mode == "file" and is_hf_file_download:
                     requested_filename = _sanitize_filename_hint(model.get("filename"))
+                if not requested_filename and download_mode == "file":
+                    requested_filename = _sanitize_filename_hint(model.get("hf_path"))
                 item["download_id"] = download_id
                 item["filename"] = filename
+                item["display_name"] = _normalize_display_name(model.get("display_name")) or filename
+                item["requested_path"] = _normalize_display_name(model.get("requested_path")) or None
                 item["target_filename"] = requested_filename or None
                 item["folder"] = folder
                 item["download_mode"] = download_mode
@@ -2646,6 +2673,8 @@ def setup(app_or_server):
                 _set_download_status(download_id, {
                     "status": "queued",
                     "filename": filename,
+                    "display_name": item.get("display_name") or filename,
+                    "requested_path": item.get("requested_path"),
                     "folder": folder,
                     "download_mode": download_mode,
                     "retry_payload": retry_payload,

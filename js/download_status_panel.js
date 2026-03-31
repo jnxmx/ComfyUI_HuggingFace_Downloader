@@ -729,7 +729,7 @@ app.registerExtension({
         const updateItemNode = (refs, info) => {
             refs.root.setAttribute("data-download-id", info.id);
 
-            const rawName = String(info.filename || info.id || "unknown").replace(/\/+$/, "");
+            const rawName = String(info.display_name || info.requested_path || info.filename || info.id || "unknown").replace(/\/+$/, "");
             refs.name.textContent = rawName;
             refs.name.title = rawName;
             if (String(info.download_mode || "").toLowerCase() === "folder") {

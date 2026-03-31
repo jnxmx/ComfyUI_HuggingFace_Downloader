@@ -1446,7 +1446,7 @@ app.registerExtension({
             if (rowData.filename !== next) {
                 rowData.filename = next;
                 if (rowData.nameEl) {
-                    rowData.nameEl.textContent = next;
+                    rowData.nameEl.textContent = rowData.displayName || next;
                 }
             }
         };
@@ -2015,6 +2015,7 @@ app.registerExtension({
                 const isFolderRepoSection = Boolean(options.isFolderRepoSection);
                 models.forEach((m) => {
                     const downloadMode = isFolderRepoSection || isFolderRepoDownloadModel(m) ? "folder" : "file";
+                    const displayName = String(m.display_name || m.requested_path || m.filename || "").trim() || "Unknown model";
                     const rowWrapper = document.createElement("div");
                     Object.assign(rowWrapper.style, {
                         display: "flex",
@@ -2041,7 +2042,7 @@ app.registerExtension({
                         wordBreak: "break-word",
                         color: "var(--input-text)",
                     });
-                    nameEl.textContent = m.filename || "Unknown model";
+                    nameEl.textContent = displayName;
 
                     const metaEl = document.createElement("div");
                     Object.assign(metaEl.style, {
@@ -2066,8 +2067,8 @@ app.registerExtension({
                     });
 
                     const defaultFolder = downloadMode === "folder"
-                        ? (m.suggested_folder || "")
-                        : (m.suggested_folder || "checkpoints");
+                        ? (m.locked_folder || m.suggested_folder || "")
+                        : (m.locked_folder || m.suggested_folder || "checkpoints");
                     const folderPicker = createFolderPicker(defaultFolder, "Folder");
                     Object.assign(folderPicker.wrapper.style, {
                         width: "100%",
@@ -2082,7 +2083,7 @@ app.registerExtension({
                     }
                     const folderLocked = Boolean(m.folder_locked) && downloadMode !== "folder";
                     if (folderLocked) {
-                        folderPicker.input.value = String(m.suggested_folder || defaultFolder || "").trim();
+                        folderPicker.input.value = String(m.locked_folder || m.suggested_folder || defaultFolder || "").trim();
                         folderPicker.input.readOnly = true;
                         folderPicker.input.disabled = true;
                         folderPicker.input.title = "Locked to the requesting node's model folder";
@@ -2097,6 +2098,7 @@ app.registerExtension({
 
                     const rowData = {
                         checkbox: cb,
+                        displayName,
                         filename: m.filename,
                         originalFilename: m.filename,
                         requestedPath: m.requested_path || m.filename,
@@ -2112,7 +2114,7 @@ app.registerExtension({
                         skipWorkflowUpdate: downloadMode === "folder",
                         folderLocked,
                         lockedFolder: folderLocked
-                            ? String(m.suggested_folder || defaultFolder || "").trim()
+                            ? String(m.locked_folder || m.suggested_folder || defaultFolder || "").trim()
                             : "",
                     };
                     rowInputs.push(rowData);
@@ -2442,6 +2444,9 @@ app.registerExtension({
                         : r.folderInput.value.trim();
                     const item = {
                         filename: r.filename,
+                        target_filename: r.filename,
+                        display_name: r.displayName || r.requestedPath || r.filename,
+                        requested_path: r.requestedPath || r.filename,
                         url: r.urlInput.value.trim(),
                         folder: effectiveFolder,
                         folder_locked: Boolean(r.folderLocked),
@@ -2475,6 +2480,7 @@ app.registerExtension({
                         const effectiveFilename = resolveDownloadedFilename(row);
                         if (effectiveFilename) {
                             item.filename = effectiveFilename;
+                            item.target_filename = effectiveFilename;
                             syncRowFilename(row, effectiveFilename);
                         }
                     }

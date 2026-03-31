@@ -1399,23 +1399,43 @@ def _collect_models_from_nodes(
                         filename = url.split("/")[-1].split("?")[0]  # Remove query params
                     
                 if filename:
-                    # Determine suggested folder
+                    suggested_folder = None
+                    requested_path = filename
+                    folder_locked = False
+                    locked_folder = None
+
                     if custom_path and isinstance(custom_path, str) and custom_path.strip():
-                        # User specified custom path
-                        suggested_folder = custom_path.strip()
+                        normalized_custom = normalize_relative_model_path(
+                            normalize_save_path(custom_path) or custom_path
+                        )
+                        if normalized_custom:
+                            custom_segments = [seg for seg in normalized_custom.split("/") if seg]
+                            if custom_segments:
+                                suggested_folder = custom_segments[0]
+                                locked_folder = normalized_custom
+                                folder_locked = True
+                                if len(custom_segments) > 1:
+                                    requested_path = "/".join(custom_segments[1:] + [filename])
                     elif folder and folder != "custom":
-                        # Use base folder
-                        suggested_folder = folder
-                    else:
-                        suggested_folder = None
-                    
+                        normalized_folder = normalize_relative_model_path(
+                            normalize_save_path(str(folder).strip()) or str(folder).strip()
+                        )
+                        if normalized_folder:
+                            suggested_folder = normalized_folder
+                            locked_folder = normalized_folder
+                            folder_locked = True
+
                     found_models.append({
                         "filename": filename,
+                        "requested_path": requested_path,
                         "url": url,
                         "node_id": node_id,
                         "node_title": node_title,
                         "node_type": node_type,
-                        "suggested_folder": suggested_folder
+                        "suggested_folder": suggested_folder,
+                        "folder_locked": folder_locked,
+                        "locked_folder": locked_folder,
+                        "display_name": requested_path or filename,
                     })
                     continue  # Skip generic widget scan for this node
         
@@ -2760,6 +2780,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
 
     # 2b. If a requested path includes subfolders, use that for download destination
     for model in missing_models:
+        if model.get("folder_locked") and model.get("locked_folder"):
+            continue
         requested_path = model.get("requested_path")
         if not requested_path:
             continue

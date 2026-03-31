@@ -433,7 +433,12 @@ def run_download(parsed_data: dict,
 
         if status_cb:
             status_cb("copying")
-        copy_tmp_path = dest_path + ".tmp_copy"
+        copy_tmp_fd, copy_tmp_path = tempfile.mkstemp(
+            prefix=f".{target_name}.",
+            suffix=".tmp_copy",
+            dir=target_dir,
+        )
+        os.close(copy_tmp_fd)
         with open(file_path_in_cache, "rb") as src, open(copy_tmp_path, "wb") as dst:
             while True:
                 if cancel_check and cancel_check():
@@ -574,7 +579,6 @@ def run_download_url(url: str,
                 )
                 target_name = _sanitize_download_filename(resolved_name) or "download.bin"
                 dest_path = os.path.join(target_dir, target_name)
-                temp_path = dest_path + ".part"
 
                 if os.path.exists(dest_path):
                     if overwrite:
@@ -587,6 +591,12 @@ def run_download_url(url: str,
                         print("[DEBUG]", message)
                         return (message, dest_path) if sync else ("", "")
 
+                temp_fd, temp_path = tempfile.mkstemp(
+                    prefix=f".{target_name}.",
+                    suffix=".part",
+                    dir=target_dir,
+                )
+                os.close(temp_fd)
                 _safe_remove(temp_path)
 
                 downloaded_bytes = 0
