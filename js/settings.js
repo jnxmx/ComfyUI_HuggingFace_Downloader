@@ -13,14 +13,14 @@ app.registerExtension({
     },
     {
       id: "downloader.auto_open_missing_models_on_run",
-      category: ["Hugging Face Download & Backup", "Auto download", "Auto-open on native run model checks"],
-      name: "Auto-open on native run model checks",
+      category: ["Hugging Face Download & Backup", "Auto download", "Auto-open on workflow-open missing-model scan"],
+      name: "Auto-open on workflow-open missing-model scan",
       type: "boolean",
-      defaultValue: false,
+      defaultValue: true,
       tooltip:
-        "Temporarily disabled. Auto-download now opens from ComfyUI's workflow-open missing-model scan instead of the Run hook.",
+        "When ComfyUI finishes its native missing-model scan after opening a workflow, automatically open Auto-download and clear missing-model highlights.",
       onChange: (newValue) => {
-        console.log(`[HF Downloader] Auto-open on native run model checks: ${Boolean(newValue)}`);
+        console.log(`[HF Downloader] Auto-open on workflow-open missing-model scan: ${Boolean(newValue)}`);
       },
     },
     {

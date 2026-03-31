@@ -18,18 +18,17 @@ app.registerExtension({
         const RUN_HOOK_COOLDOWN_MS = 1800;
         const WORKFLOW_OPEN_TRIGGER_COOLDOWN_MS = 1800;
         const WORKFLOW_OPEN_CANDIDATE_POLL_MS = 500;
-        const WORKFLOW_OPEN_AUTOTRIGGER_WINDOW_MS = 10000;
         const MODEL_STORE_IMPORT_CANDIDATES = [
             "../../../stores/modelStore.js",
             "/stores/modelStore.js",
             "../../../scripts/stores/modelStore.js",
             "/scripts/stores/modelStore.js"
         ];
-        const EXECUTION_STORE_IMPORT_CANDIDATES = [
-            "../../../stores/executionStore.js",
-            "/stores/executionStore.js",
-            "../../../scripts/stores/executionStore.js",
-            "/scripts/stores/executionStore.js"
+        const EXECUTION_ERROR_STORE_IMPORT_CANDIDATES = [
+            "../../../stores/executionErrorStore.js",
+            "/stores/executionErrorStore.js",
+            "../../../scripts/stores/executionErrorStore.js",
+            "/scripts/stores/executionErrorStore.js"
         ];
         const MISSING_MODEL_STORE_IMPORT_CANDIDATES = [
             "../../../platform/missingModel/missingModelStore.js",
@@ -404,6 +403,14 @@ app.registerExtension({
             return settingsUi.getSettingValue(RUN_HOOK_SETTING_ID) !== false;
         };
 
+        const getWorkflowOpenAutoEnabled = () => {
+            const settingsUi = app?.ui?.settings;
+            if (!settingsUi?.getSettingValue) {
+                return true;
+            }
+            return settingsUi.getSettingValue(RUN_HOOK_SETTING_ID) !== false;
+        };
+
         const unwrapStoreValue = (value) =>
             value && typeof value === "object" && "value" in value
                 ? value.value
@@ -416,6 +423,23 @@ app.registerExtension({
             } catch (_) {
                 return null;
             }
+        };
+
+        const isMissingModelCandidate = (candidate) => {
+            if (!candidate || typeof candidate !== "object") {
+                return false;
+            }
+            if (candidate.isMissing === false) {
+                return false;
+            }
+            const name = String(candidate?.name || candidate?.filename || "").trim();
+            if (!name) {
+                return false;
+            }
+            const directory = String(candidate?.directory || candidate?.folder || "").trim();
+            const inputName = String(candidate?.widgetName || candidate?.input_name || "").trim();
+            const nodeId = candidate?.nodeId ?? candidate?.node_id;
+            return Boolean(directory || inputName || nodeId !== undefined || candidate?.url || candidate?.isMissing === true);
         };
 
         let availableFolders = [
@@ -1231,12 +1255,14 @@ app.registerExtension({
 
         const getFrontendMissingModelCandidates = async () => {
             const store = await resolveMissingModelStore();
-            let candidates = Array.isArray(store?.missingModelCandidates)
-                ? store.missingModelCandidates
+            const storeCandidates = unwrapStoreValue(store?.missingModelCandidates);
+            let candidates = Array.isArray(storeCandidates)
+                ? storeCandidates
                 : [];
             if (!candidates.length) {
                 const activeWorkflow = getActiveWorkflowEntry();
-                const pendingCandidates = activeWorkflow?.pendingWarnings?.missingModelCandidates;
+                const pendingWarnings = unwrapStoreValue(activeWorkflow?.pendingWarnings);
+                const pendingCandidates = unwrapStoreValue(pendingWarnings?.missingModelCandidates);
                 if (Array.isArray(pendingCandidates)) {
                     candidates = pendingCandidates;
                 }
@@ -1244,8 +1270,10 @@ app.registerExtension({
             return Array.isArray(candidates) ? candidates : [];
         };
 
-        const createRunHookFallbackMissingModelsFromFrontendStore = async () => {
-            const candidates = await getFrontendMissingModelCandidates();
+        const createRunHookFallbackMissingModelsFromFrontendStore = async (providedCandidates = null) => {
+            const candidates = Array.isArray(providedCandidates)
+                ? providedCandidates
+                : await getFrontendMissingModelCandidates();
             if (!candidates.length) {
                 return [];
             }
@@ -1263,14 +1291,14 @@ app.registerExtension({
             const collected = [];
             const seen = new Set();
             for (const candidate of candidates) {
-                if (!candidate || candidate.isMissing !== true) {
+                if (!isMissingModelCandidate(candidate)) {
                     continue;
                 }
-                const filename = String(candidate?.name || "").trim();
+                const filename = String(candidate?.name || candidate?.filename || "").trim();
                 if (!filename) {
                     continue;
                 }
-                const directory = String(candidate?.directory || "").trim() || "checkpoints";
+                const directory = String(candidate?.directory || candidate?.folder || "").trim() || "checkpoints";
 
                 if (modelStore && directory) {
                     if (!folderNamesCache.has(directory)) {
@@ -1396,6 +1424,14 @@ app.registerExtension({
             }
 
             return null;
+        };
+
+        const isWorkflowReadyForModelScan = () => {
+            if (app?.isGraphReady === false) {
+                return false;
+            }
+            const workflow = serializeWorkflowForModelScan();
+            return Boolean(workflow && typeof workflow === "object");
         };
 
         const formatFoundModelPath = (value) => {
@@ -3205,7 +3241,11 @@ app.registerExtension({
                     const fallbackMissingFromFailures =
                         createRunHookFallbackMissingModels(options?.runHookFailures || [], workflow);
                     const fallbackMissingFromFrontendStore =
-                        await createRunHookFallbackMissingModelsFromFrontendStore();
+                        await createRunHookFallbackMissingModelsFromFrontendStore(
+                            Array.isArray(options?.frontendMissingModelCandidates)
+                                ? options.frontendMissingModelCandidates
+                                : null
+                        );
                     if (fallbackMissingFromFailures.length) {
                         const existingMissing = Array.isArray(data?.missing) ? data.missing : [];
                         data.missing = [...existingMissing, ...fallbackMissingFromFailures];
@@ -3414,8 +3454,6 @@ app.registerExtension({
         let runHookLastTriggeredAt = 0;
         let workflowOpenLastTriggeredAt = 0;
         let workflowOpenMissingModelsTimer = null;
-        let workflowOpenObservedAt = 0;
-        let workflowOpenLastActiveWorkflow = null;
         let workflowOpenLastHandledSignature = "";
 
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -3743,7 +3781,7 @@ app.registerExtension({
         };
 
         let resolvedModelStorePromise = null;
-        let resolvedExecutionStorePromise = null;
+        let resolvedExecutionErrorStorePromise = null;
         let resolvedMissingModelStorePromise = null;
 
         const resolveModelStore = async () => {
@@ -3776,18 +3814,18 @@ app.registerExtension({
             return resolvedModelStorePromise;
         };
 
-        const resolveExecutionStore = async () => {
-            if (resolvedExecutionStorePromise) {
-                return resolvedExecutionStorePromise;
+        const resolveExecutionErrorStore = async () => {
+            if (resolvedExecutionErrorStorePromise) {
+                return resolvedExecutionErrorStorePromise;
             }
 
-            resolvedExecutionStorePromise = (async () => {
-                for (const candidate of EXECUTION_STORE_IMPORT_CANDIDATES) {
+            resolvedExecutionErrorStorePromise = (async () => {
+                for (const candidate of EXECUTION_ERROR_STORE_IMPORT_CANDIDATES) {
                     try {
                         const module = await import(candidate);
-                        const useExecutionStore = module?.useExecutionStore;
-                        if (typeof useExecutionStore === "function") {
-                            const store = useExecutionStore();
+                        const useExecutionErrorStore = module?.useExecutionErrorStore;
+                        if (typeof useExecutionErrorStore === "function") {
+                            const store = useExecutionErrorStore();
                             if (store && typeof store === "object" && ("lastNodeErrors" in store)) {
                                 return store;
                             }
@@ -3799,7 +3837,7 @@ app.registerExtension({
                 return null;
             })();
 
-            return resolvedExecutionStorePromise;
+            return resolvedExecutionErrorStorePromise;
         };
 
         const resolveMissingModelStore = async () => {
@@ -4523,10 +4561,10 @@ app.registerExtension({
                 applyNodeErrorsFallback(stripped.nextNodeErrors);
             }
 
-            const executionStore = await resolveExecutionStore();
-            if (executionStore) {
+            const executionErrorStore = await resolveExecutionErrorStore();
+            if (executionErrorStore) {
                 try {
-                    executionStore.lastNodeErrors = stripped.nextNodeErrors;
+                    executionErrorStore.lastNodeErrors = stripped.nextNodeErrors;
                     return true;
                 } catch (_) {
                     // Fall through to in-place update result.
@@ -4536,18 +4574,106 @@ app.registerExtension({
             return updatedInPlace;
         };
 
+        const clearMissingModelStoreState = async (candidates = []) => {
+            if (!Array.isArray(candidates) || !candidates.length) {
+                return false;
+            }
+
+            const missingModelStore = await resolveMissingModelStore();
+            if (!missingModelStore || typeof missingModelStore !== "object") {
+                return false;
+            }
+
+            let changed = false;
+            const widgetCandidates = [];
+            const nameCandidates = new Map();
+
+            for (const candidate of candidates) {
+                if (!isMissingModelCandidate(candidate)) {
+                    continue;
+                }
+                const nodeId = String(candidate?.nodeId ?? candidate?.node_id ?? "").trim();
+                const widgetName = String(candidate?.widgetName || candidate?.input_name || "").trim();
+                const modelName = String(candidate?.name || candidate?.filename || "").trim();
+
+                if (nodeId && widgetName) {
+                    widgetCandidates.push({ nodeId, widgetName });
+                    continue;
+                }
+
+                if (nodeId && modelName) {
+                    if (!nameCandidates.has(modelName)) {
+                        nameCandidates.set(modelName, new Set());
+                    }
+                    nameCandidates.get(modelName).add(nodeId);
+                }
+            }
+
+            try {
+                for (const entry of widgetCandidates) {
+                    if (typeof missingModelStore.removeMissingModelByWidget === "function") {
+                        missingModelStore.removeMissingModelByWidget(entry.nodeId, entry.widgetName);
+                        changed = true;
+                    }
+                }
+
+                for (const [modelName, nodeIds] of nameCandidates.entries()) {
+                    if (
+                        typeof missingModelStore.removeMissingModelByNameOnNodes === "function" &&
+                        nodeIds.size
+                    ) {
+                        missingModelStore.removeMissingModelByNameOnNodes(modelName, nodeIds);
+                        changed = true;
+                    }
+                }
+            } catch (_) {
+                // Fall back to a full clear below.
+            }
+
+            const remainingSignature = buildMissingModelCandidatesSignature(
+                unwrapStoreValue(missingModelStore?.missingModelCandidates) || []
+            );
+            if (
+                remainingSignature &&
+                remainingSignature === buildMissingModelCandidatesSignature(candidates) &&
+                typeof missingModelStore.clearMissingModels === "function"
+            ) {
+                try {
+                    missingModelStore.clearMissingModels();
+                    changed = true;
+                } catch (_) {
+                    // Ignore store clear failures.
+                }
+            }
+
+            const executionErrorStore = await resolveExecutionErrorStore();
+            if (executionErrorStore) {
+                try {
+                    if (typeof executionErrorStore.dismissErrorOverlay === "function") {
+                        executionErrorStore.dismissErrorOverlay();
+                    } else if ("isErrorOverlayOpen" in executionErrorStore) {
+                        executionErrorStore.isErrorOverlayOpen = false;
+                    }
+                } catch (_) {
+                    // Ignore overlay clear failures.
+                }
+            }
+
+            return changed;
+        };
+
         const buildMissingModelCandidatesSignature = (candidates = []) => {
             if (!Array.isArray(candidates) || !candidates.length) {
                 return "";
             }
             const parts = [];
             for (const candidate of candidates) {
-                if (!candidate || candidate.isMissing !== true) {
+                if (!isMissingModelCandidate(candidate)) {
                     continue;
                 }
                 parts.push([
-                    String(candidate?.directory || "").trim().toLowerCase(),
-                    String(candidate?.name || "").trim().toLowerCase(),
+                    String(candidate?.directory || candidate?.folder || "").trim().toLowerCase(),
+                    String(candidate?.name || candidate?.filename || "").trim().toLowerCase(),
                     String(candidate?.url || "").trim().toLowerCase(),
                     String(candidate?.widgetName || candidate?.input_name || "").trim().toLowerCase(),
                     String(candidate?.nodeId ?? candidate?.node_id ?? "").trim().toLowerCase(),
@@ -4564,7 +4690,7 @@ app.registerExtension({
 
             const nodeInputNames = new Map();
             for (const candidate of candidates) {
-                if (!candidate || candidate.isMissing !== true) {
+                if (!isMissingModelCandidate(candidate)) {
                     continue;
                 }
                 const numericNodeId = Number(candidate?.nodeId ?? candidate?.node_id);
@@ -4622,14 +4748,21 @@ app.registerExtension({
         };
 
         const triggerAutoDownloadFromWorkflowOpen = (candidates = []) => {
+            const workflowOpenCandidates = Array.isArray(candidates)
+                ? candidates
+                    .filter((candidate) => isMissingModelCandidate(candidate))
+                    .map((candidate) => ({ ...candidate }))
+                : [];
             const now = Date.now();
             if (now - workflowOpenLastTriggeredAt < WORKFLOW_OPEN_TRIGGER_COOLDOWN_MS) {
-                clearMissingModelNodeHighlights(candidates);
+                clearMissingModelNodeHighlights(workflowOpenCandidates);
+                void clearMissingModelStoreState(workflowOpenCandidates);
                 void clearModelValidationErrorsFromFrontendState();
                 return false;
             }
             if (document.getElementById("auto-download-dialog")) {
-                clearMissingModelNodeHighlights(candidates);
+                clearMissingModelNodeHighlights(workflowOpenCandidates);
+                void clearMissingModelStoreState(workflowOpenCandidates);
                 void clearModelValidationErrorsFromFrontendState();
                 return false;
             }
@@ -4640,13 +4773,15 @@ app.registerExtension({
             }
 
             workflowOpenLastTriggeredAt = now;
-            clearMissingModelNodeHighlights(candidates);
+            clearMissingModelNodeHighlights(workflowOpenCandidates);
             void clearModelValidationErrorsFromFrontendState();
             runAction(new Set(), false, {
                 suppressEmptyResults: true,
                 triggeredByWorkflowOpen: true,
+                frontendMissingModelCandidates: workflowOpenCandidates,
                 reason: "workflow-open-missing-models",
             });
+            void clearMissingModelStoreState(workflowOpenCandidates);
             showToast({
                 severity: "info",
                 summary: "Missing models detected",
@@ -4668,24 +4803,19 @@ app.registerExtension({
                 }
                 pollBusy = true;
                 try {
-                    const activeWorkflow = getActiveWorkflowEntry();
-                    const workflowReference = activeWorkflow?.activeState || activeWorkflow;
-                    if (workflowReference !== workflowOpenLastActiveWorkflow) {
-                        workflowOpenLastActiveWorkflow = workflowReference;
-                        workflowOpenObservedAt = workflowReference ? Date.now() : 0;
-                        workflowOpenLastHandledSignature = "";
-                    }
-
-                    if (!workflowReference || !workflowOpenObservedAt) {
+                    if (!getWorkflowOpenAutoEnabled()) {
                         return;
                     }
-                    if (Date.now() - workflowOpenObservedAt > WORKFLOW_OPEN_AUTOTRIGGER_WINDOW_MS) {
-                        return;
-                    }
-
                     const candidates = await getFrontendMissingModelCandidates();
                     const signature = buildMissingModelCandidatesSignature(candidates);
-                    if (!signature || signature === workflowOpenLastHandledSignature) {
+                    if (!signature) {
+                        workflowOpenLastHandledSignature = "";
+                        return;
+                    }
+                    if (signature === workflowOpenLastHandledSignature) {
+                        return;
+                    }
+                    if (!isWorkflowReadyForModelScan()) {
                         return;
                     }
 
