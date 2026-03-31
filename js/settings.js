@@ -16,9 +16,9 @@ app.registerExtension({
       category: ["Hugging Face Download & Backup", "Auto download", "Auto-open on native run model checks"],
       name: "Auto-open on native run model checks",
       type: "boolean",
-      defaultValue: true,
+      defaultValue: false,
       tooltip:
-        "After pressing Run, if native ComfyUI opens missing-models or reports model value-not-in-list validation errors, automatically open Auto-download.",
+        "Temporarily disabled. Auto-download now opens from ComfyUI's workflow-open missing-model scan instead of the Run hook.",
       onChange: (newValue) => {
         console.log(`[HF Downloader] Auto-open on native run model checks: ${Boolean(newValue)}`);
       },

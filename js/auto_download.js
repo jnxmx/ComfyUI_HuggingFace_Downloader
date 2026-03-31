@@ -5,6 +5,7 @@ app.registerExtension({
     name: "autoDownloadModels",
     setup() {
         const RUN_HOOK_SETTING_ID = "downloader.auto_open_missing_models_on_run";
+        const RUN_HOOK_TEMP_DISABLED = true;
         const RUN_QUEUE_COMMAND_IDS = ["Comfy.QueuePrompt", "Comfy.QueuePromptFront"];
         const RUN_COMMAND_OVERRIDE_MARKER = "__hfAutoDownloadRunHookNativeAwareOverride";
         const RUN_COMMAND_ORIGINAL_FN = "__hfAutoDownloadRunHookNativeAwareOriginalFn";
@@ -15,6 +16,9 @@ app.registerExtension({
         const RUN_NATIVE_DIALOG_POLL_MS = 60;
         const RUN_NATIVE_VALIDATION_POLL_MS = 60;
         const RUN_HOOK_COOLDOWN_MS = 1800;
+        const WORKFLOW_OPEN_TRIGGER_COOLDOWN_MS = 1800;
+        const WORKFLOW_OPEN_CANDIDATE_POLL_MS = 500;
+        const WORKFLOW_OPEN_AUTOTRIGGER_WINDOW_MS = 10000;
         const MODEL_STORE_IMPORT_CANDIDATES = [
             "../../../stores/modelStore.js",
             "/stores/modelStore.js",
@@ -390,11 +394,28 @@ app.registerExtension({
         };
 
         const getRunHookEnabled = () => {
+            if (RUN_HOOK_TEMP_DISABLED) {
+                return false;
+            }
             const settingsUi = app?.ui?.settings;
             if (!settingsUi?.getSettingValue) {
                 return true;
             }
             return settingsUi.getSettingValue(RUN_HOOK_SETTING_ID) !== false;
+        };
+
+        const unwrapStoreValue = (value) =>
+            value && typeof value === "object" && "value" in value
+                ? value.value
+                : value;
+
+        const getActiveWorkflowEntry = () => {
+            try {
+                const workflowStore = unwrapStoreValue(app?.extensionManager?.workflow);
+                return unwrapStoreValue(workflowStore?.activeWorkflow) || null;
+            } catch (_) {
+                return null;
+            }
         };
 
         let availableFolders = [
@@ -1208,27 +1229,23 @@ app.registerExtension({
             return filterRunHookEligibleMissingModels(collected);
         };
 
-        const createRunHookFallbackMissingModelsFromFrontendStore = async () => {
+        const getFrontendMissingModelCandidates = async () => {
             const store = await resolveMissingModelStore();
             let candidates = Array.isArray(store?.missingModelCandidates)
                 ? store.missingModelCandidates
                 : [];
             if (!candidates.length) {
-                let workflowStore = app?.extensionManager?.workflow;
-                workflowStore =
-                    workflowStore && typeof workflowStore === "object" && "value" in workflowStore
-                        ? workflowStore.value
-                        : workflowStore;
-                let activeWorkflow = workflowStore?.activeWorkflow;
-                activeWorkflow =
-                    activeWorkflow && typeof activeWorkflow === "object" && "value" in activeWorkflow
-                        ? activeWorkflow.value
-                        : activeWorkflow;
+                const activeWorkflow = getActiveWorkflowEntry();
                 const pendingCandidates = activeWorkflow?.pendingWarnings?.missingModelCandidates;
                 if (Array.isArray(pendingCandidates)) {
                     candidates = pendingCandidates;
                 }
             }
+            return Array.isArray(candidates) ? candidates : [];
+        };
+
+        const createRunHookFallbackMissingModelsFromFrontendStore = async () => {
+            const candidates = await getFrontendMissingModelCandidates();
             if (!candidates.length) {
                 return [];
             }
@@ -1353,16 +1370,7 @@ app.registerExtension({
 
         const serializeWorkflowForModelScan = () => {
             try {
-                let workflowStore = app?.extensionManager?.workflow;
-                workflowStore =
-                    workflowStore && typeof workflowStore === "object" && "value" in workflowStore
-                        ? workflowStore.value
-                        : workflowStore;
-                let activeWorkflow = workflowStore?.activeWorkflow;
-                activeWorkflow =
-                    activeWorkflow && typeof activeWorkflow === "object" && "value" in activeWorkflow
-                        ? activeWorkflow.value
-                        : activeWorkflow;
+                const activeWorkflow = getActiveWorkflowEntry();
                 const activeState = activeWorkflow?.activeState;
                 if (activeState && typeof activeState === "object") {
                     return activeState;
@@ -3249,10 +3257,13 @@ app.registerExtension({
                     }
 
                     if (!hasAnyResults) {
+                        const emptyDetail = options?.triggeredByWorkflowOpen
+                            ? "Workflow-open missing-model scan reported candidates, but the scan returned no actionable models."
+                            : "Run hook detected missing-model signals, but scan returned no actionable models.";
                         showToast({
                             severity: "warn",
                             summary: "Auto-download skipped",
-                            detail: "Run hook detected missing-model signals, but scan returned no actionable models.",
+                            detail: emptyDetail,
                             life: 4200
                         });
                         resumeRunIfPossible();
@@ -3401,6 +3412,11 @@ app.registerExtension({
         };
 
         let runHookLastTriggeredAt = 0;
+        let workflowOpenLastTriggeredAt = 0;
+        let workflowOpenMissingModelsTimer = null;
+        let workflowOpenObservedAt = 0;
+        let workflowOpenLastActiveWorkflow = null;
+        let workflowOpenLastHandledSignature = "";
 
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -4520,6 +4536,172 @@ app.registerExtension({
             return updatedInPlace;
         };
 
+        const buildMissingModelCandidatesSignature = (candidates = []) => {
+            if (!Array.isArray(candidates) || !candidates.length) {
+                return "";
+            }
+            const parts = [];
+            for (const candidate of candidates) {
+                if (!candidate || candidate.isMissing !== true) {
+                    continue;
+                }
+                parts.push([
+                    String(candidate?.directory || "").trim().toLowerCase(),
+                    String(candidate?.name || "").trim().toLowerCase(),
+                    String(candidate?.url || "").trim().toLowerCase(),
+                    String(candidate?.widgetName || candidate?.input_name || "").trim().toLowerCase(),
+                    String(candidate?.nodeId ?? candidate?.node_id ?? "").trim().toLowerCase(),
+                ].join("|"));
+            }
+            parts.sort();
+            return parts.join("||");
+        };
+
+        const clearMissingModelNodeHighlights = (candidates = []) => {
+            if (!Array.isArray(candidates) || !candidates.length) {
+                return 0;
+            }
+
+            const nodeInputNames = new Map();
+            for (const candidate of candidates) {
+                if (!candidate || candidate.isMissing !== true) {
+                    continue;
+                }
+                const numericNodeId = Number(candidate?.nodeId ?? candidate?.node_id);
+                if (!Number.isFinite(numericNodeId)) {
+                    continue;
+                }
+                if (!nodeInputNames.has(numericNodeId)) {
+                    nodeInputNames.set(numericNodeId, new Set());
+                }
+                const inputName = String(candidate?.widgetName || candidate?.input_name || "").trim();
+                if (inputName) {
+                    nodeInputNames.get(numericNodeId).add(inputName);
+                }
+            }
+
+            if (!nodeInputNames.size) {
+                return 0;
+            }
+
+            let clearedCount = 0;
+            forEachGraphNodeRecursive(app?.graph, (node) => {
+                const numericNodeId = Number(node?.id);
+                if (!Number.isFinite(numericNodeId) || !nodeInputNames.has(numericNodeId)) {
+                    return;
+                }
+
+                clearedCount += 1;
+                node.has_errors = false;
+
+                const targetInputNames = nodeInputNames.get(numericNodeId) || new Set();
+                const inputs = Array.isArray(node.inputs) ? node.inputs : [];
+                for (const slot of inputs) {
+                    if (!slot || typeof slot !== "object") {
+                        continue;
+                    }
+                    if (!targetInputNames.size) {
+                        delete slot.hasErrors;
+                        continue;
+                    }
+                    const slotName = String(slot?.name || "").trim();
+                    if (!slotName || targetInputNames.has(slotName)) {
+                        delete slot.hasErrors;
+                    }
+                }
+            });
+
+            if (clearedCount > 0) {
+                if (app?.canvas?.setDirty) {
+                    app.canvas.setDirty(true, true);
+                } else if (app?.canvas?.draw) {
+                    app.canvas.draw(true, true);
+                }
+            }
+            return clearedCount;
+        };
+
+        const triggerAutoDownloadFromWorkflowOpen = (candidates = []) => {
+            const now = Date.now();
+            if (now - workflowOpenLastTriggeredAt < WORKFLOW_OPEN_TRIGGER_COOLDOWN_MS) {
+                clearMissingModelNodeHighlights(candidates);
+                void clearModelValidationErrorsFromFrontendState();
+                return false;
+            }
+            if (document.getElementById("auto-download-dialog")) {
+                clearMissingModelNodeHighlights(candidates);
+                void clearModelValidationErrorsFromFrontendState();
+                return false;
+            }
+
+            const runAction = window?.hfDownloader?.runAutoDownload;
+            if (typeof runAction !== "function") {
+                return false;
+            }
+
+            workflowOpenLastTriggeredAt = now;
+            clearMissingModelNodeHighlights(candidates);
+            void clearModelValidationErrorsFromFrontendState();
+            runAction(new Set(), false, {
+                suppressEmptyResults: true,
+                triggeredByWorkflowOpen: true,
+                reason: "workflow-open-missing-models",
+            });
+            showToast({
+                severity: "info",
+                summary: "Missing models detected",
+                detail: "Opened Auto-download from ComfyUI's workflow-open missing-model scan.",
+                life: 3200,
+            });
+            return true;
+        };
+
+        const installWorkflowOpenMissingModelsWatcher = () => {
+            if (workflowOpenMissingModelsTimer) {
+                return;
+            }
+
+            let pollBusy = false;
+            const poll = async () => {
+                if (pollBusy) {
+                    return;
+                }
+                pollBusy = true;
+                try {
+                    const activeWorkflow = getActiveWorkflowEntry();
+                    const workflowReference = activeWorkflow?.activeState || activeWorkflow;
+                    if (workflowReference !== workflowOpenLastActiveWorkflow) {
+                        workflowOpenLastActiveWorkflow = workflowReference;
+                        workflowOpenObservedAt = workflowReference ? Date.now() : 0;
+                        workflowOpenLastHandledSignature = "";
+                    }
+
+                    if (!workflowReference || !workflowOpenObservedAt) {
+                        return;
+                    }
+                    if (Date.now() - workflowOpenObservedAt > WORKFLOW_OPEN_AUTOTRIGGER_WINDOW_MS) {
+                        return;
+                    }
+
+                    const candidates = await getFrontendMissingModelCandidates();
+                    const signature = buildMissingModelCandidatesSignature(candidates);
+                    if (!signature || signature === workflowOpenLastHandledSignature) {
+                        return;
+                    }
+
+                    workflowOpenLastHandledSignature = signature;
+                    triggerAutoDownloadFromWorkflowOpen(candidates);
+                } finally {
+                    pollBusy = false;
+                }
+            };
+
+            workflowOpenMissingModelsTimer = setInterval(() => {
+                void poll();
+            }, WORKFLOW_OPEN_CANDIDATE_POLL_MS);
+            void poll();
+        };
+
         const waitForNativeModelValidationFailure = async ({
             timeoutMs,
             beforeSignature,
@@ -4853,6 +5035,6 @@ app.registerExtension({
         registerGlobalAction("runAutoDownload", runAutoDownload);
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
         setupMissingModelsDialogObserver();
-        installRunQueueCommandHooksNativeAware();
+        installWorkflowOpenMissingModelsWatcher();
     }
 });
