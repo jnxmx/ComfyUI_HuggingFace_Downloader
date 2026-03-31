@@ -1295,6 +1295,9 @@ app.registerExtension({
                     if (!node || typeof node !== "object") {
                         continue;
                     }
+                    if (isGraphNodeBypassed(node)) {
+                        continue;
+                    }
 
                     const nodeId = String(node?.id ?? "").trim();
                     const executionId = prefix
@@ -1786,6 +1789,9 @@ app.registerExtension({
             if (!isMissingModelCandidate(candidate)) {
                 return null;
             }
+            if (isFrontendMissingModelCandidateBypassed(candidate)) {
+                return null;
+            }
 
             const requestedPath = normalizeWorkflowPath(
                 candidate?.requested_path ||
@@ -1875,6 +1881,10 @@ app.registerExtension({
 
             const resolved = [];
             for (const candidate of normalizedCandidates) {
+                if (isFrontendMissingModelCandidateBypassed(candidate)) {
+                    resolved.push(candidate);
+                    continue;
+                }
                 const entry = createFrontendMissingModelEntryFromCandidate(candidate);
                 if (!entry) {
                     continue;
@@ -4354,6 +4364,80 @@ app.registerExtension({
             return Number.isFinite(numericId) ? numericId : null;
         };
 
+        const isNodeBypassedMode = (mode) => {
+            const numericMode = Number(mode);
+            return numericMode === 2 || numericMode === 4;
+        };
+
+        const isGraphNodeBypassed = (node) =>
+            Boolean(node && typeof node === "object" && isNodeBypassedMode(node?.mode));
+
+        const getGraphNodeByExecutionId = (executionId, graph = app?.rootGraph || app?.graph) => {
+            const targetId = String(executionId || "").trim();
+            if (!targetId || !graph) {
+                return null;
+            }
+
+            let found = null;
+            const visited = new Set();
+            const visit = (currentGraph, prefix = "") => {
+                if (!currentGraph || visited.has(currentGraph) || found) {
+                    return;
+                }
+                visited.add(currentGraph);
+
+                const nodes = Array.isArray(currentGraph?.nodes)
+                    ? currentGraph.nodes
+                    : (Array.isArray(currentGraph?._nodes) ? currentGraph._nodes : []);
+                for (const node of nodes) {
+                    if (!node || typeof node !== "object") {
+                        continue;
+                    }
+                    const rawNodeId = String(node?.id ?? "").trim();
+                    const executionNodeId = prefix && rawNodeId ? `${prefix}:${rawNodeId}` : rawNodeId;
+                    if (executionNodeId === targetId || rawNodeId === targetId) {
+                        found = node;
+                        return;
+                    }
+                    try {
+                        if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
+                            visit(node.subgraph, executionNodeId);
+                        }
+                    } catch (_) {
+                        // Ignore malformed subgraph nodes.
+                    }
+                    if (found) {
+                        return;
+                    }
+                }
+            };
+
+            visit(graph, "");
+            if (found) {
+                return found;
+            }
+
+            const numericNodeId = parseNodeIdFromExecutionId(targetId);
+            if (Number.isFinite(numericNodeId)) {
+                return app?.graph?.getNodeById?.(numericNodeId) || null;
+            }
+            return null;
+        };
+
+        const isExecutionNodeBypassed = (executionId) =>
+            isGraphNodeBypassed(getGraphNodeByExecutionId(executionId));
+
+        const isFrontendMissingModelCandidateBypassed = (candidate) => {
+            if (!candidate || typeof candidate !== "object") {
+                return false;
+            }
+            const executionId = candidate?.nodeId ?? candidate?.node_id;
+            if (executionId === undefined || executionId === null || executionId === "") {
+                return false;
+            }
+            return isExecutionNodeBypassed(executionId);
+        };
+
         const getGraphNodeTitleById = (nodeId, fallback = "") => {
             if (!Number.isFinite(nodeId)) {
                 return fallback;
@@ -4389,6 +4473,9 @@ app.registerExtension({
             const collected = [];
             const seen = new Set();
             for (const [executionId, nodeError] of Object.entries(nodeErrors)) {
+                if (isExecutionNodeBypassed(executionId)) {
+                    continue;
+                }
                 const classType = String(nodeError?.class_type || "").trim();
                 const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
                 if (!reasons.length) continue;
@@ -4436,6 +4523,9 @@ app.registerExtension({
             const collected = [];
             const seen = new Set();
             for (const [executionId, nodeError] of Object.entries(nodeErrors)) {
+                if (isExecutionNodeBypassed(executionId)) {
+                    continue;
+                }
                 const classType = String(nodeError?.class_type || "").trim();
                 const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
                 if (!reasons.length) continue;
@@ -4664,6 +4754,9 @@ app.registerExtension({
 
         const getSelectedModelsMetadataNativeLike = (node) => {
             try {
+                if (isGraphNodeBypassed(node)) {
+                    return [];
+                }
                 const models = Array.isArray(node?.properties?.models) ? node.properties.models : [];
                 if (!models.length) return [];
                 const widgetsValuesRaw = node?.widgets_values;
@@ -4698,6 +4791,9 @@ app.registerExtension({
             const collectFromNodes = (nodes) => {
                 if (!Array.isArray(nodes)) return;
                 for (const node of nodes) {
+                    if (isNodeBypassedMode(node?.mode)) {
+                        continue;
+                    }
                     const selected = getSelectedModelsMetadataNativeLike(node);
                     if (selected.length) {
                         embeddedModels.push(...selected);
@@ -4753,6 +4849,7 @@ app.registerExtension({
 
             for (const node of nodesToScan) {
                 if (!node || typeof node !== "object") continue;
+                if (isNodeBypassedMode(node?.mode)) continue;
 
                 const nodeModels = Array.isArray(node?.properties?.models) ? node.properties.models : [];
                 if (nodeModels.length) {
@@ -4826,6 +4923,7 @@ app.registerExtension({
             const collectFromNodes = (nodes) => {
                 if (!Array.isArray(nodes)) return;
                 for (const node of nodes) {
+                    if (isNodeBypassedMode(node?.mode)) continue;
                     const nodeType = String(node?.type || "").trim();
                     if (!nodeType) continue;
                     if (!(nodeType in registeredNodeTypes)) {
@@ -5132,6 +5230,9 @@ app.registerExtension({
 
             const failures = [];
             for (const [executionId, nodeError] of Object.entries(nodeErrors)) {
+                if (isExecutionNodeBypassed(executionId)) {
+                    continue;
+                }
                 const classType = String(nodeError?.class_type || "");
                 const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
                 const nodeId = parseNodeIdFromExecutionId(executionId);
@@ -5475,6 +5576,9 @@ app.registerExtension({
                 if (!isMissingModelCandidate(candidate)) {
                     continue;
                 }
+                if (isFrontendMissingModelCandidateBypassed(candidate)) {
+                    continue;
+                }
                 parts.push([
                     String(candidate?.directory || candidate?.folder || "").trim().toLowerCase(),
                     String(candidate?.name || candidate?.filename || "").trim().toLowerCase(),
@@ -5497,16 +5601,16 @@ app.registerExtension({
                 if (!isMissingModelCandidate(candidate)) {
                     continue;
                 }
-                const numericNodeId = Number(candidate?.nodeId ?? candidate?.node_id);
-                if (!Number.isFinite(numericNodeId)) {
+                const executionId = String(candidate?.nodeId ?? candidate?.node_id ?? "").trim();
+                if (!executionId) {
                     continue;
                 }
-                if (!nodeInputNames.has(numericNodeId)) {
-                    nodeInputNames.set(numericNodeId, new Set());
+                if (!nodeInputNames.has(executionId)) {
+                    nodeInputNames.set(executionId, new Set());
                 }
                 const inputName = String(candidate?.widgetName || candidate?.input_name || "").trim();
                 if (inputName) {
-                    nodeInputNames.get(numericNodeId).add(inputName);
+                    nodeInputNames.get(executionId).add(inputName);
                 }
             }
 
@@ -5516,15 +5620,33 @@ app.registerExtension({
 
             let clearedCount = 0;
             forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
-                const numericNodeId = Number(node?.id);
-                if (!Number.isFinite(numericNodeId) || !nodeInputNames.has(numericNodeId)) {
+                const rawNodeId = String(node?.id ?? "").trim();
+                if (!rawNodeId) {
+                    return;
+                }
+                const matchedExecutionIds = [];
+                for (const executionId of nodeInputNames.keys()) {
+                    if (executionId === rawNodeId || executionId.endsWith(`:${rawNodeId}`)) {
+                        matchedExecutionIds.push(executionId);
+                    }
+                }
+                if (!matchedExecutionIds.length) {
                     return;
                 }
 
                 clearedCount += 1;
                 node.has_errors = false;
 
-                const targetInputNames = nodeInputNames.get(numericNodeId) || new Set();
+                const targetInputNames = new Set();
+                for (const executionId of matchedExecutionIds) {
+                    const names = nodeInputNames.get(executionId);
+                    if (!names) {
+                        continue;
+                    }
+                    for (const name of names) {
+                        targetInputNames.add(name);
+                    }
+                }
                 const inputs = Array.isArray(node.inputs) ? node.inputs : [];
                 for (const slot of inputs) {
                     if (!slot || typeof slot !== "object") {
@@ -5557,33 +5679,47 @@ app.registerExtension({
                     .filter((candidate) => isMissingModelCandidate(candidate))
                     .map((candidate) => ({ ...candidate }))
                 : [];
+            const bypassedWorkflowOpenCandidates = workflowOpenCandidates.filter((candidate) =>
+                isFrontendMissingModelCandidateBypassed(candidate)
+            );
+            const activeWorkflowOpenCandidates = workflowOpenCandidates.filter((candidate) =>
+                !isFrontendMissingModelCandidateBypassed(candidate)
+            );
+            if (bypassedWorkflowOpenCandidates.length) {
+                clearMissingModelNodeHighlights(bypassedWorkflowOpenCandidates);
+                void clearMissingModelStoreState(bypassedWorkflowOpenCandidates);
+            }
             console.log(
                 "[AutoDownload] Workflow-open candidates:",
-                workflowOpenCandidates.map((candidate) => ({
+                activeWorkflowOpenCandidates.map((candidate) => ({
                     name: candidate?.name || candidate?.filename || "",
                     directory: candidate?.directory || candidate?.folder || "",
                     nodeId: candidate?.nodeId ?? candidate?.node_id ?? "",
                     widgetName: candidate?.widgetName || candidate?.input_name || "",
                 }))
             );
+            if (!activeWorkflowOpenCandidates.length) {
+                void clearModelValidationErrorsFromFrontendState();
+                return false;
+            }
             const now = Date.now();
             if (now - workflowOpenLastTriggeredAt < WORKFLOW_OPEN_TRIGGER_COOLDOWN_MS) {
-                clearMissingModelNodeHighlights(workflowOpenCandidates);
+                clearMissingModelNodeHighlights(activeWorkflowOpenCandidates);
                 void clearModelValidationErrorsFromFrontendState();
                 return false;
             }
             if (document.getElementById("auto-download-dialog")) {
-                clearMissingModelNodeHighlights(workflowOpenCandidates);
+                clearMissingModelNodeHighlights(activeWorkflowOpenCandidates);
                 void clearModelValidationErrorsFromFrontendState();
                 return false;
             }
 
             workflowOpenLastTriggeredAt = now;
-            clearMissingModelNodeHighlights(workflowOpenCandidates);
+            clearMissingModelNodeHighlights(activeWorkflowOpenCandidates);
             void clearModelValidationErrorsFromFrontendState();
 
             const frontendMissingEntries =
-                await createRunHookFallbackMissingModelsFromFrontendStore(workflowOpenCandidates);
+                await createRunHookFallbackMissingModelsFromFrontendStore(activeWorkflowOpenCandidates);
             console.log(
                 "[AutoDownload] Workflow-open actionable entries:",
                 frontendMissingEntries.map((entry) => ({
@@ -5624,7 +5760,7 @@ app.registerExtension({
                     {
                         suppressEmptyResults: true,
                         triggeredByWorkflowOpen: true,
-                        frontendMissingModelCandidates: workflowOpenCandidates,
+                        frontendMissingModelCandidates: activeWorkflowOpenCandidates,
                         reason: "workflow-open-missing-models",
                     }
                 );
@@ -5645,7 +5781,7 @@ app.registerExtension({
             runAction(new Set(), false, {
                 suppressEmptyResults: true,
                 triggeredByWorkflowOpen: true,
-                frontendMissingModelCandidates: workflowOpenCandidates,
+                frontendMissingModelCandidates: activeWorkflowOpenCandidates,
                 reason: "workflow-open-missing-models",
             });
             showToast({
