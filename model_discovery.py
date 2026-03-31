@@ -945,6 +945,12 @@ def resolve_node_folder_for_widget(
 
 def apply_known_directory_hints(models: list[dict]) -> None:
     for model in models:
+        locked_folder = normalize_save_path(model.get("locked_folder")) or ""
+        if model.get("folder_locked"):
+            if locked_folder and not model.get("suggested_folder"):
+                model["suggested_folder"] = locked_folder.split("/", 1)[0]
+            continue
+
         filename = model.get("filename")
         known_dir = _lookup_known_directory_for_filename(filename)
         if not known_dir:
@@ -1952,6 +1958,41 @@ def recursive_find_file(filename: str, root_dir: str) -> str | None:
             return os.path.join(dirpath, filename)
     return None
 
+def resolve_requested_model_path(root_dir: str, requested_path: str | None, filename: str | None = None) -> str | None:
+    """
+    Resolve the workflow-requested relative path directly under a model root.
+
+    This is the hot path for workflow-managed downloader nodes. When requested_path
+    includes subfolders (for example `repo_subdir/model.safetensors`), checking the
+    exact relative destination avoids a full recursive walk on every scan.
+    """
+    root_abs = os.path.abspath(root_dir)
+    candidate_rel_paths = []
+
+    requested_norm = normalize_relative_model_path(requested_path)
+    if requested_norm:
+        candidate_rel_paths.append(requested_norm)
+
+    filename_norm = normalize_relative_model_path(os.path.basename(str(filename or "").replace("\\", "/")))
+    if filename_norm and filename_norm not in candidate_rel_paths:
+        candidate_rel_paths.append(filename_norm)
+
+    seen_candidates = set()
+    for rel_path in candidate_rel_paths:
+        candidate = os.path.abspath(os.path.join(root_abs, rel_path))
+        if candidate in seen_candidates:
+            continue
+        seen_candidates.add(candidate)
+        try:
+            if os.path.commonpath([root_abs, candidate]) != root_abs:
+                continue
+        except Exception:
+            continue
+        if os.path.exists(candidate):
+            return candidate
+
+    return None
+
 def recursive_find_file_by_stem(stem: str, root_dir: str) -> str | None:
     """Recursively searches for a file by exact stem or stem + known extension."""
     stem_lower = (stem or "").lower()
@@ -2069,10 +2110,12 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
         for root_path in search_paths:
              if not os.path.exists(root_path):
                  continue
-                 
-             # 1. Exact match check (e.g., "model.safetensors" in "models/checkpoints/model.safetensors")
-             exact_path = os.path.join(root_path, filename)
-             if os.path.exists(exact_path):
+
+             # 1. Exact requested-path check.
+             # This keeps workflow-managed downloader nodes fast even when multiple
+             # models share the same basename in different subfolders.
+             exact_path = resolve_requested_model_path(root_path, requested_path, filename)
+             if exact_path:
                  found_path = exact_path
                  found_root = root_path
                  break
@@ -2857,9 +2900,103 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             })
         return normalized_items
 
+    def _merge_prefilled_metadata_into_model(existing: dict, incoming: dict) -> None:
+        if not isinstance(existing, dict) or not isinstance(incoming, dict):
+            return
+
+        if incoming.get("url") and not existing.get("url"):
+            existing["url"] = incoming.get("url")
+            if incoming.get("source") and not existing.get("source"):
+                existing["source"] = incoming.get("source")
+
+        for key in ("hash", "hash_type", "input_name"):
+            if incoming.get(key) and not existing.get(key):
+                existing[key] = incoming.get(key)
+
+        for key in ("node_title", "node_type"):
+            if incoming.get(key) and not existing.get(key):
+                existing[key] = incoming.get(key)
+
+        if incoming.get("requested_path") and not existing.get("requested_path"):
+            existing["requested_path"] = incoming.get("requested_path")
+
+        if incoming.get("suggested_folder") and not existing.get("suggested_folder"):
+            existing["suggested_folder"] = incoming.get("suggested_folder")
+            existing["directory"] = incoming.get("suggested_folder")
+
+    def _merge_prefilled_missing_models(
+        existing_models: list[dict],
+        prefilled_items: list[dict]
+    ) -> list[dict]:
+        if not prefilled_items:
+            return existing_models
+
+        def _store_unique_match(index: dict, key: tuple | str, model: dict) -> None:
+            if not key:
+                return
+            current = index.get(key)
+            if current is None:
+                index[key] = model
+            elif current is not model:
+                index[key] = False
+
+        by_node_and_path: dict[tuple[str, str], dict | bool] = {}
+        by_node_and_filename: dict[tuple[str, str], dict | bool] = {}
+        by_path: dict[str, dict | bool] = {}
+
+        for model in existing_models:
+            if not isinstance(model, dict):
+                continue
+            requested_norm = normalize_relative_model_path(model.get("requested_path") or model.get("filename"))
+            filename_key = normalize_filename_key(model.get("filename") or requested_norm)
+            node_key = str(model.get("node_id")).strip() if model.get("node_id") is not None else ""
+
+            if node_key and requested_norm:
+                _store_unique_match(by_node_and_path, (node_key, requested_norm), model)
+            if node_key and filename_key:
+                _store_unique_match(by_node_and_filename, (node_key, filename_key), model)
+            if requested_norm:
+                _store_unique_match(by_path, requested_norm, model)
+
+        remaining_prefilled: list[dict] = []
+        for item in prefilled_items:
+            if not isinstance(item, dict):
+                continue
+
+            requested_norm = normalize_relative_model_path(item.get("requested_path") or item.get("filename"))
+            filename_key = normalize_filename_key(item.get("filename") or requested_norm)
+            node_key = str(item.get("node_id")).strip() if item.get("node_id") is not None else ""
+
+            match = None
+            if node_key and requested_norm:
+                candidate = by_node_and_path.get((node_key, requested_norm))
+                if candidate not in (None, False):
+                    match = candidate
+            if match is None and node_key and filename_key:
+                candidate = by_node_and_filename.get((node_key, filename_key))
+                if candidate not in (None, False):
+                    match = candidate
+            if match is None and requested_norm:
+                candidate = by_path.get(requested_norm)
+                if candidate not in (None, False):
+                    match = candidate
+
+            if match is not None:
+                _merge_prefilled_metadata_into_model(match, item)
+                continue
+
+            remaining_prefilled.append(item)
+
+        if remaining_prefilled:
+            existing_models.extend(remaining_prefilled)
+        return existing_models
+
     required_models = extract_models_from_workflow(workflow_json)
     if prefilled_missing_models:
-        required_models.extend(_normalize_prefilled_missing_models(prefilled_missing_models))
+        required_models = _merge_prefilled_missing_models(
+            required_models,
+            _normalize_prefilled_missing_models(prefilled_missing_models)
+        )
     enforce_authoritative_node_folders(required_models)
 
     def _normalize_dedupe_path(value: str | None) -> str:
@@ -3007,8 +3144,13 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     required_models = deduped
 
     # Normalize Nunchaku SVDQ precision before local presence checks.
-    # This ensures incompatible workflow variants are treated as mismatch/missing and can be corrected.
-    preferred_nunchaku_precision = _preferred_nunchaku_precision()
+    # Avoid probing torch/CUDA unless the workflow actually references Nunchaku SVDQ names,
+    # otherwise the first scan of an ordinary workflow pays a large cold-start cost.
+    needs_nunchaku_precision = any(
+        _is_nunchaku_svdq_name(model.get("filename"))
+        for model in required_models
+    )
+    preferred_nunchaku_precision = _preferred_nunchaku_precision() if needs_nunchaku_precision else None
     for model in required_models:
         current_name = model.get("filename")
         if not _is_nunchaku_svdq_name(current_name):
