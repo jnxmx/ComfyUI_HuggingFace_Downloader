@@ -1500,6 +1500,14 @@ app.registerExtension({
             return missing + found + mismatches;
         };
 
+        const countDownloadRequiredScanResults = (data) => {
+            const missing = Array.isArray(data?.missing) ? data.missing.length : 0;
+            const mismatches = Array.isArray(data?.mismatches)
+                ? data.mismatches.length
+                : (Array.isArray(data?.path_mismatches) ? data.path_mismatches.length : 0);
+            return missing + mismatches;
+        };
+
         const buildScanResultsSignature = (data = null) => {
             if (!data || typeof data !== "object") {
                 return "";
@@ -1774,6 +1782,147 @@ app.registerExtension({
             ]);
         };
 
+        const createFrontendMissingModelEntryFromCandidate = (candidate) => {
+            if (!isMissingModelCandidate(candidate)) {
+                return null;
+            }
+
+            const requestedPath = normalizeWorkflowPath(
+                candidate?.requested_path ||
+                candidate?.requestedPath ||
+                candidate?.name ||
+                candidate?.filename ||
+                ""
+            );
+            const filename = getPathBasename(requestedPath);
+            if (!filename) {
+                return null;
+            }
+
+            const directory = String(candidate?.directory || candidate?.folder || "").trim() || "checkpoints";
+            return {
+                filename,
+                name: filename,
+                requested_path: requestedPath || filename,
+                suggested_folder: directory,
+                directory,
+                url: String(candidate?.url || "").trim(),
+                hash: String(candidate?.hash || "").trim(),
+                hash_type: String(candidate?.hashType || candidate?.hash_type || "").trim(),
+                node_id: candidate?.nodeId ?? candidate?.node_id,
+                node_title: String(candidate?.nodeType || candidate?.node_title || "").trim(),
+                node_type: String(candidate?.nodeType || candidate?.node_type || "").trim(),
+                input_name: String(candidate?.widgetName || candidate?.input_name || "").trim(),
+                source: "frontend_missing_model_store",
+                type: "",
+            };
+        };
+
+        const isWorkflowManagedMissingEntry = (entry) => {
+            if (!entry || typeof entry !== "object") {
+                return false;
+            }
+            const source = String(entry?.source || "").trim().toLowerCase();
+            const nodeLabel = [
+                String(entry?.node_title || ""),
+                String(entry?.node_type || ""),
+            ].join(" ").toLowerCase();
+            return Boolean(entry?.url) && (
+                source === "workflow_metadata" ||
+                nodeLabel.includes("hugging face download model") ||
+                nodeLabel.includes("huggingface download model")
+            );
+        };
+
+        const collectResolvedFrontendMissingModelCandidates = (
+            candidates = [],
+            unresolvedMissingModels = [],
+            unresolvedMismatchModels = []
+        ) => {
+            const normalizedCandidates = Array.isArray(candidates)
+                ? candidates.filter((candidate) => isMissingModelCandidate(candidate))
+                : [];
+            if (!normalizedCandidates.length) {
+                return [];
+            }
+
+            const unresolvedKeys = new Set();
+            for (const entry of Array.isArray(unresolvedMissingModels) ? unresolvedMissingModels : []) {
+                if (!entry || typeof entry !== "object") {
+                    continue;
+                }
+                if (isWorkflowManagedMissingEntry(entry)) {
+                    continue;
+                }
+                const key = getMissingEntryDestinationKey(entry);
+                if (key) {
+                    unresolvedKeys.add(key);
+                }
+            }
+            for (const entry of Array.isArray(unresolvedMismatchModels) ? unresolvedMismatchModels : []) {
+                if (!entry || typeof entry !== "object") {
+                    continue;
+                }
+                const key = getMissingEntryDestinationKey(entry);
+                if (key) {
+                    unresolvedKeys.add(key);
+                }
+            }
+
+            if (!unresolvedKeys.size) {
+                return normalizedCandidates;
+            }
+
+            const resolved = [];
+            for (const candidate of normalizedCandidates) {
+                const entry = createFrontendMissingModelEntryFromCandidate(candidate);
+                if (!entry) {
+                    continue;
+                }
+                const key = getMissingEntryDestinationKey(entry);
+                if (!key || unresolvedKeys.has(key)) {
+                    continue;
+                }
+                resolved.push(candidate);
+            }
+            return resolved;
+        };
+
+        const applyResolvedFrontendMissingModelState = async (
+            candidates = [],
+            unresolvedMissingModels = [],
+            unresolvedMismatchModels = []
+        ) => {
+            const normalizedCandidates = Array.isArray(candidates)
+                ? candidates.filter((candidate) => isMissingModelCandidate(candidate))
+                : [];
+            if (!normalizedCandidates.length) {
+                return { resolvedCount: 0, allResolved: false };
+            }
+
+            const resolvedCandidates = collectResolvedFrontendMissingModelCandidates(
+                normalizedCandidates,
+                unresolvedMissingModels,
+                unresolvedMismatchModels
+            );
+            if (!resolvedCandidates.length) {
+                return { resolvedCount: 0, allResolved: false };
+            }
+
+            clearMissingModelNodeHighlights(resolvedCandidates);
+            await clearMissingModelStoreState(resolvedCandidates);
+
+            const allResolved = resolvedCandidates.length >= normalizedCandidates.length;
+            if (allResolved) {
+                await clearModelValidationErrorsFromFrontendState();
+            }
+
+            return {
+                resolvedCount: resolvedCandidates.length,
+                allResolved,
+            };
+        };
+
         const createRunHookFallbackMissingModelsFromFrontendStore = async (providedCandidates = null) => {
             const candidates = Array.isArray(providedCandidates)
                 ? providedCandidates
@@ -1798,21 +1947,12 @@ app.registerExtension({
             const collected = [];
             const seen = new Set();
             for (const candidate of candidates) {
-                if (!isMissingModelCandidate(candidate)) {
+                const entry = createFrontendMissingModelEntryFromCandidate(candidate);
+                if (!entry) {
                     continue;
                 }
-                const requestedPath = normalizeWorkflowPath(
-                    candidate?.requested_path ||
-                    candidate?.requestedPath ||
-                    candidate?.name ||
-                    candidate?.filename ||
-                    ""
-                );
-                const filename = getPathBasename(requestedPath);
-                if (!filename) {
-                    continue;
-                }
-                const directory = String(candidate?.directory || candidate?.folder || "").trim() || "checkpoints";
+                const filename = entry.filename;
+                const directory = entry.directory;
 
                 if (modelStore && directory) {
                     if (!folderNamesCache.has(directory)) {
@@ -1836,23 +1976,9 @@ app.registerExtension({
                     }
                 }
 
-                const entry = {
-                    filename,
-                    name: filename,
-                    requested_path: requestedPath || filename,
-                    suggested_folder: directory,
-                    directory,
-                    url: String(candidate?.url || "").trim(),
-                    hash: String(candidate?.hash || "").trim(),
-                    hash_type: String(candidate?.hashType || "").trim(),
-                    node_id: candidate?.nodeId,
-                    node_title: String(candidate?.nodeType || "").trim(),
-                    input_name: String(candidate?.widgetName || "").trim(),
-                    source: "frontend_missing_model_store",
-                    type: "",
-                };
                 const key = [
                     entry.filename.toLowerCase(),
+                    String(entry.requested_path || "").toLowerCase(),
                     entry.suggested_folder.toLowerCase(),
                     entry.url.toLowerCase(),
                     String(entry.node_id || "").toLowerCase(),
@@ -2531,6 +2657,17 @@ app.registerExtension({
                 : (Array.isArray(data.path_mismatches) ? [...data.path_mismatches] : []);
             const autoMismatchFix = autoApplyPathMismatches(mismatchModels);
             mismatchModels = autoMismatchFix.remaining;
+            const frontendMissingCandidates = Array.isArray(options?.frontendMissingModelCandidates)
+                ? options.frontendMissingModelCandidates
+                : [];
+
+            if (frontendMissingCandidates.length) {
+                void applyResolvedFrontendMissingModelState(
+                    frontendMissingCandidates,
+                    rawMissingModels,
+                    mismatchModels
+                );
+            }
 
             if (autoMismatchFix.fixedRows > 0) {
                 showToast({
@@ -2556,10 +2693,19 @@ app.registerExtension({
                 missingModels.length;
 
             if (
+                options?.triggeredByWorkflowOpen &&
+                totalMissingCount === 0 &&
+                mismatchModels.length === 0
+            ) {
+                return;
+            }
+
+            if (
                 options?.triggeredByRunHook &&
                 totalMissingCount === 0 &&
                 mismatchModels.length === 0
             ) {
+                void clearModelValidationErrorsFromFrontendState();
                 showToast({
                     severity: "success",
                     summary: "No downloads needed",
@@ -5463,6 +5609,16 @@ app.registerExtension({
                         found: [],
                         mismatches: [],
                     };
+                if (countDownloadRequiredScanResults(resultsToShow) <= 0) {
+                    void applyResolvedFrontendMissingModelState(
+                        workflowOpenCandidates,
+                        Array.isArray(resultsToShow?.missing) ? resultsToShow.missing : [],
+                        Array.isArray(resultsToShow?.mismatches)
+                            ? resultsToShow.mismatches
+                            : (Array.isArray(resultsToShow?.path_mismatches) ? resultsToShow.path_mismatches : [])
+                    );
+                    return false;
+                }
                 showResultsDialog(
                     resultsToShow,
                     {
@@ -5611,10 +5767,14 @@ app.registerExtension({
                                 const backendResults = await getWorkflowOpenBackendResults(
                                     loadedGraphData || serializeWorkflowForModelScan()
                                 );
-                                const backendSignature = buildScanResultsSignature(backendResults);
+                                const backendTargetCount = countDownloadRequiredScanResults(backendResults || {});
+                                const backendSignature =
+                                    backendTargetCount > 0
+                                        ? buildScanResultsSignature(backendResults)
+                                        : "";
                                 console.log(
                                     "[AutoDownload] Workflow-open backend fallback results:",
-                                    countActionableScanResults(backendResults || {})
+                                    backendTargetCount
                                 );
                                 if (backendSignature) {
                                     if (
