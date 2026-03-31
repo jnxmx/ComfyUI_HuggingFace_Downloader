@@ -2552,7 +2552,54 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     _hf_search_time_exhausted = False
     _hf_rate_limited_until = None
     _hf_repo_files_cache = {}
+    prefilled_missing_models = workflow_json.get("prefilled_missing_models")
+
+    def _normalize_prefilled_missing_models(prefilled_items: Any) -> list[dict]:
+        normalized_items: list[dict] = []
+        if not isinstance(prefilled_items, list):
+            return normalized_items
+
+        for item in prefilled_items:
+            if not isinstance(item, dict):
+                continue
+            filename = os.path.basename(
+                str(
+                    item.get("filename")
+                    or item.get("name")
+                    or item.get("requested_path")
+                    or ""
+                ).replace("\\", "/")
+            ).strip()
+            if not filename:
+                continue
+
+            requested_path = str(item.get("requested_path") or filename).strip() or filename
+            suggested_folder = str(
+                item.get("suggested_folder")
+                or item.get("directory")
+                or item.get("folder")
+                or "checkpoints"
+            ).strip() or "checkpoints"
+            node_id = item.get("node_id") if item.get("node_id") is not None else item.get("nodeId")
+            normalized_items.append({
+                "filename": filename,
+                "requested_path": requested_path,
+                "suggested_folder": suggested_folder,
+                "directory": suggested_folder,
+                "node_id": node_id,
+                "node_title": str(item.get("node_title") or item.get("nodeType") or "").strip(),
+                "node_type": str(item.get("node_type") or item.get("nodeType") or "").strip(),
+                "input_name": str(item.get("input_name") or item.get("widgetName") or "").strip(),
+                "url": str(item.get("url") or "").strip(),
+                "hash": str(item.get("hash") or "").strip(),
+                "hash_type": str(item.get("hash_type") or item.get("hashType") or "").strip(),
+                "source": str(item.get("source") or "frontend_missing_model_store").strip() or "frontend_missing_model_store",
+            })
+        return normalized_items
+
     required_models = extract_models_from_workflow(workflow_json)
+    if prefilled_missing_models:
+        required_models.extend(_normalize_prefilled_missing_models(prefilled_missing_models))
     enforce_authoritative_node_folders(required_models)
 
     def _normalize_dedupe_path(value: str | None) -> str:

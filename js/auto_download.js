@@ -1462,13 +1462,17 @@ app.registerExtension({
                 return candidates;
             }
 
-            const graphData =
-                graphDataOverride && typeof graphDataOverride === "object"
-                    ? graphDataOverride
-                    : serializeWorkflowForModelScan();
+            const hasExplicitWorkflowGraph = graphDataOverride && typeof graphDataOverride === "object";
+            const graphData = hasExplicitWorkflowGraph
+                ? graphDataOverride
+                : serializeWorkflowForModelScan();
             candidates = collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, graphData);
             if (candidates.length) {
                 return candidates;
+            }
+
+            if (hasExplicitWorkflowGraph) {
+                return [];
             }
 
             candidates = await collectEmbeddedMissingModelCandidatesNativeLike(graphData);
@@ -1560,7 +1564,10 @@ app.registerExtension({
                 return [];
             }
 
-            const modelStore = await resolveModelStore();
+            const shouldCheckFrontendModelStore = !Array.isArray(providedCandidates);
+            const modelStore = shouldCheckFrontendModelStore
+                ? await resolveModelStore()
+                : null;
             const folderNamesCache = new Map();
             if (modelStore && typeof modelStore.loadModelFolders === "function") {
                 try {
@@ -1634,6 +1641,58 @@ app.registerExtension({
             }
 
             return filterRunHookEligibleMissingModels(collected);
+        };
+
+        const enrichMissingEntriesViaBackend = async (entries = [], options = {}) => {
+            const missingEntries = Array.isArray(entries) ? entries.filter(Boolean) : [];
+            if (!missingEntries.length) {
+                return null;
+            }
+
+            const workflow =
+                options?.workflow && typeof options.workflow === "object"
+                    ? options.workflow
+                    : serializeWorkflowForModelScan();
+            if (!workflow || typeof workflow !== "object") {
+                return null;
+            }
+
+            try {
+                const payload = {
+                    ...workflow,
+                    request_id: options?.requestId || `frontend-enrich-${Date.now()}`,
+                    skip_hf_search: options?.skipHfSearch !== false,
+                    prefilled_missing_models: missingEntries,
+                };
+                const resp = api && typeof api.fetchApi === "function"
+                    ? await api.fetchApi("/check_missing_models", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    })
+                    : await fetch("/check_missing_models", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+                if (resp.status !== 200) {
+                    return null;
+                }
+                const data = await resp.json();
+                return {
+                    request_id: data?.request_id || payload.request_id,
+                    missing: filterRunHookEligibleMissingModels(
+                        Array.isArray(data?.missing) ? data.missing : []
+                    ),
+                    found: Array.isArray(data?.found) ? data.found : [],
+                    mismatches: Array.isArray(data?.mismatches)
+                        ? data.mismatches
+                        : (Array.isArray(data?.path_mismatches) ? data.path_mismatches : []),
+                };
+            } catch (err) {
+                console.warn("[AutoDownload] Backend enrichment failed:", err);
+                return null;
+            }
         };
 
         const normalizeFolderPathInput = (value) =>
@@ -3505,6 +3564,16 @@ app.registerExtension({
                             : null
                     );
                 if (frontendStoreFallbackMissing.length) {
+                    loadingDlg.setStatus("Resolving links...");
+                    loadingDlg.setDetail("Checking curated model registry for native missing-model candidates.");
+                    const enrichedFastPathResults = await enrichMissingEntriesViaBackend(
+                        frontendStoreFallbackMissing,
+                        {
+                            workflow,
+                            requestId,
+                            skipHfSearch: skipAllUnresolved,
+                        }
+                    );
                     if (loadingDlg) {
                         if (statusTimer) {
                             clearInterval(statusTimer);
@@ -3518,12 +3587,14 @@ app.registerExtension({
                         frontendStoreFallbackMissing
                     );
                     showResultsDialog(
-                        {
-                            request_id: requestId,
-                            missing: frontendStoreFallbackMissing,
-                            found: [],
-                            mismatches: []
-                        },
+                        enrichedFastPathResults && countActionableScanResults(enrichedFastPathResults)
+                            ? enrichedFastPathResults
+                            : {
+                                request_id: requestId,
+                                missing: frontendStoreFallbackMissing,
+                                found: [],
+                                mismatches: []
+                            },
                         options || {}
                     );
                     return;
@@ -5101,7 +5172,7 @@ app.registerExtension({
             return clearedCount;
         };
 
-        const triggerAutoDownloadFromWorkflowOpen = async (candidates = []) => {
+        const triggerAutoDownloadFromWorkflowOpen = async (candidates = [], workflowGraphData = null) => {
             const workflowOpenCandidates = Array.isArray(candidates)
                 ? candidates
                     .filter((candidate) => isMissingModelCandidate(candidate))
@@ -5143,13 +5214,24 @@ app.registerExtension({
                 }))
             );
             if (frontendMissingEntries.length) {
-                showResultsDialog(
-                    {
+                const enrichedResults = await enrichMissingEntriesViaBackend(frontendMissingEntries, {
+                    workflow:
+                        workflowGraphData && typeof workflowGraphData === "object"
+                            ? workflowGraphData
+                            : serializeWorkflowForModelScan(),
+                    requestId: `workflow_open_${Date.now()}`,
+                    skipHfSearch: true,
+                });
+                const resultsToShow = enrichedResults && countActionableScanResults(enrichedResults)
+                    ? enrichedResults
+                    : {
                         request_id: `workflow_open_${Date.now()}`,
                         missing: frontendMissingEntries,
                         found: [],
-                        mismatches: []
-                    },
+                        mismatches: [],
+                    };
+                showResultsDialog(
+                    resultsToShow,
                     {
                         suppressEmptyResults: true,
                         triggeredByWorkflowOpen: true,
@@ -5340,7 +5422,7 @@ app.registerExtension({
                             }
                             workflowOpenLastHandledSignature = signature;
                             workflowOpenLastHandledPath = activePath;
-                            await triggerAutoDownloadFromWorkflowOpen(candidates);
+                            await triggerAutoDownloadFromWorkflowOpen(candidates, loadedGraphData);
                         } catch (hookErr) {
                             console.warn("[AutoDownload] Workflow-open loadGraph hook failed:", hookErr);
                         }
