@@ -1270,6 +1270,44 @@ app.registerExtension({
             return Array.isArray(candidates) ? candidates : [];
         };
 
+        const countActionableScanResults = (data) => {
+            const missing = Array.isArray(data?.missing) ? data.missing.length : 0;
+            const found = Array.isArray(data?.found) ? data.found.length : 0;
+            const mismatches = Array.isArray(data?.mismatches)
+                ? data.mismatches.length
+                : (Array.isArray(data?.path_mismatches) ? data.path_mismatches.length : 0);
+            return missing + found + mismatches;
+        };
+
+        const mergeMissingEntries = (existingEntries, newEntries) => {
+            const merged = [];
+            const seen = new Set();
+            const append = (entry) => {
+                if (!entry || typeof entry !== "object") {
+                    return;
+                }
+                const key = [
+                    String(entry?.filename || entry?.name || "").trim().toLowerCase(),
+                    String(entry?.suggested_folder || entry?.directory || "").trim().toLowerCase(),
+                    String(entry?.requested_path || "").trim().toLowerCase(),
+                    String(entry?.url || "").trim().toLowerCase(),
+                    String(entry?.node_id || "").trim().toLowerCase()
+                ].join("|");
+                if (seen.has(key)) {
+                    return;
+                }
+                seen.add(key);
+                merged.push(entry);
+            };
+            for (const entry of Array.isArray(existingEntries) ? existingEntries : []) {
+                append(entry);
+            }
+            for (const entry of Array.isArray(newEntries) ? newEntries : []) {
+                append(entry);
+            }
+            return merged;
+        };
+
         const createRunHookFallbackMissingModelsFromFrontendStore = async (providedCandidates = null) => {
             const candidates = Array.isArray(providedCandidates)
                 ? providedCandidates
@@ -3251,6 +3289,22 @@ app.registerExtension({
                 }
                 const data = await resp.json();
                 console.log("[AutoDownload] Scan results:", data);
+
+                if (!countActionableScanResults(data)) {
+                    const fallbackMissingFromFrontendStore =
+                        await createRunHookFallbackMissingModelsFromFrontendStore(
+                            Array.isArray(options?.frontendMissingModelCandidates)
+                                ? options.frontendMissingModelCandidates
+                                : null
+                        );
+                    if (fallbackMissingFromFrontendStore.length) {
+                        data.missing = mergeMissingEntries(data?.missing, fallbackMissingFromFrontendStore);
+                        console.info(
+                            "[AutoDownload] Recovered actionable models from frontend missing-model store:",
+                            fallbackMissingFromFrontendStore
+                        );
+                    }
+                }
 
                 const suppressEmptyResults = Boolean(options?.suppressEmptyResults);
                 if (suppressEmptyResults) {
