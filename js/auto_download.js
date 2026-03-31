@@ -1367,6 +1367,88 @@ app.registerExtension({
             return collected;
         };
 
+        const collectEmbeddedMissingModelCandidatesNativeLike = async (graphData = null) => {
+            if (!graphData || typeof graphData !== "object") {
+                return [];
+            }
+
+            const uniqueModels = collectEmbeddedModelsNativeLike(graphData);
+            if (!uniqueModels.length) {
+                return [];
+            }
+
+            const modelStore = await resolveModelStore();
+            if (!modelStore) {
+                return [];
+            }
+
+            try {
+                await modelStore.loadModelFolders();
+            } catch (_) {
+                return [];
+            }
+
+            const folderNamesCache = new Map();
+            const collected = [];
+            const seen = new Set();
+
+            for (const model of uniqueModels) {
+                const directory = String(model?.directory || "").trim();
+                const modelName = String(model?.name || "").trim();
+                if (!directory || !modelName) {
+                    continue;
+                }
+
+                if (!folderNamesCache.has(directory)) {
+                    let nameSet = null;
+                    try {
+                        const folder = await modelStore.getLoadedModelFolder(directory);
+                        const values = folder?.models ? Object.values(folder.models) : [];
+                        nameSet = new Set(
+                            values
+                                .map((entry) => String(entry?.file_name || "").trim())
+                                .filter(Boolean)
+                        );
+                    } catch (_) {
+                        nameSet = null;
+                    }
+                    folderNamesCache.set(directory, nameSet);
+                }
+
+                const namesInFolder = folderNamesCache.get(directory);
+                if (namesInFolder && namesInFolder.has(modelName)) {
+                    continue;
+                }
+
+                const candidate = {
+                    nodeId: model?.sourceNodeId,
+                    nodeType: String(model?.sourceNodeType || "").trim(),
+                    widgetName: String(model?.sourceWidgetName || "").trim(),
+                    isAssetSupported: false,
+                    name: modelName,
+                    directory,
+                    url: String(model?.url || "").trim(),
+                    hash: String(model?.hash || "").trim(),
+                    hashType: String(model?.hash_type || "").trim(),
+                    isMissing: true,
+                };
+                const key = [
+                    String(candidate?.name || "").trim().toLowerCase(),
+                    String(candidate?.directory || "").trim().toLowerCase(),
+                    String(candidate?.url || "").trim().toLowerCase(),
+                    String(candidate?.widgetName || "").trim().toLowerCase(),
+                    String(candidate?.nodeId ?? "").trim().toLowerCase(),
+                ].join("|");
+                if (seen.has(key)) {
+                    continue;
+                }
+                seen.add(key);
+                collected.push(candidate);
+            }
+
+            return collected;
+        };
+
         const getFrontendPendingWarningCandidates = () => {
             const activeWorkflow = getActiveWorkflowEntry();
             const pendingWarnings = unwrapStoreValue(activeWorkflow?.pendingWarnings);
@@ -1374,17 +1456,26 @@ app.registerExtension({
             return Array.isArray(pendingCandidates) ? pendingCandidates : [];
         };
 
-        const getFrontendMissingModelCandidates = async () => {
+        const getFrontendMissingModelCandidates = async (graphDataOverride = null) => {
             let candidates = getFrontendPendingWarningCandidates();
             if (candidates.length) {
                 return candidates;
             }
 
-            const graphData = serializeWorkflowForModelScan();
+            const graphData =
+                graphDataOverride && typeof graphDataOverride === "object"
+                    ? graphDataOverride
+                    : serializeWorkflowForModelScan();
             candidates = collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, graphData);
             if (candidates.length) {
                 return candidates;
             }
+
+            candidates = await collectEmbeddedMissingModelCandidatesNativeLike(graphData);
+            if (candidates.length) {
+                return candidates;
+            }
+
             return [];
         };
 
@@ -5023,7 +5114,6 @@ app.registerExtension({
                         reason: "workflow-open-missing-models",
                     }
                 );
-                void clearMissingModelStoreState(workflowOpenCandidates);
                 showToast({
                     severity: "info",
                     summary: "Missing models detected",
@@ -5044,7 +5134,6 @@ app.registerExtension({
                 frontendMissingModelCandidates: workflowOpenCandidates,
                 reason: "workflow-open-missing-models",
             });
-            void clearMissingModelStoreState(workflowOpenCandidates);
             showToast({
                 severity: "info",
                 summary: "Missing models detected",
@@ -5052,6 +5141,24 @@ app.registerExtension({
                 life: 3200,
             });
             return true;
+        };
+
+        const normalizeWorkflowOpenGraphDataArg = (value) => {
+            if (!value) {
+                return null;
+            }
+            if (typeof value === "object") {
+                return value;
+            }
+            if (typeof value === "string") {
+                try {
+                    const parsed = JSON.parse(value);
+                    return parsed && typeof parsed === "object" ? parsed : null;
+                } catch (_) {
+                    return null;
+                }
+            }
+            return null;
         };
 
         const installWorkflowOpenLoadGraphHook = () => {
@@ -5065,6 +5172,7 @@ app.registerExtension({
 
             const originalLoadGraphData = comfyApp.loadGraphData.bind(comfyApp);
             comfyApp.loadGraphData = async (...args) => {
+                const loadedGraphData = normalizeWorkflowOpenGraphDataArg(args?.[0]);
                 const result = await originalLoadGraphData(...args);
                 try {
                     if (!getWorkflowOpenAutoEnabled()) {
@@ -5078,7 +5186,7 @@ app.registerExtension({
                             }
                             const activeWorkflow = getActiveWorkflowEntry();
                             const activePath = String(activeWorkflow?.path || activeWorkflow?.key || "").trim();
-                            const candidates = await getFrontendMissingModelCandidates();
+                            const candidates = await getFrontendMissingModelCandidates(loadedGraphData);
                             const signature = buildMissingModelCandidatesSignature(candidates);
                             console.log(
                                 "[AutoDownload] Workflow-open loadGraph hook candidates:",
