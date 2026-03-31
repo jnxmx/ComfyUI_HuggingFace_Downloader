@@ -4848,7 +4848,7 @@ app.registerExtension({
             return clearedCount;
         };
 
-        const triggerAutoDownloadFromWorkflowOpen = (candidates = []) => {
+        const triggerAutoDownloadFromWorkflowOpen = async (candidates = []) => {
             const workflowOpenCandidates = Array.isArray(candidates)
                 ? candidates
                     .filter((candidate) => isMissingModelCandidate(candidate))
@@ -4868,14 +4868,42 @@ app.registerExtension({
                 return false;
             }
 
+            workflowOpenLastTriggeredAt = now;
+            clearMissingModelNodeHighlights(workflowOpenCandidates);
+            void clearModelValidationErrorsFromFrontendState();
+
+            const frontendMissingEntries =
+                await createRunHookFallbackMissingModelsFromFrontendStore(workflowOpenCandidates);
+            if (frontendMissingEntries.length) {
+                showResultsDialog(
+                    {
+                        request_id: `workflow_open_${Date.now()}`,
+                        missing: frontendMissingEntries,
+                        found: [],
+                        mismatches: []
+                    },
+                    {
+                        suppressEmptyResults: true,
+                        triggeredByWorkflowOpen: true,
+                        frontendMissingModelCandidates: workflowOpenCandidates,
+                        reason: "workflow-open-missing-models",
+                    }
+                );
+                void clearMissingModelStoreState(workflowOpenCandidates);
+                showToast({
+                    severity: "info",
+                    summary: "Missing models detected",
+                    detail: "Opened Auto-download from ComfyUI's workflow-open missing-model scan.",
+                    life: 3200,
+                });
+                return true;
+            }
+
             const runAction = window?.hfDownloader?.runAutoDownload;
             if (typeof runAction !== "function") {
                 return false;
             }
 
-            workflowOpenLastTriggeredAt = now;
-            clearMissingModelNodeHighlights(workflowOpenCandidates);
-            void clearModelValidationErrorsFromFrontendState();
             runAction(new Set(), false, {
                 suppressEmptyResults: true,
                 triggeredByWorkflowOpen: true,
@@ -4921,7 +4949,7 @@ app.registerExtension({
                     }
 
                     workflowOpenLastHandledSignature = signature;
-                    triggerAutoDownloadFromWorkflowOpen(candidates);
+                    await triggerAutoDownloadFromWorkflowOpen(candidates);
                 } finally {
                     pollBusy = false;
                 }
