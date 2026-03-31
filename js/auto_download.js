@@ -5,7 +5,7 @@ app.registerExtension({
     name: "autoDownloadModels",
     setup() {
         const RUN_HOOK_SETTING_ID = "downloader.auto_open_missing_models_on_run";
-        const RUN_HOOK_TEMP_DISABLED = true;
+        const RUN_HOOK_TEMP_DISABLED = false;
         const RUN_QUEUE_COMMAND_IDS = ["Comfy.QueuePrompt", "Comfy.QueuePromptFront"];
         const RUN_COMMAND_OVERRIDE_MARKER = "__hfAutoDownloadRunHookNativeAwareOverride";
         const RUN_COMMAND_ORIGINAL_FN = "__hfAutoDownloadRunHookNativeAwareOriginalFn";
@@ -5182,5 +5182,6 @@ app.registerExtension({
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
         setupMissingModelsDialogObserver();
         installWorkflowOpenMissingModelsWatcher();
+        installRunQueueCommandHooksNativeAware();
     }
 });
