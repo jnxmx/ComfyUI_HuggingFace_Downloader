@@ -4122,6 +4122,19 @@ app.registerExtension({
                 data.missing = coalesceMissingEntriesByDestination(
                     Array.isArray(data?.missing) ? data.missing : []
                 );
+                if (Boolean(options?.suppressEmptyResults) && countDownloadRequiredScanResults(data) <= 0) {
+                    if (Array.isArray(options?.frontendMissingModelCandidates) && options.frontendMissingModelCandidates.length) {
+                        void applyResolvedFrontendMissingModelState(
+                            options.frontendMissingModelCandidates,
+                            Array.isArray(data?.missing) ? data.missing : [],
+                            Array.isArray(data?.mismatches)
+                                ? data.mismatches
+                                : (Array.isArray(data?.path_mismatches) ? data.path_mismatches : [])
+                        );
+                    }
+                    resumeRunIfPossible();
+                    return;
+                }
                 showResultsDialog(data, options || {});
 
             } catch (e) {
@@ -5723,6 +5736,23 @@ app.registerExtension({
             clearMissingModelNodeHighlights(activeWorkflowOpenCandidates);
             void clearModelValidationErrorsFromFrontendState();
 
+            const runAction = window?.hfDownloader?.runAutoDownload;
+            if (typeof runAction === "function") {
+                runAction(new Set(), false, {
+                    suppressEmptyResults: true,
+                    triggeredByWorkflowOpen: true,
+                    frontendMissingModelCandidates: activeWorkflowOpenCandidates,
+                    reason: "workflow-open-missing-models",
+                });
+                showToast({
+                    severity: "info",
+                    summary: "Missing models detected",
+                    detail: "Opened Auto-download from ComfyUI's workflow-open missing-model scan.",
+                    life: 3200,
+                });
+                return true;
+            }
+
             const frontendMissingEntries =
                 await createRunHookFallbackMissingModelsFromFrontendStore(activeWorkflowOpenCandidates);
             console.log(
@@ -5778,24 +5808,7 @@ app.registerExtension({
                 return true;
             }
 
-            const runAction = window?.hfDownloader?.runAutoDownload;
-            if (typeof runAction !== "function") {
-                return false;
-            }
-
-            runAction(new Set(), false, {
-                suppressEmptyResults: true,
-                triggeredByWorkflowOpen: true,
-                frontendMissingModelCandidates: activeWorkflowOpenCandidates,
-                reason: "workflow-open-missing-models",
-            });
-            showToast({
-                severity: "info",
-                summary: "Missing models detected",
-                detail: "Opened Auto-download from ComfyUI's workflow-open missing-model scan.",
-                life: 3200,
-            });
-            return true;
+            return false;
         };
 
         const getWorkflowOpenBackendResults = async (graphData = null) => {
