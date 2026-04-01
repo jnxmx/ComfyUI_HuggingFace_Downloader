@@ -425,6 +425,11 @@ app.registerExtension({
             }
         };
 
+        const getActiveWorkflowPathKey = () => {
+            const activeWorkflow = getActiveWorkflowEntry();
+            return String(activeWorkflow?.path || activeWorkflow?.key || "").trim();
+        };
+
         const isMissingModelCandidate = (candidate) => {
             if (!candidate || typeof candidate !== "object") {
                 return false;
@@ -5879,6 +5884,9 @@ app.registerExtension({
             const originalLoadGraphData = comfyApp.loadGraphData.bind(comfyApp);
             comfyApp.loadGraphData = async (...args) => {
                 const loadedGraphData = normalizeWorkflowOpenGraphDataArg(args?.[0]);
+                workflowOpenLastTriggeredAt = 0;
+                workflowOpenLastHandledSignature = "";
+                workflowOpenLastHandledPath = "";
                 const result = await originalLoadGraphData(...args);
                 try {
                     if (!getWorkflowOpenAutoEnabled()) {
@@ -5985,9 +5993,18 @@ app.registerExtension({
                 const result = originalSurfaceMissingModels(models);
                 try {
                     if (getWorkflowOpenAutoEnabled() && Array.isArray(models) && models.length) {
+                        const activePath = getActiveWorkflowPathKey();
                         const signature = buildMissingModelCandidatesSignature(models);
+                        if (
+                            signature &&
+                            signature === workflowOpenLastHandledSignature &&
+                            (!activePath || activePath === workflowOpenLastHandledPath)
+                        ) {
+                            return result;
+                        }
                         if (signature) {
                             workflowOpenLastHandledSignature = signature;
+                            workflowOpenLastHandledPath = activePath;
                         }
                         void triggerAutoDownloadFromWorkflowOpen(models);
                     }
@@ -6020,11 +6037,16 @@ app.registerExtension({
                     }
                     const candidates = await getFrontendMissingModelCandidates();
                     const signature = buildMissingModelCandidatesSignature(candidates);
+                    const activePath = getActiveWorkflowPathKey();
                     if (!signature) {
                         workflowOpenLastHandledSignature = "";
+                        workflowOpenLastHandledPath = activePath;
                         return;
                     }
-                    if (signature === workflowOpenLastHandledSignature) {
+                    if (
+                        signature === workflowOpenLastHandledSignature &&
+                        (!activePath || activePath === workflowOpenLastHandledPath)
+                    ) {
                         return;
                     }
                     if (!isWorkflowReadyForModelScan()) {
@@ -6032,6 +6054,7 @@ app.registerExtension({
                     }
 
                     workflowOpenLastHandledSignature = signature;
+                    workflowOpenLastHandledPath = activePath;
                     await triggerAutoDownloadFromWorkflowOpen(candidates);
                 } finally {
                     pollBusy = false;
@@ -6377,6 +6400,7 @@ app.registerExtension({
         registerGlobalAction("runAutoDownload", runAutoDownload);
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
         setupMissingModelsDialogObserver();
+        void installNativeMissingModelsSurfaceHook();
         installWorkflowOpenLoadGraphHook();
         installWorkflowOpenMissingModelsWatcher();
         installRunQueueCommandHooksNativeAware();
