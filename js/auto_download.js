@@ -1338,6 +1338,13 @@ app.registerExtension({
                         }
 
                         const widgetName = String(widget?.name || "").trim();
+                        const hasLinkedInput = Array.isArray(node?.inputs) && node.inputs.some(inp => 
+                            (String(inp?.name || "").trim() === widgetName || String(inp?.widget?.name || "").trim() === widgetName) && inp.link != null
+                        );
+                        if (hasLinkedInput) {
+                            continue;
+                        }
+
                         const directory =
                             String(widget?.options?.model_folder || widget?.options?.folder || "").trim() ||
                             inferSuggestedFolderFromRunHookSignals({
@@ -2109,12 +2116,39 @@ app.registerExtension({
         };
 
         const serializeWorkflowForModelScan = () => {
+            const sanitizeData = (data) => {
+                if (!data || !Array.isArray(data.nodes)) return data;
+                try {
+                    const parsedData = JSON.parse(JSON.stringify(data));
+                    const liveNodes = app?.rootGraph?._nodes_by_id || app?.graph?._nodes_by_id || {};
+                    for (const node of parsedData.nodes) {
+                        const liveNode = liveNodes[node.id];
+                        if (!liveNode || !Array.isArray(liveNode.widgets) || !Array.isArray(liveNode.inputs)) continue;
+                        if (!Array.isArray(node.widgets_values)) continue;
+                        
+                        for (const inp of liveNode.inputs) {
+                            if (inp.link != null) {
+                                const matchedName = String(inp.name || inp.widget?.name || "");
+                                if (!matchedName) continue;
+                                const wIdx = liveNode.widgets.findIndex(w => String(w?.name || "") === matchedName);
+                                if (wIdx >= 0 && wIdx < node.widgets_values.length) {
+                                    node.widgets_values[wIdx] = null;
+                                }
+                            }
+                        }
+                    }
+                    return parsedData;
+                } catch(e) {
+                    return data;
+                }
+            };
+
             let rootGraphData = null;
             try {
                 if (typeof app?.rootGraph?.serialize === "function") {
                     rootGraphData = app.rootGraph.serialize();
                     if (rootGraphData && typeof rootGraphData === "object") {
-                        return rootGraphData;
+                        return sanitizeData(rootGraphData);
                     }
                 }
             } catch (_) {
@@ -2125,7 +2159,7 @@ app.registerExtension({
                 const activeWorkflow = getActiveWorkflowEntry();
                 const activeState = activeWorkflow?.activeState;
                 if (activeState && typeof activeState === "object") {
-                    return activeState;
+                    return sanitizeData(activeState);
                 }
             } catch (_) {
                 // Fall through to deprecated graph alias.
@@ -2139,14 +2173,14 @@ app.registerExtension({
                         typeof legacyGraphData === "object" &&
                         (!rootGraphData || hasSerializableSubgraphDefinitions(legacyGraphData))
                     ) {
-                        return legacyGraphData;
+                        return sanitizeData(legacyGraphData);
                     }
                 }
             } catch (_) {
                 // No serialized workflow available.
             }
 
-            return rootGraphData;
+            return sanitizeData(rootGraphData);
         };
 
         const isWorkflowReadyForModelScan = () => {

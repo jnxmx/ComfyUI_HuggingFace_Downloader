@@ -1609,23 +1609,16 @@ def _collect_models_from_nodes(
         if node_cnr == "comfyui_controlnet_aux":
             continue
 
-        linked_widget_indices = set()
         linked_widget_names = set()
-        widget_names_by_index = {}
-        widget_pos = 0
         has_linked_widget_input = False
         for input_item in node.get("inputs", []):
             if "widget" in input_item:
                 input_name = input_item.get("name")
-                if isinstance(input_name, str) and input_name:
-                    widget_names_by_index[widget_pos] = input_name
                 link_id = input_item.get("link")
                 if link_id is not None:
-                    linked_widget_indices.add(widget_pos)
                     has_linked_widget_input = True
                     if isinstance(input_name, str) and input_name:
                         linked_widget_names.add(input_name)
-                widget_pos += 1
 
         # Gather currently selected model-like widget values for this node.
         # Some workflows keep stale entries in properties.models (template metadata),
@@ -1634,9 +1627,7 @@ def _collect_models_from_nodes(
         widgets_for_keys = node.get("widgets_values")
         if isinstance(widgets_for_keys, list):
             for idx, raw_val in enumerate(widgets_for_keys):
-                if idx in linked_widget_indices:
-                    continue
-                if not isinstance(raw_val, str):
+                if raw_val is None or not isinstance(raw_val, str):
                     continue
                 val = raw_val.strip()
                 if not val:
@@ -1792,9 +1783,7 @@ def _collect_models_from_nodes(
             widgets = node["widgets_values"]
             if isinstance(widgets, list):
                 for idx, val in enumerate(widgets):
-                    if idx in linked_widget_indices:
-                        continue
-                    if not isinstance(val, str):
+                    if val is None or not isinstance(val, str):
                         continue
 
                     # CASE A: Value is a URL
@@ -1811,7 +1800,7 @@ def _collect_models_from_nodes(
                                     suggested_folder = resolve_node_folder_for_widget(
                                         node,
                                         widget_index=idx,
-                                        widget_name=widget_names_by_index.get(idx),
+                                        widget_name=None,
                                         widget_value=parsed_filename
                                     )
                                     found_models.append({
@@ -1835,7 +1824,7 @@ def _collect_models_from_nodes(
                             suggested_folder = resolve_node_folder_for_widget(
                                 node,
                                 widget_index=idx,
-                                widget_name=widget_names_by_index.get(idx),
+                                widget_name=None,
                                 widget_value=filename
                             )
                             found_models.append({
