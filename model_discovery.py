@@ -1760,28 +1760,38 @@ def _collect_models_from_nodes(
         # 2. Check properties -> models (Standard ComfyUI template format)
         if node_cnr != "comfyui_controlnet_aux":
             if "properties" in node and "models" in node["properties"]:
-                if not has_linked_widget_input:
-                    for model_info in node["properties"]["models"]:
-                        name = model_info.get("name")
-                        filename, requested_path = split_model_identifier(name) if name else (name, None)
-                        if not filename:
-                            continue
-                        filename_key = normalize_filename_key(filename)
-                        # If widget-selected models exist, ignore property rows that don't
-                        # match any active widget value (stale template metadata).
+                # Collect models from property rows, but ONLY if they are not overridden by a link.
+                # 'has_linked_widget_input' is now a signal that we must be careful.
+                for model_info in node["properties"]["models"]:
+                    name = model_info.get("name")
+                    filename, requested_path = split_model_identifier(name) if name else (name, None)
+                    if not filename:
+                        continue
+                    filename_key = normalize_filename_key(filename)
+                    
+                    # If any linked widget's ORIGINAL value (which we can't always know, 
+                    # but we know it's being overridden) matched this filename, we skip.
+                    # As a heuristic, if a widget is linked and 'has_linked_widget_input' is true,
+                    # we only trust the property row if the filename matches a NON-LINKED widget.
+                    if has_linked_widget_input:
+                        # If the filename_key matches a widget that IS linked, skip it.
+                        # (This is hard to know for sure in backend, so we check if it matches ANY 
+                        # currently selected widget that's NOT in our skip list).
                         if widget_model_keys and filename_key not in widget_model_keys:
+                            # It's either linked or stale, so skip it.
                             continue
-                        if any(m["filename"] == filename and m["node_id"] == node_id for m in found_models):
-                            continue
-                        found_models.append({
-                            "filename": filename,
-                            "requested_path": requested_path,
-                            "url": model_info.get("url"),
-                            "node_id": node_id,
-                            "node_title": node_title,
-                            "node_type": node_type,
-                            "suggested_folder": model_info.get("directory")
-                        })
+
+                    if any(m["filename"] == filename and m["node_id"] == node_id for m in found_models):
+                        continue
+                    found_models.append({
+                        "filename": filename,
+                        "requested_path": requested_path,
+                        "url": model_info.get("url"),
+                        "node_id": node_id,
+                        "node_title": node_title,
+                        "node_type": node_type,
+                        "suggested_folder": model_info.get("directory")
+                    })
                 
         # 3. Check widgets_values for filenames
         # SKIP for Notes/PrimitiveStrings as we handled them specifically above

@@ -2126,19 +2126,36 @@ app.registerExtension({
                         if (!liveNode || !Array.isArray(liveNode.widgets) || !Array.isArray(liveNode.inputs)) continue;
                         if (!Array.isArray(node.widgets_values)) continue;
                         
+                        // Set of indices to nullify
+                        const indicesToNull = new Set();
                         for (const inp of liveNode.inputs) {
                             if (inp.link != null) {
-                                const matchedName = String(inp.name || inp.widget?.name || "");
-                                if (!matchedName) continue;
-                                const wIdx = liveNode.widgets.findIndex(w => String(w?.name || "") === matchedName);
-                                if (wIdx >= 0 && wIdx < node.widgets_values.length) {
-                                    node.widgets_values[wIdx] = null;
+                                // 1. Map by 'widget' link property (most reliable)
+                                if (inp.widget && typeof inp.widget === 'object') {
+                                    const wName = String(inp.widget.name || "");
+                                    if (wName) {
+                                        const wIdx = liveNode.widgets.findIndex(w => String(w?.name || "") === wName);
+                                        if (wIdx >= 0) indicesToNull.add(wIdx);
+                                    }
                                 }
+                                // 2. Map by input name (fallback)
+                                const matchedName = String(inp.name || "");
+                                if (matchedName) {
+                                    const wIdx = liveNode.widgets.findIndex(w => String(w?.name || "") === matchedName);
+                                    if (wIdx >= 0) indicesToNull.add(wIdx);
+                                }
+                            }
+                        }
+                        
+                        for (const idx of indicesToNull) {
+                            if (idx < node.widgets_values.length) {
+                                node.widgets_values[idx] = null;
                             }
                         }
                     }
                     return parsedData;
                 } catch(e) {
+                    console.error("[AutoDownload] Sanitize failed:", e);
                     return data;
                 }
             };
