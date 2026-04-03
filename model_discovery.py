@@ -1610,15 +1610,25 @@ def _collect_models_from_nodes(
             continue
 
         linked_widget_names = set()
+        linked_widget_indices = set()
         has_linked_widget_input = False
         for input_item in node.get("inputs", []):
             if "widget" in input_item:
                 input_name = input_item.get("name")
+                widget_map = input_item.get("widget")
                 link_id = input_item.get("link")
                 if link_id is not None:
                     has_linked_widget_input = True
                     if isinstance(input_name, str) and input_name:
                         linked_widget_names.add(input_name)
+                    if isinstance(widget_map, dict):
+                        w_name = widget_map.get("name")
+                        if w_name:
+                            linked_widget_names.add(w_name)
+                    elif isinstance(widget_map, int):
+                        linked_widget_indices.add(widget_map)
+                    elif isinstance(widget_map, str):
+                        linked_widget_names.add(widget_map)
 
         # Gather currently selected model-like widget values for this node.
         # Some workflows keep stale entries in properties.models (template metadata),
@@ -1783,6 +1793,8 @@ def _collect_models_from_nodes(
             widgets = node["widgets_values"]
             if isinstance(widgets, list):
                 for idx, val in enumerate(widgets):
+                    if idx in linked_widget_indices:
+                        continue
                     if val is None or not isinstance(val, str):
                         continue
 
