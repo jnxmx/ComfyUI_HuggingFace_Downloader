@@ -1,15 +1,23 @@
-/temp_repos
-/__pycache__
-/__pycache__
-/__pycache__
-__pycache__/model_discovery.cpython-313.pyc
+# --- CORE NODEPACK FILES (Keep these) ---
+# __init__.py, web_api.py, model_discovery.py, downloader.py, backup.py, parse_link.py, file_manager.py, js/, metadata/popular-models.json, metadata/manual-curation-overrides.json, README.md, requirements.txt
+
+# --- LOCAL TOOLS & DOCUMENTATION ---
+ANTIGRAVITY.md
 NODEPACK_FUNCTIONALITY.md
-__pycache__/model_discovery.cpython-313.pyc
-/scripts/__pycache__
-/metadata/marketplace_extract
-scripts/cloud_marketplace_dump_console.js
-scripts/extract_cloud_marketplace_from_har.py
+check_braces.py
+check_syntax.js
+/internal_tools/
+/scripts/
+
+# --- LOCAL DATA & CACHE ---
+/temp_repos/
+/models/
+/metadata/reports/
+/metadata/marketplace_extract/
+/metadata/manual-curation-backups/
+
+# --- STANDARD IGNORES ---
+.DS_Store
+.venv/
 __pycache__/
 *.pyc
-/internal_tools
-/metadata/manual-curation-backups
