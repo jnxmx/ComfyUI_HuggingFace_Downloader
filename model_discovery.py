@@ -349,9 +349,19 @@ def _preferred_nunchaku_precision() -> str:
         _nunchaku_blackwell_cache = is_blackwell
     return "fp4" if _nunchaku_blackwell_cache else "int4"
 
-def _lookup_popular_entry(popular_models: dict, filename: str) -> dict | None:
+def _lookup_popular_entry(
+    popular_models: dict,
+    filename: str,
+    requested_path: str | None = None,
+) -> dict | None:
+    requested_key = normalize_relative_model_path(requested_path).lower()
+    if requested_key:
+        entry = popular_models.get(requested_key)
+        if entry:
+            return entry
+
     key = (filename or "").lower()
-    if not key:
+    if not key and not requested_key:
         return None
     entry = popular_models.get(key) or popular_models.get(os.path.basename(key))
     if entry:
@@ -370,6 +380,24 @@ def _lookup_popular_entry(popular_models: dict, filename: str) -> dict | None:
         return None
     candidates.sort(key=lambda kv: len(kv[0]))
     return candidates[0][1]
+
+
+def _is_exact_popular_entry_match(entry: dict | None, requested_path: str | None) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    requested_key = normalize_relative_model_path(requested_path).lower()
+    if not requested_key:
+        return False
+
+    for candidate in (
+        entry.get("hf_path"),
+        entry.get("filename"),
+        entry.get("requested_path"),
+    ):
+        normalized = normalize_relative_model_path(candidate).lower()
+        if normalized and normalized == requested_key:
+            return True
+    return False
 
 def load_comfyui_manager_model_list() -> dict:
     """Load ComfyUI Manager model-list.json from known locations."""
@@ -3262,7 +3290,11 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     "source": "popular_models",
                     "filename": model.get("filename")
             })
-            entry = _lookup_popular_entry(popular_models, model["filename"])
+            entry = _lookup_popular_entry(
+                popular_models,
+                model["filename"],
+                model.get("requested_path"),
+            )
             if not entry:
                 continue
 
@@ -3276,12 +3308,13 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     live_url = candidate_url
                     break
 
+            exact_path_match = _is_exact_popular_entry_match(entry, model.get("requested_path"))
             if not live_url:
                 trusted_curated_source = (entry.get("source") or "") in {
                     "cloud_marketplace_export",
                     "comfyui_manager_model_list",
                 }
-                if trusted_curated_source:
+                if trusted_curated_source or exact_path_match:
                     live_url = next(
                         (url for url in candidate_urls if "/resolve/" in url),
                         candidate_urls[0],
