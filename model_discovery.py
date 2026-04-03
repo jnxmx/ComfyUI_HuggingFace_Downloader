@@ -1807,13 +1807,13 @@ def _collect_models_from_nodes(
                     # but we know it's being overridden) matched this filename, we skip.
                     # As a heuristic, if a widget is linked and 'has_linked_widget_input' is true,
                     # we only trust the property row if the filename matches a NON-LINKED widget.
-                    if has_linked_widget_input:
-                        # If the filename_key matches a widget that IS linked, skip it.
-                        # (This is hard to know for sure in backend, so we check if it matches ANY 
-                        # currently selected widget that's NOT in our skip list).
-                        if widget_model_keys and filename_key not in widget_model_keys:
-                            # It's either linked or stale, so skip it.
-                            continue
+                    # AUTHORITATIVE CHECK:
+                    # If the node has any model(s) selected in its widgets (populated in widget_model_keys),
+                    # we ONLY trust the property-metadata rows that match those selections.
+                    # This prevents stale metadata (leftover from previous selections) from being reported.
+                    if (has_linked_widget_input or widget_model_keys) and filename_key not in widget_model_keys:
+                        # It's either linked or stale, so skip it.
+                        continue
 
                     if any(m["filename"] == filename and m["node_id"] == node_id for m in found_models):
                         continue
