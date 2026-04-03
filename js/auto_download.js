@@ -2117,45 +2117,61 @@ app.registerExtension({
 
         const serializeWorkflowForModelScan = () => {
             const sanitizeData = (data) => {
-                if (!data || !Array.isArray(data.nodes)) return data;
+                if (!data || typeof data !== "object") return data;
+                
                 try {
                     const parsedData = JSON.parse(JSON.stringify(data));
                     const liveNodes = app?.rootGraph?._nodes_by_id || app?.graph?._nodes_by_id || {};
-                    for (const node of parsedData.nodes) {
-                        const liveNode = liveNodes[node.id];
-                        if (!liveNode || !Array.isArray(liveNode.widgets) || !Array.isArray(liveNode.inputs)) continue;
-                        if (!Array.isArray(node.widgets_values)) continue;
-                        
-                        // Set of indices to nullify
-                        const indicesToNull = new Set();
-                        for (const inp of liveNode.inputs) {
-                            if (inp.link != null) {
-                                // 1. Map by 'widget' link property (most reliable)
-                                if (inp.widget && typeof inp.widget === 'object') {
-                                    const wName = String(inp.widget.name || "");
-                                    if (wName) {
-                                        const wIdx = liveNode.widgets.findIndex(w => String(w?.name || "") === wName);
+                    
+                    const processNodeList = (nodes) => {
+                        if (!Array.isArray(nodes)) return;
+                        for (const node of nodes) {
+                            const liveNode = liveNodes[node.id];
+                            if (!liveNode || !Array.isArray(liveNode.widgets) || !Array.isArray(liveNode.inputs)) continue;
+                            if (!Array.isArray(node.widgets_values)) continue;
+                            
+                            const indicesToNull = new Set();
+                            for (const inp of liveNode.inputs) {
+                                if (inp.link != null) {
+                                    if (inp.widget && typeof inp.widget === 'object') {
+                                        const wName = String(inp.widget.name || "");
+                                        if (wName) {
+                                            const wIdx = liveNode.widgets.findIndex(w => String(w?.name || "") === wName);
+                                            if (wIdx >= 0) indicesToNull.add(wIdx);
+                                        }
+                                    }
+                                    const matchedName = String(inp.name || "");
+                                    if (matchedName) {
+                                        const wIdx = liveNode.widgets.findIndex(w => String(w?.name || "") === matchedName);
                                         if (wIdx >= 0) indicesToNull.add(wIdx);
                                     }
                                 }
-                                // 2. Map by input name (fallback)
-                                const matchedName = String(inp.name || "");
-                                if (matchedName) {
-                                    const wIdx = liveNode.widgets.findIndex(w => String(w?.name || "") === matchedName);
-                                    if (wIdx >= 0) indicesToNull.add(wIdx);
+                            }
+                            
+                            for (const idx of indicesToNull) {
+                                if (idx < node.widgets_values.length) {
+                                    node.widgets_values[idx] = null;
                                 }
                             }
                         }
-                        
-                        for (const idx of indicesToNull) {
-                            if (idx < node.widgets_values.length) {
-                                node.widgets_values[idx] = null;
+                    };
+
+                    // Process root nodes
+                    processNodeList(parsedData.nodes);
+
+                    // Process subgraphs in definitions (recursive support)
+                    if (parsedData.definitions && parsedData.definitions.subgraphs) {
+                        for (const subgraphId in parsedData.definitions.subgraphs) {
+                            const subgraph = parsedData.definitions.subgraphs[subgraphId];
+                            if (subgraph && subgraph.nodes) {
+                                processNodeList(subgraph.nodes);
                             }
                         }
                     }
+
                     return parsedData;
                 } catch(e) {
-                    console.error("[AutoDownload] Sanitize failed:", e);
+                    console.error("[AutoDownload] Recursive sanitize failed:", e);
                     return data;
                 }
             };
