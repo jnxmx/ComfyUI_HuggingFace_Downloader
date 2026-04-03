@@ -7,6 +7,8 @@ import time
 import subprocess
 import copy
 import re
+import sys
+from importlib import metadata
 from huggingface_hub import HfApi
 from .parse_link import parse_link
 
@@ -17,6 +19,8 @@ LOCAL_SUBGRAPH_PATHS = (
 )
 REPO_SUBGRAPH_PATHS = tuple(f"ComfyUI/{p}" for p in LOCAL_SUBGRAPH_PATHS)
 CUSTOM_NODES_SNAPSHOT_PATH = "ComfyUI/custom_nodes_snapshot.yaml"
+CUSTOM_NODES_SNAPSHOT_MAX_ATTEMPTS = 4
+CUSTOM_NODES_SNAPSHOT_RETRY_DELAY_SECONDS = 5
 
 
 def _normalize_local_path(path: str) -> str:
@@ -58,6 +62,47 @@ def _is_placeholder_model_file(filename: str) -> bool:
 def _is_settings_file_path(path: str) -> bool:
     normalized = _normalize_local_path(path).lower()
     return normalized.endswith("comfy.settings.json")
+
+
+def _is_transient_custom_nodes_snapshot_error(message: str) -> bool:
+    lowered = str(message or "").lower()
+    return (
+        "cm-cli" in lowered and "not available" in lowered
+    ) or "comfyui-manager not found" in lowered
+
+
+def _find_manager_cli_script(comfy_dir: str) -> str:
+    custom_nodes_dir = os.path.join(comfy_dir, "custom_nodes")
+    candidates = [
+        os.path.join(custom_nodes_dir, "ComfyUI-Manager", "cm-cli.py"),
+        os.path.join(custom_nodes_dir, "comfyui-manager", "cm-cli.py"),
+    ]
+
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+
+    if os.path.isdir(custom_nodes_dir):
+        for name in os.listdir(custom_nodes_dir):
+            node_dir = os.path.join(custom_nodes_dir, name)
+            script_path = os.path.join(node_dir, "cm-cli.py")
+            if os.path.isfile(script_path) and "manager" in name.lower():
+                return script_path
+
+    try:
+        dist = metadata.distribution("comfyui-manager")
+        for file in dist.files or []:
+            if os.path.basename(str(file)) != "cm-cli.py":
+                continue
+            candidate = os.fspath(dist.locate_file(file))
+            if os.path.isfile(candidate):
+                return candidate
+    except metadata.PackageNotFoundError:
+        pass
+    except Exception:
+        pass
+
+    raise RuntimeError("ComfyUI-Manager cm-cli.py could not be located")
 
 
 def _parse_repo_name(repo_name_or_link: str) -> str:
@@ -497,24 +542,11 @@ def find_comfy_root() -> str:
         current_dir = os.path.dirname(current_dir)
     raise RuntimeError("Could not locate the ComfyUI root directory (custom_nodes folder not found).")
 
-def _backup_custom_nodes(target_dir: str) -> str:
+def _backup_custom_nodes(target_dir: str):
     """
-    Use comfy-cli to save a snapshot of custom nodes.
+    Use ComfyUI-Manager's cm-cli.py to save a snapshot of custom nodes.
     Returns the path to the snapshot file and temp dir.
     """
-    # First check if comfy-cli is installed
-    try:
-        subprocess.run(
-            ["comfy", "--version"],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-    except subprocess.CalledProcessError:
-        raise RuntimeError("comfy-cli not found. Please install it with 'pip install comfy-cli'")
-    except FileNotFoundError:
-        raise RuntimeError("comfy-cli not found. Please install it with 'pip install comfy-cli'")
-
     temp_dir = tempfile.mkdtemp(prefix="comfyui_nodes_snapshot_")
     
     try:
@@ -528,33 +560,65 @@ def _backup_custom_nodes(target_dir: str) -> str:
         if not os.path.isdir(os.path.join(comfy_dir, "custom_nodes")):
             raise RuntimeError("Could not locate ComfyUI root directory (custom_nodes folder not found)")
 
-        # Save snapshot using comfy-cli from ComfyUI root
+        manager_cli_script = _find_manager_cli_script(comfy_dir)
+
+        # Save snapshot using ComfyUI-Manager's own cm-cli.py in the current
+        # Python environment instead of relying on comfy-cli's wrapper command.
         print("[DEBUG] Current working directory:", os.getcwd())
         print("[DEBUG] Using ComfyUI root directory:", comfy_dir)
+        print("[DEBUG] Using ComfyUI-Manager CLI script:", manager_cli_script)
 
-        # Send N to the tracking consent prompt
-        process = subprocess.Popen(
-            ["comfy", "node", "save-snapshot"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=comfy_dir  # Run from ComfyUI root
-        )
-        stdout, stderr = process.communicate(input="N\n")
-        
-        if process.returncode != 0:
-            print("[ERROR] comfy-cli save-snapshot failed:")
+        stdout = ""
+        stderr = ""
+        for attempt in range(1, CUSTOM_NODES_SNAPSHOT_MAX_ATTEMPTS + 1):
+            env = os.environ.copy()
+            env["COMFYUI_PATH"] = comfy_dir
+
+            process = subprocess.run(
+                [sys.executable, manager_cli_script, "save-snapshot"],
+                capture_output=True,
+                text=True,
+                cwd=comfy_dir,
+                env=env
+            )
+            stdout = process.stdout
+            stderr = process.stderr
+
+            if process.returncode == 0:
+                break
+
+            error_parts = []
+            if stderr and stderr.strip():
+                error_parts.append(stderr.strip())
+            if stdout and stdout.strip():
+                error_parts.append(stdout.strip())
+            error_message = " | ".join(error_parts) or "Unknown error"
+            print("[ERROR] ComfyUI-Manager cm-cli save-snapshot failed:")
             print(f"stderr: {stderr}")
             print(f"stdout: {stdout}")
-            raise RuntimeError("Failed to create nodes snapshot")
 
-        print(f"[DEBUG] comfy-cli save-snapshot output:\n{stdout}")
+            should_retry = (
+                attempt < CUSTOM_NODES_SNAPSHOT_MAX_ATTEMPTS
+                and _is_transient_custom_nodes_snapshot_error(error_message)
+            )
+            if should_retry:
+                print(
+                    "[WARNING] Custom nodes snapshot export is not ready yet. "
+                    f"Retrying in {CUSTOM_NODES_SNAPSHOT_RETRY_DELAY_SECONDS} seconds "
+                    f"({attempt}/{CUSTOM_NODES_SNAPSHOT_MAX_ATTEMPTS})..."
+                )
+                time.sleep(CUSTOM_NODES_SNAPSHOT_RETRY_DELAY_SECONDS)
+                continue
+
+            raise RuntimeError(f"Failed to create nodes snapshot: {error_message}")
+
+        print(f"[DEBUG] ComfyUI-Manager cm-cli save-snapshot output:\n{stdout}")
         if stderr:
-            print(f"[DEBUG] comfy-cli save-snapshot stderr:\n{stderr}")
+            print(f"[DEBUG] ComfyUI-Manager cm-cli save-snapshot stderr:\n{stderr}")
 
         # Extract snapshot file name and copy to temp dir
         snapshot_file = None
+        original_snapshot = None
         for line in stdout.splitlines():
             if "Current snapshot is saved as" in line:
                 snapshot_file_name = line.split("`", 1)[-1].rsplit("`", 1)[0]
@@ -611,15 +675,17 @@ def _backup_custom_nodes(target_dir: str) -> str:
 
     except subprocess.CalledProcessError as e:
         print(f"[WARNING] Failed to create nodes snapshot: {e.stderr if hasattr(e, 'stderr') else str(e)}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
         if isinstance(e.stderr, bytes):
             stderr = e.stderr.decode('utf-8', errors='replace')
         else:
             stderr = str(e.stderr)
         if "not found" in stderr:
-            raise RuntimeError("comfy-cli command failed. Please ensure ComfyUI is properly installed.")
+            raise RuntimeError("ComfyUI-Manager cm-cli failed. Please ensure ComfyUI-Manager is properly installed.")
         raise
     except Exception as e:
         print(f"[WARNING] Failed to create nodes snapshot: {str(e)}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
         raise
 
 def _restore_custom_nodes_from_snapshot(snapshot_file: str):
@@ -800,20 +866,26 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
                 temp_dirs.append(temp_dir)
                 print(f"[INFO] Created sanitized copy of '{folder}' at '{upload_path}' for upload.")
             elif is_custom_nodes_root:
-                # Create snapshot using comfy-cli
-                snapshot_file, temp_dir = _backup_custom_nodes(folder)
-                temp_dirs.append(temp_dir)
-                path_in_repo = CUSTOM_NODES_SNAPSHOT_PATH
-                print(f"[INFO] Created nodes snapshot at '{snapshot_file}'")
-                _retry_upload(
-                    api=api,
-                    upload_path=snapshot_file,
-                    repo_name=repo_name,
-                    token=token,
-                    path_in_repo=path_in_repo
-                )
-                print(f"[INFO] Upload of nodes snapshot complete.")
-                continue
+                # Prefer the compact snapshot export, but fall back to a raw folder backup
+                # when ComfyUI-Manager snapshot export is unavailable.
+                try:
+                    snapshot_file, temp_dir = _backup_custom_nodes(folder)
+                except Exception as e:
+                    print(f"[WARNING] Could not create custom nodes snapshot for '{folder}': {e}")
+                    print("[WARNING] Falling back to uploading the raw 'custom_nodes' folder.")
+                else:
+                    temp_dirs.append(temp_dir)
+                    path_in_repo = CUSTOM_NODES_SNAPSHOT_PATH
+                    print(f"[INFO] Created nodes snapshot at '{snapshot_file}'")
+                    _retry_upload(
+                        api=api,
+                        upload_path=snapshot_file,
+                        repo_name=repo_name,
+                        token=token,
+                        path_in_repo=path_in_repo
+                    )
+                    print(f"[INFO] Upload of nodes snapshot complete.")
+                    continue
             elif is_settings_file:
                 temp_dir = tempfile.mkdtemp(prefix="comfyui_settings_strip_")
                 upload_path = _copy_settings_without_token(folder, temp_dir)
