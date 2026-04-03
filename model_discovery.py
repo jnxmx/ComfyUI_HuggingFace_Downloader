@@ -1609,6 +1609,27 @@ def _collect_models_from_nodes(
         if node_cnr == "comfyui_controlnet_aux":
             continue
 
+        # Common widget names for model loaders and their typical indices.
+        # This helps backend discovery skip redundant widgets even if the frontend
+        # serialization doesn't explicitly null them.
+        _COMMON_LOADER_WIDGET_MAPPING = {
+            "unet_name": 0,
+            "lora_name": 0,
+            "lora_name_1": 1,
+            "vae_name": 0,
+            "clip_name": 0,
+            "checkpoint_name": 0,
+            "model_name": 0,
+            "unet": 0,
+            "lora": 0,
+            "vae": 0,
+            "clip": 0,
+            "model": 0,
+            "diffusion_model": 0,
+            "vitpose_model": 0,
+            "yolo_model": 0,
+        }
+
         linked_widget_names = set()
         linked_widget_indices = set()
         has_linked_widget_input = False
@@ -1619,16 +1640,29 @@ def _collect_models_from_nodes(
                 link_id = input_item.get("link")
                 if link_id is not None:
                     has_linked_widget_input = True
+                    # Record name
                     if isinstance(input_name, str) and input_name:
                         linked_widget_names.add(input_name)
+                    
+                    # Resolve index
+                    idx = None
                     if isinstance(widget_map, dict):
                         w_name = widget_map.get("name")
                         if w_name:
                             linked_widget_names.add(w_name)
+                            idx = _COMMON_LOADER_WIDGET_MAPPING.get(w_name)
                     elif isinstance(widget_map, int):
-                        linked_widget_indices.add(widget_map)
+                        idx = widget_map
                     elif isinstance(widget_map, str):
                         linked_widget_names.add(widget_map)
+                        idx = _COMMON_LOADER_WIDGET_MAPPING.get(widget_map)
+                    
+                    if idx is not None:
+                        linked_widget_indices.add(idx)
+                    elif isinstance(input_name, str):
+                        idx = _COMMON_LOADER_WIDGET_MAPPING.get(input_name)
+                        if idx is not None:
+                            linked_widget_indices.add(idx)
 
         # Gather currently selected model-like widget values for this node.
         # Some workflows keep stale entries in properties.models (template metadata),
