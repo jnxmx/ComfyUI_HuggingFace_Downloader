@@ -1098,6 +1098,17 @@
     "high_noise_model.safetensors": {
       "explorer_base": "WAN"
     },
+    "Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V2.0/high_noise_model.safetensors": {
+      "url": "https://huggingface.co/lightx2v/Wan2.2-Lightning/resolve/main/Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V2.0/high_noise_model.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models/Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V2.0",
+      "filename": "Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V2.0/high_noise_model.safetensors",
+      "repo_id": "lightx2v/Wan2.2-Lightning",
+      "hf_path": "Wan2.2-T2V-A14B-4steps-lora-rank64-Seko-V2.0/high_noise_model.safetensors",
+      "base": "WAN",
+      "explorer_base": "WAN",
+      "source_note": "manual_restoration_seko_v2"
+    },
     "high_noise_model_rank64.safetensors": {
       "explorer_base": "WAN"
     },
