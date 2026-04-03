@@ -17,7 +17,6 @@ ComfyUI node pack and UI tools for:
   - `Model Explorer`
   - `Download new model`
   - `Backup ComfyUI to Hugging Face`
-- native Model Library (cloud-style) backed by this node pack via Asset API shim
 - queued downloader with cancel + status panel
 - missing-model dialog integration (`Auto-search and download missing models`)
 - selective backup/restore/delete browser for HF backups
@@ -79,13 +78,6 @@ ComfyUI node pack and UI tools for:
 - `POST /api/model_explorer/download`
 - `POST /api/model_explorer/use`
 - `POST /api/model_explorer/delete`
-- `GET /api/hf_model_library_assets`
-- `GET /api/hf_model_library_assets/{asset_id}`
-- `PUT /api/hf_model_library_assets/{asset_id}`
-- `POST /api/hf_model_library_assets/{asset_id}/tags`
-- `DELETE /api/hf_model_library_assets/{asset_id}/tags`
-- `GET /api/hf_model_library_assets/remote-metadata`
-- `POST /api/hf_model_library_assets/download`
 - `GET /backup_browser_tree`
 - `POST /backup_to_hf`
 - `POST /backup_selected_to_hf`
@@ -99,7 +91,6 @@ ComfyUI node pack and UI tools for:
 Configured in ComfyUI settings:
 
 - `downloader.hf_token` (Hugging Face token)
-- `downloader.model_library_backend_enabled` (enable/disable native Model Library backend shim, default `false`)
 - `downloader.auto_open_missing_models_on_run` (after Run, auto-opens downloader only when native ComfyUI missing-models dialog appears)
 - `downloaderbackup.repo_name` (target HF repo for backup/restore)
 - `downloaderbackup.file_size_limit` (max single file size in GB for backup)
@@ -134,5 +125,4 @@ pip install -r requirements.txt
   - Hugging Face links use the Hugging Face engine.
   - Non-HF `http(s)` file URLs use direct streaming download.
 - Folder/full-repo mode remains Hugging Face-only.
-- Model library backend routes remain Hugging Face-only.
 - For gated repos, set a valid token via `downloader.hf_token` or `HF_TOKEN`.
