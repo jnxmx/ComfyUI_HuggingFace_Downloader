@@ -346,7 +346,8 @@ def run_download(parsed_data: dict,
 
     file_name = parsed_data.get("file", "unknown.bin").strip("/")
     sub = parsed_data.get("subfolder", "").strip("/")
-    remote_filename = os.path.join(sub, file_name) if sub else file_name
+    remote_filename = f"{sub}/{file_name}" if sub else file_name
+    remote_filename = remote_filename.replace("\\", "/")
     target_name = os.path.basename(str(target_filename or "").replace("\\", "/").strip())
     if not target_name:
         target_name = os.path.basename(remote_filename)

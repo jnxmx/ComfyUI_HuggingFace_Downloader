@@ -1,4 +1,4 @@
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 def parse_link(link: str) -> dict:
     """
@@ -12,9 +12,9 @@ def parse_link(link: str) -> dict:
     """
     parsed_url = urlparse(link)
     if parsed_url.scheme:
-        path_parts = parsed_url.path.strip("/").split("/")
+        path_parts = [unquote(p) for p in parsed_url.path.strip("/").split("/")]
     else:
-        path_parts = link.strip("/").split("/")
+        path_parts = [unquote(p) for p in link.strip("/").split("/")]
 
     result = {}
     if len(path_parts) >= 2:
