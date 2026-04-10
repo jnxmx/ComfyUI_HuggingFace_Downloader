@@ -1606,7 +1606,9 @@ def _collect_models_from_nodes(
         node_cnr = ""
         if isinstance(node.get("properties"), dict):
             node_cnr = node["properties"].get("cnr_id", "") or ""
-        if node_cnr == "comfyui_controlnet_aux":
+        if node_cnr in {"comfyui_controlnet_aux", "frame-interpolation", "ComfyUI-Frame-Interpolation"}:
+            continue
+        if node_type.endswith(" VFI") or node_type in {"KSampler Gradually Adding More Denoise (efficient)", "Make Interpolation State List", "VFI FloatToInt"}:
             continue
 
         # Common widget names for model loaders and their typical indices.
@@ -1792,47 +1794,45 @@ def _collect_models_from_nodes(
             continue  # Don't process Notes as loader nodes
 
         # 2. Check properties -> models (Standard ComfyUI template format)
-        if node_cnr != "comfyui_controlnet_aux":
-            if "properties" in node and "models" in node["properties"]:
-                # Collect models from property rows, but ONLY if they are not overridden by a link.
-                # 'has_linked_widget_input' is now a signal that we must be careful.
-                for model_info in node["properties"]["models"]:
-                    name = model_info.get("name")
-                    filename, requested_path = split_model_identifier(name) if name else (name, None)
-                    if not filename:
-                        continue
-                    filename_key = normalize_filename_key(filename)
-                    
-                    # If any linked widget's ORIGINAL value (which we can't always know, 
-                    # but we know it's being overridden) matched this filename, we skip.
-                    # As a heuristic, if a widget is linked and 'has_linked_widget_input' is true,
-                    # we only trust the property row if the filename matches a NON-LINKED widget.
-                    # AUTHORITATIVE CHECK:
-                    # If the node has any model(s) selected in its widgets (populated in widget_model_keys),
-                    # we ONLY trust the property-metadata rows that match those selections.
-                    # This prevents stale metadata (leftover from previous selections) from being reported.
-                    if (has_linked_widget_input or widget_model_keys) and filename_key not in widget_model_keys:
-                        # It's either linked or stale, so skip it.
-                        continue
+        if "properties" in node and "models" in node["properties"]:
+            # Collect models from property rows, but ONLY if they are not overridden by a link.
+            # 'has_linked_widget_input' is now a signal that we must be careful.
+            for model_info in node["properties"]["models"]:
+                name = model_info.get("name")
+                filename, requested_path = split_model_identifier(name) if name else (name, None)
+                if not filename:
+                    continue
+                filename_key = normalize_filename_key(filename)
+                
+                # If any linked widget's ORIGINAL value (which we can't always know, 
+                # but we know it's being overridden) matched this filename, we skip.
+                # As a heuristic, if a widget is linked and 'has_linked_widget_input' is true,
+                # we only trust the property row if the filename matches a NON-LINKED widget.
+                # AUTHORITATIVE CHECK:
+                # If the node has any model(s) selected in its widgets (populated in widget_model_keys),
+                # we ONLY trust the property-metadata rows that match those selections.
+                # This prevents stale metadata (leftover from previous selections) from being reported.
+                if (has_linked_widget_input or widget_model_keys) and filename_key not in widget_model_keys:
+                    # It's either linked or stale, so skip it.
+                    continue
 
-                    if any(m["filename"] == filename and m["node_id"] == node_id for m in found_models):
-                        continue
-                    found_models.append({
-                        "filename": filename,
-                        "requested_path": requested_path,
-                        "url": model_info.get("url"),
-                        "node_id": node_id,
-                        "node_title": node_title,
-                        "node_type": node_type,
-                        "suggested_folder": model_info.get("directory")
-                    })
+                if any(m["filename"] == filename and m["node_id"] == node_id for m in found_models):
+                    continue
+                found_models.append({
+                    "filename": filename,
+                    "requested_path": requested_path,
+                    "url": model_info.get("url"),
+                    "node_id": node_id,
+                    "node_title": node_title,
+                    "node_type": node_type,
+                    "suggested_folder": model_info.get("directory")
+                })
                 
         # 3. Check widgets_values for filenames
         # SKIP for Notes/PrimitiveStrings as we handled them specifically above
         if (
             "widgets_values" in node
             and not ("Note" in node_type or "PrimitiveString" in node_type)
-            and node_cnr != "comfyui_controlnet_aux"
         ):
             widgets = node["widgets_values"]
             if isinstance(widgets, list):
