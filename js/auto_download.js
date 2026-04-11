@@ -2345,9 +2345,12 @@ app.registerExtension({
             const nodeId = Number(entry?.node_id);
             let hadPreferredMatches = false;
             if (Number.isFinite(nodeId) && app?.graph?.getNodeById) {
-                const beforeCount = targets.length;
-                pushNodeMatches(app.graph.getNodeById(nodeId));
-                hadPreferredMatches = targets.length > beforeCount;
+                const preferredNode = app.graph.getNodeById(nodeId);
+                if (isLocalModelLoaderNode(preferredNode)) {
+                    const beforeCount = targets.length;
+                    pushNodeMatches(preferredNode);
+                    hadPreferredMatches = targets.length > beforeCount;
+                }
             }
 
             if (hadPreferredMatches) {
