@@ -18,24 +18,9 @@ app.registerExtension({
         const RUN_HOOK_COOLDOWN_MS = 1800;
         const WORKFLOW_OPEN_TRIGGER_COOLDOWN_MS = 1800;
         const WORKFLOW_OPEN_CANDIDATE_POLL_MS = 500;
-        const MODEL_STORE_IMPORT_CANDIDATES = [
-            "../../../stores/modelStore.js",
-            "/stores/modelStore.js",
-            "../../../scripts/stores/modelStore.js",
-            "/scripts/stores/modelStore.js"
-        ];
-        const EXECUTION_ERROR_STORE_IMPORT_CANDIDATES = [
-            "../../../stores/executionErrorStore.js",
-            "/stores/executionErrorStore.js",
-            "../../../scripts/stores/executionErrorStore.js",
-            "/scripts/stores/executionErrorStore.js"
-        ];
-        const MISSING_MODEL_STORE_IMPORT_CANDIDATES = [
-            "../../../platform/missingModel/missingModelStore.js",
-            "/platform/missingModel/missingModelStore.js",
-            "../../../scripts/platform/missingModel/missingModelStore.js",
-            "/scripts/platform/missingModel/missingModelStore.js"
-        ];
+        const MODEL_STORE_IMPORT_CANDIDATES = [];
+        const EXECUTION_ERROR_STORE_IMPORT_CANDIDATES = [];
+        const MISSING_MODEL_STORE_IMPORT_CANDIDATES = [];
         let runHookBypassRemaining = 0;
 
         /* ──────────────── Helper Functions ──────────────── */
