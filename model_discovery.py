@@ -1606,9 +1606,9 @@ def _collect_models_from_nodes(
         node_cnr = ""
         if isinstance(node.get("properties"), dict):
             node_cnr = node["properties"].get("cnr_id", "") or ""
-        if node_cnr in {"comfyui_controlnet_aux", "frame-interpolation", "ComfyUI-Frame-Interpolation"}:
+        if node_cnr in {"comfyui_controlnet_aux", "frame-interpolation", "ComfyUI-Frame-Interpolation", "video-depth-anything", "ComfyUI-Video-Depth-Anything"}:
             continue
-        if node_type.endswith(" VFI") or node_type in {"KSampler Gradually Adding More Denoise (efficient)", "Make Interpolation State List", "VFI FloatToInt"}:
+        if node_type.endswith(" VFI") or node_type in {"KSampler Gradually Adding More Denoise (efficient)", "Make Interpolation State List", "VFI FloatToInt"} or "VideoDepthAnything" in node_type:
             continue
 
         # Common widget names for model loaders and their typical indices.
