@@ -376,7 +376,10 @@ def run_download(parsed_data: dict,
         dest_path = os.path.join(target_dir, target_name)
 
         if os.path.exists(dest_path):
-            if overwrite:
+            if os.path.getsize(dest_path) == 0:
+                print("[DEBUG] Empty placeholder found, deleting before download.")
+                _safe_remove(dest_path)
+            elif overwrite:
                 print("[DEBUG] Overwrite requested, deleting existing file before download.")
                 _safe_remove(dest_path)
             else:
@@ -640,7 +643,10 @@ def run_download_url(url: str,
                 dest_path = os.path.join(target_dir, target_name)
 
                 if os.path.exists(dest_path):
-                    if overwrite:
+                    if os.path.getsize(dest_path) == 0:
+                        print("[DEBUG] Empty placeholder found, deleting before direct URL download.")
+                        _safe_remove(dest_path)
+                    elif overwrite:
                         print("[DEBUG] Overwrite requested, deleting existing file before direct URL download.")
                         _safe_remove(dest_path)
                     else:

@@ -24,6 +24,14 @@ app.registerExtension({
       },
     },
     {
+      id: "downloader.disable_missing_model_red_frames",
+      category: ["Hugging Face Download & Backup", "Appearance", "Disable missing models red frames"],
+      name: "Disable missing models red frames",
+      type: "boolean",
+      defaultValue: false,
+      tooltip: "If enabled, red error frames around nodes caused by missing model validations will be automatically cleared.",
+    },
+    {
       id: "downloader.top_menu_button_style",
       category: ["Hugging Face Download & Backup", "Appearance", "Top menu button"],
       name: "Top menu button",

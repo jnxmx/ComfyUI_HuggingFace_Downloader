@@ -6465,6 +6465,23 @@ app.registerExtension({
             }
         };
 
+        const installDisableMissingModelsRedFramesObserver = () => {
+            const handleValidationError = () => {
+                const settingsUi = app?.ui?.settings;
+                const disableRedFrames = settingsUi?.getSettingValue("downloader.disable_missing_model_red_frames") === true;
+                if (!disableRedFrames) return;
+                
+                setTimeout(() => {
+                    void clearModelValidationErrorsFromFrontendState();
+                }, 100);
+            };
+
+            if (api && typeof api.addEventListener === "function") {
+                api.addEventListener("validation_error", handleValidationError);
+                api.addEventListener("execution_error", handleValidationError);
+            }
+        };
+
         registerGlobalAction("runAutoDownload", runAutoDownload);
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
         setupMissingModelsDialogObserver();
@@ -6472,5 +6489,6 @@ app.registerExtension({
         installWorkflowOpenLoadGraphHook();
         installWorkflowOpenMissingModelsWatcher();
         installRunQueueCommandHooksNativeAware();
+        installDisableMissingModelsRedFramesObserver();
     }
 });

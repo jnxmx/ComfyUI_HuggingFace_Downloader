@@ -2754,6 +2754,17 @@ def setup(app_or_server):
                     continue
                 item["destination_key"] = destination_key
                 retry_payload = _build_retry_payload(item)
+                
+                if download_mode == "file":
+                    try:
+                        target_dir = os.path.join(os.getcwd(), "models", folder)
+                        os.makedirs(target_dir, exist_ok=True)
+                        dest_path = os.path.join(target_dir, requested_filename or filename)
+                        if not os.path.exists(dest_path):
+                            open(dest_path, 'a').close()
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to create empty placeholder file for {filename}: {e}")
+                
                 with download_queue_lock:
                     download_queue.append(item)
                 _set_download_status(download_id, {
