@@ -2516,13 +2516,55 @@ app.registerExtension({
                 maxWidth: "92vw",
             });
 
+            // Close button (X) in upper right corner of the panel to instantly close/abort
+            const closeBtn = document.createElement("button");
+            closeBtn.type = "button";
+            closeBtn.innerHTML = "×";
+            Object.assign(closeBtn.style, {
+                position: "absolute",
+                top: "10px",
+                right: "10px",
+                width: "28px",
+                height: "28px",
+                borderRadius: "50%",
+                border: "none",
+                background: "transparent",
+                color: "var(--descrip-text, #999)",
+                fontSize: "20px",
+                lineHeight: "1",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "0",
+                transition: "background-color 120ms ease, color 120ms ease",
+                zIndex: "10",
+            });
+            closeBtn.onmouseenter = () => {
+                closeBtn.style.background = "var(--secondary-background-hover, rgba(255, 255, 255, 0.1))";
+                closeBtn.style.color = "var(--input-text, #fff)";
+            };
+            closeBtn.onmouseleave = () => {
+                closeBtn.style.background = "transparent";
+                closeBtn.style.color = "var(--descrip-text, #999)";
+            };
+            closeBtn.onclick = () => {
+                if (typeof options.onClose === "function") {
+                    options.onClose();
+                } else {
+                    if (dlg.parentElement) dlg.remove();
+                }
+            };
+            panel.appendChild(closeBtn);
+
             const statusEl = document.createElement("div");
             statusEl.textContent = "Preparing scan...";
             Object.assign(statusEl.style, {
                 fontSize: "16px",
                 lineHeight: "1.25",
                 fontWeight: "600",
-                letterSpacing: "-0.005em"
+                letterSpacing: "-0.005em",
+                paddingRight: "20px" // ensure no overlap with closeBtn
             });
 
             const detailEl = document.createElement("div");
@@ -2531,7 +2573,8 @@ app.registerExtension({
                 fontSize: "13px",
                 color: "var(--descrip-text, #999)",
                 marginTop: "8px",
-                minHeight: "18px"
+                minHeight: "18px",
+                paddingRight: "20px" // ensure no overlap with closeBtn
             });
 
             const actionsEl = document.createElement("div");
@@ -3908,7 +3951,19 @@ app.registerExtension({
                         statusTimer = null;
                     }
                     controller.abort();
-                }, { skipModeActive: skipAllUnresolved });
+                }, {
+                    skipModeActive: skipAllUnresolved,
+                    onClose: () => {
+                        aborted = true;
+                        skipRequested = false;
+                        if (statusTimer) {
+                            clearInterval(statusTimer);
+                            statusTimer = null;
+                        }
+                        controller.abort();
+                        loadingDlg.remove();
+                    }
+                });
 
                 if (skipAllUnresolved) {
                     loadingDlg.setStatus("Skipping unresolved models...");
