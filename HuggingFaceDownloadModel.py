@@ -83,9 +83,20 @@ class HuggingFaceDownloadModel:
 
         # Step 3: run in background or sync
         if download_in_background:
+            def _async_download():
+                try:
+                    final_message, local_path = run_download(parsed, final_folder, sync=True)
+                    if local_path:
+                        import server
+                        import folder_paths
+                        if hasattr(folder_paths, "clear_cache"):
+                            folder_paths.clear_cache()
+                        server.PromptServer.instance.send_sync("hf_download_finished", {"path": local_path})
+                except Exception:
+                    pass
+
             threading.Thread(
-                target=run_download,
-                args=(parsed, final_folder),
+                target=_async_download,
                 daemon=True
             ).start()
             # best guess: use parsed["file"]
@@ -110,6 +121,15 @@ class HuggingFaceDownloadModel:
             # sync => we get final_message and local_path
             final_message, local_path = run_download(parsed, final_folder, sync=True)
             if local_path:
+                try:
+                    import server
+                    import folder_paths
+                    if hasattr(folder_paths, "clear_cache"):
+                        folder_paths.clear_cache()
+                    server.PromptServer.instance.send_sync("hf_download_finished", {"path": local_path})
+                except Exception:
+                    pass
+
                 # user wants leftover + "/" + filename if custom
                 filename = os.path.basename(local_path)
                 if target_folder == "custom":

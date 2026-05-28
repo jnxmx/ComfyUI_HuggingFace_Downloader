@@ -6479,6 +6479,27 @@ app.registerExtension({
             if (api && typeof api.addEventListener === "function") {
                 api.addEventListener("validation_error", handleValidationError);
                 api.addEventListener("execution_error", handleValidationError);
+                api.addEventListener("hf_download_finished", () => {
+                    setTimeout(() => {
+                        if (app && typeof app.refreshComboInNodes === "function") {
+                            app.refreshComboInNodes();
+                        }
+                        const refreshBtn = document.querySelector('#comfy-refresh-button');
+                        if (refreshBtn) refreshBtn.click();
+                        
+                        if (typeof clearMissingModelStoreState === "function") {
+                            clearMissingModelStoreState([]);
+                        }
+                        if (typeof clearModelValidationErrorsFromFrontendState === "function") {
+                            clearModelValidationErrorsFromFrontendState();
+                        }
+                        if (typeof useCommandStore !== "undefined") {
+                            try {
+                                useCommandStore().execute('Comfy.RefreshNodeDefinitions');
+                            } catch (e) {}
+                        }
+                    }, 500);
+                });
             }
         };
 
