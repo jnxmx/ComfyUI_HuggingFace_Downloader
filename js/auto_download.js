@@ -6544,38 +6544,27 @@ app.registerExtension({
                 }, 100);
             };
 
-            const refreshComboInNodesRecursive = async () => {
-                if (!app || typeof api === "undefined" || typeof api.getNodeDefs !== "function") return;
-                try {
-                    const defs = await api.getNodeDefs();
-                    forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
-                        const def = defs[node.type];
-                        if (!def) return;
-                        for (const widget of node.widgets || []) {
-                            if (widget.type === "combo" && def.input && def.input.required && def.input.required[widget.name]) {
-                                widget.options.values = def.input.required[widget.name][0];
-                                if (widget.name !== "image" && widget.name !== "image_upload" && !widget.options.values.includes(widget.value)) {
-                                    widget.value = widget.options.values[0];
-                                    if (node.onResize) node.onResize(node.size);
-                                    if (app.graph) app.graph.setDirtyCanvas(true, true);
-                                }
-                            }
-                        }
-                    });
-                } catch (e) {
-                    console.warn("[AutoDownload] Recursive combo refresh failed:", e);
-                }
-            };
-
             if (api && typeof api.addEventListener === "function") {
                 api.addEventListener("validation_error", handleValidationError);
                 api.addEventListener("execution_error", handleValidationError);
                 api.addEventListener("hf_download_finished", () => {
                     setTimeout(async () => {
-                        if (app && typeof app.refreshComboInNodes === "function") {
-                            app.refreshComboInNodes();
+                        if (app && typeof app.refreshMissingModels === "function") {
+                            try {
+                                await app.refreshMissingModels({ silent: true });
+                            } catch (e) {
+                                console.warn("[AutoDownload] Failed to run native refreshMissingModels:", e);
+                            }
+                        } else {
+                            if (app && typeof app.refreshComboInNodes === "function") {
+                                app.refreshComboInNodes();
+                            }
+                            if (typeof useCommandStore !== "undefined") {
+                                try {
+                                    useCommandStore().execute('Comfy.RefreshNodeDefinitions');
+                                } catch (e) {}
+                            }
                         }
-                        await refreshComboInNodesRecursive();
                         
                         const refreshBtn = document.querySelector('#comfy-refresh-button');
                         if (refreshBtn) refreshBtn.click();
@@ -6585,11 +6574,6 @@ app.registerExtension({
                         }
                         if (typeof clearModelValidationErrorsFromFrontendState === "function") {
                             clearModelValidationErrorsFromFrontendState();
-                        }
-                        if (typeof useCommandStore !== "undefined") {
-                            try {
-                                useCommandStore().execute('Comfy.RefreshNodeDefinitions');
-                            } catch (e) {}
                         }
                     }, 500);
                 });
