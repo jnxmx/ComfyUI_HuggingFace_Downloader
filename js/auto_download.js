@@ -2324,8 +2324,43 @@ app.registerExtension({
             initialWidgetValue: entry?.requested_path || entry?.requestedPath || entry?.filename || "",
         });
 
+        const forEachGraphNodeRecursive = (graph, callback, visited = new Set()) => {
+            if (!graph || typeof callback !== "function") return;
+            if (visited.has(graph)) {
+                return;
+            }
+            visited.add(graph);
+
+            const nodes = Array.isArray(graph?.nodes)
+                ? graph.nodes
+                : (Array.isArray(graph?._nodes) ? graph._nodes : []);
+            for (const node of nodes) {
+                callback(node);
+                try {
+                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
+                        forEachGraphNodeRecursive(node.subgraph, callback, visited);
+                    }
+                } catch (_) {
+                    // Ignore malformed subgraph nodes.
+                }
+            }
+        };
+
+        const findNodeByIdRecursive = (graph, id) => {
+            let foundNode = null;
+            forEachGraphNodeRecursive(graph, (node) => {
+                if (node && String(node.id) === String(id)) {
+                    foundNode = node;
+                }
+            });
+            return foundNode;
+        };
+
         const collectModelWidgetTargets = (entry) => {
-            const graphNodes = Array.isArray(app?.graph?._nodes) ? app.graph._nodes : [];
+            const graphNodes = [];
+            forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
+                graphNodes.push(node);
+            });
             if (!graphNodes.length) return [];
 
             const rowData = buildRowDataFromModelEntry(entry);
@@ -2344,8 +2379,8 @@ app.registerExtension({
 
             const nodeId = Number(entry?.node_id);
             let hadPreferredMatches = false;
-            if (Number.isFinite(nodeId) && app?.graph?.getNodeById) {
-                const preferredNode = app.graph.getNodeById(nodeId);
+            if (Number.isFinite(nodeId)) {
+                const preferredNode = findNodeByIdRecursive(app?.rootGraph || app?.graph, nodeId);
                 if (isLocalModelLoaderNode(preferredNode)) {
                     const beforeCount = targets.length;
                     pushNodeMatches(preferredNode);
@@ -5511,28 +5546,6 @@ app.registerExtension({
             }
         };
 
-        const forEachGraphNodeRecursive = (graph, callback, visited = new Set()) => {
-            if (!graph || typeof callback !== "function") return;
-            if (visited.has(graph)) {
-                return;
-            }
-            visited.add(graph);
-
-            const nodes = Array.isArray(graph?.nodes)
-                ? graph.nodes
-                : (Array.isArray(graph?._nodes) ? graph._nodes : []);
-            for (const node of nodes) {
-                callback(node);
-                try {
-                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
-                        forEachGraphNodeRecursive(node.subgraph, callback, visited);
-                    }
-                } catch (_) {
-                    // Ignore malformed subgraph nodes.
-                }
-            }
-        };
-
         const applyNodeErrorsFallback = (nodeErrors) => {
             forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
                 if (!node || typeof node !== "object") return;
@@ -5552,7 +5565,7 @@ app.registerExtension({
                     if (!Number.isFinite(numericId)) {
                         continue;
                     }
-                    const node = app?.graph?.getNodeById?.(numericId);
+                    const node = findNodeByIdRecursive(app?.rootGraph || app?.graph, numericId);
                     if (!node) {
                         continue;
                     }
