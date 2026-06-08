@@ -6548,8 +6548,15 @@ app.registerExtension({
                 api.addEventListener("validation_error", handleValidationError);
                 api.addEventListener("execution_error", handleValidationError);
                 api.addEventListener("hf_download_finished", () => {
-                    setTimeout(async () => {
-                        if (app && typeof app.refreshMissingModels === "function") {
+                    const runRefresh = async () => {
+                        const missingModelStore = await resolveMissingModelStore();
+                        if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
+                            try {
+                                await missingModelStore.refreshMissingModels();
+                            } catch (e) {
+                                console.warn("[AutoDownload] Failed to run store.refreshMissingModels:", e);
+                            }
+                        } else if (app && typeof app.refreshMissingModels === "function") {
                             try {
                                 await app.refreshMissingModels({ silent: true });
                             } catch (e) {
@@ -6575,7 +6582,10 @@ app.registerExtension({
                         if (typeof clearModelValidationErrorsFromFrontendState === "function") {
                             clearModelValidationErrorsFromFrontendState();
                         }
-                    }, 500);
+                    };
+
+                    setTimeout(runRefresh, 500);
+                    setTimeout(runRefresh, 2000);
                 });
             }
         };
