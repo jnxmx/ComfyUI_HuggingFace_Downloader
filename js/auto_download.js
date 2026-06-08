@@ -6588,48 +6588,60 @@ app.registerExtension({
                 }, 100);
             };
 
+            let needsRefreshAfterExecution = false;
+
             if (api && typeof api.addEventListener === "function") {
                 api.addEventListener("validation_error", handleValidationError);
                 api.addEventListener("execution_error", handleValidationError);
-                api.addEventListener("hf_download_finished", () => {
-                    const runRefresh = async () => {
-                        const missingModelStore = await resolveMissingModelStore();
-                        if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
+                
+                const runRefresh = async () => {
+                    const missingModelStore = await resolveMissingModelStore();
+                    if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
+                        try {
+                            await missingModelStore.refreshMissingModels();
+                        } catch (e) {
+                            console.warn("[AutoDownload] Failed to run store.refreshMissingModels:", e);
+                        }
+                    } else if (app && typeof app.refreshMissingModels === "function") {
+                        try {
+                            await app.refreshMissingModels({ silent: true });
+                        } catch (e) {
+                            console.warn("[AutoDownload] Failed to run native refreshMissingModels:", e);
+                        }
+                    } else {
+                        if (app && typeof app.refreshComboInNodes === "function") {
+                            app.refreshComboInNodes();
+                        }
+                        if (typeof useCommandStore !== "undefined") {
                             try {
-                                await missingModelStore.refreshMissingModels();
-                            } catch (e) {
-                                console.warn("[AutoDownload] Failed to run store.refreshMissingModels:", e);
-                            }
-                        } else if (app && typeof app.refreshMissingModels === "function") {
-                            try {
-                                await app.refreshMissingModels({ silent: true });
-                            } catch (e) {
-                                console.warn("[AutoDownload] Failed to run native refreshMissingModels:", e);
-                            }
-                        } else {
-                            if (app && typeof app.refreshComboInNodes === "function") {
-                                app.refreshComboInNodes();
-                            }
-                            if (typeof useCommandStore !== "undefined") {
-                                try {
-                                    useCommandStore().execute('Comfy.RefreshNodeDefinitions');
-                                } catch (e) {}
-                            }
+                                useCommandStore().execute('Comfy.RefreshNodeDefinitions');
+                            } catch (e) {}
                         }
-                        
-                        const refreshBtn = document.querySelector('#comfy-refresh-button');
-                        if (refreshBtn) refreshBtn.click();
-                        
-                        if (typeof clearMissingModelStoreState === "function") {
-                            clearMissingModelStoreState([]);
-                        }
-                        if (typeof clearModelValidationErrorsFromFrontendState === "function") {
-                            clearModelValidationErrorsFromFrontendState();
-                        }
-                    };
+                    }
+                    
+                    const refreshBtn = document.querySelector('#comfy-refresh-button');
+                    if (refreshBtn) refreshBtn.click();
+                    
+                    if (typeof clearMissingModelStoreState === "function") {
+                        clearMissingModelStoreState([]);
+                    }
+                    if (typeof clearModelValidationErrorsFromFrontendState === "function") {
+                        clearModelValidationErrorsFromFrontendState();
+                    }
+                };
 
+                api.addEventListener("hf_download_finished", () => {
+                    needsRefreshAfterExecution = true;
+                    // Trigger once immediately
                     setTimeout(runRefresh, 500);
-                    setTimeout(runRefresh, 2000);
+                });
+
+                api.addEventListener("executing", (e) => {
+                    // e.detail is the node ID currently executing. It is null when execution finishes.
+                    if (e.detail === null && needsRefreshAfterExecution) {
+                        needsRefreshAfterExecution = false;
+                        setTimeout(runRefresh, 500);
+                    }
                 });
             }
         };
