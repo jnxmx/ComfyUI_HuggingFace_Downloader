@@ -4829,6 +4829,35 @@ app.registerExtension({
             return { repoFolderMissing, curatedMissing, regularMissing };
         };
 
+        const findPiniaStore = (storeId) => {
+            try {
+                const appEl = document.querySelector('#app') || document.querySelector('#root') || document.body;
+                if (!appEl) return null;
+                const vueApp = appEl.__vue_app__;
+                if (!vueApp) return null;
+                const provides = vueApp._context?.provides;
+                if (!provides) return null;
+                
+                let pinia = null;
+                const symbols = Object.getOwnPropertySymbols(provides);
+                for (const sym of symbols) {
+                    if (sym.toString().includes("pinia") || sym.description === "pinia") {
+                        pinia = provides[sym];
+                        break;
+                    }
+                }
+                if (!pinia) return null;
+                
+                const storeMap = pinia._s || pinia.stores;
+                if (storeMap && typeof storeMap.get === "function" && storeMap.has(storeId)) {
+                    return storeMap.get(storeId);
+                }
+            } catch (e) {
+                console.warn("[AutoDownload] Error finding Pinia store:", storeId, e);
+            }
+            return null;
+        };
+
         let resolvedModelStorePromise = null;
         let resolvedExecutionErrorStorePromise = null;
         let resolvedMissingModelStorePromise = null;
@@ -4839,6 +4868,11 @@ app.registerExtension({
             }
 
             resolvedModelStorePromise = (async () => {
+                try {
+                    const store = findPiniaStore("model");
+                    if (store) return store;
+                } catch (e) {}
+
                 for (const candidate of MODEL_STORE_IMPORT_CANDIDATES) {
                     try {
                         const module = await import(candidate);
@@ -4869,6 +4903,11 @@ app.registerExtension({
             }
 
             resolvedExecutionErrorStorePromise = (async () => {
+                try {
+                    const store = findPiniaStore("executionError");
+                    if (store) return store;
+                } catch (e) {}
+
                 for (const candidate of EXECUTION_ERROR_STORE_IMPORT_CANDIDATES) {
                     try {
                         const module = await import(candidate);
@@ -4895,6 +4934,11 @@ app.registerExtension({
             }
 
             resolvedMissingModelStorePromise = (async () => {
+                try {
+                    const store = findPiniaStore("missingModel");
+                    if (store) return store;
+                } catch (e) {}
+
                 for (const candidate of MISSING_MODEL_STORE_IMPORT_CANDIDATES) {
                     try {
                         const module = await import(candidate);
