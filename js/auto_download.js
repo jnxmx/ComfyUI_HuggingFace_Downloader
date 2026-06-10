@@ -6608,15 +6608,17 @@ app.registerExtension({
                         } catch (e) {
                             console.warn("[AutoDownload] Failed to run native refreshMissingModels:", e);
                         }
-                    } else {
-                        if (app && typeof app.refreshComboInNodes === "function") {
-                            app.refreshComboInNodes();
-                        }
-                        if (typeof useCommandStore !== "undefined") {
-                            try {
-                                useCommandStore().execute('Comfy.RefreshNodeDefinitions');
-                            } catch (e) {}
-                        }
+                    }
+                    
+                    if (app && typeof app.refreshComboInNodes === "function") {
+                        try {
+                            await app.refreshComboInNodes();
+                        } catch (e) {}
+                    }
+                    if (typeof useCommandStore !== "undefined") {
+                        try {
+                            await useCommandStore().execute('Comfy.RefreshNodeDefinitions');
+                        } catch (e) {}
                     }
                     
                     const refreshBtn = document.querySelector('#comfy-refresh-button');
