@@ -2423,7 +2423,7 @@ def search_huggingface_model(
                     print(f"[DEBUG] HF search budget/rate limit hit before term search for {filename}")
                     return None
                 try:
-                    models = list(call_with_timeout(api.list_models, search=term, limit=20, sort="downloads", direction=-1))
+                    models = list(call_with_timeout(api.list_models, search=term, limit=20, sort="downloads"))
                 except concurrent.futures.TimeoutError:
                     if status_cb:
                         status_cb({
@@ -2491,8 +2491,7 @@ def search_huggingface_model(
                                 author=author,
                                 search=term,
                                 limit=15,
-                                sort="downloads",
-                                direction=-1
+                                sort="downloads"
                             ))
                         except concurrent.futures.TimeoutError:
                             if status_cb:
@@ -2537,7 +2536,7 @@ def search_huggingface_model(
                         print(f"[DEBUG] HF search budget/rate limit hit before author list for {filename}")
                         return None
                     try:
-                        author_list = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads", direction=-1))
+                        author_list = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads"))
                     except concurrent.futures.TimeoutError:
                         if status_cb:
                             status_cb({
@@ -2797,7 +2796,7 @@ def search_huggingface_model(
                 try:
                     if not _hf_search_allowed():
                         return None
-                    author_models = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads", direction=-1))
+                    author_models = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads"))
                 except concurrent.futures.TimeoutError:
                     if status_cb:
                         status_cb({
@@ -3431,7 +3430,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             api = HfApi(token=token)
             for author in PRIORITY_AUTHORS:
                 try:
-                    repos = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads", direction=-1))
+                    repos = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads"))
                     priority_author_repos[author] = [m.modelId for m in repos if getattr(m, "modelId", None)]
                 except Exception as e:
                     print(f"[DEBUG] Priority author {author} list fetch failed: {e}")
