@@ -844,12 +844,56 @@ app.registerExtension({
 
             let refreshSucceeded = false;
             try {
+                // Try to resolve and run refreshMissingModels on the Pinia store or ComfyApp
+                let missingModelStore = null;
+                try {
+                    const findPiniaStore = (storeId) => {
+                        const appEl = document.querySelector('#app') || document.querySelector('#root') || document.body;
+                        if (!appEl) return null;
+                        const vueApp = appEl.__vue_app__;
+                        if (!vueApp) return null;
+                        const provides = vueApp._context?.provides;
+                        if (!provides) return null;
+                        let pinia = null;
+                        const symbols = Object.getOwnPropertySymbols(provides);
+                        for (const sym of symbols) {
+                            if (sym.toString().includes("pinia") || sym.description === "pinia") {
+                                pinia = provides[sym];
+                                break;
+                            }
+                        }
+                        if (!pinia) return null;
+                        const storeMap = pinia._s || pinia.stores;
+                        if (storeMap && typeof storeMap.get === "function" && storeMap.has(storeId)) {
+                            return storeMap.get(storeId);
+                        }
+                        return null;
+                    };
+                    missingModelStore = findPiniaStore("missingModel");
+                } catch (e) {}
+
+                if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
+                    await missingModelStore.refreshMissingModels();
+                } else if (app && typeof app.refreshMissingModels === "function") {
+                    await app.refreshMissingModels({ silent: true });
+                }
+
                 if (typeof app?.refreshComboInNodes === "function") {
                     const maybePromise = app.refreshComboInNodes();
                     if (maybePromise && typeof maybePromise.then === "function") {
                         await maybePromise;
                     }
                 }
+                
+                if (typeof useCommandStore !== "undefined") {
+                    try {
+                        await useCommandStore().execute('Comfy.RefreshNodeDefinitions');
+                    } catch (e) {}
+                }
+
+                const refreshBtnNative = document.querySelector('#comfy-refresh-button');
+                if (refreshBtnNative) refreshBtnNative.click();
+
                 if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
                     app.graph.setDirtyCanvas(true, true);
                 }
