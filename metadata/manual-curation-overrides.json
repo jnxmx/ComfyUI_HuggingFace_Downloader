@@ -1071,6 +1071,15 @@
     "freeway_animation_demo_hunyuan_dit_nonema.safetensors": {
       "explorer_base": "Hunyuan-DiT"
     },
+    "gemma4_e2b_it_bf16.safetensors": {
+      "explorer_enabled": true
+    },
+    "gemma4_e4b_it_bf16.safetensors": {
+      "explorer_enabled": true
+    },
+    "gemma4_e4b_it_fp8_scaled.safetensors": {
+      "explorer_enabled": true
+    },
     "hidream_e1_1_bf16.safetensors": {
       "explorer_base": "HiDream-I1 & E1"
     },
