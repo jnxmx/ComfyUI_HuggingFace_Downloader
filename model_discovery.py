@@ -1319,8 +1319,24 @@ NODE_TYPE_MAPPING = {
     "PulidModelLoader": "pulid",
     "Florence2ModelLoader": "LLM",
     "DownloadAndLoadFlorence2Model": "LLM",
-    
+
+    # Native ComfyUI Background Removal
+    "LoadBackgroundRemovalModel": "background_removal",
+
+    # Native ComfyUI Model Patches
+    "ModelPatchLoader": "model_patches",
+
+    # ComfyUI-HunyuanVideoWrapper
+    "HunyuanVideoModelLoader": "diffusion_models",
+    "HunyuanVideoVAELoader": "vae",
+    "HyVideoModelLoader": "diffusion_models",
+    "HyVideoVAELoader": "vae",
+
+    # ComfyUI-LTXVideo
+    "LTXVideoModelLoader": "checkpoints",
+    "LTXVideoVAELoader": "vae",
 }
+
 
 
 def resolve_wanvideo_wrapper_folder(node_type_lower: str) -> str | None:
