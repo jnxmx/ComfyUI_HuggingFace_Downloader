@@ -1702,7 +1702,7 @@ class ModelExplorerDialog {
         const leftPanel = document.createElement("nav");
         leftPanel.className = "hf-me-left-panel";
         leftPanel.innerHTML = `
-            <header class="hf-me-left-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 20px; padding-right: 20px;">
+            <header class="hf-me-left-header">
                 <h2 class="hf-me-left-title">Model Explorer</h2>
             </header>
             <div class="hf-me-left-scroll">
@@ -1711,29 +1711,14 @@ class ModelExplorerDialog {
                 </div>
                 <div id="hf-me-category-list" class="hf-me-category-list"></div>
             </div>
+            <div class="hf-me-left-footer" style="padding: 12px; border-top: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452))); flex-shrink: 0;">
+                <button type="button" class="p-button p-component p-button-sm p-button-outlined hf-me-upload-btn" style="width: 100%; height: 36px; border-radius: 6px; border: 1px solid var(--border-default, #3c4452); background: transparent; color: var(--base-foreground, #e5e7eb); font-size: 13px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: background-color 120ms ease, border-color 120ms ease;">
+                    <i class="pi pi-upload" aria-hidden="true"></i>
+                    <span>Upload Model</span>
+                </button>
+            </div>
         `;
-        const leftHeader = leftPanel.querySelector(".hf-me-left-header");
-        
-        const uploadBtn = document.createElement("button");
-        uploadBtn.type = "button";
-        uploadBtn.className = "p-button p-component p-button-sm p-button-outlined hf-me-upload-btn";
-        uploadBtn.innerHTML = '<i class="pi pi-upload" aria-hidden="true"></i><span style="margin-left: 4px;">Upload</span>';
-        Object.assign(uploadBtn.style, {
-            height: "32px",
-            borderRadius: "6px",
-            border: "1px solid var(--border-default, #3c4452)",
-            background: "transparent",
-            color: "var(--base-foreground, #e5e7eb)",
-            fontSize: "12px",
-            fontWeight: "500",
-            cursor: "pointer",
-            padding: "0 10px",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transition: "background-color 120ms ease, border-color 120ms ease",
-            flexShrink: "0",
-        });
+        const uploadBtn = leftPanel.querySelector(".hf-me-upload-btn");
         uploadBtn.onmouseenter = () => {
             uploadBtn.style.background = "var(--secondary-background-hover, #3a4458)";
             uploadBtn.style.borderColor = "var(--border-default, #4b5563)";
@@ -1746,7 +1731,6 @@ class ModelExplorerDialog {
             e.stopPropagation();
             this.showUploadDialog();
         };
-        leftHeader.appendChild(uploadBtn);
         shell.appendChild(leftPanel);
 
         const mainPanel = document.createElement("div");
