@@ -2608,6 +2608,82 @@ async def delete_from_hf_backup_endpoint(request):
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
+async def get_disk_space(request):
+    try:
+        path = os.path.join(os.getcwd(), "models")
+        if not os.path.exists(path):
+            path = os.getcwd()
+        total, used, free = shutil.disk_usage(path)
+        return web.json_response({
+            "total": total,
+            "used": used,
+            "free": free
+        })
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+
+async def upload_chunk(request):
+    try:
+        reader = await request.multipart()
+        upload_id = None
+        filename = None
+        folder = None
+        chunk_index = None
+        total_chunks = None
+        chunk_data = None
+
+        while True:
+            part = await reader.next()
+            if part is None:
+                break
+            if part.name == 'upload_id':
+                upload_id = (await part.read()).decode('utf-8').strip()
+            elif part.name == 'filename':
+                filename = (await part.read()).decode('utf-8').strip()
+            elif part.name == 'folder':
+                folder = (await part.read()).decode('utf-8').strip()
+            elif part.name == 'chunk_index':
+                chunk_index = int((await part.read()).decode('utf-8').strip())
+            elif part.name == 'total_chunks':
+                total_chunks = int((await part.read()).decode('utf-8').strip())
+            elif part.name == 'chunk':
+                chunk_data = await part.read()
+
+        if not upload_id or not filename or not folder or chunk_index is None or not total_chunks or chunk_data is None:
+            return web.json_response({"error": "Missing required chunk upload fields"}, status=400)
+
+        folder = str(folder or "loras").strip()
+        roots = _resolve_model_search_paths(folder)
+        if not roots:
+            return web.json_response({"error": f"Invalid folder category: {folder}"}, status=400)
+
+        target_dir = roots[0]
+        os.makedirs(target_dir, exist_ok=True)
+
+        clean_filename = os.path.basename(filename)
+        temp_file_path = os.path.join(target_dir, f".upload-{upload_id}.tmp")
+
+        mode = "wb" if chunk_index == 0 else "ab"
+        with open(temp_file_path, mode) as f:
+            f.write(chunk_data)
+
+        if chunk_index + 1 == total_chunks:
+            final_file_path = os.path.join(target_dir, clean_filename)
+            if os.path.exists(final_file_path):
+                try:
+                    os.remove(final_file_path)
+                except Exception:
+                    pass
+            os.rename(temp_file_path, final_file_path)
+            _invalidate_model_library_local_cache()
+
+        return web.json_response({"status": "ok", "chunk_index": chunk_index})
+    except Exception as e:
+        print(f"[ERROR] upload_chunk failed: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+
 def _bind_route_target(target, method: str, path: str, handler):
     if target is None:
         raise RuntimeError("Route target is None.")
@@ -3443,6 +3519,8 @@ def setup(app_or_server):
     _safe_add_route("DELETE", f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_remove_tags)
 
     # --- Model Explorer Routes ---
+    _safe_add_route("GET", "/hf_downloader_model_explorer_v2/disk_space", get_disk_space)
+    _safe_add_route("POST", "/hf_downloader_model_explorer_v2/upload_chunk", upload_chunk)
     _safe_add_route("GET", "/hf_downloader_model_explorer_v2/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/hf_downloader_model_explorer_v2/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/hf_downloader_model_explorer_v2/groups", model_explorer_list_groups)

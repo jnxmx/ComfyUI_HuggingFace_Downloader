@@ -989,11 +989,11 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-row {
                 display: flex;
                 align-items: center;
-                gap: 10px;
-                height: 52px;
-                border-radius: 12px;
-                background: var(--secondary-background, #2f3747);
-                padding: 0 10px;
+                gap: 8px;
+                height: 40px;
+                border-radius: 6px;
+                background: var(--bg-100, var(--comfy-input-bg, #2b3242));
+                padding: 0 12px;
                 transition: background-color 120ms ease;
                 box-sizing: border-box;
                 overflow: hidden;
@@ -1014,8 +1014,8 @@ class ModelExplorerDialog {
                 flex: 1 1 auto;
             }
             #hf-model-explorer-dialog .hf-me-file {
-                font-size: 0.98rem;
-                font-weight: 600;
+                font-size: 0.875rem;
+                font-weight: 500;
                 line-height: 1.2;
                 white-space: nowrap;
                 overflow: hidden;
@@ -1043,14 +1043,14 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-tag {
                 display: inline-flex;
                 align-items: center;
-                border-radius: 6px;
+                border-radius: 4px;
                 background: color-mix(in srgb, var(--secondary-background, #2f3747) 50%, var(--border-default, #4b5563) 50%);
                 color: var(--base-foreground, var(--input-text, #e5e7eb));
-                font-size: 0.8rem;
+                font-size: 0.7rem;
                 line-height: 1;
                 text-transform: uppercase;
                 font-weight: 700;
-                padding: 6px 9px;
+                padding: 3px 6px;
                 white-space: nowrap;
                 flex: 0 0 auto;
             }
@@ -1210,7 +1210,7 @@ class ModelExplorerDialog {
                     flex-wrap: nowrap;
                 }
                 #hf-model-explorer-dialog .hf-me-row {
-                    height: 52px;
+                    height: 40px;
                 }
                 #hf-model-explorer-dialog .hf-me-main {
                     flex: 1 1 auto;
@@ -1219,6 +1219,122 @@ class ModelExplorerDialog {
                     width: auto;
                     justify-content: initial;
                 }
+            }
+            /* Upload dialog styles */
+            #hf-upload-modal-dialog {
+                position: fixed;
+                inset: 0;
+                width: 100vw;
+                height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 10002;
+                padding: 16px;
+                box-sizing: border-box;
+            }
+            .hf-upload-modal-panel {
+                background: var(--modal-panel-background, var(--comfy-menu-bg, #1f2128));
+                color: var(--input-text, #e5e7eb);
+                border: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
+                border-radius: 16px;
+                box-shadow: var(--shadow-interface, 0 12px 28px rgba(0, 0, 0, 0.45));
+                display: flex;
+                flex-direction: column;
+                gap: 16px;
+                padding: 24px;
+                overflow: hidden;
+                font-family: var(--font-sans, Inter, sans-serif);
+                min-width: 460px;
+                max-width: 550px;
+                width: 100%;
+            }
+            .hf-upload-modal-title {
+                font-size: 18px;
+                font-weight: 600;
+                margin: 0 0 4px;
+                color: var(--input-text, #e5e7eb);
+            }
+            .hf-upload-dropzone {
+                border: 2px dashed var(--border-default, #3c4452);
+                border-radius: 12px;
+                padding: 32px 16px;
+                text-align: center;
+                cursor: pointer;
+                background: var(--bg-100, var(--comfy-input-bg, #111319));
+                transition: border-color 120ms ease, background-color 120ms ease;
+            }
+            .hf-upload-dropzone:hover {
+                border-color: var(--primary-background, #2786e5);
+                background: var(--secondary-background-hover, #2b3242);
+            }
+            .hf-upload-dropzone i {
+                font-size: 32px;
+                color: var(--text-secondary, #9aa4b6);
+                margin-bottom: 8px;
+                display: block;
+            }
+            .hf-upload-dropzone p {
+                margin: 0;
+                font-size: 13px;
+                color: var(--text-secondary, #9aa4b6);
+            }
+            .hf-upload-file-info {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                background: var(--bg-100, var(--comfy-input-bg, #111319));
+                padding: 12px;
+                border-radius: 8px;
+                border: 1px solid var(--border-default, #3c4452);
+            }
+            .hf-upload-file-row {
+                display: flex;
+                justify-content: space-between;
+                font-size: 13px;
+            }
+            .hf-upload-file-label {
+                color: var(--descrip-text, #9aa4b6);
+            }
+            .hf-upload-file-val {
+                font-weight: 500;
+                color: var(--input-text, #e5e7eb);
+            }
+            .hf-upload-folder-select {
+                width: 100%;
+                height: 38px;
+                background: var(--comfy-input-bg, #2b3242);
+                border: 1px solid var(--border-default, #3c4452);
+                color: var(--input-text, #e5e7eb);
+                border-radius: 6px;
+                padding: 0 8px;
+                font-size: 13px;
+                outline: none;
+            }
+            .hf-upload-progress-container {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .hf-upload-progress-bar {
+                width: 100%;
+                height: 8px;
+                background: var(--border-default, #3c4452);
+                border-radius: 999px;
+                overflow: hidden;
+            }
+            .hf-upload-progress-fill {
+                width: 0%;
+                height: 100%;
+                background: var(--primary-background, #2786e5);
+                transition: width 100ms linear;
+            }
+            .hf-upload-stats {
+                display: flex;
+                justify-content: space-between;
+                font-size: 12px;
+                color: var(--descrip-text, #9aa4b6);
             }
         `;
         document.head.appendChild(style);
@@ -1241,6 +1357,321 @@ class ModelExplorerDialog {
             this.element.style.display = "none";
             this.closeFilterPopover(null, false);
         }
+    }
+
+    async showUploadDialog() {
+        let folderOptions = ["loras", "checkpoints", "clip", "diffusion_models", "vae", "controlnet"];
+        try {
+            const resp = await fetch("/folder_structure");
+            if (resp.ok) {
+                const data = await resp.json();
+                if (Array.isArray(data)) {
+                    folderOptions = data;
+                }
+            }
+        } catch (e) {
+            console.error("Failed to fetch folder structure", e);
+        }
+
+        let freeSpace = null;
+        let freeSpaceText = "Checking...";
+        try {
+            const resp = await fetch("/hf_downloader_model_explorer_v2/disk_space");
+            if (resp.ok) {
+                const spaceData = await resp.json();
+                if (Number.isFinite(spaceData.free)) {
+                    freeSpace = spaceData.free;
+                    freeSpaceText = this.formatSizeGb(freeSpace);
+                }
+            }
+        } catch (e) {
+            console.error("Failed to fetch disk space", e);
+            freeSpaceText = "Error checking";
+        }
+
+        const existing = document.getElementById("hf-upload-modal-dialog");
+        if (existing) existing.remove();
+
+        const overlay = document.createElement("div");
+        overlay.id = "hf-upload-modal-dialog";
+
+        const panel = document.createElement("div");
+        panel.className = "hf-upload-modal-panel";
+        
+        const title = document.createElement("h3");
+        title.className = "hf-upload-modal-title";
+        title.textContent = "Upload Model File";
+        panel.appendChild(title);
+
+        const diskInfo = document.createElement("div");
+        diskInfo.style.fontSize = "12px";
+        diskInfo.style.color = "var(--descrip-text, #9aa4b6)";
+        diskInfo.style.marginBottom = "8px";
+        diskInfo.innerHTML = `Available HDD space: <span id="hf-upload-disk-val" style="font-weight:600; color:var(--input-text, #e5e7eb);">${freeSpaceText}</span>`;
+        panel.appendChild(diskInfo);
+
+        const dropzone = document.createElement("div");
+        dropzone.className = "hf-upload-dropzone";
+        dropzone.innerHTML = `
+            <i class="pi pi-cloud-upload"></i>
+            <p>Click to browse or drag file here</p>
+            <input type="file" id="hf-upload-file-input" style="display:none;" />
+        `;
+        
+        const fileInput = dropzone.querySelector("#hf-upload-file-input");
+        dropzone.onclick = () => fileInput.click();
+        panel.appendChild(dropzone);
+
+        const detailsContainer = document.createElement("div");
+        detailsContainer.style.display = "none";
+        detailsContainer.style.flexDirection = "column";
+        detailsContainer.style.gap = "12px";
+
+        const fileDetails = document.createElement("div");
+        fileDetails.className = "hf-upload-file-info";
+        fileDetails.innerHTML = `
+            <div class="hf-upload-file-row">
+                <span class="hf-upload-file-label">File name:</span>
+                <span class="hf-upload-file-val" id="hf-upload-filename-val">-</span>
+            </div>
+            <div class="hf-upload-file-row">
+                <span class="hf-upload-file-label">File size:</span>
+                <span class="hf-upload-file-val" id="hf-upload-filesize-val">-</span>
+            </div>
+        `;
+        detailsContainer.appendChild(fileDetails);
+
+        const folderSelectGroup = document.createElement("div");
+        folderSelectGroup.innerHTML = `
+            <label style="display:block; font-size:12px; font-weight:600; margin-bottom:6px; color:var(--input-text, #e5e7eb);">Upload Folder Category:</label>
+            <select class="hf-upload-folder-select"></select>
+        `;
+        const selectEl = folderSelectGroup.querySelector("select");
+        for (const opt of folderOptions) {
+            const optEl = document.createElement("option");
+            optEl.value = opt;
+            optEl.textContent = opt;
+            if (opt === "loras" || opt === "lora") {
+                optEl.selected = true;
+            }
+            selectEl.appendChild(optEl);
+        }
+        detailsContainer.appendChild(folderSelectGroup);
+
+        const progressContainer = document.createElement("div");
+        progressContainer.className = "hf-upload-progress-container";
+        progressContainer.style.display = "none";
+        progressContainer.innerHTML = `
+            <div class="hf-upload-progress-bar">
+                <div class="hf-upload-progress-fill" id="hf-upload-progress-fill"></div>
+            </div>
+            <div class="hf-upload-stats">
+                <span id="hf-upload-percent">0%</span>
+                <span id="hf-upload-speed">0 MB/s</span>
+                <span id="hf-upload-eta">ETA: -</span>
+            </div>
+        `;
+        detailsContainer.appendChild(progressContainer);
+        panel.appendChild(detailsContainer);
+
+        const errorMsg = document.createElement("div");
+        errorMsg.id = "hf-upload-error-msg";
+        errorMsg.style.color = "var(--destructive-background, #d24a4a)";
+        errorMsg.style.fontSize = "12px";
+        errorMsg.style.display = "none";
+        panel.appendChild(errorMsg);
+
+        const footer = document.createElement("div");
+        footer.style.display = "flex";
+        footer.style.justifyContent = "flex-end";
+        footer.style.gap = "8px";
+        footer.style.marginTop = "8px";
+
+        const cancelBtn = createConfirmDialogButton("Cancel", "default");
+        const uploadStartBtn = createConfirmDialogButton("Start Upload", "primary");
+        uploadStartBtn.disabled = true;
+
+        footer.appendChild(cancelBtn);
+        footer.appendChild(uploadStartBtn);
+        panel.appendChild(footer);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+
+        let selectedFile = null;
+        let isUploading = false;
+        let abortController = null;
+
+        const updateDiskWarning = () => {
+            if (selectedFile && freeSpace !== null && selectedFile.size > freeSpace) {
+                errorMsg.textContent = `Warning: File size (${this.formatSizeGb(selectedFile.size)}) exceeds free disk space (${freeSpaceText}).`;
+                errorMsg.style.display = "block";
+                uploadStartBtn.disabled = true;
+            } else {
+                errorMsg.style.display = "none";
+                if (selectedFile) {
+                    uploadStartBtn.disabled = false;
+                }
+            }
+        };
+
+        const onFileChosen = (file) => {
+            if (!file) return;
+            selectedFile = file;
+            dropzone.style.display = "none";
+            detailsContainer.style.display = "flex";
+            document.getElementById("hf-upload-filename-val").textContent = file.name;
+            document.getElementById("hf-upload-filesize-val").textContent = this.formatSizeGb(file.size);
+            updateDiskWarning();
+        };
+
+        fileInput.onchange = (e) => {
+            onFileChosen(e.target.files[0]);
+        };
+
+        dropzone.ondragover = (e) => {
+            e.preventDefault();
+            dropzone.style.borderColor = "var(--primary-background, #2786e5)";
+            dropzone.style.background = "var(--secondary-background-hover, #2b3242)";
+        };
+        dropzone.ondragleave = () => {
+            dropzone.style.borderColor = "var(--border-default, #3c4452)";
+            dropzone.style.background = "var(--bg-100, var(--comfy-input-bg, #111319))";
+        };
+        dropzone.ondrop = (e) => {
+            e.preventDefault();
+            dropzone.style.borderColor = "var(--border-default, #3c4452)";
+            dropzone.style.background = "var(--bg-100, var(--comfy-input-bg, #111319))";
+            if (e.dataTransfer?.files?.length) {
+                onFileChosen(e.dataTransfer.files[0]);
+            }
+        };
+
+        cancelBtn.onclick = () => {
+            if (isUploading && abortController) {
+                abortController.abort();
+            }
+            overlay.remove();
+        };
+
+        overlay.onclick = (e) => {
+            if (e.target === overlay && !isUploading) {
+                overlay.remove();
+            }
+        };
+
+        uploadStartBtn.onclick = async () => {
+            if (!selectedFile || isUploading) return;
+            isUploading = true;
+            uploadStartBtn.disabled = true;
+            cancelBtn.textContent = "Cancel Upload";
+            selectEl.disabled = true;
+            progressContainer.style.display = "flex";
+
+            const uploadId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+            const targetFolder = selectEl.value;
+            const filename = selectedFile.name;
+            const fileSize = selectedFile.size;
+            
+            const chunkSize = 8 * 1024 * 1024;
+            const totalChunks = Math.ceil(fileSize / chunkSize);
+
+            abortController = new AbortController();
+            const progressFill = document.getElementById("hf-upload-progress-fill");
+            const percentLabel = document.getElementById("hf-upload-percent");
+            const speedLabel = document.getElementById("hf-upload-speed");
+            const etaLabel = document.getElementById("hf-upload-eta");
+
+            const uploadStartTime = Date.now();
+            let bytesUploaded = 0;
+
+            for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                if (abortController.signal.aborted) {
+                    break;
+                }
+
+                const start = chunkIndex * chunkSize;
+                const end = Math.min(start + chunkSize, fileSize);
+                const chunk = selectedFile.slice(start, end);
+                const currentChunkSize = end - start;
+
+                const formData = new FormData();
+                formData.append("upload_id", uploadId);
+                formData.append("filename", filename);
+                formData.append("folder", targetFolder);
+                formData.append("chunk_index", String(chunkIndex));
+                formData.append("total_chunks", String(totalChunks));
+                formData.append("chunk", chunk, filename);
+
+                let success = false;
+                let retries = 3;
+
+                while (retries > 0 && !success) {
+                    try {
+                        const resp = await fetch("/hf_downloader_model_explorer_v2/upload_chunk", {
+                            method: "POST",
+                            body: formData,
+                            signal: abortController.signal,
+                        });
+
+                        if (resp.ok) {
+                            success = true;
+                        } else {
+                            retries--;
+                            if (retries === 0) {
+                                throw new Error(`HTTP ${resp.status}`);
+                            }
+                            await new Promise(r => setTimeout(r, 1000));
+                        }
+                    } catch (e) {
+                        if (abortController.signal.aborted) break;
+                        retries--;
+                        if (retries === 0) {
+                            errorMsg.textContent = `Upload failed: ${e.message || e}`;
+                            errorMsg.style.display = "block";
+                            isUploading = false;
+                            uploadStartBtn.disabled = false;
+                            cancelBtn.textContent = "Close";
+                            return;
+                        }
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+                }
+
+                if (abortController.signal.aborted) break;
+
+                bytesUploaded += currentChunkSize;
+
+                const totalElapsed = (Date.now() - uploadStartTime) / 1000;
+                const percent = Math.round((bytesUploaded / fileSize) * 100);
+                const speedBps = bytesUploaded / (totalElapsed || 0.1);
+                const speedMbs = speedBps / (1024 * 1024);
+
+                const remainingBytes = fileSize - bytesUploaded;
+                const etaSeconds = speedBps > 0 ? Math.round(remainingBytes / speedBps) : 0;
+                
+                let etaText = "ETA: -";
+                if (etaSeconds > 0) {
+                    const m = Math.floor(etaSeconds / 60);
+                    const s = etaSeconds % 60;
+                    etaText = m > 0 ? `ETA: ${m}m ${s}s` : `ETA: ${s}s`;
+                }
+
+                progressFill.style.width = `${percent}%`;
+                percentLabel.textContent = `${percent}%`;
+                speedLabel.textContent = `${speedMbs.toFixed(1)} MB/s`;
+                etaLabel.textContent = etaText;
+            }
+
+            if (!abortController.signal.aborted) {
+                showToast({
+                    severity: "success",
+                    summary: "Upload complete",
+                    detail: `Successfully uploaded ${filename} to ${targetFolder}`,
+                });
+                overlay.remove();
+                await this.refreshAll();
+            }
+        };
     }
 
     createUi() {
@@ -1271,7 +1702,7 @@ class ModelExplorerDialog {
         const leftPanel = document.createElement("nav");
         leftPanel.className = "hf-me-left-panel";
         leftPanel.innerHTML = `
-            <header class="hf-me-left-header">
+            <header class="hf-me-left-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 20px; padding-right: 20px;">
                 <h2 class="hf-me-left-title">Model Explorer</h2>
             </header>
             <div class="hf-me-left-scroll">
@@ -1281,6 +1712,41 @@ class ModelExplorerDialog {
                 <div id="hf-me-category-list" class="hf-me-category-list"></div>
             </div>
         `;
+        const leftHeader = leftPanel.querySelector(".hf-me-left-header");
+        
+        const uploadBtn = document.createElement("button");
+        uploadBtn.type = "button";
+        uploadBtn.className = "p-button p-component p-button-sm p-button-outlined hf-me-upload-btn";
+        uploadBtn.innerHTML = '<i class="pi pi-upload" aria-hidden="true"></i><span style="margin-left: 4px;">Upload</span>';
+        Object.assign(uploadBtn.style, {
+            height: "32px",
+            borderRadius: "6px",
+            border: "1px solid var(--border-default, #3c4452)",
+            background: "transparent",
+            color: "var(--base-foreground, #e5e7eb)",
+            fontSize: "12px",
+            fontWeight: "500",
+            cursor: "pointer",
+            padding: "0 10px",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "background-color 120ms ease, border-color 120ms ease",
+            flexShrink: "0",
+        });
+        uploadBtn.onmouseenter = () => {
+            uploadBtn.style.background = "var(--secondary-background-hover, #3a4458)";
+            uploadBtn.style.borderColor = "var(--border-default, #4b5563)";
+        };
+        uploadBtn.onmouseleave = () => {
+            uploadBtn.style.background = "transparent";
+            uploadBtn.style.borderColor = "var(--border-default, #3c4452)";
+        };
+        uploadBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.showUploadDialog();
+        };
+        leftHeader.appendChild(uploadBtn);
         shell.appendChild(leftPanel);
 
         const mainPanel = document.createElement("div");
