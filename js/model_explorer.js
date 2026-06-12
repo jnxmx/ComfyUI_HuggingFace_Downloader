@@ -55,7 +55,6 @@ const MODEL_EXPLORER_PRIMARY_CATEGORIES = new Set([
     "animatediff_motion_lora",
     "frame_interpolation",
     "background_removal",
-    "other",
 ]);
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
