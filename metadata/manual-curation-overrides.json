@@ -2,6 +2,27 @@
   "version": "1.0.0",
   "updated_at": "2026-02-21T16:41:10.343729+00:00",
   "overrides": {
+    "wan2.1_bernini_1.3B_fp16.safetensors": {
+      "explorer_enabled": true
+    },
+    "wan2.2_bernini_r_high_noise_fp16.safetensors": {
+      "explorer_enabled": true
+    },
+    "wan2.2_bernini_r_high_noise_fp8_scaled.safetensors": {
+      "explorer_enabled": true
+    },
+    "wan2.2_bernini_r_high_noise_mxfp8.safetensors": {
+      "explorer_enabled": true
+    },
+    "wan2.2_bernini_r_low_noise_fp16.safetensors": {
+      "explorer_enabled": true
+    },
+    "wan2.2_bernini_r_low_noise_fp8_scaled.safetensors": {
+      "explorer_enabled": true
+    },
+    "wan2.2_bernini_r_low_noise_mxfp8.safetensors": {
+      "explorer_enabled": true
+    },
     "birefnet.safetensors": {
       "explorer_category": "diffusion_models",
       "explorer_enabled": true
