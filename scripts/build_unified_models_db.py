@@ -601,12 +601,13 @@ def main() -> int:
         priority_family_supported = bool(category) and bool(stem_key) and (
             (category, stem_key) in curated_family_keys
         )
+        # Whitelist Comfy-Org models by default
+        is_comfy_org = str(entry.get("repo_id") or "").lower().startswith("comfy-org/")
         explorer_enabled_priority = (
             source == "priority_repo_scrape"
             and bool(category)
             and (not base_applicable or bool(base_value))
-            and allow_priority_gguf
-            and priority_family_supported
+            and (is_comfy_org or (allow_priority_gguf and priority_family_supported))
             and bool(entry.get("library_visible", True))
         )
         explorer_enabled = bool(explorer_enabled_core or explorer_enabled_priority)
