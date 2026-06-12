@@ -1530,6 +1530,10 @@ def resolve_proxy_widget_folder(widget_name: str | None) -> str | None:
         return "loras"
     if "checkpoint" in name or "ckpt" in name:
         return "checkpoints"
+    if "bg_removal" in name or "background_removal" in name or "background removal" in name:
+        return "background_removal"
+    if "model_patch" in name or "model patch" in name:
+        return "model_patches"
     return None
 
 def collect_proxy_widget_models(
