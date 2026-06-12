@@ -2,6 +2,10 @@
   "version": "1.0.0",
   "updated_at": "2026-02-21T16:41:10.343729+00:00",
   "overrides": {
+    "birefnet.safetensors": {
+      "explorer_category": "diffusion_models",
+      "explorer_enabled": true
+    },
     "2511-AnyPose-base-000006250.safetensors": {
       "explorer_base": "Qwen Image Edit"
     },
