@@ -3,24 +3,67 @@
   "updated_at": "2026-02-21T16:41:10.343729+00:00",
   "overrides": {
     "wan2.1_bernini_1.3B_fp16.safetensors": {
+      "explorer_category": "diffusion_models",
       "explorer_enabled": true
     },
     "wan2.2_bernini_r_high_noise_fp16.safetensors": {
+      "explorer_category": "diffusion_models",
       "explorer_enabled": true
     },
     "wan2.2_bernini_r_high_noise_fp8_scaled.safetensors": {
+      "explorer_category": "diffusion_models",
       "explorer_enabled": true
     },
     "wan2.2_bernini_r_high_noise_mxfp8.safetensors": {
+      "explorer_category": "diffusion_models",
       "explorer_enabled": true
     },
     "wan2.2_bernini_r_low_noise_fp16.safetensors": {
+      "explorer_category": "diffusion_models",
       "explorer_enabled": true
     },
     "wan2.2_bernini_r_low_noise_fp8_scaled.safetensors": {
+      "explorer_category": "diffusion_models",
       "explorer_enabled": true
     },
     "wan2.2_bernini_r_low_noise_mxfp8.safetensors": {
+      "explorer_category": "diffusion_models",
+      "explorer_enabled": true
+    },
+    "wan2.1_14B_SCAIL_2_fp16.safetensors": {
+      "explorer_category": "diffusion_models",
+      "explorer_enabled": true
+    },
+    "wan2.1_14B_SCAIL_2_fp8_scaled.safetensors": {
+      "explorer_category": "diffusion_models",
+      "explorer_enabled": true
+    },
+    "wan2.1_14B_SCAIL_2_mxfp8.safetensors": {
+      "explorer_category": "diffusion_models",
+      "explorer_enabled": true
+    },
+    "Wan22_Bernini_HIGH_fp16.safetensors": {
+      "explorer_category": "diffusion_models",
+      "explorer_enabled": true
+    },
+    "Wan22_Bernini_HIGH_fp8_e4m3fn_scaled.safetensors": {
+      "explorer_category": "diffusion_models",
+      "explorer_enabled": true
+    },
+    "Wan22_Bernini_HIGH_mxfp8.safetensors": {
+      "explorer_category": "diffusion_models",
+      "explorer_enabled": true
+    },
+    "Wan22_Bernini_LOW_fp16.safetensors": {
+      "explorer_category": "diffusion_models",
+      "explorer_enabled": true
+    },
+    "Wan22_Bernini_LOW_fp8_e4m3fn_scaled.safetensors": {
+      "explorer_category": "diffusion_models",
+      "explorer_enabled": true
+    },
+    "Wan22_Bernini_LOW_mxfp8.safetensors": {
+      "explorer_category": "diffusion_models",
       "explorer_enabled": true
     },
     "birefnet.safetensors": {
