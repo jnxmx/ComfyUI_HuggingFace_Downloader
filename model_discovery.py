@@ -1335,6 +1335,9 @@ NODE_TYPE_MAPPING = {
     # ComfyUI-LTXVideo
     "LTXVideoModelLoader": "checkpoints",
     "LTXVideoVAELoader": "vae",
+
+    # Native ComfyUI Frame Interpolation
+    "FrameInterpolationModelLoader": "frame_interpolation",
 }
 
 
@@ -1534,6 +1537,8 @@ def resolve_proxy_widget_folder(widget_name: str | None) -> str | None:
         return "background_removal"
     if "model_patch" in name or "model patch" in name:
         return "model_patches"
+    if "rife" in name or "film" in name or "frame_interpolation" in name or "frame interpolation" in name:
+        return "frame_interpolation"
     return None
 
 def collect_proxy_widget_models(
