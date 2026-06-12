@@ -53,6 +53,9 @@ const MODEL_EXPLORER_PRIMARY_CATEGORIES = new Set([
     "vae_approx",
     "animatediff_models",
     "animatediff_motion_lora",
+    "frame_interpolation",
+    "background_removal",
+    "other",
 ]);
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
