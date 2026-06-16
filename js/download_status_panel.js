@@ -870,6 +870,44 @@ app.registerExtension({
                     }
                 }
 
+                // Run native refresh to re-scan models, clear native error log and update subgraphs
+                const runNativeRefreshMissingModels = async () => {
+                    try {
+                        const appEl = document.querySelector('#app') || document.querySelector('#root') || document.body;
+                        if (appEl) {
+                            const vueApp = appEl.__vue_app__;
+                            if (vueApp && vueApp._context?.provides) {
+                                let pinia = null;
+                                const symbols = Object.getOwnPropertySymbols(vueApp._context.provides);
+                                for (const sym of symbols) {
+                                    if (sym.toString().includes("pinia") || sym.description === "pinia") {
+                                        pinia = vueApp._context.provides[sym];
+                                        break;
+                                    }
+                                }
+                                if (pinia) {
+                                    const storeMap = pinia._s || pinia.stores;
+                                    if (storeMap && typeof storeMap.get === "function" && storeMap.has("missingModel")) {
+                                        const missingModelStore = storeMap.get("missingModel");
+                                        if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
+                                            await missingModelStore.refreshMissingModels();
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_) {}
+
+                    try {
+                        if (app && typeof app.refreshMissingModels === "function") {
+                            await app.refreshMissingModels({ silent: true });
+                        }
+                    } catch (_) {}
+                };
+
+                await runNativeRefreshMissingModels();
+
                 if (typeof app?.refreshComboInNodes === "function") {
                     const maybePromise = app.refreshComboInNodes();
                     if (maybePromise && typeof maybePromise.then === "function") {
@@ -1070,23 +1108,60 @@ app.registerExtension({
                 }
                 
                 if (completedPaths.length > 0) {
-                    if (window.hfDownloader && typeof window.hfDownloader.clearCompletedModelsFromStore === "function") {
-                        try {
-                            const cleared = await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
-                            if (cleared) {
-                                if (typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
-                                    await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
-                                }
-                                if (typeof app?.refreshComboInNodes === "function") {
-                                    await app.refreshComboInNodes();
-                                }
-                                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                                    app.graph.setDirtyCanvas(true, true);
-                                }
-                            }
-                        } catch (e) {
-                            console.warn("[HF Downloader] Failed to auto-clear completed models during status poll:", e);
+                    try {
+                        if (window.hfDownloader && typeof window.hfDownloader.clearCompletedModelsFromStore === "function") {
+                            await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
                         }
+                        if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
+                            await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
+                        }
+                        
+                        // Run native refresh to re-scan models, clear native error log and update subgraphs
+                        const runNativeRefreshMissingModels = async () => {
+                            try {
+                                const appEl = document.querySelector('#app') || document.querySelector('#root') || document.body;
+                                if (appEl) {
+                                    const vueApp = appEl.__vue_app__;
+                                    if (vueApp && vueApp._context?.provides) {
+                                        let pinia = null;
+                                        const symbols = Object.getOwnPropertySymbols(vueApp._context.provides);
+                                        for (const sym of symbols) {
+                                            if (sym.toString().includes("pinia") || sym.description === "pinia") {
+                                                pinia = vueApp._context.provides[sym];
+                                                break;
+                                            }
+                                        }
+                                        if (pinia) {
+                                            const storeMap = pinia._s || pinia.stores;
+                                            if (storeMap && typeof storeMap.get === "function" && storeMap.has("missingModel")) {
+                                                const missingModelStore = storeMap.get("missingModel");
+                                                if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
+                                                    await missingModelStore.refreshMissingModels();
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (_) {}
+
+                            try {
+                                if (app && typeof app.refreshMissingModels === "function") {
+                                    await app.refreshMissingModels({ silent: true });
+                                }
+                            } catch (_) {}
+                        };
+
+                        await runNativeRefreshMissingModels();
+
+                        if (typeof app?.refreshComboInNodes === "function") {
+                            await app.refreshComboInNodes();
+                        }
+                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                            app.graph.setDirtyCanvas(true, true);
+                        }
+                    } catch (e) {
+                        console.warn("[HF Downloader] Failed to auto-clear completed models during status poll:", e);
                     }
                 }
 
