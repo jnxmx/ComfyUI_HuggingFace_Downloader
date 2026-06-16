@@ -4480,6 +4480,7 @@ app.registerExtension({
         let workflowOpenMissingModelsTimer = null;
         let workflowOpenLastHandledSignature = "";
         let workflowOpenLastHandledPath = "";
+        let workflowOpenTriggeredForCurrentLoad = false;
 
         const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -6094,6 +6095,9 @@ app.registerExtension({
         };
 
         const triggerAutoDownloadFromWorkflowOpen = async (candidates = [], workflowGraphData = null) => {
+            if (workflowOpenTriggeredForCurrentLoad) {
+                return false;
+            }
             const workflowOpenCandidates = Array.isArray(candidates)
                 ? candidates
                     .filter((candidate) => isMissingModelCandidate(candidate))
@@ -6192,6 +6196,7 @@ app.registerExtension({
                     );
                     return false;
                 }
+                workflowOpenTriggeredForCurrentLoad = true;
                 showResultsDialog(
                     resultsToShow,
                     {
@@ -6302,6 +6307,7 @@ app.registerExtension({
                 workflowOpenLastTriggeredAt = 0;
                 workflowOpenLastHandledSignature = "";
                 workflowOpenLastHandledPath = "";
+                workflowOpenTriggeredForCurrentLoad = false;
                 const result = await originalLoadGraphData(...args);
                 try {
                     if (!getWorkflowOpenAutoEnabled()) {
@@ -6336,6 +6342,9 @@ app.registerExtension({
                                     backendTargetCount
                                 );
                                 if (backendSignature) {
+                                    if (workflowOpenTriggeredForCurrentLoad) {
+                                        return;
+                                    }
                                     if (
                                         backendSignature === workflowOpenLastHandledSignature &&
                                         (!activePath || activePath === workflowOpenLastHandledPath)
@@ -6344,6 +6353,7 @@ app.registerExtension({
                                     }
                                     workflowOpenLastHandledSignature = backendSignature;
                                     workflowOpenLastHandledPath = activePath;
+                                    workflowOpenTriggeredForCurrentLoad = true;
                                     showResultsDialog(
                                         backendResults,
                                         {
@@ -6408,6 +6418,9 @@ app.registerExtension({
                 const result = originalSurfaceMissingModels(models);
                 try {
                     if (getWorkflowOpenAutoEnabled() && Array.isArray(models) && models.length) {
+                        if (workflowOpenTriggeredForCurrentLoad) {
+                            return result;
+                        }
                         const activePath = getActiveWorkflowPathKey();
                         const signature = buildMissingModelCandidatesSignature(models);
                         if (
@@ -6448,6 +6461,9 @@ app.registerExtension({
                 pollBusy = true;
                 try {
                     if (!getWorkflowOpenAutoEnabled()) {
+                        return;
+                    }
+                    if (workflowOpenTriggeredForCurrentLoad) {
                         return;
                     }
                     const candidates = await getFrontendMissingModelCandidates();
