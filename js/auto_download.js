@@ -5875,7 +5875,10 @@ app.registerExtension({
                 return candidates.filter((c) => {
                     const candidateName = String(c?.name || "").trim().toLowerCase();
                     const candidateFile = String(c?.filename || "").trim().toLowerCase();
-                    if (normalizedBases.includes(candidateName) || normalizedBases.includes(candidateFile)) {
+                    const candBaseName = candidateName.split(/[/\\]/).pop().trim();
+                    const candBaseFile = candidateFile.split(/[/\\]/).pop().trim();
+                    if (normalizedBases.includes(candidateName) || normalizedBases.includes(candidateFile) ||
+                        normalizedBases.includes(candBaseName) || normalizedBases.includes(candBaseFile)) {
                         return false;
                     }
                     const fullNormalizedList = validList.map(f => String(f).trim().toLowerCase().replace(/\\/g, "/"));
@@ -6901,16 +6904,18 @@ app.registerExtension({
                     const path = event.detail?.path;
                     if (path) {
                         try {
-                            const cleared = await clearCompletedModelsFromStore(path);
-                            if (cleared) {
-                                await clearModelValidationErrorsFromFrontendState();
-                                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                                    app.graph.setDirtyCanvas(true, true);
-                                }
-                            }
+                            await clearCompletedModelsFromStore(path);
                         } catch (e) {
                             console.warn("[AutoDownload] Error clearing completed model from store:", e);
                         }
+                    }
+                    try {
+                        await clearModelValidationErrorsFromFrontendState();
+                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                            app.graph.setDirtyCanvas(true, true);
+                        }
+                    } catch (e) {
+                        console.warn("[AutoDownload] Error clearing model validation errors:", e);
                     }
                     // Trigger once immediately
                     setTimeout(runRefresh, 500);
