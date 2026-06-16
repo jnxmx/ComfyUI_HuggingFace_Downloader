@@ -5850,59 +5850,128 @@ app.registerExtension({
         };
 
         const clearCompletedModelsFromStore = async (filenamesOrPaths) => {
-            const missingModelStore = await resolveMissingModelStore();
-            if (!missingModelStore) return false;
-
             const list = Array.isArray(filenamesOrPaths) ? filenamesOrPaths : [filenamesOrPaths];
             const validList = list.filter(Boolean);
             if (!validList.length) return false;
 
-            const candidates = unwrapStoreValue(missingModelStore.missingModelCandidates);
-            if (!candidates || !Array.isArray(candidates)) return false;
-
             const normalizedBases = validList.map(f => String(f).split(/[/\\]/).pop().trim().toLowerCase());
 
-            const nextCandidates = candidates.filter((c) => {
-                const candidateName = String(c?.name || "").trim().toLowerCase();
-                const candidateFile = String(c?.filename || "").trim().toLowerCase();
-                if (normalizedBases.includes(candidateName) || normalizedBases.includes(candidateFile)) {
-                    return false;
-                }
-                const fullNormalizedList = validList.map(f => String(f).trim().toLowerCase().replace(/\\/g, "/"));
-                const candDir = String(c?.directory || c?.folder || "").trim().toLowerCase().replace(/\\/g, "/");
-                if (candDir) {
-                    for (const fullNormalized of fullNormalizedList) {
-                        if (fullNormalized.endsWith(candDir + "/" + candidateName)) {
-                            return false;
+            const filterCandidates = (candidates) => {
+                if (!Array.isArray(candidates)) return [];
+                return candidates.filter((c) => {
+                    const candidateName = String(c?.name || "").trim().toLowerCase();
+                    const candidateFile = String(c?.filename || "").trim().toLowerCase();
+                    if (normalizedBases.includes(candidateName) || normalizedBases.includes(candidateFile)) {
+                        return false;
+                    }
+                    const fullNormalizedList = validList.map(f => String(f).trim().toLowerCase().replace(/\\/g, "/"));
+                    const candDir = String(c?.directory || c?.folder || "").trim().toLowerCase().replace(/\\/g, "/");
+                    if (candDir) {
+                        for (const fullNormalized of fullNormalizedList) {
+                            if (fullNormalized.endsWith(candDir + "/" + candidateName)) {
+                                return false;
+                            }
+                        }
+                    }
+                    return true;
+                });
+            };
+
+            let changed = false;
+
+            // 1. Clear from missingModelStore
+            try {
+                const missingModelStore = await resolveMissingModelStore();
+                if (missingModelStore) {
+                    const candidates = unwrapStoreValue(missingModelStore.missingModelCandidates);
+                    if (Array.isArray(candidates) && candidates.length) {
+                        const nextCandidates = filterCandidates(candidates);
+                        if (nextCandidates.length !== candidates.length) {
+                            changed = true;
+                            if (nextCandidates.length === 0) {
+                                if (typeof missingModelStore.clearMissingModels === "function") {
+                                    try { missingModelStore.clearMissingModels(); } catch (e) {}
+                                } else if ("value" in missingModelStore.missingModelCandidates) {
+                                    missingModelStore.missingModelCandidates.value = null;
+                                } else {
+                                    missingModelStore.missingModelCandidates = null;
+                                }
+                            } else {
+                                if (typeof missingModelStore.setMissingModels === "function") {
+                                    try { missingModelStore.setMissingModels(nextCandidates); } catch (e) {}
+                                } else if ("value" in missingModelStore.missingModelCandidates) {
+                                    missingModelStore.missingModelCandidates.value = nextCandidates;
+                                } else {
+                                    missingModelStore.missingModelCandidates = nextCandidates;
+                                }
+                            }
                         }
                     }
                 }
-                return true;
-            });
+            } catch (e) {
+                console.warn("[AutoDownload] Error clearing missingModelStore candidates:", e);
+            }
 
-            if (nextCandidates.length !== candidates.length) {
-                if (nextCandidates.length === 0) {
-                    if (typeof missingModelStore.clearMissingModels === "function") {
-                        try { missingModelStore.clearMissingModels(); } catch (e) {}
-                    } else if ("value" in missingModelStore.missingModelCandidates) {
-                        missingModelStore.missingModelCandidates.value = null;
-                    } else {
-                        missingModelStore.missingModelCandidates = null;
+            // 2. Clear from activeWorkflow and all open workflows in workflowStore
+            try {
+                const workflowStore = unwrapStoreValue(app?.extensionManager?.workflow);
+                const workflows = [];
+                if (workflowStore) {
+                    if (workflowStore.activeWorkflow) {
+                        workflows.push(workflowStore.activeWorkflow);
                     }
-                } else {
-                    if (typeof missingModelStore.setMissingModels === "function") {
-                        try { missingModelStore.setMissingModels(nextCandidates); } catch (e) {}
-                    } else if ("value" in missingModelStore.missingModelCandidates) {
-                        missingModelStore.missingModelCandidates.value = nextCandidates;
-                    } else {
-                        missingModelStore.missingModelCandidates = nextCandidates;
+                    const storeWorkflows = unwrapStoreValue(workflowStore.workflows);
+                    if (Array.isArray(storeWorkflows)) {
+                        for (const wf of storeWorkflows) {
+                            if (wf && !workflows.includes(wf)) {
+                                workflows.push(wf);
+                            }
+                        }
+                    } else if (storeWorkflows && typeof storeWorkflows === "object") {
+                        for (const wf of Object.values(storeWorkflows)) {
+                            if (wf && !workflows.includes(wf)) {
+                                workflows.push(wf);
+                            }
+                        }
                     }
                 }
 
-                // Also dismiss error overlay if no more missing models or execution/node errors
-                const executionErrorStore = await resolveExecutionErrorStore();
-                if (executionErrorStore) {
+                for (const wf of workflows) {
                     try {
+                        const pendingWarnings = unwrapStoreValue(wf?.pendingWarnings);
+                        if (pendingWarnings) {
+                            const candidates = unwrapStoreValue(pendingWarnings.missingModelCandidates);
+                            if (Array.isArray(candidates) && candidates.length) {
+                                const nextCandidates = filterCandidates(candidates);
+                                if (nextCandidates.length !== candidates.length) {
+                                    changed = true;
+                                    if (nextCandidates.length === 0) {
+                                        if ("value" in pendingWarnings.missingModelCandidates) {
+                                            pendingWarnings.missingModelCandidates.value = null;
+                                        } else {
+                                            pendingWarnings.missingModelCandidates = null;
+                                        }
+                                    } else {
+                                        if ("value" in pendingWarnings.missingModelCandidates) {
+                                            pendingWarnings.missingModelCandidates.value = nextCandidates;
+                                        } else {
+                                            pendingWarnings.missingModelCandidates = nextCandidates;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_) {}
+                }
+            } catch (e) {
+                console.warn("[AutoDownload] Error clearing workflow pending warnings:", e);
+            }
+
+            if (changed) {
+                // Dismiss error overlay if no more missing models or execution/node errors
+                try {
+                    const executionErrorStore = await resolveExecutionErrorStore();
+                    if (executionErrorStore) {
                         const hasErrors = unwrapStoreValue(executionErrorStore.hasAnyError);
                         if (!hasErrors) {
                             if (typeof executionErrorStore.dismissErrorOverlay === "function") {
@@ -5911,12 +5980,11 @@ app.registerExtension({
                                 executionErrorStore.isErrorOverlayOpen = false;
                             }
                         }
-                    } catch (_) {}
-                }
-
-                return true;
+                    }
+                } catch (_) {}
             }
-            return false;
+
+            return changed;
         };
 
         const buildMissingModelCandidatesSignature = (candidates = []) => {
