@@ -4211,6 +4211,9 @@ app.registerExtension({
                     throw new Error("Failed to scan models: " + detail + " (" + resp.status + ")");
                 }
                 const data = await resp.json();
+                if (aborted || data?.cancelled || data?.status === "cancelled") {
+                    return;
+                }
                 data.missing = coalesceMissingEntriesByDestination(
                     Array.isArray(data?.missing) ? data.missing : []
                 );
@@ -4322,6 +4325,9 @@ app.registerExtension({
                         );
                     }
                     resumeRunIfPossible();
+                    return;
+                }
+                if (aborted || data?.cancelled || data?.status === "cancelled") {
                     return;
                 }
                 showResultsDialog(data, options || {});
