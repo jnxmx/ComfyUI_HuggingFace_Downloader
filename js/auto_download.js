@@ -4518,6 +4518,25 @@ app.registerExtension({
         ];
 
         const getNodeErrorsSnapshot = () => {
+            try {
+                const store = findPiniaStore("executionError");
+                if (store && typeof store === "object" && store.lastNodeErrors) {
+                    return store.lastNodeErrors;
+                }
+            } catch (_) {}
+
+            try {
+                if (app?.extensionStore && typeof app.extensionStore === "object" && app.extensionStore.lastNodeErrors) {
+                    return app.extensionStore.lastNodeErrors;
+                }
+            } catch (_) {}
+
+            try {
+                if (app?.extensionManager && typeof app.extensionManager === "object" && app.extensionManager.lastNodeErrors) {
+                    return app.extensionManager.lastNodeErrors;
+                }
+            } catch (_) {}
+
             const value = app?.lastNodeErrors;
             if (!value || typeof value !== "object") {
                 return null;
@@ -5711,11 +5730,33 @@ app.registerExtension({
             if (executionErrorStore) {
                 try {
                     executionErrorStore.lastNodeErrors = stripped.nextNodeErrors;
-                    return true;
-                } catch (_) {
-                    // Fall through to in-place update result.
-                }
+                    if (!stripped.nextNodeErrors) {
+                        if (typeof executionErrorStore.dismissErrorOverlay === "function") {
+                            executionErrorStore.dismissErrorOverlay();
+                        } else if ("isErrorOverlayOpen" in executionErrorStore) {
+                            executionErrorStore.isErrorOverlayOpen = false;
+                        }
+                    }
+                } catch (_) {}
             }
+
+            try {
+                if (app?.extensionStore && typeof app.extensionStore === "object") {
+                    app.extensionStore.lastNodeErrors = stripped.nextNodeErrors;
+                }
+            } catch (_) {}
+
+            try {
+                if (app?.extensionManager && typeof app.extensionManager === "object") {
+                    app.extensionManager.lastNodeErrors = stripped.nextNodeErrors;
+                }
+            } catch (_) {}
+
+            try {
+                if (app && typeof app === "object") {
+                    app.lastNodeErrors = stripped.nextNodeErrors;
+                }
+            } catch (_) {}
 
             return updatedInPlace;
         };
