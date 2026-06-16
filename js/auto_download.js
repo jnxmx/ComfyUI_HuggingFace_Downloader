@@ -4499,7 +4499,16 @@ app.registerExtension({
             "style_model_name",
             "gligen_name",
             "audio_encoder_name",
-            "name"
+            "name",
+            "unet",
+            "model",
+            "vae",
+            "clip",
+            "lora",
+            "checkpoint",
+            "diffusion_model",
+            "vitpose_model",
+            "yolo_model"
         ]);
         const RUN_HOOK_CLASS_INCLUDE_MARKERS = [
             "loader",
@@ -5348,6 +5357,10 @@ app.registerExtension({
                 detailsLower.includes("not in [");
             if (!isValueNotInList) {
                 return false;
+            }
+
+            if (isLikelyModelLoaderClass(classType)) {
+                return true;
             }
 
             const inputName =

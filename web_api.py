@@ -2074,15 +2074,37 @@ def _download_worker():
                         if _is_cancel_requested(download_id):
                             return
                         bytes_now = None
+                        used_incomplete_path = incomplete_path
                         if incomplete_path and os.path.exists(incomplete_path):
                             bytes_now = os.path.getsize(incomplete_path)
-                        elif blob_path and os.path.exists(blob_path):
+                        else:
+                            # Try to find a temporary file like <blob_path>.<uuid>.incomplete
+                            # or <blob_path>*.incomplete in the parent directory
+                            if blob_path:
+                                blob_dir = os.path.dirname(blob_path)
+                                etag = os.path.basename(blob_path)
+                                if os.path.isdir(blob_dir) and etag:
+                                    try:
+                                        candidates = []
+                                        for name in os.listdir(blob_dir):
+                                            if name.startswith(etag) and name.endswith(".incomplete"):
+                                                full_path = os.path.join(blob_dir, name)
+                                                if os.path.isfile(full_path):
+                                                    candidates.append(full_path)
+                                        if candidates:
+                                            # Use the most recently modified candidate
+                                            latest_candidate = max(candidates, key=os.path.getmtime)
+                                            bytes_now = os.path.getsize(latest_candidate)
+                                            used_incomplete_path = latest_candidate
+                                    except Exception:
+                                        pass
+                        if bytes_now is None and blob_path and os.path.exists(blob_path):
                             bytes_now = os.path.getsize(blob_path)
 
                         if bytes_now is not None:
                             now = time.time()
                             if now - last_report >= 5:
-                                blob_label = "incomplete" if (incomplete_path and os.path.exists(incomplete_path)) else "blob"
+                                blob_label = "incomplete" if (used_incomplete_path and os.path.exists(used_incomplete_path)) else "blob"
                                 size_label = bytes_now
                                 total_label = expected_size if expected_size is not None else "unknown"
                                 print(f"[DEBUG] monitor_progress {filename}: {size_label}/{total_label} bytes ({blob_label})")
