@@ -818,98 +818,7 @@ app.registerExtension({
                 : null;
         };
 
-        const triggerWidgetValueRefresh = () => {
-            try {
-                const forEachNode = (graph, callback, visited = new Set()) => {
-                    if (!graph || typeof callback !== "function") return;
-                    if (visited.has(graph)) return;
-                    visited.add(graph);
 
-                    const nodes = Array.isArray(graph.nodes)
-                        ? graph.nodes
-                        : (Array.isArray(graph._nodes) ? graph._nodes : []);
-                    
-                    for (const node of nodes) {
-                        if (!node) continue;
-                        callback(node);
-                        try {
-                            const sub = (typeof node.getInnerGraph === "function" ? node.getInnerGraph() : null) || node.subgraph;
-                            if (sub && typeof sub === "object") {
-                                forEachNode(sub, callback, visited);
-                            }
-                        } catch (_) {}
-                    }
-
-                    try {
-                        const subgraphs = graph.subgraphs;
-                        if (subgraphs) {
-                            if (typeof subgraphs.values === "function") {
-                                for (const sub of subgraphs.values()) {
-                                    if (sub && typeof sub === "object") {
-                                        forEachNode(sub, callback, visited);
-                                    }
-                                }
-                            } else if (Array.isArray(subgraphs)) {
-                                for (const sub of subgraphs) {
-                                    if (sub && typeof sub === "object") {
-                                        forEachNode(sub, callback, visited);
-                                    }
-                                }
-                            } else if (typeof subgraphs === "object") {
-                                for (const sub of Object.values(subgraphs)) {
-                                    if (sub && typeof sub === "object") {
-                                        forEachNode(sub, callback, visited);
-                                    }
-                                }
-                            }
-                        }
-                    } catch (_) {}
-                };
-
-                forEachNode(app?.rootGraph || app?.graph, (node) => {
-                    if (node && Array.isArray(node.widgets)) {
-                        for (const widget of node.widgets) {
-                            const isCombo = widget && (
-                                widget.type === "combo" ||
-                                (widget.options && Array.isArray(widget.options.values)) ||
-                                ["vae_name", "unet_name", "clip_name", "ckpt_name", "lora_name", "model_name"].includes(widget.name)
-                            );
-                            if (isCombo) {
-                                const val = widget.value;
-                                widget.value = "";
-                                widget.value = val;
-                                if (typeof widget.callback === "function") {
-                                    try { widget.callback(val); } catch (_) {}
-                                }
-                            }
-                        }
-                    }
-                });
-            } catch (e) {
-                console.warn("[HF Downloader] Failed to force refresh combo widgets:", e);
-            }
-            
-            try {
-                if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
-                    window.hfDownloader.clearModelValidationErrorsFromFrontendState();
-                }
-            } catch (_) {}
-            
-            try {
-                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                    app.graph.setDirtyCanvas(true, true);
-                }
-                window.dispatchEvent(new Event('resize'));
-            } catch (_) {}
-        };
-
-        const runStaggeredWidgetValueRefresh = () => {
-            setTimeout(triggerWidgetValueRefresh, 50);
-            setTimeout(triggerWidgetValueRefresh, 300);
-            setTimeout(triggerWidgetValueRefresh, 800);
-            setTimeout(triggerWidgetValueRefresh, 1500);
-            setTimeout(triggerWidgetValueRefresh, 2500);
-        };
 
         const handleRefresh = async () => {
             if (refreshBusy || !refreshBtn) return;
@@ -1007,6 +916,11 @@ app.registerExtension({
                         await maybePromise;
                     }
                 }
+                if (window.hfDownloader && typeof window.hfDownloader.refreshComboInNodesRecursive === "function") {
+                    try {
+                        await window.hfDownloader.refreshComboInNodesRecursive();
+                    } catch (e) {}
+                }
                 await new Promise((resolve) => setTimeout(resolve, 250));
 
                 const clickNativeRefreshButton = () => {
@@ -1026,7 +940,19 @@ app.registerExtension({
 
                 clickNativeRefreshButton();
 
-                runStaggeredWidgetValueRefresh();
+                setTimeout(async () => {
+                    try {
+                        if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
+                            await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
+                        }
+                    } catch (_) {}
+                    try {
+                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                            app.graph.setDirtyCanvas(true, true);
+                        }
+                        window.dispatchEvent(new Event('resize'));
+                    } catch (_) {}
+                }, 250);
 
                 refreshSucceeded = true;
             } catch (err) {
@@ -1258,7 +1184,25 @@ app.registerExtension({
                         if (typeof app?.refreshComboInNodes === "function") {
                             await app.refreshComboInNodes();
                         }
-                        runStaggeredWidgetValueRefresh();
+                        if (window.hfDownloader && typeof window.hfDownloader.refreshComboInNodesRecursive === "function") {
+                            try {
+                                await window.hfDownloader.refreshComboInNodesRecursive();
+                            } catch (e) {}
+                        }
+                        
+                        setTimeout(async () => {
+                            try {
+                                if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
+                                    await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
+                                }
+                            } catch (_) {}
+                            try {
+                                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                                    app.graph.setDirtyCanvas(true, true);
+                                }
+                                window.dispatchEvent(new Event('resize'));
+                            } catch (_) {}
+                        }, 250);
                     } catch (e) {
                         console.warn("[HF Downloader] Failed to auto-clear completed models during status poll:", e);
                     }

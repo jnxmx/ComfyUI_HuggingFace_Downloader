@@ -5707,41 +5707,45 @@ app.registerExtension({
         };
 
         const applyNodeErrorsFallback = (nodeErrors) => {
-            forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
-                if (!node || typeof node !== "object") return;
-                node.has_errors = false;
-                const inputs = Array.isArray(node.inputs) ? node.inputs : [];
-                for (const slot of inputs) {
-                    if (slot && typeof slot === "object") {
-                        delete slot.hasErrors;
-                    }
-                }
-            });
-
-            if (nodeErrors && typeof nodeErrors === "object") {
-                for (const [executionId, nodeError] of Object.entries(nodeErrors)) {
-                    const node = getGraphNodeByExecutionId(executionId);
-                    if (!node) {
-                        continue;
-                    }
-                    node.has_errors = true;
-                    const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
+            try {
+                forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
+                    if (!node || typeof node !== "object") return;
+                    node.has_errors = false;
                     const inputs = Array.isArray(node.inputs) ? node.inputs : [];
-                    for (const reason of reasons) {
-                        const inputName = String(reason?.extra_info?.input_name || "").trim();
-                        if (!inputName || !inputs.length) continue;
-                        const slot = inputs.find((entry) => String(entry?.name || "") === inputName);
-                        if (slot) {
-                            slot.hasErrors = true;
+                    for (const slot of inputs) {
+                        if (slot && typeof slot === "object") {
+                            delete slot.hasErrors;
+                        }
+                    }
+                });
+
+                if (nodeErrors && typeof nodeErrors === "object") {
+                    for (const [executionId, nodeError] of Object.entries(nodeErrors)) {
+                        const node = getGraphNodeByExecutionId(executionId);
+                        if (!node) {
+                            continue;
+                        }
+                        node.has_errors = true;
+                        const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
+                        const inputs = Array.isArray(node.inputs) ? node.inputs : [];
+                        for (const reason of reasons) {
+                            const inputName = String(reason?.extra_info?.input_name || "").trim();
+                            if (!inputName || !inputs.length) continue;
+                            const slot = inputs.find((entry) => String(entry?.name || "") === inputName);
+                            if (slot) {
+                                slot.hasErrors = true;
+                            }
                         }
                     }
                 }
-            }
 
-            if (app?.canvas?.setDirty) {
-                app.canvas.setDirty(true, true);
-            } else if (app?.canvas?.draw) {
-                app.canvas.draw(true, true);
+                if (app?.canvas?.setDirty) {
+                    app.canvas.setDirty(true, true);
+                } else if (app?.canvas?.draw) {
+                    app.canvas.draw(true, true);
+                }
+            } catch (err) {
+                console.warn("[AutoDownload] Error in applyNodeErrorsFallback:", err);
             }
         };
 
@@ -5797,6 +5801,39 @@ app.registerExtension({
             } catch (_) {}
 
             return updatedInPlace;
+        };
+
+        const refreshComboInNodesRecursive = async () => {
+            if (!app || typeof api === "undefined" || typeof api.getNodeDefs !== "function") {
+                return;
+            }
+            try {
+                const defs = await api.getNodeDefs();
+                forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
+                    if (!node || !node.type || !node.widgets) {
+                        return;
+                    }
+                    const def = defs[node.type];
+                    if (!def || !def.input) {
+                        return;
+                    }
+                    for (const widget of node.widgets) {
+                        if (!widget || !widget.name) {
+                            continue;
+                        }
+                        const isCombo = widget.type === "combo" || (widget.options && Array.isArray(widget.options.values));
+                        if (!isCombo) {
+                            continue;
+                        }
+                        const inputDef = def.input.required?.[widget.name] || def.input.optional?.[widget.name];
+                        if (inputDef && Array.isArray(inputDef[0])) {
+                            widget.options.values = inputDef[0];
+                        }
+                    }
+                });
+            } catch (err) {
+                console.warn("[AutoDownload] Error in refreshComboInNodesRecursive:", err);
+            }
         };
 
         const clearMissingModelStoreState = async (candidates = []) => {
@@ -6923,6 +6960,9 @@ app.registerExtension({
                             await app.refreshComboInNodes();
                         } catch (e) {}
                     }
+                    try {
+                        await refreshComboInNodesRecursive();
+                    } catch (e) {}
                     
                     if (typeof useCommandStore !== "undefined") {
                         try {
@@ -6932,32 +6972,9 @@ app.registerExtension({
                     
                     clickNativeRefreshButton();
 
-                    const triggerWidgetValueRefresh = () => {
+                    setTimeout(async () => {
                         try {
-                            forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
-                                if (node && Array.isArray(node.widgets)) {
-                                    for (const widget of node.widgets) {
-                                        const isCombo = widget && (
-                                            widget.type === "combo" ||
-                                            (widget.options && Array.isArray(widget.options.values)) ||
-                                            ["vae_name", "unet_name", "clip_name", "ckpt_name", "lora_name", "model_name"].includes(widget.name)
-                                        );
-                                        if (isCombo) {
-                                            const val = widget.value;
-                                            widget.value = "";
-                                            widget.value = val;
-                                            if (typeof widget.callback === "function") {
-                                                try { widget.callback(val); } catch (_) {}
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                        } catch (e) {
-                            console.warn("[AutoDownload] Failed to force refresh combo widgets:", e);
-                        }
-                        try {
-                            clearModelValidationErrorsFromFrontendState();
+                            await clearModelValidationErrorsFromFrontendState();
                         } catch (_) {}
                         try {
                             if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
@@ -6965,13 +6982,7 @@ app.registerExtension({
                             }
                             window.dispatchEvent(new Event('resize'));
                         } catch (_) {}
-                    };
-
-                    setTimeout(triggerWidgetValueRefresh, 50);
-                    setTimeout(triggerWidgetValueRefresh, 300);
-                    setTimeout(triggerWidgetValueRefresh, 800);
-                    setTimeout(triggerWidgetValueRefresh, 1500);
-                    setTimeout(triggerWidgetValueRefresh, 2500);
+                    }, 250);
                     
                     if (typeof clearMissingModelStoreState === "function") {
                         clearMissingModelStoreState([]);
@@ -7014,6 +7025,7 @@ app.registerExtension({
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
         registerGlobalAction("clearCompletedModelsFromStore", clearCompletedModelsFromStore);
         registerGlobalAction("clearModelValidationErrorsFromFrontendState", clearModelValidationErrorsFromFrontendState);
+        registerGlobalAction("refreshComboInNodesRecursive", refreshComboInNodesRecursive);
         setupMissingModelsDialogObserver();
         // void installNativeMissingModelsSurfaceHook();
         installWorkflowOpenLoadGraphHook();
