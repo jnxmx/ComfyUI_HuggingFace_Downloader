@@ -29,6 +29,7 @@ app.registerExtension({
 
         const dismissedEntryIds = new Set();
         const itemNodes = new Map();
+        const processedDownloadIds = new Set();
 
         let panel = null;
         let listBody = null;
@@ -727,6 +728,7 @@ app.registerExtension({
         };
 
         const updateItemNode = (refs, info) => {
+            refs.lastInfo = info;
             refs.root.setAttribute("data-download-id", info.id);
 
             const rawName = String(info.display_name || info.requested_path || info.filename || info.id || "unknown").replace(/\/+$/, "");
@@ -823,11 +825,19 @@ app.registerExtension({
             refreshBtn.textContent = "Refreshing...";
 
             const justCompletedIds = [];
+            const completedPaths = [];
             if (listBody) {
                 const cards = listBody.querySelectorAll("[data-download-id]");
                 for (const card of cards) {
                     const id = card.getAttribute("data-download-id");
-                    if (id) justCompletedIds.push(id);
+                    if (id) {
+                        justCompletedIds.push(id);
+                        const refs = itemNodes.get(id);
+                        if (refs && refs.lastInfo) {
+                            if (refs.lastInfo.path) completedPaths.push(refs.lastInfo.path);
+                            if (refs.lastInfo.filename) completedPaths.push(refs.lastInfo.filename);
+                        }
+                    }
                 }
             }
             for (const id of justCompletedIds) {
@@ -844,38 +854,20 @@ app.registerExtension({
 
             let refreshSucceeded = false;
             try {
-                // Try to resolve and run refreshMissingModels on the Pinia store or ComfyApp
-                let missingModelStore = null;
-                try {
-                    const findPiniaStore = (storeId) => {
-                        const appEl = document.querySelector('#app') || document.querySelector('#root') || document.body;
-                        if (!appEl) return null;
-                        const vueApp = appEl.__vue_app__;
-                        if (!vueApp) return null;
-                        const provides = vueApp._context?.provides;
-                        if (!provides) return null;
-                        let pinia = null;
-                        const symbols = Object.getOwnPropertySymbols(provides);
-                        for (const sym of symbols) {
-                            if (sym.toString().includes("pinia") || sym.description === "pinia") {
-                                pinia = provides[sym];
-                                break;
-                            }
-                        }
-                        if (!pinia) return null;
-                        const storeMap = pinia._s || pinia.stores;
-                        if (storeMap && typeof storeMap.get === "function" && storeMap.has(storeId)) {
-                            return storeMap.get(storeId);
-                        }
-                        return null;
-                    };
-                    missingModelStore = findPiniaStore("missingModel");
-                } catch (e) {}
+                if (window.hfDownloader && typeof window.hfDownloader.clearCompletedModelsFromStore === "function" && completedPaths.length > 0) {
+                    try {
+                        await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
+                    } catch (e) {
+                        console.warn("[HF Downloader] Failed to clear completed models from store:", e);
+                    }
+                }
 
-                if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
-                    await missingModelStore.refreshMissingModels();
-                } else if (app && typeof app.refreshMissingModels === "function") {
-                    await app.refreshMissingModels({ silent: true });
+                if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
+                    try {
+                        await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
+                    } catch (e) {
+                        console.warn("[HF Downloader] Failed to clear validation errors:", e);
+                    }
                 }
 
                 if (typeof app?.refreshComboInNodes === "function") {
@@ -1058,7 +1050,47 @@ app.registerExtension({
                 const resp = await fetch("/download_status");
                 if (resp.status !== 200) return;
                 const data = await resp.json();
-                renderList(data.downloads || {});
+                
+                const downloads = data.downloads || {};
+                const completedPaths = [];
+                for (const [id, info] of Object.entries(downloads)) {
+                    if (info && SUCCESS_STATUSES.has(info.status) && !processedDownloadIds.has(id)) {
+                        processedDownloadIds.add(id);
+                        if (info.path) completedPaths.push(info.path);
+                        if (info.filename) completedPaths.push(info.filename);
+                    }
+                }
+                
+                // Clean up old processed IDs that are no longer in the active status list
+                const currentIds = new Set(Object.keys(downloads));
+                for (const id of processedDownloadIds) {
+                    if (!currentIds.has(id)) {
+                        processedDownloadIds.delete(id);
+                    }
+                }
+                
+                if (completedPaths.length > 0) {
+                    if (window.hfDownloader && typeof window.hfDownloader.clearCompletedModelsFromStore === "function") {
+                        try {
+                            const cleared = await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
+                            if (cleared) {
+                                if (typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
+                                    await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
+                                }
+                                if (typeof app?.refreshComboInNodes === "function") {
+                                    await app.refreshComboInNodes();
+                                }
+                                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                                    app.graph.setDirtyCanvas(true, true);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn("[HF Downloader] Failed to auto-clear completed models during status poll:", e);
+                        }
+                    }
+                }
+
+                renderList(downloads);
             } catch (err) {
                 console.warn("[HF Downloader] Failed to fetch download status:", err);
             }

@@ -5808,6 +5808,76 @@ app.registerExtension({
             return changed;
         };
 
+        const clearCompletedModelsFromStore = async (filenamesOrPaths) => {
+            const missingModelStore = await resolveMissingModelStore();
+            if (!missingModelStore) return false;
+
+            const list = Array.isArray(filenamesOrPaths) ? filenamesOrPaths : [filenamesOrPaths];
+            const validList = list.filter(Boolean);
+            if (!validList.length) return false;
+
+            const candidates = unwrapStoreValue(missingModelStore.missingModelCandidates);
+            if (!candidates || !Array.isArray(candidates)) return false;
+
+            const normalizedBases = validList.map(f => String(f).split(/[/\\]/).pop().trim().toLowerCase());
+
+            const nextCandidates = candidates.filter((c) => {
+                const candidateName = String(c?.name || "").trim().toLowerCase();
+                const candidateFile = String(c?.filename || "").trim().toLowerCase();
+                if (normalizedBases.includes(candidateName) || normalizedBases.includes(candidateFile)) {
+                    return false;
+                }
+                const fullNormalizedList = validList.map(f => String(f).trim().toLowerCase().replace(/\\/g, "/"));
+                const candDir = String(c?.directory || c?.folder || "").trim().toLowerCase().replace(/\\/g, "/");
+                if (candDir) {
+                    for (const fullNormalized of fullNormalizedList) {
+                        if (fullNormalized.endsWith(candDir + "/" + candidateName)) {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            });
+
+            if (nextCandidates.length !== candidates.length) {
+                if (nextCandidates.length === 0) {
+                    if (typeof missingModelStore.clearMissingModels === "function") {
+                        try { missingModelStore.clearMissingModels(); } catch (e) {}
+                    } else if ("value" in missingModelStore.missingModelCandidates) {
+                        missingModelStore.missingModelCandidates.value = null;
+                    } else {
+                        missingModelStore.missingModelCandidates = null;
+                    }
+                } else {
+                    if (typeof missingModelStore.setMissingModels === "function") {
+                        try { missingModelStore.setMissingModels(nextCandidates); } catch (e) {}
+                    } else if ("value" in missingModelStore.missingModelCandidates) {
+                        missingModelStore.missingModelCandidates.value = nextCandidates;
+                    } else {
+                        missingModelStore.missingModelCandidates = nextCandidates;
+                    }
+                }
+
+                // Also dismiss error overlay if no more missing models or execution/node errors
+                const executionErrorStore = await resolveExecutionErrorStore();
+                if (executionErrorStore) {
+                    try {
+                        const hasErrors = unwrapStoreValue(executionErrorStore.hasAnyError);
+                        if (!hasErrors) {
+                            if (typeof executionErrorStore.dismissErrorOverlay === "function") {
+                                executionErrorStore.dismissErrorOverlay();
+                            } else if ("isErrorOverlayOpen" in executionErrorStore) {
+                                executionErrorStore.isErrorOverlayOpen = false;
+                            }
+                        }
+                    } catch (_) {}
+                }
+
+                return true;
+            }
+            return false;
+        };
+
         const buildMissingModelCandidatesSignature = (candidates = []) => {
             if (!Array.isArray(candidates) || !candidates.length) {
                 return "";
@@ -6688,8 +6758,22 @@ app.registerExtension({
                     }
                 };
 
-                api.addEventListener("hf_download_finished", () => {
+                api.addEventListener("hf_download_finished", async (event) => {
                     needsRefreshAfterExecution = true;
+                    const path = event.detail?.path;
+                    if (path) {
+                        try {
+                            const cleared = await clearCompletedModelsFromStore(path);
+                            if (cleared) {
+                                await clearModelValidationErrorsFromFrontendState();
+                                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                                    app.graph.setDirtyCanvas(true, true);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn("[AutoDownload] Error clearing completed model from store:", e);
+                        }
+                    }
                     // Trigger once immediately
                     setTimeout(runRefresh, 500);
                 });
@@ -6706,6 +6790,8 @@ app.registerExtension({
 
         registerGlobalAction("runAutoDownload", runAutoDownload);
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
+        registerGlobalAction("clearCompletedModelsFromStore", clearCompletedModelsFromStore);
+        registerGlobalAction("clearModelValidationErrorsFromFrontendState", clearModelValidationErrorsFromFrontendState);
         setupMissingModelsDialogObserver();
         void installNativeMissingModelsSurfaceHook();
         installWorkflowOpenLoadGraphHook();
