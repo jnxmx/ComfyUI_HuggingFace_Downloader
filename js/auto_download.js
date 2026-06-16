@@ -6879,33 +6879,6 @@ app.registerExtension({
                     return false;
                 };
 
-                const clickNativeRefreshButton = () => {
-                    // 1. Try to click native refresh buttons
-                    const btn = document.querySelector('#comfy-refresh-button') ||
-                                document.querySelector('button[title*="Refresh"]') ||
-                                document.querySelector('button[aria-label*="Refresh"]') ||
-                                document.querySelector('button .pi-refresh')?.closest('button') ||
-                                document.querySelector('button.pi-refresh');
-                    if (btn) {
-                        try {
-                            btn.click();
-                        } catch (e) {
-                            console.warn("[AutoDownload] Failed to click native refresh button:", e);
-                        }
-                    }
-                    // 2. Dispatch 'r' key event to trigger ComfyUI's native shortcut
-                    try {
-                        const event = new KeyboardEvent('keydown', {
-                            key: 'r',
-                            code: 'KeyR',
-                            bubbles: true,
-                            cancelable: true
-                        });
-                        document.dispatchEvent(event);
-                        window.dispatchEvent(event);
-                    } catch (_) {}
-                };
-
                 const runRefresh = async () => {
                     const missingModelStore = await resolveMissingModelStore();
                     if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {

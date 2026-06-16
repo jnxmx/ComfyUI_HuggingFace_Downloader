@@ -929,16 +929,6 @@ app.registerExtension({
                             console.warn("[HF Downloader] Failed to click native refresh button:", e);
                         }
                     }
-                    try {
-                        const event = new KeyboardEvent('keydown', {
-                            key: 'r',
-                            code: 'KeyR',
-                            bubbles: true,
-                            cancelable: true
-                        });
-                        document.dispatchEvent(event);
-                        window.dispatchEvent(event);
-                    } catch (_) {}
                 };
 
                 clickNativeRefreshButton();
