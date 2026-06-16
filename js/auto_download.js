@@ -5725,7 +5725,8 @@ app.registerExtension({
 
         const clearModelValidationErrorsFromFrontendState = async () => {
             const snapshot = getNodeErrorsSnapshot();
-            if (!snapshot) {
+            if (!snapshot || Object.keys(snapshot).length === 0) {
+                applyNodeErrorsFallback(null);
                 return false;
             }
 

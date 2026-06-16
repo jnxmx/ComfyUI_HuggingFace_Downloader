@@ -818,6 +818,66 @@ app.registerExtension({
                 : null;
         };
 
+        const triggerWidgetValueRefresh = () => {
+            try {
+                const forEachNode = (graph, callback) => {
+                    if (!graph || typeof graph !== "object") return;
+                    const nodes = Array.isArray(graph._nodes) ? graph._nodes : (Array.isArray(graph.nodes) ? graph.nodes : []);
+                    for (const node of nodes) {
+                        if (!node) continue;
+                        callback(node);
+                        const subGraph = node.getInnerGraph?.() || node.subgraph;
+                        if (subGraph) {
+                            forEachNode(subGraph, callback);
+                        }
+                    }
+                };
+
+                forEachNode(app?.rootGraph || app?.graph, (node) => {
+                    if (node && Array.isArray(node.widgets)) {
+                        for (const widget of node.widgets) {
+                            const isCombo = widget && (
+                                widget.type === "combo" ||
+                                (widget.options && Array.isArray(widget.options.values)) ||
+                                ["vae_name", "unet_name", "clip_name", "ckpt_name", "lora_name", "model_name"].includes(widget.name)
+                            );
+                            if (isCombo) {
+                                const val = widget.value;
+                                widget.value = "";
+                                widget.value = val;
+                                if (typeof widget.callback === "function") {
+                                    try { widget.callback(val); } catch (_) {}
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (e) {
+                console.warn("[HF Downloader] Failed to force refresh combo widgets:", e);
+            }
+            
+            try {
+                if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
+                    window.hfDownloader.clearModelValidationErrorsFromFrontendState();
+                }
+            } catch (_) {}
+            
+            try {
+                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                    app.graph.setDirtyCanvas(true, true);
+                }
+                window.dispatchEvent(new Event('resize'));
+            } catch (_) {}
+        };
+
+        const runStaggeredWidgetValueRefresh = () => {
+            setTimeout(triggerWidgetValueRefresh, 50);
+            setTimeout(triggerWidgetValueRefresh, 300);
+            setTimeout(triggerWidgetValueRefresh, 800);
+            setTimeout(triggerWidgetValueRefresh, 1500);
+            setTimeout(triggerWidgetValueRefresh, 2500);
+        };
+
         const handleRefresh = async () => {
             if (refreshBusy || !refreshBtn) return;
             refreshBusy = true;
@@ -933,63 +993,7 @@ app.registerExtension({
 
                 clickNativeRefreshButton();
 
-                const triggerWidgetValueRefresh = () => {
-                    try {
-                        const forEachNode = (graph, callback) => {
-                            if (!graph || typeof graph !== "object") return;
-                            const nodes = Array.isArray(graph._nodes) ? graph._nodes : (Array.isArray(graph.nodes) ? graph.nodes : []);
-                            for (const node of nodes) {
-                                if (!node) continue;
-                                callback(node);
-                                const subGraph = node.getInnerGraph?.() || node.subgraph;
-                                if (subGraph) {
-                                    forEachNode(subGraph, callback);
-                                }
-                            }
-                        };
-
-                        forEachNode(app?.rootGraph || app?.graph, (node) => {
-                            if (node && Array.isArray(node.widgets)) {
-                                for (const widget of node.widgets) {
-                                    const isCombo = widget && (
-                                        widget.type === "combo" ||
-                                        (widget.options && Array.isArray(widget.options.values)) ||
-                                        ["vae_name", "unet_name", "clip_name", "ckpt_name", "lora_name", "model_name"].includes(widget.name)
-                                    );
-                                    if (isCombo) {
-                                        const val = widget.value;
-                                        widget.value = "";
-                                        widget.value = val;
-                                        if (typeof widget.callback === "function") {
-                                            try { widget.callback(val); } catch (_) {}
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    } catch (e) {
-                        console.warn("[HF Downloader] Failed to force refresh combo widgets:", e);
-                    }
-                    
-                    try {
-                        if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
-                            window.hfDownloader.clearModelValidationErrorsFromFrontendState();
-                        }
-                    } catch (_) {}
-                    
-                    try {
-                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                            app.graph.setDirtyCanvas(true, true);
-                        }
-                        window.dispatchEvent(new Event('resize'));
-                    } catch (_) {}
-                };
-
-                setTimeout(triggerWidgetValueRefresh, 50);
-                setTimeout(triggerWidgetValueRefresh, 300);
-                setTimeout(triggerWidgetValueRefresh, 800);
-                setTimeout(triggerWidgetValueRefresh, 1500);
-                setTimeout(triggerWidgetValueRefresh, 2500);
+                runStaggeredWidgetValueRefresh();
 
                 refreshSucceeded = true;
             } catch (err) {
@@ -1221,9 +1225,7 @@ app.registerExtension({
                         if (typeof app?.refreshComboInNodes === "function") {
                             await app.refreshComboInNodes();
                         }
-                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                            app.graph.setDirtyCanvas(true, true);
-                        }
+                        runStaggeredWidgetValueRefresh();
                     } catch (e) {
                         console.warn("[HF Downloader] Failed to auto-clear completed models during status poll:", e);
                     }
