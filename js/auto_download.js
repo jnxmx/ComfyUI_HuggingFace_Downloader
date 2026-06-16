@@ -6882,6 +6882,24 @@ app.registerExtension({
                             await app.refreshComboInNodes();
                         } catch (e) {}
                     }
+                    try {
+                        forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
+                            if (node && Array.isArray(node.widgets)) {
+                                for (const widget of node.widgets) {
+                                    if (widget && widget.type === "combo") {
+                                        const val = widget.value;
+                                        widget.value = "";
+                                        widget.value = val;
+                                        if (typeof widget.callback === "function") {
+                                            try { widget.callback(val); } catch (_) {}
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    } catch (e) {
+                        console.warn("[AutoDownload] Failed to force refresh combo widgets:", e);
+                    }
                     if (typeof useCommandStore !== "undefined") {
                         try {
                             await useCommandStore().execute('Comfy.RefreshNodeDefinitions');

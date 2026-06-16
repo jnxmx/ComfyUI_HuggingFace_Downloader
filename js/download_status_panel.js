@@ -914,6 +914,38 @@ app.registerExtension({
                         await maybePromise;
                     }
                 }
+
+                try {
+                    const forEachNode = (graph, callback) => {
+                        if (!graph || typeof graph !== "object") return;
+                        const nodes = Array.isArray(graph._nodes) ? graph._nodes : (Array.isArray(graph.nodes) ? graph.nodes : []);
+                        for (const node of nodes) {
+                            if (!node) continue;
+                            callback(node);
+                            const subGraph = node.getInnerGraph?.() || node.subgraph;
+                            if (subGraph) {
+                                forEachNode(subGraph, callback);
+                            }
+                        }
+                    };
+
+                    forEachNode(app?.rootGraph || app?.graph, (node) => {
+                        if (node && Array.isArray(node.widgets)) {
+                            for (const widget of node.widgets) {
+                                if (widget && widget.type === "combo") {
+                                    const val = widget.value;
+                                    widget.value = "";
+                                    widget.value = val;
+                                    if (typeof widget.callback === "function") {
+                                        try { widget.callback(val); } catch (_) {}
+                                    }
+                                }
+                            }
+                        }
+                    });
+                } catch (e) {
+                    console.warn("[HF Downloader] Failed to force refresh combo widgets:", e);
+                }
                 
                 if (typeof useCommandStore !== "undefined") {
                     try {
