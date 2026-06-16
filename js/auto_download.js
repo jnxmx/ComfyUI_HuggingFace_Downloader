@@ -6879,6 +6879,33 @@ app.registerExtension({
                     return false;
                 };
 
+                const clickNativeRefreshButton = () => {
+                    // 1. Try to click native refresh buttons
+                    const btn = document.querySelector('#comfy-refresh-button') ||
+                                document.querySelector('button[title*="Refresh"]') ||
+                                document.querySelector('button[aria-label*="Refresh"]') ||
+                                document.querySelector('button .pi-refresh')?.closest('button') ||
+                                document.querySelector('button.pi-refresh');
+                    if (btn) {
+                        try {
+                            btn.click();
+                        } catch (e) {
+                            console.warn("[AutoDownload] Failed to click native refresh button:", e);
+                        }
+                    }
+                    // 2. Dispatch 'r' key event to trigger ComfyUI's native shortcut
+                    try {
+                        const event = new KeyboardEvent('keydown', {
+                            key: 'r',
+                            code: 'KeyR',
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        document.dispatchEvent(event);
+                        window.dispatchEvent(event);
+                    } catch (_) {}
+                };
+
                 const runRefresh = async () => {
                     const missingModelStore = await resolveMissingModelStore();
                     if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
@@ -6914,7 +6941,12 @@ app.registerExtension({
                             forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
                                 if (node && Array.isArray(node.widgets)) {
                                     for (const widget of node.widgets) {
-                                        if (widget && widget.type === "combo") {
+                                        const isCombo = widget && (
+                                            widget.type === "combo" ||
+                                            (widget.options && Array.isArray(widget.options.values)) ||
+                                            ["vae_name", "unet_name", "clip_name", "ckpt_name", "lora_name", "model_name"].includes(widget.name)
+                                        );
+                                        if (isCombo) {
                                             const val = widget.value;
                                             widget.value = "";
                                             widget.value = val;
@@ -6931,12 +6963,19 @@ app.registerExtension({
                         try {
                             clearModelValidationErrorsFromFrontendState();
                         } catch (_) {}
+                        try {
+                            if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                                app.graph.setDirtyCanvas(true, true);
+                            }
+                            window.dispatchEvent(new Event('resize'));
+                        } catch (_) {}
                     };
 
                     setTimeout(triggerWidgetValueRefresh, 50);
                     setTimeout(triggerWidgetValueRefresh, 300);
                     setTimeout(triggerWidgetValueRefresh, 800);
                     setTimeout(triggerWidgetValueRefresh, 1500);
+                    setTimeout(triggerWidgetValueRefresh, 2500);
                     
                     if (typeof clearMissingModelStoreState === "function") {
                         clearMissingModelStoreState([]);
