@@ -6157,6 +6157,7 @@ app.registerExtension({
 
             const runAction = window?.hfDownloader?.runAutoDownload;
             if (typeof runAction === "function") {
+                workflowOpenTriggeredForCurrentLoad = true;
                 runAction(new Set(), false, {
                     suppressEmptyResults: true,
                     triggeredByWorkflowOpen: true,
