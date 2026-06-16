@@ -2027,11 +2027,13 @@ app.registerExtension({
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(payload),
+                        signal: options?.signal
                     })
                     : await fetch("/check_missing_models", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(payload),
+                        signal: options?.signal
                     });
                 if (resp.status !== 200) {
                     return null;
@@ -4145,6 +4147,7 @@ app.registerExtension({
                             workflow,
                             requestId,
                             skipHfSearch: skipAllUnresolved,
+                            signal: controller.signal
                         }
                     );
                     if (loadingDlg) {
@@ -4154,6 +4157,9 @@ app.registerExtension({
                         }
                         loadingDlg.cleanup();
                         loadingDlg.remove();
+                    }
+                    if (aborted || enrichedFastPathResults?.cancelled || enrichedFastPathResults?.status === "cancelled") {
+                        return;
                     }
                     console.info(
                         "[AutoDownload] Using frontend missing-model store fast path:",
