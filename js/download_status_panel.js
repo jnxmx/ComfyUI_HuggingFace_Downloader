@@ -820,17 +820,50 @@ app.registerExtension({
 
         const triggerWidgetValueRefresh = () => {
             try {
-                const forEachNode = (graph, callback) => {
-                    if (!graph || typeof graph !== "object") return;
-                    const nodes = Array.isArray(graph._nodes) ? graph._nodes : (Array.isArray(graph.nodes) ? graph.nodes : []);
+                const forEachNode = (graph, callback, visited = new Set()) => {
+                    if (!graph || typeof callback !== "function") return;
+                    if (visited.has(graph)) return;
+                    visited.add(graph);
+
+                    const nodes = Array.isArray(graph.nodes)
+                        ? graph.nodes
+                        : (Array.isArray(graph._nodes) ? graph._nodes : []);
+                    
                     for (const node of nodes) {
                         if (!node) continue;
                         callback(node);
-                        const subGraph = node.getInnerGraph?.() || node.subgraph;
-                        if (subGraph) {
-                            forEachNode(subGraph, callback);
-                        }
+                        try {
+                            const sub = (typeof node.getInnerGraph === "function" ? node.getInnerGraph() : null) || node.subgraph;
+                            if (sub && typeof sub === "object") {
+                                forEachNode(sub, callback, visited);
+                            }
+                        } catch (_) {}
                     }
+
+                    try {
+                        const subgraphs = graph.subgraphs;
+                        if (subgraphs) {
+                            if (typeof subgraphs.values === "function") {
+                                for (const sub of subgraphs.values()) {
+                                    if (sub && typeof sub === "object") {
+                                        forEachNode(sub, callback, visited);
+                                    }
+                                }
+                            } else if (Array.isArray(subgraphs)) {
+                                for (const sub of subgraphs) {
+                                    if (sub && typeof sub === "object") {
+                                        forEachNode(sub, callback, visited);
+                                    }
+                                }
+                            } else if (typeof subgraphs === "object") {
+                                for (const sub of Object.values(subgraphs)) {
+                                    if (sub && typeof sub === "object") {
+                                        forEachNode(sub, callback, visited);
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_) {}
                 };
 
                 forEachNode(app?.rootGraph || app?.graph, (node) => {

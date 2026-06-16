@@ -2333,19 +2333,45 @@ app.registerExtension({
             }
             visited.add(graph);
 
-            const nodes = Array.isArray(graph?.nodes)
+            const nodes = Array.isArray(graph.nodes)
                 ? graph.nodes
-                : (Array.isArray(graph?._nodes) ? graph._nodes : []);
+                : (Array.isArray(graph._nodes) ? graph._nodes : []);
+            
             for (const node of nodes) {
+                if (!node) continue;
                 callback(node);
                 try {
-                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
-                        forEachGraphNodeRecursive(node.subgraph, callback, visited);
+                    const sub = (typeof node.getInnerGraph === "function" ? node.getInnerGraph() : null) || node.subgraph;
+                    if (sub && typeof sub === "object") {
+                        forEachGraphNodeRecursive(sub, callback, visited);
                     }
-                } catch (_) {
-                    // Ignore malformed subgraph nodes.
-                }
+                } catch (_) {}
             }
+
+            try {
+                const subgraphs = graph.subgraphs;
+                if (subgraphs) {
+                    if (typeof subgraphs.values === "function") {
+                        for (const sub of subgraphs.values()) {
+                            if (sub && typeof sub === "object") {
+                                forEachGraphNodeRecursive(sub, callback, visited);
+                            }
+                        }
+                    } else if (Array.isArray(subgraphs)) {
+                        for (const sub of subgraphs) {
+                            if (sub && typeof sub === "object") {
+                                forEachGraphNodeRecursive(sub, callback, visited);
+                            }
+                        }
+                    } else if (typeof subgraphs === "object") {
+                        for (const sub of Object.values(subgraphs)) {
+                            if (sub && typeof sub === "object") {
+                                forEachGraphNodeRecursive(sub, callback, visited);
+                            }
+                        }
+                    }
+                }
+            } catch (_) {}
         };
 
         const findNodeByIdRecursive = (graph, id) => {
@@ -4648,8 +4674,9 @@ app.registerExtension({
                         return;
                     }
                     try {
-                        if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
-                            visit(node.subgraph, executionNodeId);
+                        const sub = (typeof node.getInnerGraph === "function" ? node.getInnerGraph() : null) || node.subgraph;
+                        if (sub && typeof sub === "object") {
+                            visit(sub, executionNodeId);
                         }
                     } catch (_) {
                         // Ignore malformed subgraph nodes.
@@ -5693,12 +5720,7 @@ app.registerExtension({
 
             if (nodeErrors && typeof nodeErrors === "object") {
                 for (const [executionId, nodeError] of Object.entries(nodeErrors)) {
-                    const idToken = String(executionId || "").split(":").pop();
-                    const numericId = Number(idToken);
-                    if (!Number.isFinite(numericId)) {
-                        continue;
-                    }
-                    const node = findNodeByIdRecursive(app?.rootGraph || app?.graph, numericId);
+                    const node = getGraphNodeByExecutionId(executionId);
                     if (!node) {
                         continue;
                     }
