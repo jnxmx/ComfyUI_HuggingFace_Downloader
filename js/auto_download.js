@@ -6862,6 +6862,23 @@ app.registerExtension({
                 api.addEventListener("validation_error", handleValidationError);
                 api.addEventListener("execution_error", handleValidationError);
                 
+                const clickNativeRefreshButton = () => {
+                    const btn = document.querySelector('#comfy-refresh-button') ||
+                                document.querySelector('button[title*="Refresh"]') ||
+                                document.querySelector('button[aria-label*="Refresh"]') ||
+                                document.querySelector('button .pi-refresh')?.closest('button') ||
+                                document.querySelector('button.pi-refresh');
+                    if (btn) {
+                        try {
+                            btn.click();
+                            return true;
+                        } catch (e) {
+                            console.warn("[AutoDownload] Failed to click native refresh button:", e);
+                        }
+                    }
+                    return false;
+                };
+
                 const runRefresh = async () => {
                     const missingModelStore = await resolveMissingModelStore();
                     if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
@@ -6883,39 +6900,46 @@ app.registerExtension({
                             await app.refreshComboInNodes();
                         } catch (e) {}
                     }
-                    await wait(250);
-                    try {
-                        forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
-                            if (node && Array.isArray(node.widgets)) {
-                                for (const widget of node.widgets) {
-                                    if (widget && widget.type === "combo") {
-                                        const val = widget.value;
-                                        widget.value = "";
-                                        widget.value = val;
-                                        if (typeof widget.callback === "function") {
-                                            try { widget.callback(val); } catch (_) {}
-                                        }
-                                    }
-                                }
-                            }
-                        });
-                    } catch (e) {
-                        console.warn("[AutoDownload] Failed to force refresh combo widgets:", e);
-                    }
+                    
                     if (typeof useCommandStore !== "undefined") {
                         try {
                             await useCommandStore().execute('Comfy.RefreshNodeDefinitions');
                         } catch (e) {}
                     }
                     
-                    const refreshBtn = document.querySelector('#comfy-refresh-button');
-                    if (refreshBtn) refreshBtn.click();
+                    clickNativeRefreshButton();
+
+                    const triggerWidgetValueRefresh = () => {
+                        try {
+                            forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
+                                if (node && Array.isArray(node.widgets)) {
+                                    for (const widget of node.widgets) {
+                                        if (widget && widget.type === "combo") {
+                                            const val = widget.value;
+                                            widget.value = "";
+                                            widget.value = val;
+                                            if (typeof widget.callback === "function") {
+                                                try { widget.callback(val); } catch (_) {}
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        } catch (e) {
+                            console.warn("[AutoDownload] Failed to force refresh combo widgets:", e);
+                        }
+                        try {
+                            clearModelValidationErrorsFromFrontendState();
+                        } catch (_) {}
+                    };
+
+                    setTimeout(triggerWidgetValueRefresh, 50);
+                    setTimeout(triggerWidgetValueRefresh, 300);
+                    setTimeout(triggerWidgetValueRefresh, 800);
+                    setTimeout(triggerWidgetValueRefresh, 1500);
                     
                     if (typeof clearMissingModelStoreState === "function") {
                         clearMissingModelStoreState([]);
-                    }
-                    if (typeof clearModelValidationErrorsFromFrontendState === "function") {
-                        clearModelValidationErrorsFromFrontendState();
                     }
                 };
 

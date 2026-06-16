@@ -916,50 +916,74 @@ app.registerExtension({
                 }
                 await new Promise((resolve) => setTimeout(resolve, 250));
 
-                try {
-                    const forEachNode = (graph, callback) => {
-                        if (!graph || typeof graph !== "object") return;
-                        const nodes = Array.isArray(graph._nodes) ? graph._nodes : (Array.isArray(graph.nodes) ? graph.nodes : []);
-                        for (const node of nodes) {
-                            if (!node) continue;
-                            callback(node);
-                            const subGraph = node.getInnerGraph?.() || node.subgraph;
-                            if (subGraph) {
-                                forEachNode(subGraph, callback);
-                            }
+                const clickNativeRefreshButton = () => {
+                    const btn = document.querySelector('#comfy-refresh-button') ||
+                                document.querySelector('button[title*="Refresh"]') ||
+                                document.querySelector('button[aria-label*="Refresh"]') ||
+                                document.querySelector('button .pi-refresh')?.closest('button') ||
+                                document.querySelector('button.pi-refresh');
+                    if (btn) {
+                        try {
+                            btn.click();
+                            return true;
+                        } catch (e) {
+                            console.warn("[HF Downloader] Failed to click native refresh button:", e);
                         }
-                    };
+                    }
+                    return false;
+                };
 
-                    forEachNode(app?.rootGraph || app?.graph, (node) => {
-                        if (node && Array.isArray(node.widgets)) {
-                            for (const widget of node.widgets) {
-                                if (widget && widget.type === "combo") {
-                                    const val = widget.value;
-                                    widget.value = "";
-                                    widget.value = val;
-                                    if (typeof widget.callback === "function") {
-                                        try { widget.callback(val); } catch (_) {}
+                clickNativeRefreshButton();
+
+                const triggerWidgetValueRefresh = () => {
+                    try {
+                        const forEachNode = (graph, callback) => {
+                            if (!graph || typeof graph !== "object") return;
+                            const nodes = Array.isArray(graph._nodes) ? graph._nodes : (Array.isArray(graph.nodes) ? graph.nodes : []);
+                            for (const node of nodes) {
+                                if (!node) continue;
+                                callback(node);
+                                const subGraph = node.getInnerGraph?.() || node.subgraph;
+                                if (subGraph) {
+                                    forEachNode(subGraph, callback);
+                                }
+                            }
+                        };
+
+                        forEachNode(app?.rootGraph || app?.graph, (node) => {
+                            if (node && Array.isArray(node.widgets)) {
+                                for (const widget of node.widgets) {
+                                    if (widget && widget.type === "combo") {
+                                        const val = widget.value;
+                                        widget.value = "";
+                                        widget.value = val;
+                                        if (typeof widget.callback === "function") {
+                                            try { widget.callback(val); } catch (_) {}
+                                        }
                                     }
                                 }
                             }
-                        }
-                    });
-                } catch (e) {
-                    console.warn("[HF Downloader] Failed to force refresh combo widgets:", e);
-                }
-                
-                if (typeof useCommandStore !== "undefined") {
+                        });
+                    } catch (e) {
+                        console.warn("[HF Downloader] Failed to force refresh combo widgets:", e);
+                    }
+                    
                     try {
-                        await useCommandStore().execute('Comfy.RefreshNodeDefinitions');
-                    } catch (e) {}
-                }
+                        if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
+                            window.hfDownloader.clearModelValidationErrorsFromFrontendState();
+                        }
+                    } catch (_) {}
+                    
+                    if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                        app.graph.setDirtyCanvas(true, true);
+                    }
+                };
 
-                const refreshBtnNative = document.querySelector('#comfy-refresh-button');
-                if (refreshBtnNative) refreshBtnNative.click();
+                setTimeout(triggerWidgetValueRefresh, 50);
+                setTimeout(triggerWidgetValueRefresh, 300);
+                setTimeout(triggerWidgetValueRefresh, 800);
+                setTimeout(triggerWidgetValueRefresh, 1500);
 
-                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                    app.graph.setDirtyCanvas(true, true);
-                }
                 refreshSucceeded = true;
             } catch (err) {
                 console.warn("[HF Downloader] Comfy refresh hook failed:", err);
