@@ -6157,7 +6157,6 @@ app.registerExtension({
 
             const runAction = window?.hfDownloader?.runAutoDownload;
             if (typeof runAction === "function") {
-                workflowOpenTriggeredForCurrentLoad = true;
                 runAction(new Set(), false, {
                     suppressEmptyResults: true,
                     triggeredByWorkflowOpen: true,
@@ -6932,9 +6931,9 @@ app.registerExtension({
         registerGlobalAction("clearCompletedModelsFromStore", clearCompletedModelsFromStore);
         registerGlobalAction("clearModelValidationErrorsFromFrontendState", clearModelValidationErrorsFromFrontendState);
         setupMissingModelsDialogObserver();
-        void installNativeMissingModelsSurfaceHook();
+        // void installNativeMissingModelsSurfaceHook();
         installWorkflowOpenLoadGraphHook();
-        installWorkflowOpenMissingModelsWatcher();
+        // installWorkflowOpenMissingModelsWatcher();
         installRunQueueCommandHooksNativeAware();
         installDisableMissingModelsRedFramesObserver();
     }
