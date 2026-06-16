@@ -2630,7 +2630,7 @@ app.registerExtension({
             };
 
             const skipBtn = document.createElement("button");
-            skipBtn.textContent = "Skip";
+            skipBtn.textContent = "Skip Model";
             applyNativeButtonStyle(skipBtn, "secondary");
             Object.assign(skipBtn.style, {
                 ...buttonBaseStyle,
@@ -2643,9 +2643,24 @@ app.registerExtension({
                 if (onSkip) onSkip();
             };
 
+            const cancelBtn = document.createElement("button");
+            cancelBtn.textContent = "Cancel";
+            applyNativeButtonStyle(cancelBtn, "secondary");
+            Object.assign(cancelBtn.style, {
+                ...buttonBaseStyle,
+            });
+            cancelBtn.onclick = () => {
+                if (typeof options.onClose === "function") {
+                    options.onClose();
+                } else {
+                    if (dlg.parentElement) dlg.remove();
+                }
+            };
+
             panel.appendChild(statusEl);
             panel.appendChild(detailEl);
             actionsEl.appendChild(skipBtn);
+            actionsEl.appendChild(cancelBtn);
             panel.appendChild(actionsEl);
 
             dlg.appendChild(panel);
@@ -4170,6 +4185,10 @@ app.registerExtension({
                     }),
                     signal: controller.signal
                 });
+
+                if (aborted) {
+                    return;
+                }
 
                 // Remove loading dialog
                 if (loadingDlg) {
