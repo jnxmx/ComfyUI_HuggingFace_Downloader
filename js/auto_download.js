@@ -3961,6 +3961,9 @@ app.registerExtension({
             let aborted = false;
             let skipRequested = false;
             let statusTimer = null;
+            let currentSearchingFilename = "";
+            const requestId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
             const resumeRunIfPossible = () => {
                 const resume = options?.resumeRun;
                 if (typeof resume !== "function") {
@@ -3976,16 +3979,13 @@ app.registerExtension({
                 // Show loading dialog immediately
                 const controller = new AbortController();
                 loadingDlg = showLoadingDialog(() => {
-                    skipRequested = true;
-                    aborted = true;
-                    loadingDlg.setSkipMode(true);
-                    loadingDlg.setStatus("Skipping unresolved models...");
-                    loadingDlg.setDetail("Restarting scan without Hugging Face lookups.");
-                    if (statusTimer) {
-                        clearInterval(statusTimer);
-                        statusTimer = null;
+                    if (currentSearchingFilename) {
+                        doFetch(`/skip_search_model`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ request_id: requestId, filename: currentSearchingFilename })
+                        }).catch(err => console.error("[AutoDownload] Skip model request failed:", err));
                     }
-                    controller.abort();
                 }, {
                     skipModeActive: skipAllUnresolved,
                     onClose: () => {
@@ -3996,6 +3996,11 @@ app.registerExtension({
                             statusTimer = null;
                         }
                         controller.abort();
+                        doFetch(`/cancel_search`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ request_id: requestId })
+                        }).catch(err => console.error("[AutoDownload] Cancel search request failed:", err));
                         loadingDlg.remove();
                     }
                 });
@@ -4007,8 +4012,6 @@ app.registerExtension({
                     loadingDlg.setStatus("Looking for links...");
                     loadingDlg.setDetail("Preparing workflow scan...");
                 }
-
-                const requestId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
                 const resolveBaseUrl = () => {
                     const path = window.location.pathname || "/";
@@ -4026,7 +4029,13 @@ app.registerExtension({
                     const baseUrl = resolveBaseUrl();
                     const relPath = String(path || "").replace(/^\/+/, "");
                     const url = new URL(relPath, baseUrl).toString();
-                    return fetch(url, options);
+                    return fetch(url, {
+                        ...options,
+                        headers: {
+                            "Content-Type": "application/json",
+                            ...(options.headers || {})
+                        }
+                    });
                 };
 
                 const pollStatus = async () => {
@@ -4042,41 +4051,57 @@ app.registerExtension({
                         const detailRaw = String(status.detail || "").trim();
                         let message = String(status.message || "").trim();
 
-                        const sourceLabelMap = {
-                            workflow: "Scanning workflow",
-                            popular_models: "Checking curated model list",
-                            manager_cache: "Checking manager cache",
-                            huggingface_search: "Searching Hugging Face",
-                            huggingface_priority_authors: "Searching priority authors",
-                            huggingface_priority_repos: "Searching priority repos",
-                            huggingface_skip: "Skipping unresolved Hugging Face lookups",
-                            complete: "Scan complete"
-                        };
-
-                        const sourceLabel = sourceLabelMap[source] || (
-                            source
-                                ? source.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-                                : ""
-                        );
-
-                        if (!message) {
-                            message = sourceLabel || "Looking for links...";
-                        }
-
-                        const detailParts = [];
                         if (filename) {
-                            detailParts.push(filename);
-                        }
-                        if (detailRaw) {
-                            detailParts.push(detailRaw);
-                        }
-                        if (sourceLabel && !message.toLowerCase().includes(sourceLabel.toLowerCase())) {
-                            detailParts.push(sourceLabel);
+                            currentSearchingFilename = filename;
                         }
 
-                        const detail = detailParts.length ? detailParts.join(" • ") : "Working...";
-                        loadingDlg.setStatus(message);
-                        loadingDlg.setDetail(detail);
+                        let displayMessage = message;
+                        let displayDetail = "";
+
+                        if (status.current_index && status.total_files) {
+                            const idx = status.current_index;
+                            const total = status.total_files;
+                            const fn = filename || "model";
+                            const node = status.node_label || "";
+                            displayMessage = `Searching model ${idx} of ${total}`;
+                            displayDetail = node ? `"${fn}" in ${node}` : `"${fn}"`;
+                        } else {
+                            const sourceLabelMap = {
+                                workflow: "Scanning workflow",
+                                popular_models: "Checking curated model list",
+                                manager_cache: "Checking manager cache",
+                                huggingface_search: "Searching Hugging Face",
+                                huggingface_priority_authors: "Searching priority authors",
+                                huggingface_priority_repos: "Searching priority repos",
+                                huggingface_skip: "Skipping unresolved Hugging Face lookups",
+                                complete: "Scan complete"
+                            };
+
+                            const sourceLabel = sourceLabelMap[source] || (
+                                source
+                                    ? source.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+                                    : ""
+                            );
+
+                            if (!displayMessage) {
+                                displayMessage = sourceLabel || "Looking for links...";
+                            }
+
+                            const detailParts = [];
+                            if (filename) {
+                                detailParts.push(filename);
+                            }
+                            if (detailRaw) {
+                                detailParts.push(detailRaw);
+                            }
+                            if (sourceLabel && !displayMessage.toLowerCase().includes(sourceLabel.toLowerCase())) {
+                                detailParts.push(sourceLabel);
+                            }
+                            displayDetail = detailParts.length ? detailParts.join(" • ") : "Working...";
+                        }
+
+                        loadingDlg.setStatus(displayMessage);
+                        loadingDlg.setDetail(displayDetail);
                     } catch (e) {
                         // Ignore polling errors during search
                     }

@@ -21,7 +21,7 @@ from .backup import (
     delete_selected_from_huggingface,
 )
 from .file_manager import get_model_subfolders
-from .model_discovery import process_workflow_for_missing_models
+from .model_discovery import process_workflow_for_missing_models, SearchCancelledException
 from .downloader import (
     run_download,
     run_download_folder,
@@ -2311,10 +2311,38 @@ async def check_missing_models(request):
         _set_search_status(request_id, {"message": "Done", "source": "complete"})
         result["request_id"] = request_id
         return web.json_response(result)
+    except SearchCancelledException as sce:
+        print(f"[DEBUG] check_missing_models: search {request_id} was cancelled/aborted: {sce}")
+        _set_search_status(request_id, {"message": "Cancelled", "source": "cancelled"})
+        return web.json_response({"cancelled": True, "missing": [], "found": [], "request_id": request_id})
     except Exception as e:
         print(f"[ERROR] check_missing_models failed: {e}")
         print(f"[ERROR] Traceback: {traceback.format_exc()}")
-        return web.json_response({"error": str(e) if str(e) else repr(e)}, status=500)
+async def cancel_search_endpoint(request):
+    try:
+        data = await request.json()
+        request_id = data.get("request_id")
+        if not request_id:
+            return web.json_response({"error": "Missing request_id"}, status=400)
+        from .model_discovery import cancel_search
+        cancel_search(request_id)
+        _set_search_status(request_id, {"message": "Cancelled", "source": "cancelled"})
+        return web.json_response({"status": "cancelled", "request_id": request_id})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+
+async def skip_search_model_endpoint(request):
+    try:
+        data = await request.json()
+        request_id = data.get("request_id")
+        filename = data.get("filename")
+        if not request_id:
+            return web.json_response({"error": "Missing request_id"}, status=400)
+        from .model_discovery import skip_search_model
+        skip_search_model(request_id, filename)
+        return web.json_response({"status": "skipped", "request_id": request_id, "filename": filename})
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
 
 
 def _is_path_like(value: str) -> bool:
@@ -2746,6 +2774,8 @@ def setup(app_or_server):
     _safe_add_route("POST", "/restore_selected_from_hf", restore_selected_from_hf_endpoint)
     _safe_add_route("POST", "/delete_from_hf_backup", delete_from_hf_backup_endpoint)
     _safe_add_route("POST", "/check_missing_models", check_missing_models)
+    _safe_add_route("POST", "/cancel_search", cancel_search_endpoint)
+    _safe_add_route("POST", "/skip_search_model", skip_search_model_endpoint)
     _safe_add_route("POST", "/relocate_model_file", relocate_model_file)
     _safe_add_route("POST", "/install_models", install_models)
 

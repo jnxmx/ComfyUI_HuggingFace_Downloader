@@ -71,6 +71,57 @@ AMBIGUOUS_REGISTRY_FILENAMES = set(HF_SEARCH_SKIP_FILENAMES) | {
 class HFSearchBudgetError(Exception):
     pass
 
+import threading
+
+_cancelled_searches = set()
+_skipped_models = {}  # request_id -> set of lowercase filenames
+_search_locks = threading.Lock()
+_current_searching_models = {}  # request_id -> current filename
+
+class SearchCancelledException(Exception):
+    pass
+
+def cancel_search(request_id: str):
+    if not request_id:
+        return
+    with _search_locks:
+        _cancelled_searches.add(request_id)
+
+def skip_search_model(request_id: str, filename: str = None):
+    if not request_id:
+        return
+    with _search_locks:
+        if request_id not in _skipped_models:
+            _skipped_models[request_id] = set()
+        if filename:
+            _skipped_models[request_id].add(filename.lower())
+        else:
+            curr = _current_searching_models.get(request_id)
+            if curr:
+                _skipped_models[request_id].add(curr.lower())
+
+def is_search_cancelled(request_id: str) -> bool:
+    if not request_id:
+        return False
+    with _search_locks:
+        return request_id in _cancelled_searches
+
+def is_model_skipped(request_id: str, filename: str) -> bool:
+    if not request_id or not filename:
+        return False
+    with _search_locks:
+        skipped = _skipped_models.get(request_id)
+        return skipped and (filename.lower() in skipped)
+
+def set_current_searching_model(request_id: str, filename: str):
+    if not request_id:
+        return
+    with _search_locks:
+        if filename:
+            _current_searching_models[request_id] = filename
+        else:
+            _current_searching_models.pop(request_id, None)
+
 def is_rate_limited_error(err: Exception) -> bool:
     text = str(err)
     return "429" in text or "Too Many Requests" in text or "rate limit" in text.lower()
@@ -1183,7 +1234,7 @@ def find_quantized_alternatives(filename: str, registries: list[tuple[str, dict]
 
     return alternatives
 
-def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]], status_cb=None) -> List[Dict[str, Any]]:
+def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]], status_cb=None, request_id: str = None) -> List[Dict[str, Any]]:
     """
     Checks ComfyUI-Manager cache for missing model URLs and enriches the missing_models list.
     Locations to check:
@@ -1195,15 +1246,21 @@ def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]], status_cb=N
 
     # Enrich missing_models with URLs from cache/model-list
     for model in missing_models:
+        if request_id and is_search_cancelled(request_id):
+            raise SearchCancelledException("Search cancelled by user")
         if model.get("url"):
             continue
+        filename = model["filename"]
+        if request_id:
+            if is_model_skipped(request_id, filename):
+                continue
+            set_current_searching_model(request_id, filename)
         if status_cb:
             status_cb({
                 "message": "Checking manager cache",
                 "source": "manager_cache",
                 "filename": model.get("filename")
             })
-        filename = model["filename"]
         entry = _lookup_manager_entry_for_model(manager_map, model)
         if entry and entry.get("url"):
             enrich_model_with_url(
@@ -1213,6 +1270,8 @@ def load_comfyui_manager_cache(missing_models: List[Dict[str, Any]], status_cb=N
                 directory=entry.get("directory")
             )
             print(f"[DEBUG] Found URL in Manager cache for {filename}: {entry['url']}")
+        if request_id:
+            set_current_searching_model(request_id, None)
 
     return missing_models
 
@@ -2321,12 +2380,19 @@ def search_huggingface_model(
     mode: str = "full",
     workflow_keywords: list[str] | None = None,
     priority_author_repos: dict[str, list[str]] | None = None,
-    skip_priority_repo_scan: bool = False
+    skip_priority_repo_scan: bool = False,
+    request_id: str = None
 ) -> Dict[str, Any] | None:
     """
     Searches Hugging Face for the filename, prioritizing specific authors.
     Returns metadata dict with url/hf_repo/hf_path or None.
     """
+    if request_id and is_search_cancelled(request_id):
+        raise SearchCancelledException("Search cancelled by user")
+    if request_id and is_model_skipped(request_id, filename):
+        print(f"[DEBUG] Skipping search_huggingface_model for {filename} (model skipped)")
+        return None
+
     api = HfApi(token=token)
 
     key = _normalize_hf_search_key(filename)
@@ -2945,6 +3011,12 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     2. Check local models.
     3. If missing, search HF.
     """
+    request_id = workflow_json.get("request_id")
+    def _check_cancelled():
+        if request_id and is_search_cancelled(request_id):
+            raise SearchCancelledException("Search cancelled by user")
+
+    _check_cancelled()
     
     global _hf_api_calls, _hf_search_deadline, _hf_search_time_exhausted, _hf_rate_limited_until, _hf_repo_files_cache
     _hf_api_calls = 0
@@ -3347,35 +3419,77 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     enforce_authoritative_node_folders(missing_models)
     missing_models = coalesce_missing_models_by_destination(missing_models)
 
+    models_to_search = [m for m in missing_models if not m.get("url")]
+    total_files = len(models_to_search)
+    model_to_index = {m["filename"].lower(): idx + 1 for idx, m in enumerate(models_to_search)}
+
+    original_status_cb = status_cb
+    def wrapped_status_cb(payload):
+        if not original_status_cb or not payload:
+            return
+        if isinstance(payload, str):
+            payload = {"message": payload}
+        elif not isinstance(payload, dict):
+            return
+        filename = payload.get("filename")
+        if filename:
+            fn_lower = filename.lower()
+            if fn_lower in model_to_index:
+                payload["current_index"] = model_to_index[fn_lower]
+                payload["total_files"] = total_files
+                for m in models_to_search:
+                    if m.get("filename", "").lower() == fn_lower:
+                        payload["node_label"] = m.get("node_title") or m.get("node_type") or ""
+                        break
+        original_status_cb(payload)
+    status_cb = wrapped_status_cb
+
     # 3. Check curated popular models registry
     if missing_models:
         popular_models = load_popular_models_registry()
         for model in missing_models:
+            _check_cancelled()
             if model.get("url"):
                 continue
+            filename = model.get("filename")
+            if filename and request_id:
+                if is_model_skipped(request_id, filename):
+                    continue
+                set_current_searching_model(request_id, filename)
             if status_cb:
                 status_cb({
                     "message": "Checking popular models",
                     "source": "popular_models",
                     "filename": model.get("filename")
-            })
+                })
             entry = _lookup_popular_entry(
                 popular_models,
                 model["filename"],
                 model.get("requested_path"),
             )
             if not entry:
+                if request_id:
+                    set_current_searching_model(request_id, None)
                 continue
 
             candidate_urls = _iter_registry_urls(entry)
             if not candidate_urls:
+                if request_id:
+                    set_current_searching_model(request_id, None)
                 continue
 
             live_url = None
             for candidate_url in candidate_urls:
+                _check_cancelled()
+                if request_id and is_model_skipped(request_id, filename):
+                    break
                 if _hf_url_exists(candidate_url):
                     live_url = candidate_url
                     break
+
+            if request_id and is_model_skipped(request_id, filename):
+                set_current_searching_model(request_id, None)
+                continue
 
             exact_path_match = _is_exact_popular_entry_match(entry, model.get("requested_path"))
             if not live_url:
@@ -3394,6 +3508,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     )
                 else:
                     print(f"[DEBUG] Skipping stale curated URLs for {model.get('filename')}; falling back to other sources")
+                    if request_id:
+                        set_current_searching_model(request_id, None)
                     continue
 
             enrich_model_with_url(
@@ -3402,10 +3518,12 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                 entry.get("source") or "popular_models",
                 directory=entry.get("directory")
             )
+            if request_id:
+                set_current_searching_model(request_id, None)
 
     # 4. Check ComfyUI Manager model list/cache for missing models
     if missing_models:
-        missing_models = load_comfyui_manager_cache(missing_models, status_cb=status_cb)
+        missing_models = load_comfyui_manager_cache(missing_models, status_cb=status_cb, request_id=request_id)
 
     token = get_token()
     skip_hf_search_all = bool(workflow_json.get("skip_hf_search"))
@@ -3425,6 +3543,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     if missing_models and skip_hf_search_all:
         reused_cache_hits = 0
         for model in missing_models:
+            _check_cancelled()
             if model.get("url"):
                 continue
             key = _normalize_hf_search_key(model.get("filename") or "")
@@ -3454,6 +3573,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         try:
             api = HfApi(token=token)
             for author in PRIORITY_AUTHORS:
+                _check_cancelled()
                 try:
                     repos = list(call_with_timeout(api.list_models, author=author, limit=100, sort="downloads"))
                     priority_author_repos[author] = [m.modelId for m in repos if getattr(m, "modelId", None)]
@@ -3467,6 +3587,7 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     priority_tokens: list[str] = []
     if missing_models and not skip_hf_search_all:
         for model in missing_models:
+            _check_cancelled()
             if model.get("url"):
                 continue
             filename = model.get("filename")
@@ -3543,8 +3664,14 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         for repo_id in priority_repo_ids:
             if not remaining:
                 break
+            _check_cancelled()
             current_model = next(iter(remaining.values()))
             current_filename = current_model.get("filename") or ""
+            if current_filename and request_id:
+                if is_model_skipped(request_id, current_filename):
+                    remaining.pop(current_filename.lower(), None)
+                    continue
+                set_current_searching_model(request_id, current_filename)
             author = repo_id.split("/")[0] if "/" in repo_id else repo_id
             if status_cb:
                 status_cb({
@@ -3563,6 +3690,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                         "source": "huggingface_priority_repos",
                         "filename": current_filename
                     })
+                if current_filename and request_id:
+                    set_current_searching_model(request_id, None)
                 return
             except concurrent.futures.TimeoutError:
                 print(f"[DEBUG] list_repo_files timeout for {repo_id} while searching {current_filename} (priority repo scan)")
@@ -3573,6 +3702,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                         "filename": current_filename,
                         "detail": f"list_repo_files({repo_id})"
                     })
+                if current_filename and request_id:
+                    set_current_searching_model(request_id, None)
                 continue
             except Exception as e:
                 if is_timeout_error(e):
@@ -3584,6 +3715,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                             "filename": current_filename,
                             "detail": f"list_repo_files({repo_id})"
                         })
+                    if current_filename and request_id:
+                        set_current_searching_model(request_id, None)
                     continue
                 if is_rate_limited_error(e):
                     _set_hf_rate_limited()
@@ -3594,7 +3727,11 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                             "filename": current_filename,
                             "detail": str(e)
                         })
+                    if current_filename and request_id:
+                        set_current_searching_model(request_id, None)
                     return
+                if current_filename and request_id:
+                    set_current_searching_model(request_id, None)
                 continue
 
             found_paths: dict[str, str] = {}
@@ -3620,6 +3757,9 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                     "hf_path": match_path
                 }
                 print(f"[DEBUG] Found {model.get('filename')} in repo {repo_id} (priority repo scan)")
+            
+            if current_filename and request_id:
+                set_current_searching_model(request_id, None)
 
     if missing_models and priority_author_repos and not skip_hf_search_all:
         _reset_hf_search_budget()
@@ -3628,8 +3768,16 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
     def _run_hf_stage(label: str, mode: str):
         _reset_hf_search_budget()
         for m in [m for m in missing_models if not m.get("url")]:
+            _check_cancelled()
+            filename = m.get("filename")
+            if filename and request_id:
+                if is_model_skipped(request_id, filename):
+                    continue
+                set_current_searching_model(request_id, filename)
             if _skip_hf_search(m):
                 print(f"[DEBUG] Skipping HF search for {m.get('filename')} (user skipped)")
+                if request_id:
+                    set_current_searching_model(request_id, None)
                 continue
             if _hf_search_budget_exhausted():
                 if status_cb:
@@ -3638,6 +3786,8 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                         "source": "huggingface_search",
                         "filename": m.get("filename")
                     })
+                if request_id:
+                    set_current_searching_model(request_id, None)
                 break
             if status_cb:
                 status_cb({
@@ -3652,13 +3802,16 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                 mode=mode,
                 workflow_keywords=workflow_keywords,
                 priority_author_repos=priority_author_repos,
-                skip_priority_repo_scan=True
+                skip_priority_repo_scan=True,
+                request_id=request_id
             )
             if result:
                 m["url"] = result.get("url")
                 m["hf_repo"] = result.get("hf_repo")
                 m["hf_path"] = result.get("hf_path")
                 m["source"] = "huggingface_search"
+            if request_id:
+                set_current_searching_model(request_id, None)
 
     if missing_models and not skip_hf_search_all:
         _run_hf_stage("basic", "basic")
