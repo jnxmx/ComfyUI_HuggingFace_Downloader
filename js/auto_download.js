@@ -5731,6 +5731,7 @@ app.registerExtension({
 
             const stripped = stripModelValidationErrorsFromNodeErrors(snapshot);
             if (!stripped.changed || stripped.removedCount <= 0) {
+                applyNodeErrorsFallback(snapshot);
                 return false;
             }
 
@@ -6882,6 +6883,7 @@ app.registerExtension({
                             await app.refreshComboInNodes();
                         } catch (e) {}
                     }
+                    await wait(250);
                     try {
                         forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
                             if (node && Array.isArray(node.widgets)) {

@@ -914,6 +914,7 @@ app.registerExtension({
                         await maybePromise;
                     }
                 }
+                await new Promise((resolve) => setTimeout(resolve, 250));
 
                 try {
                     const forEachNode = (graph, callback) => {
