@@ -1436,6 +1436,69 @@ app.registerExtension({
             repoConfigRow.appendChild(createRepoBtn);
             panel.appendChild(repoConfigRow);
 
+            // Runpod Warning Message container
+            const runpodWarningRow = document.createElement("div");
+            Object.assign(runpodWarningRow.style, {
+                display: "none",
+                fontSize: "12px",
+                padding: "4px 24px 12px",
+                lineHeight: "1.4",
+            });
+            panel.appendChild(runpodWarningRow);
+
+            const updateRunpodWarning = (isRunpod, comfyuiBackupEnv, currentRepo) => {
+                if (!isRunpod) {
+                    runpodWarningRow.style.display = "none";
+                    return;
+                }
+
+                const cleanedRepo = (currentRepo || "").trim();
+                const cleanedEnv = (comfyuiBackupEnv || "").trim();
+
+                runpodWarningRow.style.display = "block";
+                runpodWarningRow.innerHTML = "";
+
+                const warningContainer = document.createElement("div");
+                Object.assign(warningContainer.style, {
+                    background: "rgba(255, 165, 0, 0.15)",
+                    border: "1px solid rgba(255, 165, 0, 0.3)",
+                    borderRadius: "8px",
+                    padding: "10px 14px",
+                    color: "#ffd075",
+                });
+
+                const link = document.createElement("a");
+                link.href = "https://console.runpod.io/user/secrets";
+                link.target = "_blank";
+                link.rel = "noopener noreferrer";
+                link.textContent = "RunPod User Secrets";
+                Object.assign(link.style, {
+                    color: "#4aa3ff",
+                    textDecoration: "underline",
+                    fontWeight: "bold",
+                });
+
+                if (!cleanedEnv) {
+                    warningContainer.appendChild(document.createTextNode("RunPod environment detected: "));
+                    warningContainer.appendChild(link);
+                    warningContainer.appendChild(document.createTextNode(` is missing the 'COMFYUI_BACKUP' variable. Please create a new secret 'COMFYUI_BACKUP' with value '${cleanedRepo}' to ensure settings persist across pod restarts.`));
+                } else if (cleanedEnv !== cleanedRepo) {
+                    warningContainer.appendChild(document.createTextNode("RunPod environment detected: "));
+                    warningContainer.appendChild(link);
+                    warningContainer.appendChild(document.createTextNode(` 'COMFYUI_BACKUP' secret is currently set to '${cleanedEnv}', which differs from '${cleanedRepo}'. Please update the RunPod secret 'COMFYUI_BACKUP' to '${cleanedRepo}' to keep them in sync.`));
+                } else {
+                    // Correctly configured
+                    Object.assign(warningContainer.style, {
+                        background: "rgba(67, 192, 107, 0.12)",
+                        border: "1px solid rgba(67, 192, 107, 0.25)",
+                        color: "#a3ecc1",
+                    });
+                    warningContainer.textContent = `RunPod environment: 'COMFYUI_BACKUP' is correctly set to '${cleanedRepo}'.`;
+                }
+
+                runpodWarningRow.appendChild(warningContainer);
+            };
+
             const body = document.createElement("div");
             Object.assign(body.style, {
                 display: "grid",
@@ -1832,6 +1895,7 @@ app.registerExtension({
                 initializeDefaultSelections(backupState);
                 initializeDefaultSelections(localState);
                 updateRepoMeta(payload.repo_name || "", payload.backup_total_size_bytes);
+                updateRunpodWarning(payload.is_runpod, payload.comfyui_backup_env, payload.repo_name);
 
                 if (payload.backup_error) {
                     backupPanel.errorEl.style.display = "block";

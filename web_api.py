@@ -2593,6 +2593,15 @@ async def backup_browser_tree(request):
     repo_name = _read_backup_repo_name()
     try:
         payload = get_backup_browser_tree(repo_name)
+        
+        # Check if running on RunPod
+        runpod_id = os.getenv("RUNPOD_POD_ID", "").strip()
+        is_runpod = bool(runpod_id)
+        comfyui_backup_env = os.getenv("COMFYUI_BACKUP", "").strip()
+        
+        payload["is_runpod"] = is_runpod
+        payload["comfyui_backup_env"] = comfyui_backup_env
+        
         return web.json_response({"status": "ok", **payload})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
