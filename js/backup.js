@@ -1658,75 +1658,140 @@ app.registerExtension({
                 }
             };
 
-            createRepoBtn.onclick = async () => {
-                const name = prompt("Enter the repository name (e.g. 'my-backup' or 'username/my-backup'):");
-                if (name === null) return; // Cancelled
-                const parsedName = parseRepoName(name);
-                if (!parsedName) {
-                    showToast("Repository name cannot be empty.", "error");
-                    return;
-                }
+            createRepoBtn.onclick = () => {
+                const modalOverlay = document.createElement("div");
+                applyTemplateDialogOverlayStyle(modalOverlay, 10005);
 
-                setBusy(true, "Creating Hugging Face repository...");
-                try {
-                    const res = await requestJson("/create_hf_backup_repo", {
-                        method: "POST",
-                        body: JSON.stringify({ repo_name: parsedName }),
-                    });
-                    
-                    if (res.status === "ok" && res.repo_name) {
-                        repoInput.value = res.repo_name;
-                        app.ui.settings.setSettingValue("downloaderbackup.repo_name", res.repo_name);
-                        showToast(`Repository created successfully: ${res.repo_name}`, "success");
-                        await loadTree();
-                    } else {
-                        throw new Error(res.message || "Failed to create repository");
+                const modalPanel = document.createElement("div");
+                applyTemplateDialogPanelStyle(modalPanel, {
+                    minWidth: "360px",
+                    maxWidth: "500px",
+                    padding: "24px",
+                    gap: "16px",
+                });
+
+                const modalTitle = document.createElement("div");
+                modalTitle.textContent = "Create New Backup Repository";
+                Object.assign(modalTitle.style, {
+                    fontSize: "18px",
+                    fontWeight: "600",
+                    color: "var(--input-text)",
+                });
+
+                const modalDesc = document.createElement("div");
+                modalDesc.textContent = "Enter a name for the new Hugging Face repository. A private repository will be created under your account.";
+                Object.assign(modalDesc.style, {
+                    fontSize: "13px",
+                    color: "var(--descrip-text, #999)",
+                    lineHeight: "1.4",
+                });
+
+                const modalInput = document.createElement("input");
+                modalInput.type = "text";
+                modalInput.placeholder = "e.g., my-backup or username/my-backup";
+                Object.assign(modalInput.style, {
+                    width: "100%",
+                    height: "36px",
+                    background: "var(--comfy-input-bg, #222)",
+                    color: "var(--input-text, #fff)",
+                    border: `1px solid ${TEMPLATE_DIALOG_TOKENS.border}`,
+                    borderRadius: "8px",
+                    padding: "0 10px",
+                    fontSize: "13px",
+                    boxSizing: "border-box",
+                });
+
+                const modalActions = document.createElement("div");
+                Object.assign(modalActions.style, {
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: "8px",
+                    marginTop: "8px",
+                });
+
+                const cancelBtn = createButton("Cancel", "default");
+                cancelBtn.onclick = () => modalOverlay.remove();
+
+                const confirmBtn = createButton("Create", "primary");
+                confirmBtn.onclick = async () => {
+                    const name = modalInput.value;
+                    const parsedName = parseRepoName(name);
+                    if (!parsedName) {
+                        showToast("Repository name cannot be empty.", "error");
+                        return;
                     }
-                } catch (e) {
-                    const errMsg = e.message || String(e);
-                    
-                    // Render modal dialog for the error so the link is clickable
-                    const errOverlay = document.createElement("div");
-                    applyTemplateDialogOverlayStyle(errOverlay, 10005);
-                    const errPanel = document.createElement("div");
-                    applyTemplateDialogPanelStyle(errPanel, {
-                        minWidth: "320px",
-                        maxWidth: "520px",
-                        padding: "20px",
-                        gap: "12px",
-                    });
-                    
-                    const title = document.createElement("div");
-                    title.textContent = "Repository Creation Failed";
-                    title.style.fontSize = "16px";
-                    title.style.fontWeight = "bold";
-                    title.style.color = "#ff6b6b";
-                    
-                    const desc = document.createElement("div");
-                    desc.style.fontSize = "13px";
-                    desc.style.lineHeight = "1.4";
-                    
-                    if (errMsg.includes("settings/tokens") || errMsg.includes("Write") || errMsg.includes("token")) {
-                        desc.innerHTML = `Permission denied. Your Hugging Face token may be invalid or missing 'Write' permissions.<br/><br/>Please create a new token with <strong>Write</strong> permissions at <a href="https://huggingface.co/settings/tokens" target="_blank" style="color: var(--primary-color, #4aa3ff); text-decoration: underline;">huggingface.co/settings/tokens</a> and configure it in your ComfyUI settings under HuggingFace Downloader.`;
-                    } else {
-                        desc.textContent = errMsg;
+                    modalOverlay.remove();
+                    setBusy(true, "Creating Hugging Face repository...");
+                    try {
+                        const res = await requestJson("/create_hf_backup_repo", {
+                            method: "POST",
+                            body: JSON.stringify({ repo_name: parsedName }),
+                        });
+                        
+                        if (res.status === "ok" && res.repo_name) {
+                            repoInput.value = res.repo_name;
+                            app.ui.settings.setSettingValue("downloaderbackup.repo_name", res.repo_name);
+                            showToast(`Repository created successfully: ${res.repo_name}`, "success");
+                            await loadTree();
+                        } else {
+                            throw new Error(res.message || "Failed to create repository");
+                        }
+                    } catch (e) {
+                        const errMsg = e.message || String(e);
+                        
+                        // Render modal dialog for the error so the link is clickable
+                        const errOverlay = document.createElement("div");
+                        applyTemplateDialogOverlayStyle(errOverlay, 10005);
+                        const errPanel = document.createElement("div");
+                        applyTemplateDialogPanelStyle(errPanel, {
+                            minWidth: "320px",
+                            maxWidth: "520px",
+                            padding: "20px",
+                            gap: "12px",
+                        });
+                        
+                        const title = document.createElement("div");
+                        title.textContent = "Repository Creation Failed";
+                        title.style.fontSize = "16px";
+                        title.style.fontWeight = "bold";
+                        title.style.color = "#ff6b6b";
+                        
+                        const desc = document.createElement("div");
+                        desc.style.fontSize = "13px";
+                        desc.style.lineHeight = "1.4";
+                        
+                        if (errMsg.includes("settings/tokens") || errMsg.includes("Write") || errMsg.includes("token")) {
+                            desc.innerHTML = `Permission denied. Your Hugging Face token may be invalid or missing 'Write' permissions.<br/><br/>Please create a new token with <strong>Write</strong> permissions at <a href="https://huggingface.co/settings/tokens" target="_blank" style="color: var(--primary-color, #4aa3ff); text-decoration: underline;">huggingface.co/settings/tokens</a> and configure it in your ComfyUI settings under HuggingFace Downloader.`;
+                        } else {
+                            desc.textContent = errMsg;
+                        }
+                        
+                        const closeBtn = createButton("Close", "default");
+                        closeBtn.onclick = () => errOverlay.remove();
+                        const actionRow = document.createElement("div");
+                        actionRow.style.display = "flex";
+                        actionRow.style.justifyContent = "flex-end";
+                        actionRow.appendChild(closeBtn);
+                        
+                        errPanel.appendChild(title);
+                        errPanel.appendChild(desc);
+                        errPanel.appendChild(actionRow);
+                        errOverlay.appendChild(errPanel);
+                        document.body.appendChild(errOverlay);
+                    } finally {
+                        setBusy(false);
                     }
-                    
-                    const closeBtn = createButton("Close", "default");
-                    closeBtn.onclick = () => errOverlay.remove();
-                    const actionRow = document.createElement("div");
-                    actionRow.style.display = "flex";
-                    actionRow.style.justifyContent = "flex-end";
-                    actionRow.appendChild(closeBtn);
-                    
-                    errPanel.appendChild(title);
-                    errPanel.appendChild(desc);
-                    errPanel.appendChild(actionRow);
-                    errOverlay.appendChild(errPanel);
-                    document.body.appendChild(errOverlay);
-                } finally {
-                    setBusy(false);
-                }
+                };
+
+                modalActions.appendChild(cancelBtn);
+                modalActions.appendChild(confirmBtn);
+                modalPanel.appendChild(modalTitle);
+                modalPanel.appendChild(modalDesc);
+                modalPanel.appendChild(modalInput);
+                modalPanel.appendChild(modalActions);
+                modalOverlay.appendChild(modalPanel);
+                document.body.appendChild(modalOverlay);
+                modalInput.focus();
             };
 
             const clearBackupSelection = () => {
