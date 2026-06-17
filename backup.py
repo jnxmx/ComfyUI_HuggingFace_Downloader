@@ -823,9 +823,19 @@ def create_hf_backup_repo(repo_name_or_link: str) -> str:
 
     try:
         api = HfApi()
-        # Ensure it's just the 'user/repo'
         repo_id = _parse_repo_name(repo_name_or_link)
         
+        # If the repository ID doesn't contain a namespace (e.g. 'my-backup'),
+        # resolve it dynamically using whoami() so it becomes 'username/my-backup'
+        if "/" not in repo_id:
+            try:
+                user_info = api.whoami(token=token)
+                username = user_info.get("name")
+                if username:
+                    repo_id = f"{username}/{repo_id}"
+            except Exception as e:
+                print(f"[WARNING] Failed to fetch Hugging Face username using whoami: {e}")
+
         # Create repo (exist_ok=True just in case it already exists but we want to make sure we have access)
         api.create_repo(repo_id=repo_id, repo_type="model", exist_ok=True, private=True, token=token)
         return repo_id
