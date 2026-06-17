@@ -6983,9 +6983,9 @@ app.registerExtension({
         registerGlobalAction("clearCompletedModelsFromStore", clearCompletedModelsFromStore);
         registerGlobalAction("clearModelValidationErrorsFromFrontendState", clearModelValidationErrorsFromFrontendState);
         setupMissingModelsDialogObserver();
-        void installNativeMissingModelsSurfaceHook();
+        // void installNativeMissingModelsSurfaceHook();
         installWorkflowOpenLoadGraphHook();
-        installWorkflowOpenMissingModelsWatcher();
+        // installWorkflowOpenMissingModelsWatcher();
         installRunQueueCommandHooksNativeAware();
         installDisableMissingModelsRedFramesObserver();
     }
