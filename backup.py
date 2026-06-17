@@ -810,6 +810,29 @@ def _copy_and_restore_token(src_folder, temp_dir):
                     print(f"[WARNING] Could not process token in {fpath}: {e}")
     return dst_folder
 
+def create_hf_backup_repo(repo_name_or_link: str) -> str:
+    """
+    Creates a new private Hugging Face repository for backups.
+    """
+    token, _ = get_token_and_size_limit()
+    if not token:
+        raise ValueError("Hugging Face token not found. Please create a token with 'Write' permissions at https://huggingface.co/settings/tokens and set it in ComfyUI settings.")
+
+    try:
+        api = HfApi()
+        # Ensure it's just the 'user/repo'
+        repo_id = _parse_repo_name(repo_name_or_link)
+        
+        # Create repo (exist_ok=True just in case it already exists but we want to make sure we have access)
+        api.create_repo(repo_id=repo_id, repo_type="model", exist_ok=True, private=True, token=token)
+        return repo_id
+    except Exception as e:
+        error_msg = str(e)
+        if "401" in error_msg or "403" in error_msg or "Unauthorized" in error_msg or "Forbidden" in error_msg:
+            raise ValueError(f"Permission denied. Your Hugging Face token may be invalid or missing 'Write' permissions.\n\nPlease create a new token with 'Write' permissions at https://huggingface.co/settings/tokens and set it in ComfyUI settings.")
+        else:
+            raise ValueError(f"Failed to create repository: {error_msg}")
+
 def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_backup_start=None, on_backup_progress=None, *args, **kwargs):
     """
     Backup specified folders to a Hugging Face repository under a single 'ComfyUI' root.

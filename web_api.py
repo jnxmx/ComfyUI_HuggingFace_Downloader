@@ -19,6 +19,7 @@ from .backup import (
     backup_selected_to_huggingface,
     restore_selected_from_huggingface,
     delete_selected_from_huggingface,
+    create_hf_backup_repo,
 )
 from .file_manager import get_model_subfolders
 from .model_discovery import process_workflow_for_missing_models, SearchCancelledException
@@ -2576,6 +2577,18 @@ def _parse_size_limit(value, default=5.0) -> float:
         return float(default)
 
 
+async def create_hf_backup_repo_endpoint(request):
+    data = await request.json()
+    repo_name = data.get("repo_name", "").strip()
+    if not repo_name:
+        return web.json_response({"status": "error", "message": "Repository name cannot be empty."}, status=400)
+    try:
+        new_repo_id = create_hf_backup_repo(repo_name)
+        return web.json_response({"status": "ok", "repo_name": new_repo_id})
+    except Exception as e:
+        return web.json_response({"status": "error", "message": str(e)}, status=500)
+
+
 async def backup_browser_tree(request):
     repo_name = _read_backup_repo_name()
     try:
@@ -2790,6 +2803,7 @@ def setup(app_or_server):
 
     _safe_add_route("GET", "/folder_structure", folder_structure)
     _safe_add_route("GET", "/backup_browser_tree", backup_browser_tree)
+    _safe_add_route("POST", "/create_hf_backup_repo", create_hf_backup_repo_endpoint)
     _safe_add_route("POST", "/backup_to_hf", backup_to_hf)
     _safe_add_route("POST", "/backup_selected_to_hf", backup_selected_to_hf_endpoint)
     _safe_add_route("POST", "/restore_from_hf", restore_from_hf)

@@ -1354,6 +1354,85 @@ app.registerExtension({
             headerWrap.appendChild(closeIconButton);
             panel.appendChild(headerWrap);
 
+            // Repository configuration row (below header, above the panels)
+            const repoConfigRow = document.createElement("div");
+            Object.assign(repoConfigRow.style, {
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                padding: "0 24px 12px",
+                flexWrap: "wrap",
+            });
+
+            const repoInputLabel = document.createElement("span");
+            repoInputLabel.textContent = "Backup Repo:";
+            repoInputLabel.style.fontSize = "14px";
+            repoInputLabel.style.fontWeight = "600";
+            repoInputLabel.style.color = "var(--input-text)";
+
+            const repoInput = document.createElement("input");
+            repoInput.type = "text";
+            repoInput.placeholder = "username/repository-name or full Hugging Face URL";
+            Object.assign(repoInput.style, {
+                flex: "1",
+                minWidth: "200px",
+                height: "36px",
+                background: "var(--comfy-input-bg, #222)",
+                color: "var(--input-text, #fff)",
+                border: `1px solid ${TEMPLATE_DIALOG_TOKENS.border}`,
+                borderRadius: "8px",
+                padding: "0 10px",
+                fontSize: "13px",
+            });
+
+            // Initialize value from ComfyUI settings
+            const currentRepoVal = app.ui.settings.getSettingValue("downloaderbackup.repo_name") || "";
+            repoInput.value = currentRepoVal;
+
+            const parseRepoName = (val) => {
+                let clean = val.trim();
+                if (!clean) return "";
+                const match = clean.match(/(?:https?:\/\/)?(?:www\.)?huggingface\.co\/([^\/]+)\/([^\/\?\#]+)/);
+                if (match && match[1] && match[2]) {
+                    return `${match[1]}/${match[2]}`;
+                }
+                return clean;
+            };
+
+            const refreshRepoBtn = document.createElement("button");
+            refreshRepoBtn.type = "button";
+            refreshRepoBtn.title = "Save and refresh repository";
+            refreshRepoBtn.innerHTML = "<i class=\"pi pi-refresh\"></i>";
+            Object.assign(refreshRepoBtn.style, {
+                width: "36px",
+                height: "36px",
+                borderRadius: "8px",
+                border: "none",
+                background: "var(--secondary-background, #333)",
+                color: "var(--input-text)",
+                cursor: "pointer",
+                display: "grid",
+                placeItems: "center",
+                transition: "background-color 120ms ease",
+            });
+            refreshRepoBtn.onmouseenter = () => {
+                refreshRepoBtn.style.background = "var(--secondary-background-hover)";
+            };
+            refreshRepoBtn.onmouseleave = () => {
+                refreshRepoBtn.style.background = "var(--secondary-background)";
+            };
+
+            const createRepoBtn = createButton("Create new backup repo", "primary");
+            createRepoBtn.style.height = "36px";
+            createRepoBtn.style.fontSize = "13px";
+            createRepoBtn.style.borderRadius = "8px";
+
+            repoConfigRow.appendChild(repoInputLabel);
+            repoConfigRow.appendChild(repoInput);
+            repoConfigRow.appendChild(refreshRepoBtn);
+            repoConfigRow.appendChild(createRepoBtn);
+            panel.appendChild(repoConfigRow);
+
             const body = document.createElement("div");
             Object.assign(body.style, {
                 display: "grid",
@@ -1361,7 +1440,7 @@ app.registerExtension({
                 gap: "14px",
                 minHeight: "420px",
                 overflow: "auto",
-                padding: "16px 24px 0",
+                padding: "8px 24px 0",
             });
             applyNativeScrollbarClasses(body);
 
@@ -1507,7 +1586,6 @@ app.registerExtension({
             };
 
             const updateRepoMeta = (repoName, sizeBytes) => {
-                const backupUrl = repoName ? `https://huggingface.co/${repoName}` : "";
                 const sizeLabel = formatSizeGb(sizeBytes);
 
                 backupPanel.metaEl.innerHTML = "";
@@ -1517,24 +1595,14 @@ app.registerExtension({
                     return;
                 }
 
-                const makeLink = () => {
-                    const link = document.createElement("a");
-                    link.className = "hf-repo-link";
-                    link.href = backupUrl;
-                    link.target = "_blank";
-                    link.rel = "noopener noreferrer";
-                    link.textContent = repoName;
-                    return link;
-                };
-
-                const panelLink = makeLink();
-                backupPanel.metaEl.appendChild(panelLink);
                 if (sizeLabel) {
                     const size = document.createElement("span");
-                    size.textContent = ` \u00b7 ${sizeLabel}`;
+                    size.textContent = `Size: ${sizeLabel}`;
                     backupPanel.metaEl.appendChild(size);
+                    backupPanel.metaEl.style.display = "block";
+                } else {
+                    backupPanel.metaEl.style.display = "none";
                 }
-                backupPanel.metaEl.style.display = "block";
             };
 
             const updateActions = () => {
@@ -1553,6 +1621,100 @@ app.registerExtension({
                 closeIconButton.disabled = busy;
                 closeIconButton.style.opacity = busy ? "0.5" : "1";
                 closeIconButton.style.cursor = busy ? "default" : "pointer";
+                refreshRepoBtn.disabled = busy;
+                createRepoBtn.disabled = busy;
+                repoInput.disabled = busy;
+            };
+
+            refreshRepoBtn.onclick = async () => {
+                const rawVal = repoInput.value;
+                const parsed = parseRepoName(rawVal);
+                repoInput.value = parsed;
+                if (!parsed) {
+                    showToast("Repository name/path cannot be empty.", "error");
+                    return;
+                }
+                setBusy(true, "Updating and verifying backup repository...");
+                try {
+                    app.ui.settings.setSettingValue("downloaderbackup.repo_name", parsed);
+                    await loadTree();
+                    showToast("Repository name updated and reloaded.", "success");
+                } catch (e) {
+                    showToast(`Failed to load repository: ${e.message || e}`, "error");
+                } finally {
+                    setBusy(false);
+                }
+            };
+
+            createRepoBtn.onclick = async () => {
+                const name = prompt("Enter the repository name (e.g. 'my-backup' or 'username/my-backup'):");
+                if (name === null) return; // Cancelled
+                const parsedName = parseRepoName(name);
+                if (!parsedName) {
+                    showToast("Repository name cannot be empty.", "error");
+                    return;
+                }
+
+                setBusy(true, "Creating Hugging Face repository...");
+                try {
+                    const res = await requestJson("/create_hf_backup_repo", {
+                        method: "POST",
+                        body: JSON.stringify({ repo_name: parsedName }),
+                    });
+                    
+                    if (res.status === "ok" && res.repo_name) {
+                        repoInput.value = res.repo_name;
+                        app.ui.settings.setSettingValue("downloaderbackup.repo_name", res.repo_name);
+                        showToast(`Repository created successfully: ${res.repo_name}`, "success");
+                        await loadTree();
+                    } else {
+                        throw new Error(res.message || "Failed to create repository");
+                    }
+                } catch (e) {
+                    const errMsg = e.message || String(e);
+                    
+                    // Render modal dialog for the error so the link is clickable
+                    const errOverlay = document.createElement("div");
+                    applyTemplateDialogOverlayStyle(errOverlay, 10005);
+                    const errPanel = document.createElement("div");
+                    applyTemplateDialogPanelStyle(errPanel, {
+                        minWidth: "320px",
+                        maxWidth: "520px",
+                        padding: "20px",
+                        gap: "12px",
+                    });
+                    
+                    const title = document.createElement("div");
+                    title.textContent = "Repository Creation Failed";
+                    title.style.fontSize = "16px";
+                    title.style.fontWeight = "bold";
+                    title.style.color = "#ff6b6b";
+                    
+                    const desc = document.createElement("div");
+                    desc.style.fontSize = "13px";
+                    desc.style.lineHeight = "1.4";
+                    
+                    if (errMsg.includes("settings/tokens") || errMsg.includes("Write") || errMsg.includes("token")) {
+                        desc.innerHTML = `Permission denied. Your Hugging Face token may be invalid or missing 'Write' permissions.<br/><br/>Please create a new token with <strong>Write</strong> permissions at <a href="https://huggingface.co/settings/tokens" target="_blank" style="color: var(--primary-color, #4aa3ff); text-decoration: underline;">huggingface.co/settings/tokens</a> and configure it in your ComfyUI settings under HuggingFace Downloader.`;
+                    } else {
+                        desc.textContent = errMsg;
+                    }
+                    
+                    const closeBtn = createButton("Close", "default");
+                    closeBtn.onclick = () => errOverlay.remove();
+                    const actionRow = document.createElement("div");
+                    actionRow.style.display = "flex";
+                    actionRow.style.justifyContent = "flex-end";
+                    actionRow.appendChild(closeBtn);
+                    
+                    errPanel.appendChild(title);
+                    errPanel.appendChild(desc);
+                    errPanel.appendChild(actionRow);
+                    errOverlay.appendChild(errPanel);
+                    document.body.appendChild(errOverlay);
+                } finally {
+                    setBusy(false);
+                }
             };
 
             const clearBackupSelection = () => {
@@ -1596,7 +1758,11 @@ app.registerExtension({
 
                 if (payload.backup_error) {
                     backupPanel.errorEl.style.display = "block";
-                    backupPanel.errorEl.textContent = payload.backup_error;
+                    if (payload.backup_error.includes("401") || payload.backup_error.includes("403") || payload.backup_error.includes("token")) {
+                        backupPanel.errorEl.innerHTML = `Failed to access backup repository. Check your token permissions.<br/>Create a 'Write' token at <a href="https://huggingface.co/settings/tokens" target="_blank" style="color: #4aa3ff; text-decoration: underline;">huggingface.co/settings/tokens</a>.`;
+                    } else {
+                        backupPanel.errorEl.textContent = payload.backup_error;
+                    }
                 }
 
                 updateActions();
