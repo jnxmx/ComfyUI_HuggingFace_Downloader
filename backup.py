@@ -106,8 +106,11 @@ def _find_manager_cli_script(comfy_dir: str) -> str:
 
 
 def _parse_repo_name(repo_name_or_link: str) -> str:
-    parsed = parse_link(repo_name_or_link)
-    return parsed.get("repo", repo_name_or_link)
+    try:
+        parsed = parse_link(repo_name_or_link)
+        return parsed.get("repo", repo_name_or_link)
+    except Exception:
+        return repo_name_or_link
 
 
 def _settings_file_exists(path: str = "user/default/comfy.settings.json") -> bool:
