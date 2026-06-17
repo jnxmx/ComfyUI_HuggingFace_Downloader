@@ -5711,6 +5711,16 @@ app.registerExtension({
                 forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
                     if (!node || typeof node !== "object") return;
                     node.has_errors = false;
+                    
+                    if (node.old_color !== undefined) {
+                        node.color = node.old_color;
+                        delete node.old_color;
+                    }
+                    if (node.old_bgcolor !== undefined) {
+                        node.bgcolor = node.old_bgcolor;
+                        delete node.old_bgcolor;
+                    }
+
                     const inputs = Array.isArray(node.inputs) ? node.inputs : [];
                     for (const slot of inputs) {
                         if (slot && typeof slot === "object") {
@@ -6919,14 +6929,12 @@ app.registerExtension({
                         } catch (e) {}
                     }
                     
-                    clickNativeRefreshButton();
-
                     // Phase 1: Let ComfyUI discover the downloaded file natively
                     // (adapted from upstream PR #12317 refresh-after-download pattern)
                     const missingModelStore = await resolveMissingModelStore();
                     if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
                         try {
-                            await missingModelStore.refreshMissingModels();
+                            await missingModelStore.refreshMissingModels({ silent: true });
                         } catch (e) {
                             console.warn("[AutoDownload] Failed to run store.refreshMissingModels:", e);
                         }
