@@ -6907,6 +6907,20 @@ app.registerExtension({
                 };
 
                 const runRefresh = async () => {
+                    if (app && typeof app.refreshComboInNodes === "function") {
+                        try {
+                            await app.refreshComboInNodes();
+                        } catch (e) {}
+                    }
+                    
+                    if (typeof useCommandStore !== "undefined") {
+                        try {
+                            await useCommandStore().execute('Comfy.RefreshNodeDefinitions');
+                        } catch (e) {}
+                    }
+                    
+                    clickNativeRefreshButton();
+
                     // Phase 1: Let ComfyUI discover the downloaded file natively
                     // (adapted from upstream PR #12317 refresh-after-download pattern)
                     const missingModelStore = await resolveMissingModelStore();
@@ -6923,20 +6937,6 @@ app.registerExtension({
                             console.warn("[AutoDownload] Failed to run native refreshMissingModels:", e);
                         }
                     }
-                    
-                    if (app && typeof app.refreshComboInNodes === "function") {
-                        try {
-                            await app.refreshComboInNodes();
-                        } catch (e) {}
-                    }
-                    
-                    if (typeof useCommandStore !== "undefined") {
-                        try {
-                            await useCommandStore().execute('Comfy.RefreshNodeDefinitions');
-                        } catch (e) {}
-                    }
-                    
-                    clickNativeRefreshButton();
                     
                     // Phase 2: Clean up stale validation errors (red frames from
                     // previous failed execution attempts — these won't auto-clear)
