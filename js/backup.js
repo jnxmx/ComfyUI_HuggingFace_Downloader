@@ -198,7 +198,10 @@ app.registerExtension({
     background: var(--destructive-background-hover) !important;
 }
 .hf-backup-action-btn.p-button:disabled {
-    opacity: 0.6;
+    opacity: 0.4 !important;
+    background: var(--secondary-background, #333) !important;
+    color: var(--descrip-text, #999) !important;
+    cursor: not-allowed !important;
 }
 #backup-hf-dialog .hf-repo-link {
     color: var(--primary-color, var(--primary-background));
@@ -1625,6 +1628,14 @@ app.registerExtension({
                 refreshRepoBtn.disabled = busy;
                 createRepoBtn.disabled = busy;
                 repoInput.disabled = busy;
+
+                // Disable or enable all checkboxes in both trees depending on repo config status
+                for (const cb of backupState.checkboxes.values()) {
+                    cb.disabled = !hasRepo;
+                }
+                for (const cb of localState.checkboxes.values()) {
+                    cb.disabled = !hasRepo;
+                }
             };
 
             refreshRepoBtn.onclick = async () => {
