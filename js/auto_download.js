@@ -4007,10 +4007,20 @@ app.registerExtension({
             let currentSearchingFilename = "";
             const requestId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
-            const resumeRunIfPossible = () => {
+            const resumeRunIfPossible = async () => {
                 const resume = options?.resumeRun;
                 if (typeof resume !== "function") {
                     return;
+                }
+                if (typeof useCommandStore !== "undefined") {
+                    try {
+                        await useCommandStore().execute('Comfy.RefreshNodeDefinitions');
+                    } catch (e) {}
+                }
+                if (app && typeof app.refreshComboInNodes === "function") {
+                    try {
+                        await app.refreshComboInNodes();
+                    } catch (e) {}
                 }
                 try {
                     resume();
@@ -6953,6 +6963,33 @@ app.registerExtension({
                     }
                     if (typeof clearModelValidationErrorsFromFrontendState === "function") {
                         clearModelValidationErrorsFromFrontendState();
+                    }
+
+                    // Phase 3: Forcefully clean up any remaining stale visual red frames
+                    // (e.g. if ComfyUI natively cleared lastNodeErrors but forgot to restore node.color)
+                    const currentErrors = (typeof getNodeErrorsSnapshot === "function") ? getNodeErrorsSnapshot() : {};
+                    if (typeof forEachGraphNodeRecursive === "function") {
+                        forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
+                            if (!node || typeof node !== "object") return;
+                            const execId = String(node.id || "");
+                            if (currentErrors && currentErrors[execId]) {
+                                return; // Node still has a valid execution error
+                            }
+                            if (node.has_errors) {
+                                node.has_errors = false;
+                            }
+                            if (node.old_color !== undefined) {
+                                node.color = node.old_color;
+                                delete node.old_color;
+                            }
+                            if (node.old_bgcolor !== undefined) {
+                                node.bgcolor = node.old_bgcolor;
+                                delete node.old_bgcolor;
+                            }
+                        });
+                        if (app?.canvas?.setDirty) {
+                            app.canvas.setDirty(true, true);
+                        }
                     }
                 };
 
