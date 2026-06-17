@@ -254,6 +254,22 @@ app.registerExtension({
                     max-height: 48px;
                     box-sizing: border-box;
                 }
+                #${PANEL_ID} .hf-downloader-progress-container {
+                    position: absolute;
+                    left: 0;
+                    bottom: 0;
+                    right: 0;
+                    height: 2px;
+                    background: rgba(0, 0, 0, 0.15);
+                    pointer-events: none;
+                    overflow: hidden;
+                }
+                #${PANEL_ID} .hf-downloader-progress-bar {
+                    height: 100%;
+                    width: 0%;
+                    background: #4aa3ff;
+                    transition: width 200ms ease-out, background-color 200ms ease-in-out;
+                }
                 #${PANEL_ID} .hf-downloader-item.has-detail {
                     height: auto;
                     min-height: 74px;
@@ -705,6 +721,13 @@ app.registerExtension({
             actions.appendChild(repoLink);
             actions.appendChild(retryBtn);
 
+            const progressContainer = document.createElement("div");
+            progressContainer.className = "hf-downloader-progress-container";
+            const progressBar = document.createElement("div");
+            progressBar.className = "hf-downloader-progress-bar";
+            progressContainer.appendChild(progressBar);
+            item.appendChild(progressContainer);
+
             item.appendChild(leading);
             item.appendChild(content);
             item.appendChild(status);
@@ -723,7 +746,8 @@ app.registerExtension({
                 actions,
                 agreementHint,
                 repoLink,
-                retryBtn
+                retryBtn,
+                progressBar
             };
         };
 
@@ -750,8 +774,19 @@ app.registerExtension({
             const totalBytes = info.total_bytes || 0;
             const downloadedBytes = info.downloaded_bytes || 0;
             refs.sizeText.textContent = totalBytes
-                ? `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`
-                : formatBytes(downloadedBytes);
+                ? formatBytes(totalBytes)
+                : (downloadedBytes ? formatBytes(downloadedBytes) : "");
+
+            let pct = 0;
+            if (SUCCESS_STATUSES.has(info.status)) {
+                pct = 100;
+            } else if (info.status === "downloading" || info.status === "copying" || info.status === "finalizing") {
+                pct = totalBytes ? Math.min(100, Math.max(0, (downloadedBytes / totalBytes) * 100)) : 0;
+            }
+            if (refs.progressBar) {
+                refs.progressBar.style.width = `${pct}%`;
+                refs.progressBar.style.backgroundColor = statusColor(info.status);
+            }
 
             const iconMeta = stateIconForStatus(info.status);
             if (refs.stateIcon.dataset.iconKey !== iconMeta.key) {
