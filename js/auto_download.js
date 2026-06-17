@@ -4561,6 +4561,8 @@ app.registerExtension({
             "wanvideo_wrapper",
             "wan video wrapper",
             "wanvideo",
+            "removal",
+            "model",
         ];
 
         const getNodeErrorsSnapshot = () => {
