@@ -916,12 +916,6 @@ app.registerExtension({
                         await maybePromise;
                     }
                 }
-                if (window.hfDownloader && typeof window.hfDownloader.refreshComboInNodesRecursive === "function") {
-                    try {
-                        await window.hfDownloader.refreshComboInNodesRecursive();
-                    } catch (e) {}
-                }
-                await new Promise((resolve) => setTimeout(resolve, 250));
 
                 const clickNativeRefreshButton = () => {
                     const btn = document.querySelector('#comfy-refresh-button') ||
@@ -940,19 +934,9 @@ app.registerExtension({
 
                 clickNativeRefreshButton();
 
-                setTimeout(async () => {
-                    try {
-                        if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
-                            await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
-                        }
-                    } catch (_) {}
-                    try {
-                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                            app.graph.setDirtyCanvas(true, true);
-                        }
-                        window.dispatchEvent(new Event('resize'));
-                    } catch (_) {}
-                }, 250);
+                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                    app.graph.setDirtyCanvas(true, true);
+                }
 
                 refreshSucceeded = true;
             } catch (err) {
@@ -1185,24 +1169,12 @@ app.registerExtension({
                             await app.refreshComboInNodes();
                         }
                         if (window.hfDownloader && typeof window.hfDownloader.refreshComboInNodesRecursive === "function") {
-                            try {
-                                await window.hfDownloader.refreshComboInNodesRecursive();
-                            } catch (e) {}
+                            // Removed: no longer using custom recursive combo refresh
                         }
                         
-                        setTimeout(async () => {
-                            try {
-                                if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
-                                    await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
-                                }
-                            } catch (_) {}
-                            try {
-                                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                                    app.graph.setDirtyCanvas(true, true);
-                                }
-                                window.dispatchEvent(new Event('resize'));
-                            } catch (_) {}
-                        }, 250);
+                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                            app.graph.setDirtyCanvas(true, true);
+                        }
                     } catch (e) {
                         console.warn("[HF Downloader] Failed to auto-clear completed models during status poll:", e);
                     }

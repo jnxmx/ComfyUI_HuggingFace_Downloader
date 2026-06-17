@@ -5751,14 +5751,12 @@ app.registerExtension({
 
         const clearModelValidationErrorsFromFrontendState = async () => {
             const snapshot = getNodeErrorsSnapshot();
-            if (!snapshot || Object.keys(snapshot).length === 0) {
-                applyNodeErrorsFallback(null);
+            if (!snapshot) {
                 return false;
             }
 
             const stripped = stripModelValidationErrorsFromNodeErrors(snapshot);
             if (!stripped.changed || stripped.removedCount <= 0) {
-                applyNodeErrorsFallback(snapshot);
                 return false;
             }
 
@@ -5803,38 +5801,7 @@ app.registerExtension({
             return updatedInPlace;
         };
 
-        const refreshComboInNodesRecursive = async () => {
-            if (!app || typeof api === "undefined" || typeof api.getNodeDefs !== "function") {
-                return;
-            }
-            try {
-                const defs = await api.getNodeDefs();
-                forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
-                    if (!node || !node.type || !node.widgets) {
-                        return;
-                    }
-                    const def = defs[node.type];
-                    if (!def || !def.input) {
-                        return;
-                    }
-                    for (const widget of node.widgets) {
-                        if (!widget || !widget.name) {
-                            continue;
-                        }
-                        const isCombo = widget.type === "combo" || (widget.options && Array.isArray(widget.options.values));
-                        if (!isCombo) {
-                            continue;
-                        }
-                        const inputDef = def.input.required?.[widget.name] || def.input.optional?.[widget.name];
-                        if (inputDef && Array.isArray(inputDef[0])) {
-                            widget.options.values = inputDef[0];
-                        }
-                    }
-                });
-            } catch (err) {
-                console.warn("[AutoDownload] Error in refreshComboInNodesRecursive:", err);
-            }
-        };
+
 
         const clearMissingModelStoreState = async (candidates = []) => {
             if (!Array.isArray(candidates) || !candidates.length) {
@@ -6940,6 +6907,8 @@ app.registerExtension({
                 };
 
                 const runRefresh = async () => {
+                    // Phase 1: Let ComfyUI discover the downloaded file natively
+                    // (adapted from upstream PR #12317 refresh-after-download pattern)
                     const missingModelStore = await resolveMissingModelStore();
                     if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
                         try {
@@ -6960,9 +6929,6 @@ app.registerExtension({
                             await app.refreshComboInNodes();
                         } catch (e) {}
                     }
-                    try {
-                        await refreshComboInNodesRecursive();
-                    } catch (e) {}
                     
                     if (typeof useCommandStore !== "undefined") {
                         try {
@@ -6971,21 +6937,14 @@ app.registerExtension({
                     }
                     
                     clickNativeRefreshButton();
-
-                    setTimeout(async () => {
-                        try {
-                            await clearModelValidationErrorsFromFrontendState();
-                        } catch (_) {}
-                        try {
-                            if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                                app.graph.setDirtyCanvas(true, true);
-                            }
-                            window.dispatchEvent(new Event('resize'));
-                        } catch (_) {}
-                    }, 250);
                     
+                    // Phase 2: Clean up stale validation errors (red frames from
+                    // previous failed execution attempts — these won't auto-clear)
                     if (typeof clearMissingModelStoreState === "function") {
                         clearMissingModelStoreState([]);
+                    }
+                    if (typeof clearModelValidationErrorsFromFrontendState === "function") {
+                        clearModelValidationErrorsFromFrontendState();
                     }
                 };
 
@@ -6994,20 +6953,18 @@ app.registerExtension({
                     const path = event.detail?.path;
                     if (path) {
                         try {
-                            await clearCompletedModelsFromStore(path);
+                            const cleared = await clearCompletedModelsFromStore(path);
+                            if (cleared) {
+                                await clearModelValidationErrorsFromFrontendState();
+                                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                                    app.graph.setDirtyCanvas(true, true);
+                                }
+                            }
                         } catch (e) {
                             console.warn("[AutoDownload] Error clearing completed model from store:", e);
                         }
                     }
-                    try {
-                        await clearModelValidationErrorsFromFrontendState();
-                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                            app.graph.setDirtyCanvas(true, true);
-                        }
-                    } catch (e) {
-                        console.warn("[AutoDownload] Error clearing model validation errors:", e);
-                    }
-                    // Trigger once immediately
+                    // Trigger full native refresh after a short delay
                     setTimeout(runRefresh, 500);
                 });
 
@@ -7025,11 +6982,10 @@ app.registerExtension({
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
         registerGlobalAction("clearCompletedModelsFromStore", clearCompletedModelsFromStore);
         registerGlobalAction("clearModelValidationErrorsFromFrontendState", clearModelValidationErrorsFromFrontendState);
-        registerGlobalAction("refreshComboInNodesRecursive", refreshComboInNodesRecursive);
         setupMissingModelsDialogObserver();
-        // void installNativeMissingModelsSurfaceHook();
+        void installNativeMissingModelsSurfaceHook();
         installWorkflowOpenLoadGraphHook();
-        // installWorkflowOpenMissingModelsWatcher();
+        installWorkflowOpenMissingModelsWatcher();
         installRunQueueCommandHooksNativeAware();
         installDisableMissingModelsRedFramesObserver();
     }
