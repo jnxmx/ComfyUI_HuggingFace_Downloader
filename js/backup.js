@@ -1608,16 +1608,17 @@ app.registerExtension({
             const updateActions = () => {
                 const backupItems = getSelectedItems(backupState);
                 const localItems = getSelectedItems(localState);
+                const hasRepo = Boolean((repoInput.value || "").trim());
 
                 const hasBackupSelection = backupSelectionTouched && backupItems.length > 0;
                 backupDownloadAllBtn.textContent = hasBackupSelection
                     ? "↓ Download selected only"
                     : "↓ Download full backup";
                 setBackupSelectionButtonsVisible(hasBackupSelection);
-                backupDownloadAllBtn.disabled = busy;
-                backupDeleteSelectedBtn.disabled = busy || backupItems.length === 0;
+                backupDownloadAllBtn.disabled = busy || !hasRepo;
+                backupDeleteSelectedBtn.disabled = busy || !hasRepo || backupItems.length === 0;
                 backupClearSelectionBtn.disabled = busy || backupItems.length === 0;
-                localAddSelectedBtn.disabled = busy || localItems.length === 0;
+                localAddSelectedBtn.disabled = busy || !hasRepo || localItems.length === 0;
                 closeIconButton.disabled = busy;
                 closeIconButton.style.opacity = busy ? "0.5" : "1";
                 closeIconButton.style.cursor = busy ? "default" : "pointer";
