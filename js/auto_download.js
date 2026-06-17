@@ -6960,15 +6960,15 @@ app.registerExtension({
                 };
 
                 const runRefresh = async () => {
-                    if (app && typeof app.refreshComboInNodes === "function") {
-                        try {
-                            await app.refreshComboInNodes();
-                        } catch (e) {}
-                    }
-                    
                     if (typeof useCommandStore !== "undefined") {
                         try {
                             await useCommandStore().execute('Comfy.RefreshNodeDefinitions');
+                        } catch (e) {}
+                    }
+
+                    if (app && typeof app.refreshComboInNodes === "function") {
+                        try {
+                            await app.refreshComboInNodes();
                         } catch (e) {}
                     }
                     
