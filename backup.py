@@ -1660,10 +1660,17 @@ def get_backup_browser_tree(repo_name_or_link: str) -> dict:
             "backup_total_size_bytes": backup_total_size_bytes,
         }
     except Exception as e:
+        error_msg = str(e)
+        user_friendly_error = error_msg
+        if "404" in error_msg or "Repository Not Found" in error_msg:
+            user_friendly_error = f"Repository '{repo_name}' does not exist on Hugging Face. You can click 'Create new backup repo' to create it."
+        elif "401" in error_msg or "403" in error_msg or "Unauthorized" in error_msg:
+            user_friendly_error = "Permission denied / Unauthorized access. Check your token permissions. Create a 'Write' token at huggingface.co/settings/tokens."
+
         return {
             "local": local_nodes,
             "backup": backup_nodes,
-            "backup_error": str(e),
+            "backup_error": user_friendly_error,
             "repo_name": repo_name,
             "backup_total_size_bytes": backup_total_size_bytes,
         }
