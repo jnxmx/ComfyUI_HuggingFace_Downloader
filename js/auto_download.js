@@ -5392,7 +5392,18 @@ app.registerExtension({
                 message.includes("value not in list") ||
                 type.includes("value_not_in_list") ||
                 detailsLower.includes("not in [");
-            if (!isValueNotInList) {
+            
+            const isMissingModelException = 
+                message.includes("missing model") ||
+                detailsLower.includes("missing model") ||
+                message.includes("not found") ||
+                detailsLower.includes("not found") ||
+                message.includes("does not exist") ||
+                detailsLower.includes("does not exist") ||
+                type === "model_missing" ||
+                type === "validation_error";
+
+            if (!isValueNotInList && !isMissingModelException) {
                 return false;
             }
 
@@ -5725,10 +5736,15 @@ app.registerExtension({
                     if (node.old_color !== undefined) {
                         node.color = node.old_color;
                         delete node.old_color;
+                    } else if (typeof node.color === "string" && (node.color.toLowerCase() === "#ff0000" || node.color.toLowerCase() === "red")) {
+                        delete node.color;
                     }
+
                     if (node.old_bgcolor !== undefined) {
                         node.bgcolor = node.old_bgcolor;
                         delete node.old_bgcolor;
+                    } else if (typeof node.bgcolor === "string" && (node.bgcolor.toLowerCase() === "#ff0000" || node.bgcolor.toLowerCase() === "red")) {
+                        delete node.bgcolor;
                     }
 
                     const inputs = Array.isArray(node.inputs) ? node.inputs : [];
@@ -5968,6 +5984,23 @@ app.registerExtension({
                                     missingModelStore.missingModelCandidates.value = nextCandidates;
                                 } else {
                                     missingModelStore.missingModelCandidates = nextCandidates;
+                                }
+                            }
+                        }
+                    }
+                    
+                    const missingNodeModelsObj = unwrapStoreValue(missingModelStore.missingNodeModels);
+                    if (missingNodeModelsObj && typeof missingNodeModelsObj === "object") {
+                        for (const [nodeId, models] of Object.entries(missingNodeModelsObj)) {
+                            if (Array.isArray(models)) {
+                                const originalLength = models.length;
+                                const filtered = models.filter((m) => {
+                                    const base = String(m).split(/[/\\]/).pop().trim().toLowerCase();
+                                    return !normalizedBases.includes(base);
+                                });
+                                if (filtered.length !== originalLength) {
+                                    changed = true;
+                                    missingNodeModelsObj[nodeId] = filtered;
                                 }
                             }
                         }
@@ -6981,10 +7014,15 @@ app.registerExtension({
                             if (node.old_color !== undefined) {
                                 node.color = node.old_color;
                                 delete node.old_color;
+                            } else if (typeof node.color === "string" && (node.color.toLowerCase() === "#ff0000" || node.color.toLowerCase() === "red")) {
+                                delete node.color;
                             }
+
                             if (node.old_bgcolor !== undefined) {
                                 node.bgcolor = node.old_bgcolor;
                                 delete node.old_bgcolor;
+                            } else if (typeof node.bgcolor === "string" && (node.bgcolor.toLowerCase() === "#ff0000" || node.bgcolor.toLowerCase() === "red")) {
+                                delete node.bgcolor;
                             }
                         });
                         if (app?.canvas?.setDirty) {
