@@ -559,9 +559,9 @@ def run_download(parsed_data: dict,
         # Provide clearer feedback for common authentication/authorization problems
         if "Invalid credentials" in str(e) or "401" in str(e):
             error_msg = (
-                f"Invalid Hugging Face token for repository '{parsed_data['repo']}'.\n"
-                "Add a valid token in ComfyUI settings or set the HF_TOKEN environment variable.\n"
-                "Create/manage tokens at https://huggingface.co/settings/tokens/"
+                f"Invalid or missing Hugging Face token for repository '{parsed_data['repo']}'. "
+                "Please add a valid token in the ComfyUI settings or set the HF_TOKEN environment variable. "
+                "You can create or manage your tokens at https://huggingface.co/settings/tokens/"
             )
         elif "403" in str(e) or "gated" in str(e) or "permission" in str(e):
             repo_url = f"https://huggingface.co/{parsed_data['repo']}"

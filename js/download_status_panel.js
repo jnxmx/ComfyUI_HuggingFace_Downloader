@@ -357,6 +357,14 @@ app.registerExtension({
                     word-break: break-word;
                     display: none;
                 }
+                #${PANEL_ID} .hf-downloader-error a {
+                    color: #4aa3ff;
+                    text-decoration: underline;
+                    cursor: pointer;
+                }
+                #${PANEL_ID} .hf-downloader-error a:hover {
+                    color: #79beff;
+                }
                 #${PANEL_ID} .hf-downloader-actions {
                     margin-top: 6px;
                     display: none;
@@ -751,6 +759,25 @@ app.registerExtension({
             };
         };
 
+        const renderErrorWithLinks = (container, text) => {
+            container.innerHTML = "";
+            if (!text) return;
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const parts = text.split(urlRegex);
+            for (const part of parts) {
+                if (urlRegex.test(part)) {
+                    const link = document.createElement("a");
+                    link.href = part;
+                    link.textContent = part;
+                    link.target = "_blank";
+                    link.rel = "noopener noreferrer";
+                    container.appendChild(link);
+                } else {
+                    container.appendChild(document.createTextNode(part));
+                }
+            }
+        };
+
         const updateItemNode = (refs, info) => {
             refs.lastInfo = info;
             refs.root.setAttribute("data-download-id", info.id);
@@ -810,11 +837,11 @@ app.registerExtension({
                 const renderedError = isGated
                     ? "Gated repository. Accept the model agreement on Hugging Face, then retry."
                     : errorText;
-                refs.error.textContent = renderedError;
+                renderErrorWithLinks(refs.error, renderedError);
                 refs.error.title = renderedError;
                 refs.error.style.display = "block";
             } else {
-                refs.error.textContent = "";
+                renderErrorWithLinks(refs.error, "");
                 refs.error.title = "";
                 refs.error.style.display = "none";
             }
