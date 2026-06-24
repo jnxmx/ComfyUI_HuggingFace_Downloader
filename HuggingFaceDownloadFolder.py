@@ -26,7 +26,7 @@ class HuggingFaceDownloadFolder(io.ComfyNode):
                 options.append(io.DynamicCombo.Option(f, []))
 
         return io.Schema(
-            node_id="HuggingFaceDownloadFolder",
+            node_id="Hugging Face Download Folder",
             display_name="Hugging Face Download Folder",
             category="Hugging Face Downloaders 🤗",
             inputs=[
