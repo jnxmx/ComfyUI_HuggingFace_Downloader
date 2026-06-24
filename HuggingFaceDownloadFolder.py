@@ -34,7 +34,7 @@ class HuggingFaceDownloadFolder(io.ComfyNode):
                 io.String.Input("link", default="")
             ],
             outputs=[
-                io.AnyType.Output(display_name="folder name")
+                io.AnyType.Output(display_name="model_path")
             ]
         )
 
