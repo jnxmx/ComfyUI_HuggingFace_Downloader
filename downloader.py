@@ -23,7 +23,8 @@ from huggingface_hub import (
     list_repo_files
 )
 
-os.environ.setdefault("HF_HUB_ENABLE_HF_XET", "1")
+os.environ["HF_HUB_ENABLE_HF_XET"] = "0"
+os.environ["HF_HUB_DISABLE_XET"] = "1"
 
 token_override = os.getenv("HF_TOKEN")
 _sha_max_env = os.getenv("HF_DOWNLOADER_SHA_MAX_BYTES", "0")
@@ -444,8 +445,8 @@ def run_download(parsed_data: dict,
 
                 proc = subprocess.Popen(
                     [sys.executable, "-c", script, payload_path, result_path],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stdout=None,
+                    stderr=None,
                 )
 
                 while True:
