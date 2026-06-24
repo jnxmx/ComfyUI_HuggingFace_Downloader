@@ -66,3 +66,102 @@ app.registerExtension({
     },
   ],
 });
+
+// Dynamic widget visibility for Hugging Face Downloaders
+app.registerExtension({
+  name: "ComfyUI_HuggingFace_Downloader.DynamicVisibility",
+  async beforeRegisterNodeDef(nodeType, nodeData, app) {
+    if (nodeData.name !== "Hugging Face Download Model" && nodeData.name !== "Hugging Face Download Folder") {
+      return;
+    }
+
+    const visibilityConditions = {};
+
+    const processInputs = (inputs) => {
+      if (!inputs) return;
+      for (const [inputName, inputConfig] of Object.entries(inputs)) {
+        if (Array.isArray(inputConfig) && inputConfig[1] && inputConfig[1].visible_if) {
+          visibilityConditions[inputName] = inputConfig[1].visible_if;
+        }
+      }
+    };
+
+    processInputs(nodeData.input?.required);
+    processInputs(nodeData.input?.optional);
+
+    if (Object.keys(visibilityConditions).length > 0) {
+      const onNodeCreated = nodeType.prototype.onNodeCreated;
+      nodeType.prototype.onNodeCreated = function() {
+        const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
+        const originalTypes = {};
+
+        const updateVisibility = () => {
+          let changed = false;
+          for (const [targetName, condition] of Object.entries(visibilityConditions)) {
+            const targetWidget = this.widgets.find(w => w.name === targetName);
+            if (!targetWidget) continue;
+
+            if (!(targetName in originalTypes)) {
+              originalTypes[targetName] = targetWidget.type;
+            }
+
+            let allConditionsMet = true;
+            for (const [condWidgetName, condValue] of Object.entries(condition)) {
+              const condWidget = this.widgets.find(w => w.name === condWidgetName);
+              if (!condWidget) {
+                allConditionsMet = false;
+                break;
+              }
+
+              if (condWidget.value !== condValue) {
+                allConditionsMet = false;
+                break;
+              }
+            }
+
+            const newType = allConditionsMet ? originalTypes[targetName] : "hidden";
+            if (targetWidget.type !== newType) {
+              targetWidget.type = newType;
+              changed = true;
+            }
+          }
+
+          if (changed) {
+            this.setSize([this.size[0], this.computeSize()[1]]);
+            app.graph.setDirtyCanvas(true);
+          }
+        };
+
+        // Bind callbacks to the trigger widgets
+        for (const condition of Object.values(visibilityConditions)) {
+          for (const condWidgetName of Object.keys(condition)) {
+            const condWidget = this.widgets.find(w => w.name === condWidgetName);
+            if (condWidget && !condWidget._visibilityHooked) {
+              condWidget._visibilityHooked = true;
+              const originalCallback = condWidget.callback;
+              condWidget.callback = function() {
+                const cbResult = originalCallback ? originalCallback.apply(this, arguments) : undefined;
+                updateVisibility();
+                return cbResult;
+              };
+            }
+          }
+        }
+
+        // Initial update
+        updateVisibility();
+
+        // Hook configure
+        const onConfigure = this.onConfigure;
+        this.onConfigure = function() {
+          const confResult = onConfigure ? onConfigure.apply(this, arguments) : undefined;
+          updateVisibility();
+          return confResult;
+        };
+
+        return r;
+      };
+    }
+  }
+});
+

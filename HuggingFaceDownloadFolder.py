@@ -1,5 +1,6 @@
 import os
 import threading
+from comfy_api.latest import io
 
 class AnyType(str):
     def __ne__(self, __value: object) -> bool:
@@ -12,26 +13,30 @@ def _make_target_folder_list():
     subfolders = get_model_subfolders()
     return ["custom"] + subfolders
 
-
-class HuggingFaceDownloadFolder:
-    CATEGORY = "Hugging Face Downloaders 🤗"
-    OUTPUT_NODE = True
-
+class HuggingFaceDownloadFolder(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "target_folder": (_make_target_folder_list(), {"default": "loras"}),
-                "link": ("STRING", {"default": ""}),
-            },
-            "optional": {
-                "custom_path": ("STRING", {
-                    "default": "",
-                    "visible_if": {"target_folder": "custom"}
-                }),
-                # "download_in_background": ("BOOLEAN", {"default": False, "label": "Download in background"}),
-            }
-        }
+    def define_schema(cls):
+        options = []
+        for f in _make_target_folder_list():
+            if f == "custom":
+                options.append(io.DynamicCombo.Option("custom", [io.String.Input("custom_path", default="")]))
+            else:
+                options.append(io.DynamicCombo.Option(f, []))
+
+        return io.Schema(
+            node_id="HuggingFaceDownloadFolder",
+            display_name="Hugging Face Download Folder",
+            category="Hugging Face Downloaders 🤗",
+            inputs=[
+                io.DynamicCombo.Input("target_folder", options=options, default="loras"),
+                io.String.Input("link", default=""),
+                io.Bool.Input("download_in_background", default=False, tooltip="Download in background")
+            ],
+            outputs=[
+                io.MatchType.Output(template=io.MatchType.Template("output", [io.Any]), display_name="folder name")
+            ],
+            output_node=True
+        )
 
     @staticmethod
     def update_link_field(new_value, old_value):
@@ -49,32 +54,25 @@ class HuggingFaceDownloadFolder:
             print(f"[ERROR] Failed to parse link: {e}")
             return new_value
 
-    RETURN_TYPES = (any_typ,)
-    RETURN_NAMES = ("folder name",)
-    FUNCTION = "download_folder"
-
-    def download_folder(self, target_folder, link, custom_path="", download_in_background=False):
-        """
-        1) If user picks 'custom', final_folder= custom_path, else final_folder= target_folder
-        2) parse link => subfolder path => last_segment
-           if subfolder empty => use second half of the repo => "clip-vit-large-patch14"
-        3) call run_download_folder
-        4) final node output => leftover from custom path minus first segment + last_segment
-        """
+    @classmethod
+    def execute(cls, target_folder: dict, link: str, download_in_background: bool) -> io.NodeOutput:
         from .parse_link import parse_link
         from .downloader import run_download_folder
 
+        selected_folder = target_folder["target_folder"]
+        custom_path = target_folder.get("custom_path", "")
+
         # Step 1: final_folder logic
-        if target_folder == "custom":
+        if selected_folder == "custom":
             final_folder = custom_path.strip().rstrip("/\\")
         else:
-            final_folder = target_folder.strip().rstrip("/\\")
+            final_folder = selected_folder.strip().rstrip("/\\")
 
         # Step 2: parse link
         try:
             parsed = parse_link(link)
         except Exception as e:
-            return (f"Error parsing link: {e}",)
+            return io.NodeOutput((f"Error parsing link: {e}",))
 
         remote_subfolder_path = parsed.get("subfolder", "").strip("/")
         if not remote_subfolder_path:
@@ -105,26 +103,27 @@ class HuggingFaceDownloadFolder:
             )
 
         # node output => leftover + last_segment if custom
-        if target_folder=="custom":
+        if selected_folder=="custom":
             segments=custom_path.strip("/\\").split("/")
             if len(segments)>1:
                 leftover_segments=segments[1:]
                 leftover="/".join(leftover_segments).strip("/")
                 if leftover and last_segment:
-                    return (leftover + "/" + last_segment,)
+                    return io.NodeOutput((leftover + "/" + last_segment,))
                 elif leftover:
-                    return (leftover,)
+                    return io.NodeOutput((leftover,))
                 elif last_segment:
-                    return (last_segment,)
+                    return io.NodeOutput((last_segment,))
                 else:
-                    return ("",)
+                    return io.NodeOutput(("",))
             else:
                 if last_segment:
-                    return (last_segment,)
+                    return io.NodeOutput((last_segment,))
                 else:
-                    return ("",)
+                    return io.NodeOutput(("",))
         else:
             if last_segment:
-                return (last_segment + "/",)
+                return io.NodeOutput((last_segment + "/",))
             else:
-                return ("",)
+                return io.NodeOutput(("",))
+

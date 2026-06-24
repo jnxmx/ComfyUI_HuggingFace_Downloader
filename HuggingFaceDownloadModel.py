@@ -1,5 +1,6 @@
 import os
 import threading
+from comfy_api.latest import io
 
 class AnyType(str):
     def __ne__(self, __value: object) -> bool:
@@ -16,25 +17,30 @@ def _make_target_folder_list():
     subfolders = get_model_subfolders()
     return ["custom"] + subfolders
 
-class HuggingFaceDownloadModel:
-    CATEGORY = "Hugging Face Downloaders 🤗"
-    OUTPUT_NODE = True
-
+class HuggingFaceDownloadModel(io.ComfyNode):
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "target_folder": (_make_target_folder_list(), {"default": "loras"}),
-                "link": ("STRING", {"default": ""}),
-            },
-            "optional": {
-                "custom_path": ("STRING", {
-                    "default": "",
-                    "visible_if": {"target_folder": "custom"}
-                }),
-                # "download_in_background": ("BOOLEAN", {"default": False, "label": "Download in background"}),
-            }
-        }
+    def define_schema(cls):
+        options = []
+        for f in _make_target_folder_list():
+            if f == "custom":
+                options.append(io.DynamicCombo.Option("custom", [io.String.Input("custom_path", default="")]))
+            else:
+                options.append(io.DynamicCombo.Option(f, []))
+
+        return io.Schema(
+            node_id="HuggingFaceDownloadModel",
+            display_name="Hugging Face Download Model",
+            category="Hugging Face Downloaders 🤗",
+            inputs=[
+                io.DynamicCombo.Input("target_folder", options=options, default="loras"),
+                io.String.Input("link", default=""),
+                io.Bool.Input("download_in_background", default=False, tooltip="Download in background")
+            ],
+            outputs=[
+                io.MatchType.Output(template=io.MatchType.Template("output", [io.Any]), display_name="model name")
+            ],
+            output_node=True
+        )
 
     @staticmethod
     def update_link_field(new_value, old_value):
@@ -53,33 +59,25 @@ class HuggingFaceDownloadModel:
             print(f"[ERROR] Failed to parse link: {e}")
             return new_value
 
-    RETURN_TYPES = (any_typ,)
-    RETURN_NAMES = ("model name",)
-    FUNCTION = "download_model"
-
-    def download_model(self, target_folder, link, custom_path="", download_in_background=False):
-        """
-        1) If user picks 'custom' in the combo, we interpret custom_path as final_folder, else just target_folder.
-        2) parse link => subfolder/file for single file
-        3) call run_download(...) which uses hf_hub_download so hf_xet can be used
-        4) node's return:
-           - if target_folder != 'custom', we do just the filename
-           - if 'custom', remove the first segment of custom_path (if any), then leftover + "/" + filename
-        """
+    @classmethod
+    def execute(cls, target_folder: dict, link: str, download_in_background: bool) -> io.NodeOutput:
         from .parse_link import parse_link
         from .downloader import run_download
 
+        selected_folder = target_folder["target_folder"]
+        custom_path = target_folder.get("custom_path", "")
+
         # Step 1: final_folder logic
-        if target_folder == "custom":
+        if selected_folder == "custom":
             final_folder = custom_path.strip().rstrip("/\\")
         else:
-            final_folder = target_folder.strip().rstrip("/\\")
+            final_folder = selected_folder.strip().rstrip("/\\")
 
         # Step 2: parse link
         try:
             parsed = parse_link(link)
         except Exception as e:
-            return (f"Error parsing link: {e}",)
+            return io.NodeOutput((f"Error parsing link: {e}",))
 
         # Step 3: run in background or sync
         if download_in_background:
@@ -99,24 +97,23 @@ class HuggingFaceDownloadModel:
                 target=_async_download,
                 daemon=True
             ).start()
-            # best guess: use parsed["file"]
+            
             if "file" in parsed:
                 guessed_file = parsed["file"].strip("/")
-                # if user used 'custom', do leftover logic
-                if target_folder == "custom":
+                if selected_folder == "custom":
                     segments = custom_path.strip("/\\").split("/")
                     if len(segments) > 1:
                         leftover = "/".join(segments[1:]).strip("/")
                         if leftover:
-                            return (leftover + "/" + os.path.basename(guessed_file),)
+                            return io.NodeOutput((leftover + "/" + os.path.basename(guessed_file),))
                         else:
-                            return (os.path.basename(guessed_file),)
+                            return io.NodeOutput((os.path.basename(guessed_file),))
                     else:
-                        return (os.path.basename(guessed_file),)
+                        return io.NodeOutput((os.path.basename(guessed_file),))
                 else:
-                    return (os.path.basename(guessed_file),)
+                    return io.NodeOutput((os.path.basename(guessed_file),))
             else:
-                return ("",)  # no file known
+                return io.NodeOutput(("",))
         else:
             # sync => we get final_message and local_path
             final_message, local_path = run_download(parsed, final_folder, sync=True)
@@ -132,17 +129,17 @@ class HuggingFaceDownloadModel:
 
                 # user wants leftover + "/" + filename if custom
                 filename = os.path.basename(local_path)
-                if target_folder == "custom":
+                if selected_folder == "custom":
                     segments = custom_path.strip("/\\").split("/")
                     if len(segments) > 1:
                         leftover = "/".join(segments[1:]).strip("/")
                         if leftover:
-                            return (leftover + "/" + filename,)
+                            return io.NodeOutput((leftover + "/" + filename,))
                         else:
-                            return (filename,)
+                            return io.NodeOutput((filename,))
                     else:
-                        return (filename,)
+                        return io.NodeOutput((filename,))
                 else:
-                    return (filename,)
+                    return io.NodeOutput((filename,))
             else:
-                return ("",)
+                return io.NodeOutput(("",))
