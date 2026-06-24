@@ -31,8 +31,7 @@ class HuggingFaceDownloadFolder(io.ComfyNode):
             category="Hugging Face Downloaders 🤗",
             inputs=[
                 io.DynamicCombo.Input("target_folder", options=options),
-                io.String.Input("link", default=""),
-                io.Boolean.Input("download_in_background", default=False, tooltip="Download in background")
+                io.String.Input("link", default="")
             ],
             outputs=[
                 io.AnyType.Output(display_name="folder name")
@@ -56,7 +55,7 @@ class HuggingFaceDownloadFolder(io.ComfyNode):
             return new_value
 
     @classmethod
-    def execute(cls, target_folder: dict, link: str, download_in_background: bool) -> io.NodeOutput:
+    def execute(cls, target_folder: dict, link: str) -> io.NodeOutput:
         from .parse_link import parse_link
         from .downloader import run_download_folder
 
@@ -86,22 +85,14 @@ class HuggingFaceDownloadFolder(io.ComfyNode):
         else:
             last_segment = os.path.basename(remote_subfolder_path)
 
-        # Step 3: run in background or sync
-        if download_in_background:
-            threading.Thread(
-                target=run_download_folder,
-                args=(parsed, final_folder),
-                kwargs={"remote_subfolder_path": remote_subfolder_path, "last_segment": last_segment},
-                daemon=True
-            ).start()
-        else:
-            run_download_folder(
-                parsed, 
-                final_folder,
-                remote_subfolder_path=remote_subfolder_path,
-                last_segment=last_segment,
-                sync=True
-            )
+        # Step 3: sync download
+        run_download_folder(
+            parsed, 
+            final_folder,
+            remote_subfolder_path=remote_subfolder_path,
+            last_segment=last_segment,
+            sync=True
+        )
 
         # node output => leftover + last_segment if custom
         if selected_folder=="custom":
@@ -127,4 +118,3 @@ class HuggingFaceDownloadFolder(io.ComfyNode):
                 return io.NodeOutput((last_segment + "/",))
             else:
                 return io.NodeOutput(("",))
-

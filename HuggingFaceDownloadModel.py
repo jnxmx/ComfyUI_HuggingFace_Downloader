@@ -35,8 +35,7 @@ class HuggingFaceDownloadModel(io.ComfyNode):
             category="Hugging Face Downloaders 🤗",
             inputs=[
                 io.DynamicCombo.Input("target_folder", options=options),
-                io.String.Input("link", default=""),
-                io.Boolean.Input("download_in_background", default=False, tooltip="Download in background")
+                io.String.Input("link", default="")
             ],
             outputs=[
                 io.AnyType.Output(display_name="model name")
@@ -61,7 +60,7 @@ class HuggingFaceDownloadModel(io.ComfyNode):
             return new_value
 
     @classmethod
-    def execute(cls, target_folder: dict, link: str, download_in_background: bool) -> io.NodeOutput:
+    def execute(cls, target_folder: dict, link: str) -> io.NodeOutput:
         from .parse_link import parse_link
         from .downloader import run_download
 
@@ -80,67 +79,31 @@ class HuggingFaceDownloadModel(io.ComfyNode):
         except Exception as e:
             return io.NodeOutput((f"Error parsing link: {e}",))
 
-        # Step 3: run in background or sync
-        if download_in_background:
-            def _async_download():
-                try:
-                    final_message, local_path = run_download(parsed, final_folder, sync=True)
-                    if local_path:
-                        import server
-                        import folder_paths
-                        if hasattr(folder_paths, "clear_cache"):
-                            folder_paths.clear_cache()
-                        server.PromptServer.instance.send_sync("hf_download_finished", {"path": local_path})
-                except Exception:
-                    pass
+        # Step 3: sync download
+        final_message, local_path = run_download(parsed, final_folder, sync=True)
+        if local_path:
+            try:
+                import server
+                import folder_paths
+                if hasattr(folder_paths, "clear_cache"):
+                    folder_paths.clear_cache()
+                server.PromptServer.instance.send_sync("hf_download_finished", {"path": local_path})
+            except Exception:
+                pass
 
-            threading.Thread(
-                target=_async_download,
-                daemon=True
-            ).start()
-            
-            if "file" in parsed:
-                guessed_file = parsed["file"].strip("/")
-                if selected_folder == "custom":
-                    segments = custom_path.strip("/\\").split("/")
-                    if len(segments) > 1:
-                        leftover = "/".join(segments[1:]).strip("/")
-                        if leftover:
-                            return io.NodeOutput((leftover + "/" + os.path.basename(guessed_file),))
-                        else:
-                            return io.NodeOutput((os.path.basename(guessed_file),))
-                    else:
-                        return io.NodeOutput((os.path.basename(guessed_file),))
-                else:
-                    return io.NodeOutput((os.path.basename(guessed_file),))
-            else:
-                return io.NodeOutput(("",))
-        else:
-            # sync => we get final_message and local_path
-            final_message, local_path = run_download(parsed, final_folder, sync=True)
-            if local_path:
-                try:
-                    import server
-                    import folder_paths
-                    if hasattr(folder_paths, "clear_cache"):
-                        folder_paths.clear_cache()
-                    server.PromptServer.instance.send_sync("hf_download_finished", {"path": local_path})
-                except Exception:
-                    pass
-
-                # user wants leftover + "/" + filename if custom
-                filename = os.path.basename(local_path)
-                if selected_folder == "custom":
-                    segments = custom_path.strip("/\\").split("/")
-                    if len(segments) > 1:
-                        leftover = "/".join(segments[1:]).strip("/")
-                        if leftover:
-                            return io.NodeOutput((leftover + "/" + filename,))
-                        else:
-                            return io.NodeOutput((filename,))
+            # user wants leftover + "/" + filename if custom
+            filename = os.path.basename(local_path)
+            if selected_folder == "custom":
+                segments = custom_path.strip("/\\").split("/")
+                if len(segments) > 1:
+                    leftover = "/".join(segments[1:]).strip("/")
+                    if leftover:
+                        return io.NodeOutput((leftover + "/" + filename,))
                     else:
                         return io.NodeOutput((filename,))
                 else:
                     return io.NodeOutput((filename,))
             else:
-                return io.NodeOutput(("",))
+                return io.NodeOutput((filename,))
+        else:
+            return io.NodeOutput(("",))
