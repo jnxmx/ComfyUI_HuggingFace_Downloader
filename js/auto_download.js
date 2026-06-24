@@ -5398,12 +5398,11 @@ app.registerExtension({
             const isMissingModelException = 
                 message.includes("missing model") ||
                 detailsLower.includes("missing model") ||
-                message.includes("not found") ||
-                detailsLower.includes("not found") ||
-                message.includes("does not exist") ||
-                detailsLower.includes("does not exist") ||
                 type === "model_missing" ||
-                type === "validation_error";
+                ((message.includes("not found") || detailsLower.includes("not found") ||
+                  message.includes("does not exist") || detailsLower.includes("does not exist")) &&
+                 (isLikelyModelLoaderClass(classType) ||
+                  /\b(checkpoint|model|lora|vae|unet|clip|embedding|controlnet|safetensors|ckpt|diffusion_model)\b/i.test(message + " " + details)));
 
             if (!isValueNotInList && !isMissingModelException) {
                 return false;
