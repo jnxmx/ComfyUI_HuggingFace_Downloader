@@ -1397,6 +1397,9 @@ NODE_TYPE_MAPPING = {
 
     # Native ComfyUI Frame Interpolation
     "FrameInterpolationModelLoader": "frame_interpolation",
+
+    # Native ComfyUI Hook LoRA
+    "CreateHookLora": "loras",
 }
 
 
