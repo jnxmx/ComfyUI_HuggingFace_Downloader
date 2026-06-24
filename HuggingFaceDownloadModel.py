@@ -18,6 +18,8 @@ def _make_target_folder_list():
     return ["custom"] + subfolders
 
 class HuggingFaceDownloadModel(io.ComfyNode):
+    OUTPUT_NODE = True
+    
     @classmethod
     def define_schema(cls):
         options = []
@@ -32,14 +34,13 @@ class HuggingFaceDownloadModel(io.ComfyNode):
             display_name="Hugging Face Download Model",
             category="Hugging Face Downloaders 🤗",
             inputs=[
-                io.DynamicCombo.Input("target_folder", options=options, default="loras"),
+                io.DynamicCombo.Input("target_folder", options=options),
                 io.String.Input("link", default=""),
-                io.Bool.Input("download_in_background", default=False, tooltip="Download in background")
+                io.Boolean.Input("download_in_background", default=False, tooltip="Download in background")
             ],
             outputs=[
-                io.MatchType.Output(template=io.MatchType.Template("output", [io.Any]), display_name="model name")
-            ],
-            output_node=True
+                io.AnyType.Output(display_name="model name")
+            ]
         )
 
     @staticmethod
