@@ -762,7 +762,7 @@ app.registerExtension({
         const renderErrorWithLinks = (container, text) => {
             container.innerHTML = "";
             if (!text) return;
-            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const urlRegex = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g;
             const parts = text.split(urlRegex);
             for (const part of parts) {
                 if (urlRegex.test(part)) {
