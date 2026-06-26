@@ -77,7 +77,7 @@ class HuggingFaceDownloadModel(io.ComfyNode):
         try:
             parsed = parse_link(link)
         except Exception as e:
-            return io.NodeOutput((f"Error parsing link: {e}",))
+            return io.NodeOutput(f"Error parsing link: {e}")
 
         # Step 3: sync download
         final_message, local_path = run_download(parsed, final_folder, sync=True)
@@ -98,12 +98,12 @@ class HuggingFaceDownloadModel(io.ComfyNode):
                 if len(segments) > 1:
                     leftover = "/".join(segments[1:]).strip("/")
                     if leftover:
-                        return io.NodeOutput((leftover + "/" + filename,))
+                        return io.NodeOutput(leftover + "/" + filename)
                     else:
-                        return io.NodeOutput((filename,))
+                        return io.NodeOutput(filename)
                 else:
-                    return io.NodeOutput((filename,))
+                    return io.NodeOutput(filename)
             else:
-                return io.NodeOutput((filename,))
+                return io.NodeOutput(filename)
         else:
-            return io.NodeOutput(("",))
+            return io.NodeOutput("")

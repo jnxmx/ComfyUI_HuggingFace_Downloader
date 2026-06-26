@@ -72,7 +72,7 @@ class HuggingFaceDownloadFolder(io.ComfyNode):
         try:
             parsed = parse_link(link)
         except Exception as e:
-            return io.NodeOutput((f"Error parsing link: {e}",))
+            return io.NodeOutput(f"Error parsing link: {e}")
 
         remote_subfolder_path = parsed.get("subfolder", "").strip("/")
         if not remote_subfolder_path:
@@ -101,20 +101,20 @@ class HuggingFaceDownloadFolder(io.ComfyNode):
                 leftover_segments=segments[1:]
                 leftover="/".join(leftover_segments).strip("/")
                 if leftover and last_segment:
-                    return io.NodeOutput((leftover + "/" + last_segment,))
+                    return io.NodeOutput(leftover + "/" + last_segment)
                 elif leftover:
-                    return io.NodeOutput((leftover,))
+                    return io.NodeOutput(leftover)
                 elif last_segment:
-                    return io.NodeOutput((last_segment,))
+                    return io.NodeOutput(last_segment)
                 else:
-                    return io.NodeOutput(("",))
+                    return io.NodeOutput("")
             else:
                 if last_segment:
-                    return io.NodeOutput((last_segment,))
+                    return io.NodeOutput(last_segment)
                 else:
-                    return io.NodeOutput(("",))
+                    return io.NodeOutput("")
         else:
             if last_segment:
-                return io.NodeOutput((last_segment + "/",))
+                return io.NodeOutput(last_segment + "/")
             else:
-                return io.NodeOutput(("",))
+                return io.NodeOutput("")
