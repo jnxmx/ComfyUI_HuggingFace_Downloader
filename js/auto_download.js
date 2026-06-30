@@ -5730,8 +5730,12 @@ app.registerExtension({
 
         const applyNodeErrorsFallback = (nodeErrors) => {
             try {
+                const registeredNodeTypes = getRegisteredNodeTypesMap();
                 forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
                     if (!node || typeof node !== "object") return;
+                    if (registeredNodeTypes && node.type && !(node.type in registeredNodeTypes)) {
+                        return;
+                    }
                     node.has_errors = false;
                     
                     if (node.old_color !== undefined) {
@@ -7002,9 +7006,13 @@ app.registerExtension({
                     // Phase 3: Forcefully clean up any remaining stale visual red frames
                     // (e.g. if ComfyUI natively cleared lastNodeErrors but forgot to restore node.color)
                     const currentErrors = (typeof getNodeErrorsSnapshot === "function") ? getNodeErrorsSnapshot() : {};
+                    const registeredNodeTypes = (typeof getRegisteredNodeTypesMap === "function") ? getRegisteredNodeTypesMap() : null;
                     if (typeof forEachGraphNodeRecursive === "function") {
                         forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
                             if (!node || typeof node !== "object") return;
+                            if (registeredNodeTypes && node.type && !(node.type in registeredNodeTypes)) {
+                                return;
+                            }
                             const execId = String(node.id || "");
                             if (currentErrors && currentErrors[execId]) {
                                 return; // Node still has a valid execution error
