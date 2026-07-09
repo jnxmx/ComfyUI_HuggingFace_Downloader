@@ -1804,10 +1804,10 @@ def _collect_models_from_nodes(
         # We need to extract the custom_path (widgets[2]) to determine the target folder
         if node_type == "Hugging Face Download Model" and "widgets_values" in node:
             widgets = node["widgets_values"]
-            if isinstance(widgets, list) and len(widgets) >= 3:
+            if isinstance(widgets, list) and len(widgets) >= 2:
                 folder = widgets[0]  # Base folder type (e.g., "checkpoints", "custom")
                 url = widgets[1]  # URL
-                custom_path = widgets[2]  # Custom subfolder path
+                custom_path = widgets[2] if len(widgets) >= 3 else None  # Custom subfolder path
                 
                 # Extract filename from URL
                 filename = None
