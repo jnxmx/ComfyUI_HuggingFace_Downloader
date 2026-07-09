@@ -3031,9 +3031,7 @@ app.registerExtension({
                         minHeight: "40px",
                     });
 
-                    const defaultFolder = downloadMode === "folder"
-                        ? (m.locked_folder || m.suggested_folder || "")
-                        : (m.locked_folder || m.suggested_folder || "checkpoints");
+                    const defaultFolder = String(m.locked_folder || m.suggested_folder || "").trim();
                     const folderPicker = createFolderPicker(defaultFolder, "Folder");
                     Object.assign(folderPicker.wrapper.style, {
                         width: "100%",
@@ -3403,6 +3401,22 @@ app.registerExtension({
 
             const downloadBtn = createButton("Download Selected", "p-button p-component p-button-success", async () => {
                 const selectedRows = rowInputs.filter((r) => r.checkbox.checked);
+                let missingFolderCount = 0;
+                for (const r of selectedRows) {
+                    const folderVal = r.folderInput.value.trim();
+                    if (!folderVal) {
+                        r.folderInput.style.border = "1.5px solid #f44336";
+                        r.folderInput.style.boxShadow = "0 0 4px #f44336";
+                        missingFolderCount += 1;
+                    } else {
+                        r.folderInput.style.border = "";
+                        r.folderInput.style.boxShadow = "";
+                    }
+                }
+                if (missingFolderCount > 0) {
+                    setStatus("Please select a target folder for all checked models.", "#f44336");
+                    return;
+                }
                 const toDownload = selectedRows.map((r) => {
                     const effectiveFolder = r.folderLocked
                         ? (r.lockedFolder || r.folderInput.value.trim())
