@@ -344,7 +344,7 @@ def run_download(parsed_data: dict,
     Cleans up the cached copy to save disk space.
     """
     token = get_token()
-    print(f"[DEBUG] run_download (single-file) started. Token length: {len(token) if token else 0}")
+    print("[DEBUG] run_download (single-file) started")
 
     file_name = parsed_data.get("file", "unknown.bin").strip("/")
     sub = parsed_data.get("subfolder", "").strip("/")
@@ -444,18 +444,6 @@ def run_download(parsed_data: dict,
                 "result_path = sys.argv[2]\n"
                 "with open(payload_path, 'r', encoding='utf-8') as f:\n"
                 "    kwargs = json.load(f)\n"
-                "tok_kw = kwargs.get('token')\n"
-                "tok_env = os.environ.get('HF_TOKEN')\n"
-                "tok_file = ''\n"
-                "try:\n"
-                "    tf = os.path.expanduser('~/.cache/huggingface/token')\n"
-                "    if os.path.exists(tf):\n"
-                "        with open(tf, 'r') as f: tok_file = f.read().strip()\n"
-                "except Exception: pass\n"
-                "print(f'[DEBUG] Subprocess Diagnostic - CWD: {os.getcwd()}')\n"
-                "print(f'[DEBUG] Subprocess Diagnostic - Token in kwargs: {bool(tok_kw)} (len={len(tok_kw) if tok_kw else 0})')\n"
-                "print(f'[DEBUG] Subprocess Diagnostic - Token in env: {bool(tok_env)} (len={len(tok_env) if tok_env else 0})')\n"
-                "print(f'[DEBUG] Subprocess Diagnostic - Token in cache file: {bool(tok_file)} (len={len(tok_file) if tok_file else 0})')\n"
                 "from huggingface_hub import hf_hub_download\n"
                 "result = {}\n"
                 "try:\n"
@@ -463,7 +451,6 @@ def run_download(parsed_data: dict,
                 "    path = hf_hub_download(**kwargs)\n"
                 "    result = {'ok': True, 'path': path}\n"
                 "except Exception as e1:\n"
-                "    print(f'[DEBUG] Subprocess: Stage 1 (hf_hub_download with token) failed: {e1}')\n"
                 "    try:\n"
                 "        # Stage 2: huggingface_hub download without token (handles restricted fine-grained tokens on public repos)\n"
                 "        no_tok_kwargs = kwargs.copy()\n"
@@ -472,12 +459,10 @@ def run_download(parsed_data: dict,
                 "        try:\n"
                 "            path = hf_hub_download(**no_tok_kwargs)\n"
                 "            result = {'ok': True, 'path': path}\n"
-                "            print('[DEBUG] Subprocess: Stage 2 (hf_hub_download without token) succeeded!')\n"
                 "        finally:\n"
                 "            if orig_hf_token is not None:\n"
                 "                os.environ['HF_TOKEN'] = orig_hf_token\n"
                 "    except Exception as e2:\n"
-                "        print(f'[DEBUG] Subprocess: Stage 2 (hf_hub_download without token) failed: {e2}')\n"
                 "        repo_id = kwargs.get('repo_id')\n"
                 "        filename = kwargs.get('filename')\n"
                 "        revision = kwargs.get('revision') or 'main'\n"
@@ -502,9 +487,7 @@ def run_download(parsed_data: dict,
                 "                with open(dest_file, 'wb') as f:\n"
                 "                    shutil.copyfileobj(response, f)\n"
                 "            result = {'ok': True, 'path': dest_file}\n"
-                "            print('[DEBUG] Subprocess: Stage 3 (manual download with token) succeeded!')\n"
                 "        except Exception as e3:\n"
-                "            print(f'[DEBUG] Subprocess: Stage 3 (manual download with token) failed: {e3}')\n"
                 "            try:\n"
                 "                # Stage 4: manual redirect download without token\n"
                 "                req = urllib.request.Request(url)\n"
@@ -513,7 +496,6 @@ def run_download(parsed_data: dict,
                 "                    with open(dest_file, 'wb') as f:\n"
                 "                        shutil.copyfileobj(response, f)\n"
                 "                result = {'ok': True, 'path': dest_file}\n"
-                "                print('[DEBUG] Subprocess: Stage 4 (manual download without token) succeeded!')\n"
                 "            except Exception as e4:\n"
                 "                result = {'ok': False, 'error': f'All download stages failed. Stage 1: {e1}. Stage 2: {e2}. Stage 3: {e3}. Stage 4: {e4}'}\n"
                 "with open(result_path, 'w', encoding='utf-8') as f:\n"
@@ -532,7 +514,6 @@ def run_download(parsed_data: dict,
                     with open(payload_path, "w", encoding="utf-8") as f:
                         json.dump(download_kwargs, f)
 
-                    print(f"[DEBUG] Spawning download subprocess (Xet={'enabled' if xet_flag == '1' else 'disabled'})...")
                     proc = subprocess.Popen(
                         [sys.executable, "-u", "-c", script, payload_path, result_path, xet_flag],
                         stdout=subprocess.PIPE,
@@ -544,9 +525,10 @@ def run_download(parsed_data: dict,
                     def log_output(pipe):
                         try:
                             for line in iter(pipe.readline, ""):
+                                # Only print real errors if the subprocess output starts with Traceback or error
                                 val = line.strip()
-                                if val:
-                                    print(f"[DEBUG] Subprocess: {val}")
+                                if val and ("Traceback" in val or "Error:" in val or "Exception" in val):
+                                    print(f"[DEBUG] Subprocess Error: {val}")
                         except Exception:
                             pass
 
@@ -585,7 +567,6 @@ def run_download(parsed_data: dict,
             raise RuntimeError(last_error)
 
         download_start = time.time()
-        print(f"[DEBUG] hf_hub_download start: {parsed_data['repo']}/{remote_filename}")
         file_path_in_cache = run_file_download_with_cancel({
             "repo_id": parsed_data["repo"],
             "filename": remote_filename,
@@ -596,9 +577,6 @@ def run_download(parsed_data: dict,
             raise RuntimeError("hf_hub_download did not return a cache path.")
         if cancel_check and cancel_check():
             raise InterruptedError("Download cancelled")
-        elapsed = time.time() - download_start
-        print(f"[DEBUG] hf_hub_download finished in {elapsed:.1f}s")
-        print("[DEBUG] File downloaded to cache:", file_path_in_cache)
 
         if status_cb:
             status_cb("copying")
