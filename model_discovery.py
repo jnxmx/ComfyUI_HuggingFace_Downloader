@@ -3172,20 +3172,34 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
 
     # Trace upstream connections to inject URLs if a node is connected to a Hugging Face Download Model node
     try:
-        links_list = workflow_json.get("links", [])
         links_map = {}
-        for link in links_list:
-            if isinstance(link, list) and len(link) >= 5:
-                link_id = link[0]
-                origin_node_id = link[1]
-                target_node_id = link[3]
-                links_map[link_id] = (origin_node_id, target_node_id)
-
-        nodes_list = workflow_json.get("nodes", [])
         nodes_by_id = {}
-        for node in nodes_list:
-            if isinstance(node, dict) and "id" in node:
-                nodes_by_id[node["id"]] = node
+        
+        def collect_nodes_and_links(graph):
+            if not isinstance(graph, dict):
+                return
+            for node in graph.get("nodes", []):
+                if isinstance(node, dict) and "id" in node:
+                    nodes_by_id[node["id"]] = node
+            for link in graph.get("links", []):
+                if isinstance(link, list) and len(link) >= 5:
+                    link_id = link[0]
+                    origin_node_id = link[1]
+                    target_node_id = link[3]
+                    links_map[link_id] = (origin_node_id, target_node_id)
+            
+            # Recurse subgraphs inside definitions
+            defs = graph.get("definitions", {})
+            if isinstance(defs, dict):
+                subgraphs = defs.get("subgraphs", [])
+                if isinstance(subgraphs, list):
+                    for sg in subgraphs:
+                        collect_nodes_and_links(sg)
+                elif isinstance(subgraphs, dict):
+                    for sg in subgraphs.values():
+                        collect_nodes_and_links(sg)
+        
+        collect_nodes_and_links(workflow_json)
 
         for model in required_models:
             if model.get("url"):

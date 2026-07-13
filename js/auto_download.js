@@ -1481,7 +1481,7 @@ app.registerExtension({
                         );
                         let upstreamUrlInfo = null;
                         if (hasLinkedInput) {
-                            upstreamUrlInfo = getUpstreamDownloaderNodeUrlAndFolder(node, widgetName, rootGraph);
+                            upstreamUrlInfo = getUpstreamDownloaderNodeUrlAndFolder(node, widgetName, currentGraph);
                             if (!upstreamUrlInfo) {
                                 continue;
                             }
