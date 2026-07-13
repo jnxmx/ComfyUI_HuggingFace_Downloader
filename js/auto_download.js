@@ -1271,6 +1271,56 @@ app.registerExtension({
             return [];
         };
 
+        /**
+         * Collects all string values currently present in live graph node widgets.
+         * Used to cross-reference against stale model metadata entries.
+         * Returns a Set of string values.
+         */
+        const collectAllLiveWidgetValues = (graph = null) => {
+            const rootGraph = graph || app?.rootGraph;
+            if (!rootGraph || typeof rootGraph !== "object") {
+                return new Set();
+            }
+            const values = new Set();
+            const visitGraph = (currentGraph) => {
+                const nodes = Array.isArray(currentGraph?.nodes) ? currentGraph.nodes : [];
+                for (const node of nodes) {
+                    if (!node || typeof node !== "object") continue;
+                    if (isGraphNodeBypassed(node)) continue;
+
+                    const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
+                    for (const widget of widgets) {
+                        const val = typeof widget?.value === "string" ? widget.value.trim() : "";
+                        if (val) {
+                            values.add(val);
+                        }
+                    }
+
+                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
+                        visitGraph(node.subgraph);
+                    }
+                }
+            };
+            visitGraph(rootGraph);
+            return values;
+        };
+
+        /**
+         * Given a pending-warning candidate object, checks whether it is still
+         * referenced by a live graph node widget. Returns true if stale.
+         */
+        const isPendingCandidateStaleInLiveGraph = (candidate, liveWidgetValues) => {
+            if (!candidate || typeof candidate !== "object") return false;
+            const name = String(candidate?.name || candidate?.filename || "").trim();
+            if (!name) return false;
+            // If the model name is still present in any widget value, it's not stale
+            if (liveWidgetValues.has(name)) return false;
+            // Also check base name (without path prefix)
+            const baseName = name.split(/[/\\]/).pop().trim();
+            if (baseName && liveWidgetValues.has(baseName)) return false;
+            return true;
+        };
+
         const collectLiveGraphMissingModelCandidatesNativeLike = (graph = null, graphData = null) => {
             const rootGraph = graph || app?.rootGraph;
             if (!rootGraph || typeof rootGraph !== "object") {
@@ -1467,7 +1517,15 @@ app.registerExtension({
         const getFrontendMissingModelCandidates = async (graphDataOverride = null) => {
             let candidates = getFrontendPendingWarningCandidates();
             if (candidates.length) {
-                return candidates;
+                // Filter out stale candidates whose model name no longer matches
+                // any live widget value (e.g. user changed the widget dropdown).
+                const liveValues = collectAllLiveWidgetValues();
+                if (liveValues.size) {
+                    candidates = candidates.filter(c => !isPendingCandidateStaleInLiveGraph(c, liveValues));
+                }
+                if (candidates.length) {
+                    return candidates;
+                }
             }
 
             const hasExplicitWorkflowGraph = graphDataOverride && typeof graphDataOverride === "object";
@@ -2154,6 +2212,57 @@ app.registerExtension({
                                 processNodeList(subgraph.nodes);
                             }
                         }
+                    }
+
+                    // Strip stale model metadata entries that no longer match
+                    // any widget value. This prevents the backend from seeing
+                    // models the user has already swapped out in the UI.
+                    const allWidgetVals = new Set();
+                    const gatherAllWidgetVals = (nodes) => {
+                        if (!Array.isArray(nodes)) return;
+                        for (const node of nodes) {
+                            const wvRaw = node?.widgets_values;
+                            const wv = Array.isArray(wvRaw) ? wvRaw : Object.values(wvRaw || {});
+                            for (const v of wv) {
+                                if (typeof v === "string" && v.trim()) {
+                                    allWidgetVals.add(v.trim());
+                                }
+                            }
+                        }
+                    };
+                    gatherAllWidgetVals(parsedData.nodes);
+                    if (parsedData.definitions && parsedData.definitions.subgraphs) {
+                        for (const subgraphId in parsedData.definitions.subgraphs) {
+                            const sg = parsedData.definitions.subgraphs[subgraphId];
+                            gatherAllWidgetVals(sg?.nodes);
+                        }
+                    }
+
+                    // Filter per-node properties.models
+                    const filterNodeModels = (nodes) => {
+                        if (!Array.isArray(nodes)) return;
+                        for (const node of nodes) {
+                            if (!node?.properties?.models || !Array.isArray(node.properties.models)) continue;
+                            node.properties.models = node.properties.models.filter(m => {
+                                const name = String(m?.name || "").trim();
+                                return !name || allWidgetVals.has(name) || allWidgetVals.has(name.split(/[/\\]/).pop().trim());
+                            });
+                        }
+                    };
+                    filterNodeModels(parsedData.nodes);
+                    if (parsedData.definitions && parsedData.definitions.subgraphs) {
+                        for (const subgraphId in parsedData.definitions.subgraphs) {
+                            const sg = parsedData.definitions.subgraphs[subgraphId];
+                            filterNodeModels(sg?.nodes);
+                        }
+                    }
+
+                    // Filter top-level models array
+                    if (Array.isArray(parsedData.models)) {
+                        parsedData.models = parsedData.models.filter(m => {
+                            const name = String(m?.name || "").trim();
+                            return !name || allWidgetVals.has(name) || allWidgetVals.has(name.split(/[/\\]/).pop().trim());
+                        });
                     }
 
                     return parsedData;
@@ -5156,7 +5265,39 @@ app.registerExtension({
             }
 
             if (Array.isArray(graphData?.models)) {
-                embeddedModels.push(...graphData.models);
+                // Top-level graphData.models can contain stale entries from a
+                // previous save. Cross-reference each entry against the current
+                // widget values in the serialized nodes to exclude models that
+                // are no longer referenced by any node.
+                const allSerializedWidgetValues = new Set();
+                const gatherWidgetValues = (nodes) => {
+                    if (!Array.isArray(nodes)) return;
+                    for (const node of nodes) {
+                        const wvRaw = node?.widgets_values;
+                        const wv = Array.isArray(wvRaw) ? wvRaw : Object.values(wvRaw || {});
+                        for (const v of wv) {
+                            if (typeof v === "string" && v.trim()) {
+                                allSerializedWidgetValues.add(v.trim());
+                            }
+                        }
+                    }
+                };
+                gatherWidgetValues(graphData?.nodes);
+                if (Array.isArray(subgraphs)) {
+                    for (const subgraph of subgraphs) {
+                        gatherWidgetValues(subgraph?.nodes);
+                    }
+                }
+
+                for (const model of graphData.models) {
+                    const modelName = String(model?.name || "").trim();
+                    if (!modelName) continue;
+                    // Only include if the model name is still referenced by a widget
+                    if (allSerializedWidgetValues.has(modelName) ||
+                        allSerializedWidgetValues.has(modelName.split(/[/\\]/).pop().trim())) {
+                        embeddedModels.push(model);
+                    }
+                }
             }
 
             const uniqueByKey = new Map();
