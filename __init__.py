@@ -1,3 +1,6 @@
+import os
+os.environ["HF_HUB_DISABLE_XET"] = "1"
+
 from .HuggingFaceDownloadModel import HuggingFaceDownloadModel
 from .HuggingFaceDownloadFolder import HuggingFaceDownloadFolder
 import threading
