@@ -593,8 +593,9 @@ def run_download(parsed_data: dict,
         elif "403" in str(e) or "gated" in str(e) or "permission" in str(e):
             repo_url = f"https://huggingface.co/{parsed_data['repo']}"
             error_msg = (
-                f"The repository '{parsed_data['repo']}' is gated or you do not have permission to access it.\n"
-                f"Visit {repo_url}, accept its terms or request access, then retry the download."
+                f"The repository '{parsed_data['repo']}' is gated or requires permission.\n"
+                f"1. Visit {repo_url} and accept the model agreement.\n"
+                f"2. Ensure you have configured a valid Hugging Face Token in the ComfyUI settings or HF_TOKEN environment variable."
             )
         else:
             error_msg = f"Download failed: {e}"

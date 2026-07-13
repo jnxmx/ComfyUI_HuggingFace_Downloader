@@ -835,7 +835,9 @@ app.registerExtension({
 
             if (isFailed && errorText) {
                 const renderedError = isGated
-                    ? "Gated repository. Accept the model agreement on Hugging Face, then retry."
+                    ? (errorText.includes("Hugging Face Token") || errorText.includes("Token")
+                        ? errorText
+                        : "Gated repository. Ensure you accepted the agreement on Hugging Face AND configured your HF Token in ComfyUI settings.")
                     : errorText;
                 renderErrorWithLinks(refs.error, renderedError);
                 refs.error.title = renderedError;
@@ -848,7 +850,7 @@ app.registerExtension({
 
             refs.root.classList.toggle("has-detail", isFailed && !!errorText);
             refs.actions.classList.toggle("visible", isGated);
-            refs.agreementHint.textContent = actionMessage || "Accept model agreement and retry download.";
+            refs.agreementHint.textContent = actionMessage || "Accept model agreement and verify your HF Token in ComfyUI settings.";
             refs.agreementHint.style.display = isGated ? "inline" : "none";
 
             if (isGated && repoUrl) {
