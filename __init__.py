@@ -1,5 +1,27 @@
+
 import os
-os.environ["HF_HUB_DISABLE_XET"] = "1"
+import json
+
+# Export the configured Hugging Face token to the environment so that all custom nodes
+# and Hugging Face subprocesses can run in authenticated mode.
+try:
+    settings_path = os.path.join("user", "default", "comfy.settings.json")
+    if os.path.exists(settings_path):
+        with open(settings_path, "r", encoding="utf-8") as f:
+            settings = json.load(f)
+        token = settings.get("downloader.hf_token", "").strip()
+        if token:
+            os.environ["HF_TOKEN"] = token
+            try:
+                # Write to local cache so huggingface-cli detects it too
+                cache_dir = os.path.expanduser("~/.cache/huggingface")
+                os.makedirs(cache_dir, exist_ok=True)
+                with open(os.path.join(cache_dir, "token"), "w", encoding="utf-8") as f:
+                    f.write(token)
+            except Exception:
+                pass
+except Exception as e:
+    print(f"[ComfyUI_HuggingFace_Downloader] Failed to export token to environment: {e}")
 
 from .HuggingFaceDownloadModel import HuggingFaceDownloadModel
 from .HuggingFaceDownloadFolder import HuggingFaceDownloadFolder
