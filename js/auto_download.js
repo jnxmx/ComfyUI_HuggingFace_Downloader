@@ -1321,11 +1321,59 @@ app.registerExtension({
             return true;
         };
 
+        /**
+         * Iterates over all graph nodes and aligns their widget path slashes
+         * to match the format of the server's populated combo options.
+         * Fixes Windows-to-Linux and Linux-to-Windows workflow loading mismatches.
+         */
+        const alignGraphWidgetSlashes = (graph = null) => {
+            const rootGraph = graph || app?.rootGraph;
+            if (!rootGraph || typeof rootGraph !== "object") {
+                return;
+            }
+            const visitGraph = (currentGraph) => {
+                const nodes = Array.isArray(currentGraph?.nodes) ? currentGraph.nodes : [];
+                for (const node of nodes) {
+                    if (!node || typeof node !== "object") continue;
+
+                    const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
+                    for (const widget of widgets) {
+                        const val = typeof widget?.value === "string" ? widget.value.trim() : "";
+                        if (!val || (!val.includes("/") && !val.includes("\\"))) {
+                            continue;
+                        }
+
+                        const options = resolveComboWidgetOptionsNativeLike(widget);
+                        if (!Array.isArray(options) || !options.length) {
+                            continue;
+                        }
+
+                        const normalizedVal = val.replace(/\\/g, "/");
+                        const matchedOption = options.find(
+                            opt => typeof opt === "string" && opt.replace(/\\/g, "/") === normalizedVal
+                        );
+                        if (matchedOption && widget.value !== matchedOption) {
+                            console.log(`[AutoDownload] Aligning slash separator for widget "${widget.name}" on node ${node.id || node.type}: "${widget.value}" -> "${matchedOption}"`);
+                            widget.value = matchedOption;
+                        }
+                    }
+
+                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
+                        visitGraph(node.subgraph);
+                    }
+                }
+            };
+            visitGraph(rootGraph);
+        };
+
         const collectLiveGraphMissingModelCandidatesNativeLike = (graph = null, graphData = null) => {
             const rootGraph = graph || app?.rootGraph;
             if (!rootGraph || typeof rootGraph !== "object") {
                 return [];
             }
+
+            // Align paths to match the server's loaded format before checking if they're missing
+            alignGraphWidgetSlashes(rootGraph);
 
             const collected = [];
             const seen = new Set();
@@ -6569,6 +6617,11 @@ app.registerExtension({
                 workflowOpenTriggeredForCurrentLoad = false;
                 const result = await originalLoadGraphData(...args);
                 try {
+                    alignGraphWidgetSlashes(app?.rootGraph);
+                } catch (e) {
+                    console.warn("[AutoDownload] Slash alignment failed on workflow load:", e);
+                }
+                try {
                     if (!getWorkflowOpenAutoEnabled()) {
                         return result;
                     }
@@ -6920,6 +6973,11 @@ app.registerExtension({
                         runHookBypassRemaining = Math.max(0, runHookBypassRemaining - 1);
                         return fallback(metadata);
                     }
+
+                    // Align widget path separators to match the system OS before executing the workflow
+                    try {
+                        alignGraphWidgetSlashes(app?.rootGraph);
+                    } catch (e) {}
 
                     let resumeQueued = false;
                     const resumeRun = () => {
