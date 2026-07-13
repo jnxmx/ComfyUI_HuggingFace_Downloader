@@ -2155,9 +2155,19 @@ app.registerExtension({
             return idx === -1 ? "" : normalized.slice(0, idx);
         };
 
-        const hasSerializableSubgraphDefinitions = (graphData) => {
+        const getSafeSubgraphList = (graphData) => {
             const defs = graphData?.definitions?.subgraphs;
-            return Array.isArray(defs) && defs.length > 0;
+            if (!defs || typeof defs !== "object") {
+                return [];
+            }
+            if (Array.isArray(defs)) {
+                return defs.filter(Boolean);
+            }
+            return Object.values(defs).filter(Boolean);
+        };
+
+        const hasSerializableSubgraphDefinitions = (graphData) => {
+            return getSafeSubgraphList(graphData).length > 0;
         };
 
         const serializeWorkflowForModelScan = () => {
@@ -5257,11 +5267,9 @@ app.registerExtension({
 
             collectFromNodes(graphData?.nodes);
 
-            const subgraphs = graphData?.definitions?.subgraphs;
-            if (Array.isArray(subgraphs)) {
-                for (const subgraph of subgraphs) {
-                    collectFromNodes(subgraph?.nodes);
-                }
+            const subgraphs = getSafeSubgraphList(graphData);
+            for (const subgraph of subgraphs) {
+                collectFromNodes(subgraph?.nodes);
             }
 
             if (Array.isArray(graphData?.models)) {
@@ -5283,10 +5291,8 @@ app.registerExtension({
                     }
                 };
                 gatherWidgetValues(graphData?.nodes);
-                if (Array.isArray(subgraphs)) {
-                    for (const subgraph of subgraphs) {
-                        gatherWidgetValues(subgraph?.nodes);
-                    }
+                for (const subgraph of subgraphs) {
+                    gatherWidgetValues(subgraph?.nodes);
                 }
 
                 for (const model of graphData.models) {
@@ -5326,11 +5332,9 @@ app.registerExtension({
             };
 
             pushNodes(graphData?.nodes);
-            const subgraphs = graphData?.definitions?.subgraphs;
-            if (Array.isArray(subgraphs)) {
-                for (const subgraph of subgraphs) {
-                    pushNodes(subgraph?.nodes);
-                }
+            const subgraphs = getSafeSubgraphList(graphData);
+            for (const subgraph of subgraphs) {
+                pushNodes(subgraph?.nodes);
             }
 
             for (const node of nodesToScan) {
@@ -5419,11 +5423,9 @@ app.registerExtension({
             };
 
             collectFromNodes(graphData?.nodes);
-            const subgraphs = graphData?.definitions?.subgraphs;
-            if (Array.isArray(subgraphs)) {
-                for (const subgraph of subgraphs) {
-                    collectFromNodes(subgraph?.nodes);
-                }
+            const subgraphs = getSafeSubgraphList(graphData);
+            for (const subgraph of subgraphs) {
+                collectFromNodes(subgraph?.nodes);
             }
             return Array.from(missing);
         };
