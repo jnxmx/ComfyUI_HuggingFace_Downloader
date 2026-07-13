@@ -3169,6 +3169,90 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             required_models,
             _normalize_prefilled_missing_models(prefilled_missing_models)
         )
+
+    # Trace upstream connections to inject URLs if a node is connected to a Hugging Face Download Model node
+    try:
+        links_list = workflow_json.get("links", [])
+        links_map = {}
+        for link in links_list:
+            if isinstance(link, list) and len(link) >= 5:
+                link_id = link[0]
+                origin_node_id = link[1]
+                target_node_id = link[3]
+                links_map[link_id] = (origin_node_id, target_node_id)
+
+        nodes_list = workflow_json.get("nodes", [])
+        nodes_by_id = {}
+        for node in nodes_list:
+            if isinstance(node, dict) and "id" in node:
+                nodes_by_id[node["id"]] = node
+
+        for model in required_models:
+            if model.get("url"):
+                continue
+            
+            node_id_str = str(model.get("node_id") or "")
+            # Handle possible prefix like "prefix:node_id"
+            raw_node_id_str = node_id_str.split(":")[-1]
+            try:
+                node_id = int(raw_node_id_str)
+            except ValueError:
+                continue
+
+            node = nodes_by_id.get(node_id)
+            if not node:
+                continue
+
+            input_name = model.get("input_name")
+            if not input_name:
+                continue
+
+            # Look for linked inputs on this node
+            inputs = node.get("inputs", [])
+            for inp in inputs:
+                if not isinstance(inp, dict):
+                    continue
+                inp_name = inp.get("name")
+                widget_map = inp.get("widget")
+                w_name = widget_map.get("name") if isinstance(widget_map, dict) else (widget_map if isinstance(widget_map, str) else None)
+                
+                # Check if it matches input_name or widget name
+                if inp_name == input_name or w_name == input_name:
+                    link_id = inp.get("link")
+                    if link_id in links_map:
+                        upstream_id, _ = links_map[link_id]
+                        upstream_node = nodes_by_id.get(upstream_id)
+                        if upstream_node and upstream_node.get("type") == "Hugging Face Download Model":
+                            u_widgets = upstream_node.get("widgets_values", [])
+                            if isinstance(u_widgets, list) and len(u_widgets) >= 2:
+                                url = u_widgets[1]
+                                if isinstance(url, str) and url.startswith("http"):
+                                    model["url"] = url
+                                    # Update suggested_folder from the downloader node if custom path is set
+                                    custom_path = u_widgets[2] if len(u_widgets) >= 3 else None
+                                    folder = u_widgets[0]
+                                    if custom_path and isinstance(custom_path, str) and custom_path.strip():
+                                        normalized_custom = custom_path.replace("\\", "/").strip("/")
+                                        if normalized_custom:
+                                            custom_segments = [seg for seg in normalized_custom.split("/") if seg]
+                                            if custom_segments:
+                                                model["suggested_folder"] = custom_segments[0]
+                                                model["directory"] = custom_segments[0]
+                                                model["folder_locked"] = True
+                                                model["locked_folder"] = normalized_custom
+                                                if len(custom_segments) > 1:
+                                                    filename = url.split("/")[-1].split("?")[0]
+                                                    model["requested_path"] = "/".join(custom_segments[1:] + [filename])
+                                    elif folder and folder != "custom":
+                                        normalized_folder = folder.replace("\\", "/").strip("/")
+                                        if normalized_folder:
+                                            model["suggested_folder"] = normalized_folder
+                                            model["directory"] = normalized_folder
+                                            model["folder_locked"] = True
+                                            model["locked_folder"] = normalized_folder
+    except Exception as trace_err:
+        print(f"[ERROR] Failed to trace upstream links for model URLs: {trace_err}")
+
     enforce_authoritative_node_folders(required_models)
 
     def _normalize_dedupe_path(value: str | None) -> str:

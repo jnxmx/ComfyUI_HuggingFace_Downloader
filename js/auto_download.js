@@ -1366,6 +1366,61 @@ app.registerExtension({
             visitGraph(rootGraph);
         };
 
+        const getUpstreamDownloaderNodeUrlAndFolder = (node, widgetName, graph) => {
+            const rootGraph = graph || app?.rootGraph;
+            if (!rootGraph || typeof rootGraph !== "object" || !Array.isArray(node?.inputs)) {
+                return null;
+            }
+            const inp = node.inputs.find(entry => 
+                String(entry?.name || "").trim() === widgetName || 
+                String(entry?.widget?.name || "").trim() === widgetName
+            );
+            const linkId = inp?.link;
+            if (linkId == null) return null;
+
+            const link = rootGraph.links ? rootGraph.links[linkId] : null;
+            if (!link) return null;
+
+            const upstreamId = link.origin_id;
+            if (upstreamId == null) return null;
+
+            const upstreamNode = typeof rootGraph.getNodeById === "function" 
+                ? rootGraph.getNodeById(upstreamId) 
+                : (rootGraph._nodes_by_id ? rootGraph._nodes_by_id[upstreamId] : null);
+
+            if (upstreamNode && String(upstreamNode.type) === "Hugging Face Download Model") {
+                const widgets = Array.isArray(upstreamNode.widgets) ? upstreamNode.widgets : [];
+                const folder = String(widgets[0]?.value || "").trim();
+                const url = String(widgets[1]?.value || "").trim();
+                const customPath = String(widgets[2]?.value || "").trim();
+                
+                if (url && url.startsWith("http")) {
+                    let directory = folder;
+                    let lockedFolder = null;
+                    let requestedPath = null;
+                    if (customPath) {
+                        const normalizedCustom = customPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+                        if (normalizedCustom) {
+                            const segments = normalizedCustom.split("/");
+                            if (segments.length) {
+                                directory = segments[0];
+                                lockedFolder = normalizedCustom;
+                                if (segments.length > 1) {
+                                    const filename = url.split("?")[0].split("/").pop();
+                                    requestedPath = segments.slice(1).concat(filename).join("/");
+                                }
+                            }
+                        }
+                    } else if (folder && folder !== "custom") {
+                        directory = folder.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+                        lockedFolder = directory;
+                    }
+                    return { url, directory, lockedFolder, requestedPath };
+                }
+            }
+            return null;
+        };
+
         const collectLiveGraphMissingModelCandidatesNativeLike = (graph = null, graphData = null) => {
             const rootGraph = graph || app?.rootGraph;
             if (!rootGraph || typeof rootGraph !== "object") {
@@ -1424,24 +1479,33 @@ app.registerExtension({
                         const hasLinkedInput = Array.isArray(node?.inputs) && node.inputs.some(inp => 
                             (String(inp?.name || "").trim() === widgetName || String(inp?.widget?.name || "").trim() === widgetName) && inp.link != null
                         );
+                        let upstreamUrlInfo = null;
                         if (hasLinkedInput) {
-                            continue;
+                            upstreamUrlInfo = getUpstreamDownloaderNodeUrlAndFolder(node, widgetName, rootGraph);
+                            if (!upstreamUrlInfo) {
+                                continue;
+                            }
                         }
 
-                        const directory =
-                            String(widget?.options?.model_folder || widget?.options?.folder || "").trim() ||
-                            inferSuggestedFolderFromRunHookSignals({
-                                classType: node?.type,
-                                inputName: widgetName,
-                                filename: value,
-                                missingValue: value,
-                            }) ||
-                            "";
-                        const embedded = findEmbeddedModelMetadataForRunHookFailure(
-                            graphData,
-                            value,
-                            directory
-                        );
+                        const directory = upstreamUrlInfo
+                            ? upstreamUrlInfo.directory
+                            : (
+                                String(widget?.options?.model_folder || widget?.options?.folder || "").trim() ||
+                                inferSuggestedFolderFromRunHookSignals({
+                                    classType: node?.type,
+                                    inputName: widgetName,
+                                    filename: value,
+                                    missingValue: value,
+                                }) ||
+                                ""
+                            );
+                        const embedded = upstreamUrlInfo
+                            ? { url: upstreamUrlInfo.url }
+                            : findEmbeddedModelMetadataForRunHookFailure(
+                                graphData,
+                                value,
+                                directory
+                            );
                         const candidate = {
                             nodeId: executionId,
                             nodeType: String(node?.type || "").trim(),
