@@ -1390,9 +1390,14 @@ app.registerExtension({
 
             if (upstreamNode && String(upstreamNode.type) === "Hugging Face Download Model") {
                 const widgets = Array.isArray(upstreamNode.widgets) ? upstreamNode.widgets : [];
-                const folder = String(widgets[0]?.value || "").trim();
-                const url = String(widgets[1]?.value || "").trim();
-                const customPath = String(widgets[2]?.value || "").trim();
+                // Retrieve by widget name if available (highly robust), otherwise use index check
+                const targetFolderWidget = widgets.find(w => w?.name === "target_folder");
+                const customPathWidget = widgets.find(w => w?.name === "custom_path");
+                const linkWidget = widgets.find(w => w?.name === "link");
+
+                const folder = String(targetFolderWidget ? targetFolderWidget.value : (widgets[0]?.value || "")).trim();
+                const customPath = String(customPathWidget ? customPathWidget.value : (folder === "custom" ? widgets[1]?.value : "")).trim();
+                const url = String(linkWidget ? linkWidget.value : (folder === "custom" ? widgets[2]?.value : widgets[1]?.value || "")).trim();
                 
                 if (url && url.startsWith("http")) {
                     let directory = folder;

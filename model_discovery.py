@@ -1805,9 +1805,13 @@ def _collect_models_from_nodes(
         if node_type == "Hugging Face Download Model" and "widgets_values" in node:
             widgets = node["widgets_values"]
             if isinstance(widgets, list) and len(widgets) >= 2:
-                folder = widgets[0]  # Base folder type (e.g., "checkpoints", "custom")
-                url = widgets[1]  # URL
-                custom_path = widgets[2] if len(widgets) >= 3 else None  # Custom subfolder path
+                folder = str(widgets[0]).strip()
+                if folder == "custom":
+                    custom_path = widgets[1] if len(widgets) >= 2 else None
+                    url = widgets[2] if len(widgets) >= 3 else None
+                else:
+                    custom_path = None
+                    url = widgets[1] if len(widgets) >= 2 else None
                 
                 # Extract filename from URL
                 filename = None
@@ -3239,12 +3243,17 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                         if upstream_node and upstream_node.get("type") == "Hugging Face Download Model":
                             u_widgets = upstream_node.get("widgets_values", [])
                             if isinstance(u_widgets, list) and len(u_widgets) >= 2:
-                                url = u_widgets[1]
+                                folder = str(u_widgets[0]).strip()
+                                if folder == "custom":
+                                    custom_path = u_widgets[1] if len(u_widgets) >= 2 else None
+                                    url = u_widgets[2] if len(u_widgets) >= 3 else None
+                                else:
+                                    custom_path = None
+                                    url = u_widgets[1] if len(u_widgets) >= 2 else None
+
                                 if isinstance(url, str) and url.startswith("http"):
                                     model["url"] = url
                                     # Update suggested_folder from the downloader node if custom path is set
-                                    custom_path = u_widgets[2] if len(u_widgets) >= 3 else None
-                                    folder = u_widgets[0]
                                     if custom_path and isinstance(custom_path, str) and custom_path.strip():
                                         normalized_custom = custom_path.replace("\\", "/").strip("/")
                                         if normalized_custom:
