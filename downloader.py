@@ -412,8 +412,10 @@ def run_download(parsed_data: dict,
             ensure_remote_metadata()
 
         def run_file_download_with_cancel(download_kwargs: dict) -> str:
-            if not cancel_check:
-                return hf_hub_download(**download_kwargs)
+            # Always use a subprocess for hf_hub_download.
+            # The main process may already have hf_xet loaded (by ComfyUI core
+            # or other extensions) before our env-var override takes effect,
+            # causing Xet bridge 403 errors. A subprocess starts clean.
 
             comfy_temp = os.path.join(os.getcwd(), "temp")
             os.makedirs(comfy_temp, exist_ok=True)
@@ -848,7 +850,9 @@ def run_download_folder(parsed_data: dict,
         os.close(payload_fd)
         os.close(result_fd)
         script = (
-            "import json, sys\n"
+            "import json, sys, os\n"
+            "os.environ['HF_HUB_DISABLE_XET'] = '1'\n"
+            "os.environ['HF_HUB_ENABLE_HF_XET'] = '0'\n"
             "from huggingface_hub import snapshot_download\n"
             "payload_path = sys.argv[1]\n"
             "result_path = sys.argv[2]\n"
