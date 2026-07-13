@@ -473,9 +473,23 @@ def run_download(parsed_data: dict,
 
                 proc = subprocess.Popen(
                     [sys.executable, "-u", "-c", script, payload_path, result_path],
-                    stdout=None,
-                    stderr=None,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
                 )
+
+                import threading
+                def log_output(pipe):
+                    try:
+                        for line in iter(pipe.readline, ""):
+                            val = line.strip()
+                            if val:
+                                print(f"[DEBUG] Subprocess: {val}")
+                    except Exception:
+                        pass
+
+                log_thread = threading.Thread(target=log_output, args=(proc.stdout,), daemon=True)
+                log_thread.start()
 
                 while True:
                     if proc.poll() is not None:
@@ -488,7 +502,7 @@ def run_download(parsed_data: dict,
                             proc.kill()
                             proc.wait(timeout=5)
                         raise InterruptedError("Download cancelled")
-                    time.sleep(0.2)
+                    time.sleep(0.1)
 
                 result = {}
                 if os.path.exists(result_path):
@@ -908,10 +922,24 @@ def run_download_folder(parsed_data: dict,
                 json.dump(download_kwargs, f)
 
             proc = subprocess.Popen(
-                [sys.executable, "-c", script, payload_path, result_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                [sys.executable, "-u", "-c", script, payload_path, result_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
             )
+
+            import threading
+            def log_output(pipe):
+                try:
+                    for line in iter(pipe.readline, ""):
+                        val = line.strip()
+                        if val:
+                            print(f"[DEBUG] Subprocess: {val}")
+                except Exception:
+                    pass
+
+            log_thread = threading.Thread(target=log_output, args=(proc.stdout,), daemon=True)
+            log_thread.start()
 
             while True:
                 if proc.poll() is not None:
@@ -924,7 +952,7 @@ def run_download_folder(parsed_data: dict,
                         proc.kill()
                         proc.wait(timeout=5)
                     raise InterruptedError("Folder download cancelled")
-                time.sleep(0.2)
+                time.sleep(0.1)
 
             result = {}
             if os.path.exists(result_path):
