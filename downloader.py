@@ -472,6 +472,7 @@ def run_download(parsed_data: dict,
                 "        print('[DEBUG] Subprocess: Stage 2 (hf_hub_download without token) succeeded!')\n"
                 "    except Exception as e2:\n"
                 "        print(f'[DEBUG] Subprocess: Stage 2 (hf_hub_download without token) failed: {e2}')\n"
+                "        import urllib.request\n"
                 "        repo_id = kwargs.get('repo_id')\n"
                 "        filename = kwargs.get('filename')\n"
                 "        revision = kwargs.get('revision') or 'main'\n"
