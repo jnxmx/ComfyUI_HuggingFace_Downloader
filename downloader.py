@@ -412,7 +412,23 @@ def run_download(parsed_data: dict,
 
         def run_file_download_with_cancel(download_kwargs: dict) -> str:
             if not cancel_check:
-                return hf_hub_download(**download_kwargs)
+                try:
+                    return hf_hub_download(**download_kwargs)
+                except Exception as first_error:
+                    err_msg = str(first_error).lower()
+                    if "403" in err_msg or "accessdenied" in err_msg or "xethub" in err_msg or "cas-bridge" in err_msg:
+                        orig_xet = os.environ.get("HF_HUB_DISABLE_XET")
+                        os.environ["HF_HUB_DISABLE_XET"] = "1"
+                        try:
+                            print("[ComfyUI_HuggingFace_Downloader] hf_hub_download failed with Xet bridge error. Retrying with HF_HUB_DISABLE_XET=1...")
+                            return hf_hub_download(**download_kwargs)
+                        finally:
+                            if orig_xet is not None:
+                                os.environ["HF_HUB_DISABLE_XET"] = orig_xet
+                            else:
+                                os.environ.pop("HF_HUB_DISABLE_XET", None)
+                    else:
+                        raise first_error
 
             comfy_temp = os.path.join(os.getcwd(), "temp")
             os.makedirs(comfy_temp, exist_ok=True)
@@ -422,7 +438,7 @@ def run_download(parsed_data: dict,
             os.close(result_fd)
 
             script = (
-                "import json, sys\n"
+                "import json, sys, os\n"
                 "from huggingface_hub import hf_hub_download\n"
                 "payload_path = sys.argv[1]\n"
                 "result_path = sys.argv[2]\n"
@@ -433,7 +449,17 @@ def run_download(parsed_data: dict,
                 "    path = hf_hub_download(**kwargs)\n"
                 "    result = {'ok': True, 'path': path}\n"
                 "except Exception as e:\n"
-                "    result = {'ok': False, 'error': str(e)}\n"
+                "    err_msg = str(e).lower()\n"
+                "    if '403' in err_msg or 'accessdenied' in err_msg or 'xethub' in err_msg or 'cas-bridge' in err_msg:\n"
+                "        try:\n"
+                "            os.environ['HF_HUB_DISABLE_XET'] = '1'\n"
+                "            print('[ComfyUI_HuggingFace_Downloader] Subprocess hf_hub_download failed with Xet bridge error. Retrying with HF_HUB_DISABLE_XET=1...')\n"
+                "            path = hf_hub_download(**kwargs)\n"
+                "            result = {'ok': True, 'path': path}\n"
+                "        except Exception as retry_err:\n"
+                "            result = {'ok': False, 'error': str(retry_err)}\n"
+                "    else:\n"
+                "        result = {'ok': False, 'error': str(e)}\n"
                 "with open(result_path, 'w', encoding='utf-8') as f:\n"
                 "    json.dump(result, f)\n"
                 "sys.exit(0 if result.get('ok') else 1)\n"
