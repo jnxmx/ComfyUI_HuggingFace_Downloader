@@ -344,7 +344,7 @@ def run_download(parsed_data: dict,
     Cleans up the cached copy to save disk space.
     """
     token = get_token()
-    print("[DEBUG] run_download (single-file) started")
+    print(f"[DEBUG] run_download (single-file) started. Token length: {len(token) if token else 0}")
 
     file_name = parsed_data.get("file", "unknown.bin").strip("/")
     sub = parsed_data.get("subfolder", "").strip("/")
@@ -428,7 +428,7 @@ def run_download(parsed_data: dict,
                 "import json, sys, os\n"
                 "os.environ['HF_HUB_DISABLE_XET'] = '1'\n"
                 "os.environ['HF_HUB_ENABLE_HF_XET'] = '0'\n"
-                "# Block hf_xet entirely - env vars are ignored by newer versions\n"
+                "# Block hf_xet entirely - env vars are ignored by wild imports\n"
                 "for _m in list(sys.modules):\n"
                 "    if 'xet' in _m:\n"
                 "        del sys.modules[_m]\n"
@@ -472,7 +472,7 @@ def run_download(parsed_data: dict,
                     json.dump(download_kwargs, f)
 
                 proc = subprocess.Popen(
-                    [sys.executable, "-c", script, payload_path, result_path],
+                    [sys.executable, "-u", "-c", script, payload_path, result_path],
                     stdout=None,
                     stderr=None,
                 )
