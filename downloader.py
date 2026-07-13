@@ -15,9 +15,6 @@ import urllib.parse
 import urllib.request
 from typing import Optional, Tuple, Callable
 
-# Must be set BEFORE importing huggingface_hub so hf_xet reads it at import time.
-os.environ["HF_HUB_ENABLE_HF_XET"] = "0"
-os.environ["HF_HUB_DISABLE_XET"] = "1"
 
 from huggingface_hub import (
     HfApi,
