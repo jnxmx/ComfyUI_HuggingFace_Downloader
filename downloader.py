@@ -412,33 +412,34 @@ def run_download(parsed_data: dict,
             ensure_remote_metadata()
 
         def run_file_download_with_cancel(download_kwargs: dict) -> str:
-            # Always use a subprocess for hf_hub_download.
-            # The main process may already have hf_xet loaded (by ComfyUI core
-            # or other extensions) before our env-var override takes effect,
-            # causing Xet bridge 403 errors. A subprocess starts clean.
+            # We try to run the download subprocess in two configurations:
+            # 1. First with Xet enabled (xet_flag="1"). This is required for Xet-backed repos (e.g. black-forest-labs/FLUX.2-klein-9b-fp8)
+            #    because cas-bridge.xethub.hf.co blocks standard HTTP downloads without the Xet client authentication flow.
+            # 2. If that fails, we retry with Xet disabled (xet_flag="0") as a fallback to handle normal repos and fine-grained token issues.
 
             comfy_temp = os.path.join(os.getcwd(), "temp")
             os.makedirs(comfy_temp, exist_ok=True)
-            payload_fd, payload_path = tempfile.mkstemp(prefix="hf_file_payload_", suffix=".json", dir=comfy_temp)
-            result_fd, result_path = tempfile.mkstemp(prefix="hf_file_result_", suffix=".json", dir=comfy_temp)
-            os.close(payload_fd)
-            os.close(result_fd)
 
             script = (
                 "import json, sys, os, urllib.request, shutil\n"
-                "os.environ['HF_HUB_DISABLE_XET'] = '1'\n"
-                "os.environ['HF_HUB_ENABLE_HF_XET'] = '0'\n"
-                "# Block hf_xet entirely - env vars are ignored by wild imports\n"
-                "for _m in list(sys.modules):\n"
-                "    if 'xet' in _m:\n"
-                "        del sys.modules[_m]\n"
-                "import importlib\n"
-                "class _XetBlocker:\n"
-                "    def find_module(self, name, path=None):\n"
-                "        return self if 'xet' in name else None\n"
-                "    def load_module(self, name):\n"
-                "        raise ImportError(name)\n"
-                "sys.meta_path.insert(0, _XetBlocker())\n"
+                "use_xet = sys.argv[3] == '1'\n"
+                "if use_xet:\n"
+                "    os.environ['HF_HUB_DISABLE_XET'] = '0'\n"
+                "    os.environ['HF_HUB_ENABLE_HF_XET'] = '1'\n"
+                "else:\n"
+                "    os.environ['HF_HUB_DISABLE_XET'] = '1'\n"
+                "    os.environ['HF_HUB_ENABLE_HF_XET'] = '0'\n"
+                "    # Block hf_xet entirely - env vars are ignored by wild imports\n"
+                "    for _m in list(sys.modules):\n"
+                "        if 'xet' in _m:\n"
+                "            del sys.modules[_m]\n"
+                "    import importlib\n"
+                "    class _XetBlocker:\n"
+                "        def find_module(self, name, path=None):\n"
+                "            return self if 'xet' in name else None\n"
+                "        def load_module(self, name):\n"
+                "            raise ImportError(name)\n"
+                "    sys.meta_path.insert(0, _XetBlocker())\n"
                 "payload_path = sys.argv[1]\n"
                 "result_path = sys.argv[2]\n"
                 "with open(payload_path, 'r', encoding='utf-8') as f:\n"
@@ -510,7 +511,6 @@ def run_download(parsed_data: dict,
                 "                req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')\n"
                 "                with opener.open(req) as response:\n"
                 "                    with open(dest_file, 'wb') as f:\n"
-                "                        import shutil\n"
                 "                        shutil.copyfileobj(response, f)\n"
                 "                result = {'ok': True, 'path': dest_file}\n"
                 "                print('[DEBUG] Subprocess: Stage 4 (manual download without token) succeeded!')\n"
@@ -521,58 +521,68 @@ def run_download(parsed_data: dict,
                 "sys.exit(0 if result.get('ok') else 1)\n"
             )
 
-            try:
-                with open(payload_path, "w", encoding="utf-8") as f:
-                    json.dump(download_kwargs, f)
+            last_error = "Unknown error"
+            for xet_flag in ["1", "0"]:
+                payload_fd, payload_path = tempfile.mkstemp(prefix="hf_file_payload_", suffix=".json", dir=comfy_temp)
+                result_fd, result_path = tempfile.mkstemp(prefix="hf_file_result_", suffix=".json", dir=comfy_temp)
+                os.close(payload_fd)
+                os.close(result_fd)
 
-                proc = subprocess.Popen(
-                    [sys.executable, "-u", "-c", script, payload_path, result_path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                )
+                try:
+                    with open(payload_path, "w", encoding="utf-8") as f:
+                        json.dump(download_kwargs, f)
 
-                import threading
-                def log_output(pipe):
-                    try:
-                        for line in iter(pipe.readline, ""):
-                            val = line.strip()
-                            if val:
-                                print(f"[DEBUG] Subprocess: {val}")
-                    except Exception:
-                        pass
+                    print(f"[DEBUG] Spawning download subprocess (Xet={'enabled' if xet_flag == '1' else 'disabled'})...")
+                    proc = subprocess.Popen(
+                        [sys.executable, "-u", "-c", script, payload_path, result_path, xet_flag],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                    )
 
-                log_thread = threading.Thread(target=log_output, args=(proc.stdout,), daemon=True)
-                log_thread.start()
-
-                while True:
-                    if proc.poll() is not None:
-                        break
-                    if cancel_check and cancel_check():
-                        proc.terminate()
+                    import threading
+                    def log_output(pipe):
                         try:
-                            proc.wait(timeout=2)
-                        except subprocess.TimeoutExpired:
-                            proc.kill()
-                            proc.wait(timeout=5)
-                        raise InterruptedError("Download cancelled")
-                    time.sleep(0.1)
+                            for line in iter(pipe.readline, ""):
+                                val = line.strip()
+                                if val:
+                                    print(f"[DEBUG] Subprocess: {val}")
+                        except Exception:
+                            pass
 
-                result = {}
-                if os.path.exists(result_path):
-                    try:
-                        with open(result_path, "r", encoding="utf-8") as f:
-                            result = json.load(f)
-                    except Exception:
-                        result = {}
+                    log_thread = threading.Thread(target=log_output, args=(proc.stdout,), daemon=True)
+                    log_thread.start()
 
-                if result.get("ok"):
-                    return str(result.get("path") or "")
+                    while True:
+                        if proc.poll() is not None:
+                            break
+                        if cancel_check and cancel_check():
+                            proc.terminate()
+                            try:
+                                proc.wait(timeout=2)
+                            except subprocess.TimeoutExpired:
+                                proc.kill()
+                                proc.wait(timeout=5)
+                            raise InterruptedError("Download cancelled")
+                        time.sleep(0.1)
 
-                raise RuntimeError(result.get("error") or "hf_hub_download failed.")
-            finally:
-                _safe_remove(payload_path)
-                _safe_remove(result_path)
+                    result = {}
+                    if os.path.exists(result_path):
+                        try:
+                            with open(result_path, "r", encoding="utf-8") as f:
+                                result = json.load(f)
+                        except Exception:
+                            result = {}
+
+                    if result.get("ok"):
+                        return str(result.get("path") or "")
+
+                    last_error = result.get("error") or "Unknown subprocess error"
+                finally:
+                    _safe_remove(payload_path)
+                    _safe_remove(result_path)
+
+            raise RuntimeError(last_error)
 
         download_start = time.time()
         print(f"[DEBUG] hf_hub_download start: {parsed_data['repo']}/{remote_filename}")
