@@ -1015,13 +1015,14 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     Restore the 'ComfyUI' folder from a Hugging Face repository.
     Uses snapshot_download for faster parallel downloads.
     """
+    # Must be set BEFORE importing huggingface_hub so hf_xet reads it at import time.
+    os.environ["HF_HUB_ENABLE_HF_XET"] = "0"
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+
     from huggingface_hub import snapshot_download, hf_hub_download
     import requests.exceptions
     from collections import defaultdict
     from .downloader import clear_cache_for_path
-
-    os.environ["HF_HUB_ENABLE_HF_XET"] = "0"
-    os.environ["HF_HUB_DISABLE_XET"] = "1"
     
     api = HfApi()
     token, _ = get_token_and_size_limit()
