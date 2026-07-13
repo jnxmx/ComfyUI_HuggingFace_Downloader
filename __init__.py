@@ -2,10 +2,6 @@
 import os
 import json
 
-# Disable Xet bridge BEFORE anything imports huggingface_hub.
-# The hf_xet module reads this at import time and caches it.
-os.environ["HF_HUB_DISABLE_XET"] = "1"
-os.environ["HF_HUB_ENABLE_HF_XET"] = "0"
 
 # Export the configured Hugging Face token to the environment so that all custom nodes
 # and Hugging Face subprocesses can run in authenticated mode.
