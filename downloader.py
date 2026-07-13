@@ -425,7 +425,7 @@ def run_download(parsed_data: dict,
             os.close(result_fd)
 
             script = (
-                "import json, sys, os\n"
+                "import json, sys, os, urllib.request, shutil\n"
                 "os.environ['HF_HUB_DISABLE_XET'] = '1'\n"
                 "os.environ['HF_HUB_ENABLE_HF_XET'] = '0'\n"
                 "# Block hf_xet entirely - env vars are ignored by wild imports\n"
@@ -472,7 +472,6 @@ def run_download(parsed_data: dict,
                 "        print('[DEBUG] Subprocess: Stage 2 (hf_hub_download without token) succeeded!')\n"
                 "    except Exception as e2:\n"
                 "        print(f'[DEBUG] Subprocess: Stage 2 (hf_hub_download without token) failed: {e2}')\n"
-                "        import urllib.request\n"
                 "        repo_id = kwargs.get('repo_id')\n"
                 "        filename = kwargs.get('filename')\n"
                 "        revision = kwargs.get('revision') or 'main'\n"
