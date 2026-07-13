@@ -5664,6 +5664,17 @@ app.registerExtension({
             const detailsLower = details.toLowerCase();
             const missingValue = parseMissingValueFromDetails(details);
 
+            // Never treat unregistered node classes or missing custom nodes as model validation reasons.
+            // This ensures they keep their native red borders and error states on the canvas.
+            if (message.includes("unregistered") || 
+                message.includes("not registered") || 
+                type.includes("unregistered") ||
+                (message.includes("class") && message.includes("not found")) ||
+                (message.includes("class") && message.includes("does not exist")) ||
+                (message.includes("node type") && message.includes("not found"))) {
+                return false;
+            }
+
             const isValueNotInList =
                 message.includes("value not in list") ||
                 type.includes("value_not_in_list") ||
