@@ -2,6 +2,37 @@
 import os
 import json
 
+# Monkeypatch huggingface_hub to automatically retry public downloads anonymously
+# if they fail with a token (this resolves fine-grained token 403 blocks for other nodes).
+try:
+    import huggingface_hub.file_download
+    _orig_hf_hub_download = huggingface_hub.file_download.hf_hub_download
+
+    def _patched_hf_hub_download(*args, **kwargs):
+        try:
+            return _orig_hf_hub_download(*args, **kwargs)
+        except Exception as e:
+            e_str = str(e)
+            if "403" in e_str or "401" in e_str or "AccessDenied" in e_str or "Forbidden" in e_str:
+                token = kwargs.get("token")
+                if token is not False:
+                    kwargs_copy = kwargs.copy()
+                    kwargs_copy["token"] = False
+                    orig_env_token = os.environ.pop("HF_TOKEN", None)
+                    try:
+                        return _orig_hf_hub_download(*args, **kwargs_copy)
+                    except Exception:
+                        pass
+                    finally:
+                        if orig_env_token is not None:
+                            os.environ["HF_TOKEN"] = orig_env_token
+            raise e
+
+    huggingface_hub.file_download.hf_hub_download = _patched_hf_hub_download
+except Exception:
+    pass
+
+
 
 
 from .HuggingFaceDownloadModel import HuggingFaceDownloadModel
