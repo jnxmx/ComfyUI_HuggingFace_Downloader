@@ -1443,7 +1443,7 @@ app.registerExtension({
                     if (!node || typeof node !== "object") {
                         continue;
                     }
-                    if (isGraphNodeBypassed(node)) {
+                    if (isGraphNodeBypassed(node) || isExcludedDiscoveryNode(node)) {
                         continue;
                     }
 
@@ -5366,13 +5366,37 @@ app.registerExtension({
             }
         };
 
+        const isExcludedDiscoveryNode = (node) => {
+            if (!node || typeof node !== "object") return false;
+            const nodeType = String(node.type || "");
+            const cnrId = String(node.properties?.cnr_id || "");
+            
+            if (cnrId === "comfyui_controlnet_aux" ||
+                cnrId === "frame-interpolation" ||
+                cnrId === "ComfyUI-Frame-Interpolation" ||
+                cnrId === "video-depth-anything" ||
+                cnrId === "ComfyUI-Video-Depth-Anything") {
+                return true;
+            }
+            
+            if (nodeType.endsWith(" VFI") ||
+                nodeType === "KSampler Gradually Adding More Denoise (efficient)" ||
+                nodeType === "Make Interpolation State List" ||
+                nodeType === "VFI FloatToInt" ||
+                nodeType.includes("VideoDepthAnything")) {
+                return true;
+            }
+            
+            return false;
+        };
+
         const collectEmbeddedModelsNativeLike = (graphData) => {
             const embeddedModels = [];
 
             const collectFromNodes = (nodes) => {
                 if (!Array.isArray(nodes)) return;
                 for (const node of nodes) {
-                    if (isNodeBypassedMode(node?.mode)) {
+                    if (isNodeBypassedMode(node?.mode) || isExcludedDiscoveryNode(node)) {
                         continue;
                     }
                     const selected = getSelectedModelsMetadataNativeLike(node);
@@ -5863,9 +5887,13 @@ app.registerExtension({
                 if (isExecutionNodeBypassed(executionId)) {
                     continue;
                 }
+                const nodeId = parseNodeIdFromExecutionId(executionId);
+                const node = getGraphNodeByExecutionId(nodeId);
+                if (node && isExcludedDiscoveryNode(node)) {
+                    continue;
+                }
                 const classType = String(nodeError?.class_type || "");
                 const reasons = Array.isArray(nodeError?.errors) ? nodeError.errors : [];
-                const nodeId = parseNodeIdFromExecutionId(executionId);
                 const nodeTitle = getGraphNodeTitleById(nodeId, classType || "Unknown Node");
                 for (const reason of reasons) {
                     if (!isModelValidationReason(reason, classType)) {
