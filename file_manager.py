@@ -1,36 +1,103 @@
 import os
 
-def get_model_subfolders(models_dir: str = None) -> list:
-    if models_dir is None:
+def _find_subdirs_recursive(base_path: str, max_depth: int = 3) -> list:
+    subdirs = []
+    if not os.path.exists(base_path) or not os.path.isdir(base_path):
+        return subdirs
+
+    seen_realpaths = set()
+    seen_realpaths.add(os.path.realpath(base_path))
+
+    def walk_dir(current_path: str, depth: int):
+        if depth > max_depth:
+            return
         try:
-            import folder_paths
-            if hasattr(folder_paths, "models_dir") and folder_paths.models_dir:
-                models_dir = folder_paths.models_dir
-        except ImportError:
-            pass
+            entries = os.listdir(current_path)
+        except OSError:
+            return
+        for entry in entries:
+            if entry.startswith(".") or entry == "__pycache__":
+                continue
+            full_path = os.path.join(current_path, entry)
+            if os.path.isdir(full_path):
+                real_p = os.path.realpath(full_path)
+                if real_p in seen_realpaths:
+                    continue
+                seen_realpaths.add(real_p)
+                rel = os.path.relpath(full_path, base_path).replace("\\", "/")
+                subdirs.append(rel)
+                walk_dir(full_path, depth + 1)
+
+    walk_dir(base_path, 1)
+    return subdirs
+
+def get_model_subfolders(models_dir: str = None) -> list:
+    try:
+        import folder_paths
+    except ImportError:
+        folder_paths = None
+
+    if models_dir is None:
+        if folder_paths and hasattr(folder_paths, "models_dir") and folder_paths.models_dir:
+            models_dir = folder_paths.models_dir
     if models_dir is None:
         models_dir = os.path.join(os.getcwd(), "models")
 
-    subfolders = []
+    # Get candidate folder types (base names like checkpoints, loras, etc.)
+    base_types = []
+    if folder_paths and hasattr(folder_paths, "folder_names_and_paths"):
+        for k in folder_paths.folder_names_and_paths.keys():
+            if k not in ["custom_nodes", "user", "input", "output", "temp"]:
+                base_types.append(k)
+    else:
+        # Fallback list if folder_paths is not available
+        base_types = ["checkpoints", "clip", "diffusion_models", "vae", "loras", "controlnet", "upscale_models", "text_encoders", "style_models", "embeddings"]
+
+    # Also include any actual top-level folders inside models_dir
     if os.path.exists(models_dir):
-        subfolders = [name for name in os.listdir(models_dir)
-                      if os.path.isdir(os.path.join(models_dir, name))]
+        try:
+            for name in os.listdir(models_dir):
+                if os.path.isdir(os.path.join(models_dir, name)) and name not in base_types:
+                    base_types.append(name)
+        except OSError:
+            pass
 
-    # Merge in known keys from folder_paths if available, so they are always listed
-    try:
-        import folder_paths
-        if hasattr(folder_paths, "folder_names_and_paths"):
-            for k in folder_paths.folder_names_and_paths.keys():
-                if k not in subfolders and k not in ["custom_nodes", "user", "input", "output", "temp"]:
-                    subfolders.append(k)
-    except ImportError:
-        pass
-
-    subfolders.sort()
+    # Sort base_types with priority
     priority = ["checkpoints", "clip", "diffusion_models", "vae", "loras", "controlnet"]
-    prio_list = [p for p in priority if p in subfolders]
-    non_prio = [f for f in subfolders if f not in priority]
-    return prio_list + non_prio
+    prio_list = [p for p in priority if p in base_types]
+    non_prio = [f for f in base_types if f not in priority]
+    ordered_base_types = prio_list + sorted(non_prio)
+
+    result_folders = []
+    for base_type in ordered_base_types:
+        # Add the base folder type itself
+        result_folders.append(base_type)
+
+        # Get search paths for this type
+        search_paths = []
+        if folder_paths and hasattr(folder_paths, "get_folder_paths"):
+            try:
+                search_paths = folder_paths.get_folder_paths(base_type) or []
+            except KeyError:
+                pass
+        
+        # Always fallback/include default models_dir/base_type path
+        default_path = os.path.join(models_dir, base_type)
+        if default_path not in search_paths:
+            search_paths = list(search_paths) + [default_path]
+
+        # Scan each search path for subdirectories
+        subdirs_found = set()
+        for root_path in search_paths:
+            if os.path.exists(root_path) and os.path.isdir(root_path):
+                for rel_path in _find_subdirs_recursive(root_path, max_depth=3):
+                    subdirs_found.add(rel_path)
+
+        # Append subdirectories in sorted order
+        for rel_path in sorted(list(subdirs_found)):
+            result_folders.append(f"{base_type}/{rel_path}")
+
+    return result_folders
 
 def resolve_target_dir(final_folder: str) -> str:
     """
