@@ -399,18 +399,18 @@ def get_token_and_size_limit():
     token = ""
     size_limit_gb = None
     if os.path.exists(settings_path):
-        with open(settings_path, "r") as f:
-            settings = json.load(f)
-        token = settings.get("downloader.hf_token", "").strip()
         try:
+            with open(settings_path, "r") as f:
+                settings = json.load(f)
+            token = settings.get("downloader.hf_token", "").strip()
             size_limit_gb = float(settings.get("downloaderbackup.file_size_limit"))
         except Exception:
-            size_limit_gb = None
+            pass
     if not token:
         token = os.getenv("HF_TOKEN", "").strip()
     if size_limit_gb is None:
         size_limit_gb = 5
-    return token, size_limit_gb
+    return (token if token else None), size_limit_gb
 
 
 def _copy_and_strip_token(src_folder, temp_dir):

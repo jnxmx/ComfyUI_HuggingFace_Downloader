@@ -133,12 +133,15 @@ def get_token():
     settings_path = os.path.join("user", "default", "comfy.settings.json")
     token = ""
     if os.path.exists(settings_path):
-        with open(settings_path, "r") as f:
-            settings = json.load(f)
-        token = settings.get("downloader.hf_token", "").strip()
+        try:
+            with open(settings_path, "r") as f:
+                settings = json.load(f)
+            token = settings.get("downloader.hf_token", "").strip()
+        except Exception:
+            pass
     if not token:  # Fallback to HF_TOKEN environment variable
         token = os.getenv("HF_TOKEN", "").strip()
-    return token
+    return token if token else None
 
 
 def _safe_remove(path: str):
