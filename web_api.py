@@ -4228,8 +4228,32 @@ async def model_explorer_delete(request):
     absolute_path = os.path.abspath(str(candidate.get("absolute_path") or ""))
     if not absolute_path or not os.path.isfile(absolute_path):
         return web.json_response({"error": "Resolved model path is not a file."}, status=404)
-    if not _is_within_directory(_get_models_root(), absolute_path):
-        return web.json_response({"error": "Refusing to delete path outside models root."}, status=400)
+    try:
+        import folder_paths
+    except ImportError:
+        folder_paths = None
+
+    allowed = False
+    search_paths = []
+    if folder_paths and hasattr(folder_paths, "folder_names_and_paths"):
+        for base_type in folder_paths.folder_names_and_paths.keys():
+            if base_type not in ["custom_nodes", "user", "input", "output", "temp"]:
+                try:
+                    paths = folder_paths.get_folder_paths(base_type) or []
+                    search_paths.extend(paths)
+                except Exception:
+                    pass
+
+    # Always fallback/include default models_root
+    search_paths.append(_get_models_root())
+
+    for root_path in search_paths:
+        if _is_within_directory(root_path, absolute_path):
+            allowed = True
+            break
+
+    if not allowed:
+        return web.json_response({"error": "Refusing to delete path outside registered model paths."}, status=400)
 
     try:
         os.remove(absolute_path)
