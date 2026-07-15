@@ -138,6 +138,13 @@ def resolve_target_dir(final_folder: str) -> str:
             paths = folder_paths.get_folder_paths(base_type)
             if paths:
                 primary_path = paths[0]
+                # If there are multiple paths, prioritize the one ending with base_type
+                # to handle overlapping aliases like diffusion_models -> [unet, diffusion_models]
+                for p in paths:
+                    norm_p = p.replace("\\", "/").rstrip("/")
+                    if norm_p.endswith(f"/{base_type}"):
+                        primary_path = p
+                        break
                 if sub_path:
                     return os.path.join(primary_path, sub_path)
                 return primary_path
