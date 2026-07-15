@@ -161,3 +161,43 @@ def get_all_subfolders_flat(root_dir: str = None) -> list:
         for d in dirs:
             subfolders.append(os.path.relpath(os.path.join(root, d), root_dir))
     return subfolders
+
+def resolve_model_absolute_path(rel_path: str) -> str:
+    """
+    Given a relative path like 'checkpoints/sdxl/model.safetensors',
+    finds the actual absolute path by searching all registered directories for that type.
+    """
+    rel_path = rel_path.strip().replace("\\", "/").strip("/")
+    parts = rel_path.split("/", 1)
+    if len(parts) < 2:
+        return ""
+    base_type, sub_path = parts[0], parts[1]
+
+    try:
+        import folder_paths
+    except ImportError:
+        folder_paths = None
+
+    search_paths = []
+    if folder_paths and hasattr(folder_paths, "get_folder_paths"):
+        try:
+            search_paths = folder_paths.get_folder_paths(base_type) or []
+        except KeyError:
+            pass
+
+    default_models_dir = None
+    if folder_paths and hasattr(folder_paths, "models_dir") and folder_paths.models_dir:
+        default_models_dir = folder_paths.models_dir
+    if not default_models_dir:
+        default_models_dir = os.path.join(os.getcwd(), "models")
+    
+    default_path = os.path.join(default_models_dir, base_type)
+    if default_path not in search_paths:
+        search_paths = list(search_paths) + [default_path]
+
+    for root_path in search_paths:
+        candidate = os.path.join(root_path, sub_path)
+        if os.path.exists(candidate):
+            return os.path.abspath(candidate)
+    
+    return os.path.abspath(os.path.join(default_models_dir, rel_path))

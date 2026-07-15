@@ -21,7 +21,7 @@ from .backup import (
     delete_selected_from_huggingface,
     create_hf_backup_repo,
 )
-from .file_manager import get_model_subfolders, resolve_target_dir
+from .file_manager import get_model_subfolders, resolve_target_dir, resolve_model_absolute_path
 from .model_discovery import process_workflow_for_missing_models, SearchCancelledException
 from .downloader import (
     run_download,
@@ -996,34 +996,72 @@ def _scan_local_models() -> tuple[list[dict], dict[str, list[dict]]]:
                 model_library_local_cache.get("name_map", {}),
             )
 
+    try:
+        import folder_paths
+    except ImportError:
+        folder_paths = None
+
     models_root = _get_models_root()
     entries: list[dict] = []
     name_map: dict[str, list[dict]] = {}
-    if os.path.exists(models_root):
-        for root, _, files in os.walk(models_root):
-            for file in files:
-                ext = os.path.splitext(file)[1].lower()
-                if ext not in MODEL_LIBRARY_EXTENSIONS:
-                    continue
-                absolute_path = os.path.join(root, file)
-                rel_path = _normalize_rel_path(os.path.relpath(absolute_path, models_root))
-                directory = _normalize_rel_path(os.path.dirname(rel_path))
-                stat = None
-                try:
-                    stat = os.stat(absolute_path)
-                except Exception:
+
+    base_types = []
+    if folder_paths and hasattr(folder_paths, "folder_names_and_paths"):
+        for k in folder_paths.folder_names_and_paths.keys():
+            if k not in ["custom_nodes", "user", "input", "output", "temp"]:
+                base_types.append(k)
+    else:
+        base_types = ["checkpoints", "clip", "diffusion_models", "vae", "loras", "controlnet", "upscale_models", "text_encoders", "style_models", "embeddings"]
+
+    seen_absolute_paths = set()
+
+    for base_type in base_types:
+        search_paths = []
+        if folder_paths and hasattr(folder_paths, "get_folder_paths"):
+            try:
+                search_paths = folder_paths.get_folder_paths(base_type) or []
+            except KeyError:
+                pass
+        
+        default_path = os.path.join(models_root, base_type)
+        if default_path not in search_paths:
+            search_paths = list(search_paths) + [default_path]
+
+        for search_path in search_paths:
+            if not os.path.exists(search_path) or not os.path.isdir(search_path):
+                continue
+
+            for root, _, files in os.walk(search_path):
+                for file in files:
+                    ext = os.path.splitext(file)[1].lower()
+                    if ext not in MODEL_LIBRARY_EXTENSIONS:
+                        continue
+                    
+                    absolute_path = os.path.realpath(os.path.join(root, file))
+                    if absolute_path in seen_absolute_paths:
+                        continue
+                    seen_absolute_paths.add(absolute_path)
+
+                    rel_to_search = os.path.relpath(absolute_path, search_path)
+                    rel_path = _normalize_rel_path(os.path.join(base_type, rel_to_search))
+                    directory = _normalize_rel_path(os.path.dirname(rel_path))
+
                     stat = None
-                record = {
-                    "filename": file,
-                    "filename_lower": file.lower(),
-                    "absolute_path": absolute_path,
-                    "rel_path": rel_path,
-                    "directory": directory,
-                    "size_bytes": int(stat.st_size) if stat else None,
-                    "modified_at": float(stat.st_mtime) if stat else None,
-                }
-                entries.append(record)
-                name_map.setdefault(record["filename_lower"], []).append(record)
+                    try:
+                        stat = os.stat(absolute_path)
+                    except Exception:
+                        stat = None
+                    record = {
+                        "filename": file,
+                        "filename_lower": file.lower(),
+                        "absolute_path": absolute_path,
+                        "rel_path": rel_path,
+                        "directory": directory,
+                        "size_bytes": int(stat.st_size) if stat else None,
+                        "modified_at": float(stat.st_mtime) if stat else None,
+                    }
+                    entries.append(record)
+                    name_map.setdefault(record["filename_lower"], []).append(record)
 
     entries.sort(key=lambda item: (item.get("filename_lower", ""), item.get("rel_path", "")))
     for key in list(name_map.keys()):
@@ -1063,7 +1101,9 @@ def _scan_local_models_for_explorer(category_filter: str = "") -> tuple[list[dic
             return
         if ext in MODEL_EXPLORER_EXCLUDED_EXTENSIONS:
             return
-        absolute_path = os.path.join(models_root, rel_norm)
+        absolute_path = resolve_model_absolute_path(rel_norm)
+        if not absolute_path:
+            absolute_path = os.path.join(models_root, rel_norm)
         directory = _normalize_rel_path(os.path.dirname(rel_norm))
         stat = None
         try:
