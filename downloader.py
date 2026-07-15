@@ -15,6 +15,8 @@ import urllib.parse
 import urllib.request
 from typing import Optional, Tuple, Callable
 
+from .file_manager import resolve_target_dir
+
 
 from huggingface_hub import (
     HfApi,
@@ -370,7 +372,7 @@ def run_download(parsed_data: dict,
     dest_path = ""
     copy_tmp_path = ""
     try:
-        target_dir = os.path.join(os.getcwd(), "models", final_folder)
+        target_dir = resolve_target_dir(final_folder)
         os.makedirs(target_dir, exist_ok=True)
         dest_path = os.path.join(target_dir, target_name)
 
@@ -679,7 +681,7 @@ def run_download_url(url: str,
     if parsed_url.scheme.lower() not in ("http", "https") or not parsed_url.netloc:
         raise RuntimeError("URL must be a valid http(s) link.")
 
-    target_dir = os.path.join(os.getcwd(), "models", final_folder)
+    target_dir = resolve_target_dir(final_folder)
     os.makedirs(target_dir, exist_ok=True)
 
     explicit_target = _sanitize_download_filename(target_filename or "")
@@ -865,7 +867,7 @@ def run_download_folder(parsed_data: dict,
     repo_name = parsed_data["repo"].split("/")[-1] if "/" in parsed_data["repo"] else parsed_data["repo"]
 
     # Create base directory
-    base_dir = os.path.join(os.getcwd(), "models", final_folder)
+    base_dir = resolve_target_dir(final_folder)
     os.makedirs(base_dir, exist_ok=True)
     
     # Determine destination folder name based on whether it's a subfolder or root link

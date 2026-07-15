@@ -21,7 +21,7 @@ from .backup import (
     delete_selected_from_huggingface,
     create_hf_backup_repo,
 )
-from .file_manager import get_model_subfolders
+from .file_manager import get_model_subfolders, resolve_target_dir
 from .model_discovery import process_workflow_for_missing_models, SearchCancelledException
 from .downloader import (
     run_download,
@@ -974,6 +974,8 @@ def _is_model_library_backend_enabled() -> bool:
     return False
 
 def _get_models_root() -> str:
+    if folder_paths and hasattr(folder_paths, "models_dir") and folder_paths.models_dir:
+        return folder_paths.models_dir
     base_path = getattr(folder_paths, "base_path", None) if folder_paths else None
     if not base_path:
         base_path = os.getcwd()
@@ -2908,7 +2910,7 @@ def setup(app_or_server):
                 
                 if download_mode == "file":
                     try:
-                        target_dir = os.path.join(os.getcwd(), "models", folder)
+                        target_dir = resolve_target_dir(folder)
                         os.makedirs(target_dir, exist_ok=True)
                         dest_path = os.path.join(target_dir, requested_filename or filename)
                         if not os.path.exists(dest_path):
