@@ -1366,6 +1366,95 @@ app.registerExtension({
             visitGraph(rootGraph);
         };
 
+        /**
+         * For every loader node whose model widget is linked to an upstream
+         * "Hugging Face Download Model" node, parse the expected filename from the
+         * HF link URL and write it into the widget value.  This prevents the native
+         * ComfyUI "Missing Models" panel from showing a stale/random filename.
+         */
+        const syncDownloaderLinkedWidgetNames = (graph = null) => {
+            const rootGraph = graph || app?.rootGraph;
+            if (!rootGraph || typeof rootGraph !== "object") {
+                return;
+            }
+
+            const parseFilenameFromUrl = (url) => {
+                try {
+                    const cleaned = String(url || "").split("?")[0].split("#")[0];
+                    const parts = cleaned.split("/").filter(Boolean);
+                    const last = parts[parts.length - 1];
+                    return last ? decodeURIComponent(last) : "";
+                } catch (_) {
+                    return "";
+                }
+            };
+
+            const visitGraph = (currentGraph) => {
+                const nodes = Array.isArray(currentGraph?.nodes) ? currentGraph.nodes : [];
+                for (const node of nodes) {
+                    if (!node || typeof node !== "object") continue;
+
+                    const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
+                    const inputs = Array.isArray(node?.inputs) ? node.inputs : [];
+
+                    for (const widget of widgets) {
+                        const widgetName = String(widget?.name || "").trim();
+                        if (!widgetName) continue;
+
+                        // Only process model-like combo widgets
+                        if (!MODEL_VALIDATION_INPUT_NAMES.has(widgetName)) continue;
+
+                        // Check if this widget has a linked input
+                        const inp = inputs.find(entry =>
+                            String(entry?.name || "").trim() === widgetName ||
+                            String(entry?.widget?.name || "").trim() === widgetName
+                        );
+                        if (!inp || inp.link == null) continue;
+
+                        // Resolve the link to find the upstream node
+                        const link = currentGraph.links
+                            ? currentGraph.links[inp.link]
+                            : null;
+                        if (!link) continue;
+
+                        const upstreamId = link.origin_id;
+                        if (upstreamId == null) continue;
+
+                        const upstreamNode = typeof currentGraph.getNodeById === "function"
+                            ? currentGraph.getNodeById(upstreamId)
+                            : (currentGraph._nodes_by_id ? currentGraph._nodes_by_id[upstreamId] : null);
+
+                        if (!upstreamNode || String(upstreamNode.type) !== "Hugging Face Download Model") {
+                            continue;
+                        }
+
+                        // Extract the link URL from the upstream HF Download node
+                        const upWidgets = Array.isArray(upstreamNode.widgets) ? upstreamNode.widgets : [];
+                        const linkWidget = upWidgets.find(w => w?.name === "link");
+                        const hfUrl = String(linkWidget ? linkWidget.value : "").trim();
+                        if (!hfUrl) continue;
+
+                        const parsedFilename = parseFilenameFromUrl(hfUrl);
+                        if (!parsedFilename) continue;
+
+                        // Only update if the current widget value differs
+                        if (widget.value !== parsedFilename) {
+                            console.log(
+                                `[AutoDownload] Syncing widget "${widgetName}" on node ${node.id || node.type}: ` +
+                                `"${widget.value}" -> "${parsedFilename}" (from HF Download link)`
+                            );
+                            widget.value = parsedFilename;
+                        }
+                    }
+
+                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
+                        visitGraph(node.subgraph);
+                    }
+                }
+            };
+            visitGraph(rootGraph);
+        };
+
         const getUpstreamDownloaderNodeUrlAndFolder = (node, widgetName, graph) => {
             const rootGraph = graph || app?.rootGraph;
             if (!rootGraph || typeof rootGraph !== "object" || !Array.isArray(node?.inputs)) {
@@ -6730,6 +6819,9 @@ app.registerExtension({
                     console.warn("[AutoDownload] Slash alignment failed on workflow load:", e);
                 }
                 try {
+                    syncDownloaderLinkedWidgetNames(app?.rootGraph);
+                } catch (e) {}
+                try {
                     if (!getWorkflowOpenAutoEnabled()) {
                         return result;
                     }
@@ -7085,6 +7177,11 @@ app.registerExtension({
                     // Align widget path separators to match the system OS before executing the workflow
                     try {
                         alignGraphWidgetSlashes(app?.rootGraph);
+                    } catch (e) {}
+
+                    // Sync loader widget values to match filenames from connected HF Download nodes
+                    try {
+                        syncDownloaderLinkedWidgetNames(app?.rootGraph);
                     } catch (e) {}
 
                     let resumeQueued = false;
