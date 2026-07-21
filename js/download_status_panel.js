@@ -104,6 +104,7 @@ app.registerExtension({
 
         const toUiStatus = (status) => {
             if (status === "verifying" || status === "completed") return "downloaded";
+            if (status === "interrupted") return "interrupted";
             return status || "queued";
         };
 
@@ -126,6 +127,8 @@ app.registerExtension({
                     return "Cancelled";
                 case "cancelling":
                     return "Cancelling";
+                case "interrupted":
+                    return "Interrupted (Server restarted)";
                 default:
                     return "Queued";
             }
@@ -145,7 +148,9 @@ app.registerExtension({
                     return "#ff6b6b";
                 case "cancelled":
                 case "cancelling":
-                    return "#f5b14c";
+                    return "#a1a8b5";
+                case "interrupted":
+                    return "#ff9f43";
                 default:
                     return "#9aa1ad";
             }
@@ -603,9 +608,42 @@ app.registerExtension({
             }
         };
 
+        const resumeInterrupted = async (downloadId) => {
+            if (!downloadId) return null;
+            try {
+                const resp = await fetch("/resume_interrupted", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ download_id: downloadId })
+                });
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                const queued = Array.isArray(data?.queued) ? data.queued : [];
+                return queued[0] || null;
+            } catch (err) {
+                console.warn("[HF Downloader] Resume request failed:", err);
+                return null;
+            }
+        };
+
+        const dismissInterrupted = async (downloadId) => {
+            if (!downloadId) return false;
+            try {
+                const resp = await fetch("/dismiss_interrupted", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ download_id: downloadId })
+                });
+                return resp.ok;
+            } catch (err) {
+                console.warn("[HF Downloader] Dismiss request failed:", err);
+                return false;
+            }
+        };
+
         const isDismissedEntry = (entry) => {
             if (!dismissedEntryIds.has(entry.id)) return false;
-            return SUCCESS_STATUSES.has(entry.status) || entry.status === "cancelled";
+            return SUCCESS_STATUSES.has(entry.status) || entry.status === "cancelled" || entry.status === "interrupted";
         };
 
         const entryTimestampMs = (entry) => {
@@ -644,6 +682,11 @@ app.registerExtension({
                     return {
                         key: "cancelled",
                         className: "icon-[lucide--x-circle] size-4 text-yellow-400"
+                    };
+                case "interrupted":
+                    return {
+                        key: "interrupted",
+                        className: "icon-[lucide--alert-triangle] size-4 text-yellow-500"
                     };
                 default:
                     return {
@@ -725,9 +768,16 @@ app.registerExtension({
             retryBtn.textContent = "Retry";
             retryBtn.style.display = "none";
 
+            const dismissBtn = document.createElement("button");
+            dismissBtn.type = "button";
+            dismissBtn.className = "hf-downloader-dismiss p-button p-component p-button-sm p-button-secondary";
+            dismissBtn.textContent = "Dismiss";
+            dismissBtn.style.display = "none";
+
             actions.appendChild(agreementHint);
             actions.appendChild(repoLink);
             actions.appendChild(retryBtn);
+            actions.appendChild(dismissBtn);
 
             const progressContainer = document.createElement("div");
             progressContainer.className = "hf-downloader-progress-container";
@@ -755,6 +805,7 @@ app.registerExtension({
                 agreementHint,
                 repoLink,
                 retryBtn,
+                dismissBtn,
                 progressBar
             };
         };
@@ -848,8 +899,10 @@ app.registerExtension({
                 refs.error.style.display = "none";
             }
 
-            refs.root.classList.toggle("has-detail", isFailed && !!errorText);
-            refs.actions.classList.toggle("visible", isGated);
+            const isInterrupted = info.status === "interrupted";
+
+            refs.root.classList.toggle("has-detail", (isFailed && !!errorText) || isInterrupted);
+            refs.actions.classList.toggle("visible", isGated || isInterrupted);
             refs.agreementHint.textContent = actionMessage || "Accept model agreement and verify your HF Token in ComfyUI settings.";
             refs.agreementHint.style.display = isGated ? "inline" : "none";
 
@@ -861,25 +914,70 @@ app.registerExtension({
                 refs.repoLink.style.display = "none";
             }
 
-            refs.retryBtn.style.display = isGated ? "inline-flex" : "none";
-            refs.retryBtn.disabled = !retryPayload;
-            refs.retryBtn.onclick = isGated
-                ? async (event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (!retryPayload || refs.retryBtn.disabled) return;
-                      refs.retryBtn.disabled = true;
-                      refs.retryBtn.textContent = "Retrying...";
-                      const queued = await retryDownload(retryPayload);
-                      if (queued?.download_id) {
-                          dismissedEntryIds.add(info.id);
+            if (isInterrupted) {
+                refs.retryBtn.style.display = "inline-flex";
+                refs.retryBtn.textContent = "Resume";
+                refs.retryBtn.disabled = !retryPayload;
+                refs.retryBtn.onclick = async (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (!retryPayload || refs.retryBtn.disabled) return;
+                    refs.retryBtn.disabled = true;
+                    refs.retryBtn.textContent = "Resuming...";
+                    const queued = await resumeInterrupted(info.id);
+                    if (queued?.download_id) {
+                        dismissedEntryIds.add(info.id);
+                    }
+                    refs.retryBtn.textContent = queued?.download_id ? "Resumed" : "Resume";
+                    if (!queued?.download_id) {
+                        refs.retryBtn.disabled = false;
+                    }
+                };
+            } else {
+                refs.retryBtn.textContent = "Retry";
+                refs.retryBtn.style.display = isGated ? "inline-flex" : "none";
+                refs.retryBtn.disabled = !retryPayload;
+                refs.retryBtn.onclick = isGated
+                    ? async (event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          if (!retryPayload || refs.retryBtn.disabled) return;
+                          refs.retryBtn.disabled = true;
+                          refs.retryBtn.textContent = "Retrying...";
+                          const queued = await retryDownload(retryPayload);
+                          if (queued?.download_id) {
+                              dismissedEntryIds.add(info.id);
+                          }
+                          refs.retryBtn.textContent = queued?.download_id ? "Queued" : "Retry";
+                          if (!queued?.download_id) {
+                              refs.retryBtn.disabled = false;
+                          }
                       }
-                      refs.retryBtn.textContent = queued?.download_id ? "Queued" : "Retry";
-                      if (!queued?.download_id) {
-                          refs.retryBtn.disabled = false;
-                      }
-                  }
-                : null;
+                    : null;
+            }
+
+            if (isInterrupted) {
+                refs.dismissBtn.style.display = "inline-flex";
+                refs.dismissBtn.onclick = async (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    refs.dismissBtn.disabled = true;
+                    refs.dismissBtn.textContent = "Dismissing...";
+                    const ok = await dismissInterrupted(info.id);
+                    if (ok) {
+                        dismissedEntryIds.add(info.id);
+                        if (refs.root.parentNode) {
+                            refs.root.remove();
+                        }
+                    } else {
+                        refs.dismissBtn.disabled = false;
+                        refs.dismissBtn.textContent = "Dismiss";
+                    }
+                };
+            } else {
+                refs.dismissBtn.style.display = "none";
+                refs.dismissBtn.onclick = null;
+            }
         };
 
 

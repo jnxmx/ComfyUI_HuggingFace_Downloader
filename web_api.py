@@ -870,6 +870,14 @@ def _set_download_status(download_id: str, fields: dict):
         existing.update(fields)
         download_status[download_id] = existing
 
+    # Persist state to disk on meaningful transitions for crash recovery
+    _incoming = str(fields.get("status") or "").strip().lower()
+    if _incoming in ("queued", "downloading", "completed", "failed", "cancelled", "downloaded", "interrupted"):
+        try:
+            _persist_download_state()
+        except Exception:
+            pass
+
 def _set_search_status(request_id: str, fields: dict):
     if not request_id:
         return
@@ -2821,7 +2829,158 @@ def _bind_route_target(target, method: str, path: str, handler):
     raise RuntimeError("Unsupported route target type.")
 
 
+DOWNLOAD_STATE_PATH = os.path.join("user", "default", "hf_download_queue.json")
+DOWNLOAD_STATE_VERSION = 1
+_ORPHAN_TEMP_SUFFIXES = (".tmp_copy", ".part")
+_ORPHAN_MODEL_EXTENSIONS = (".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".gguf")
+
+def _cleanup_orphaned_download_files():
+    """Remove temp and 0-byte placeholder files left by interrupted downloads."""
+    try:
+        try:
+            import folder_paths as _fp
+        except ImportError:
+            _fp = None
+
+        base_types = []
+        if _fp and hasattr(_fp, "folder_names_and_paths"):
+            for k in _fp.folder_names_and_paths.keys():
+                if k not in ("custom_nodes", "user", "input", "output", "temp"):
+                    base_types.append(k)
+        else:
+            base_types = ["checkpoints", "clip", "diffusion_models", "vae", "loras", "controlnet",
+                          "upscale_models", "text_encoders", "style_models", "embeddings"]
+
+        dirs_to_scan = set()
+        for bt in base_types:
+            if _fp and hasattr(_fp, "get_folder_paths"):
+                try:
+                    for p in _fp.get_folder_paths(bt):
+                        if os.path.isdir(p):
+                            dirs_to_scan.add(p)
+                except Exception:
+                    pass
+
+        # Always check default models root too
+        dirs_to_scan.add(_get_models_root())
+
+        cleaned = 0
+        for scan_dir in dirs_to_scan:
+            try:
+                for dirpath, dirnames, filenames in os.walk(scan_dir):
+                    # Limit depth: only top-level + one level of subdirectories
+                    rel = os.path.relpath(dirpath, scan_dir)
+                    if rel != "." and rel.count(os.sep) >= 1:
+                        dirnames.clear()
+                        continue
+                    for fname in filenames:
+                        fpath = os.path.join(dirpath, fname)
+                        try:
+                            lower_name = fname.lower()
+                            # Remove orphaned temp files
+                            if any(lower_name.endswith(s) for s in _ORPHAN_TEMP_SUFFIXES):
+                                os.remove(fpath)
+                                print(f"[DEBUG] Startup cleanup: removed orphaned temp file {fpath}")
+                                cleaned += 1
+                                continue
+                            # Remove 0-byte model placeholders
+                            if any(lower_name.endswith(ext) for ext in _ORPHAN_MODEL_EXTENSIONS):
+                                if os.path.getsize(fpath) == 0:
+                                    os.remove(fpath)
+                                    print(f"[DEBUG] Startup cleanup: removed 0-byte placeholder {fpath}")
+                                    cleaned += 1
+                        except Exception as e:
+                            print(f"[DEBUG] Startup cleanup: failed to process {fpath}: {e}")
+            except Exception as e:
+                print(f"[DEBUG] Startup cleanup: failed to scan {scan_dir}: {e}")
+        if cleaned:
+            print(f"[DEBUG] Startup cleanup: removed {cleaned} orphaned file(s)")
+    except Exception as e:
+        print(f"[DEBUG] Startup orphan cleanup failed: {e}")
+
+
+def _persist_download_state():
+    """Save active (non-terminal) downloads to disk for crash recovery."""
+    try:
+        with download_status_lock:
+            active_items = []
+            for did, info in download_status.items():
+                status = str(info.get("status") or "").strip().lower()
+                if status in ("queued", "downloading", "copying", "cleaning_cache", "finalizing"):
+                    active_items.append({
+                        "download_id": did,
+                        "retry_payload": info.get("retry_payload"),
+                        "folder": info.get("folder"),
+                        "download_mode": info.get("download_mode"),
+                        "filename": info.get("filename"),
+                        "display_name": info.get("display_name"),
+                        "destination_key": info.get("destination_key"),
+                        "total_bytes": info.get("total_bytes"),
+                        "status": status,
+                        "started_at": info.get("started_at"),
+                    })
+        if not active_items:
+            try:
+                if os.path.exists(DOWNLOAD_STATE_PATH):
+                    os.remove(DOWNLOAD_STATE_PATH)
+            except Exception:
+                pass
+            return
+        state = {
+            "version": DOWNLOAD_STATE_VERSION,
+            "saved_at": time.time(),
+            "items": active_items,
+        }
+        os.makedirs(os.path.dirname(DOWNLOAD_STATE_PATH), exist_ok=True)
+        tmp_path = DOWNLOAD_STATE_PATH + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(state, f)
+        os.replace(tmp_path, DOWNLOAD_STATE_PATH)
+    except Exception as e:
+        print(f"[DEBUG] Failed to persist download state: {e}")
+
+
+def _load_interrupted_downloads():
+    """Load previously active downloads as 'interrupted' entries for the UI."""
+    if not os.path.exists(DOWNLOAD_STATE_PATH):
+        return
+    try:
+        with open(DOWNLOAD_STATE_PATH, "r") as f:
+            state = json.load(f)
+        items = state.get("items", [])
+        if not items:
+            return
+        with download_status_lock:
+            for item in items:
+                old_id = item.get("download_id", "")
+                new_id = f"resumed_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+                download_status[new_id] = {
+                    "status": "interrupted",
+                    "filename": item.get("filename", ""),
+                    "display_name": item.get("display_name", ""),
+                    "folder": item.get("folder", ""),
+                    "download_mode": item.get("download_mode", "file"),
+                    "destination_key": item.get("destination_key", ""),
+                    "total_bytes": item.get("total_bytes"),
+                    "retry_payload": item.get("retry_payload"),
+                    "interrupted_at": time.time(),
+                    "original_download_id": old_id,
+                }
+        print(f"[DEBUG] Loaded {len(items)} interrupted download(s) from previous session")
+    except Exception as e:
+        print(f"[DEBUG] Failed to load interrupted downloads: {e}")
+    finally:
+        try:
+            os.remove(DOWNLOAD_STATE_PATH)
+        except Exception:
+            pass
+
+
 def setup(app_or_server):
+    # --- Download crash protection: startup recovery ---
+    _cleanup_orphaned_download_files()
+    _load_interrupted_downloads()
+
     def _safe_add_route(method: str, path: str, handler):
         try:
             _bind_route_target(app_or_server, method, path, handler)
@@ -3615,6 +3774,83 @@ def setup(app_or_server):
         app.loop.call_later(1, restart_server)
         return web.json_response({"status": "ok"})
 
+    async def dismiss_interrupted(request):
+        """Dismiss interrupted download entries."""
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        download_id = str(data.get("download_id", "")).strip()
+        dismiss_all = bool(data.get("dismiss_all", False))
+        dismissed = []
+        with download_status_lock:
+            if dismiss_all:
+                to_remove = [did for did, info in download_status.items() if info.get("status") == "interrupted"]
+            elif download_id:
+                to_remove = [download_id] if download_status.get(download_id, {}).get("status") == "interrupted" else []
+            else:
+                to_remove = []
+            for did in to_remove:
+                download_status.pop(did, None)
+                dismissed.append(did)
+        # Clean up the state file if no interrupted items remain
+        try:
+            _persist_download_state()
+        except Exception:
+            pass
+        return web.json_response({"dismissed": dismissed})
+
+    async def resume_interrupted(request):
+        """Re-queue interrupted downloads."""
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        download_id = str(data.get("download_id", "")).strip()
+        resume_all = bool(data.get("resume_all", False))
+        to_resume = []
+        with download_status_lock:
+            if resume_all:
+                candidates = [(did, dict(info)) for did, info in download_status.items() if info.get("status") == "interrupted"]
+            elif download_id:
+                info = download_status.get(download_id)
+                candidates = [(download_id, dict(info))] if info and info.get("status") == "interrupted" else []
+            else:
+                candidates = []
+            for did, info in candidates:
+                payload = info.get("retry_payload")
+                if payload and isinstance(payload, dict):
+                    to_resume.append((did, payload))
+                    download_status.pop(did, None)
+        queued_ids = []
+        for old_id, payload in to_resume:
+            new_id = f"dl_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+            item = dict(payload)
+            item["download_id"] = new_id
+            item["filename"] = item.get("filename") or item.get("display_name") or "download"
+            item["display_name"] = item.get("display_name") or item.get("filename") or "download"
+            item["folder"] = item.get("folder") or "checkpoints"
+            item["download_mode"] = item.get("download_mode") or "file"
+            destination_key = _download_destination_key(item)
+            item["destination_key"] = destination_key
+            retry_payload = _build_retry_payload(item)
+            with download_queue_lock:
+                download_queue.append(item)
+            _set_download_status(new_id, {
+                "status": "queued",
+                "filename": item["filename"],
+                "display_name": item["display_name"],
+                "folder": item["folder"],
+                "download_mode": item["download_mode"],
+                "destination_key": destination_key,
+                "retry_payload": retry_payload,
+                "queued_at": time.time(),
+            })
+            queued_ids.append({"download_id": new_id, "original_id": old_id})
+        if queued_ids:
+            _start_download_worker()
+        return web.json_response({"queued": queued_ids})
+
     async def model_explorer_download_proxy(request):
         # Reuse the existing queue-based downloader contract.
         return await queue_download(request)
@@ -3624,6 +3860,8 @@ def setup(app_or_server):
     _safe_add_route("POST", "/api/model_explorer/download", model_explorer_download_proxy)
     _safe_add_route("POST", "/api/hf_downloader/model_explorer/download", model_explorer_download_proxy)
     _safe_add_route("POST", "/cancel_download", cancel_download)
+    _safe_add_route("POST", "/dismiss_interrupted", dismiss_interrupted)
+    _safe_add_route("POST", "/resume_interrupted", resume_interrupted)
     _safe_add_route("GET", "/download_status", download_status_endpoint)
     _safe_add_route("GET", "/search_status", search_status_endpoint)
     _safe_add_route("GET", "/model_library", model_library_endpoint)
