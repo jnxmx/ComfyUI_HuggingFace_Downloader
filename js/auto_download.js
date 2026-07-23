@@ -7220,6 +7220,19 @@ app.registerExtension({
                             preRunEligibleMissingModels = backendPreflight.missing;
                             preRunPathMismatches = backendPreflight.pathMismatches;
                         }
+                        // Third fallback: scan live graph widget values against combo
+                        // options. This catches models in nodes that were just un-bypassed
+                        // and whose properties.models metadata was never embedded.
+                        if (!preRunEligibleMissingModels.length && !preRunPathMismatches.length) {
+                            try {
+                                const liveGraphCandidates =
+                                    collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, graphData);
+                                if (liveGraphCandidates.length) {
+                                    preRunEligibleMissingModels =
+                                        filterRunHookEligibleMissingModels(liveGraphCandidates);
+                                }
+                            } catch (_) {}
+                        }
                         if (preRunEligibleMissingModels.length || preRunPathMismatches.length) {
                             const preRunFailures = preRunEligibleMissingModels.map((model) => ({
                                 classType: "",
