@@ -6,7 +6,20 @@ app.registerExtension({
     setup() {
         const RUN_HOOK_SETTING_ID = "downloader.auto_open_missing_models_on_run";
         const RUN_HOOK_TEMP_DISABLED = false;
-        const RUN_QUEUE_COMMAND_IDS = ["Comfy.QueuePrompt", "Comfy.QueuePromptFront"];
+        const RUN_QUEUE_COMMAND_IDS = [
+            "Comfy.QueuePrompt",
+            "Comfy.QueuePromptFront",
+            "Comfy.QueueSelected",
+            "Comfy.QueueSelectedNodes",
+            "Comfy.QueueOutputNodes",
+            "Comfy.QueueSelectedOutputNodes",
+            "Comfy.QueueSelectedOutput",
+            "Comfy.ExecuteSelected",
+            "Comfy.ExecuteSelectedNodes",
+            "Comfy.ExecuteSelectedOutputNodes",
+            "Comfy.ExecuteSelectedOutput",
+            "Comfy.QueueGroup"
+        ];
         const RUN_COMMAND_OVERRIDE_MARKER = "__hfAutoDownloadRunHookNativeAwareOverride";
         const RUN_COMMAND_ORIGINAL_FN = "__hfAutoDownloadRunHookNativeAwareOriginalFn";
         const RUN_COMMAND_OVERRIDE_RETRY_MS = 500;
@@ -7144,16 +7157,188 @@ app.registerExtension({
             return true;
         };
 
+        const executeRunWithAutoDownload = async (fallbackFn, args, contextThis) => {
+            if (typeof fallbackFn !== "function") {
+                return undefined;
+            }
+            if (runHookBypassRemaining > 0) {
+                runHookBypassRemaining = Math.max(0, runHookBypassRemaining - 1);
+                return fallbackFn.apply(contextThis, args);
+            }
+
+            // Align widget path separators to match the system OS before executing the workflow
+            try {
+                alignGraphWidgetSlashes(app?.rootGraph);
+            } catch (e) {}
+
+            // Sync loader widget values to match filenames from connected HF Download nodes
+            try {
+                syncDownloaderLinkedWidgetNames(app?.rootGraph);
+            } catch (e) {}
+
+            let resumeQueued = false;
+            const resumeRun = () => {
+                if (resumeQueued) {
+                    return;
+                }
+                resumeQueued = true;
+                runHookBypassRemaining += 1;
+                setTimeout(async () => {
+                    try {
+                        await fallbackFn.apply(contextThis, args);
+                    } catch (resumeErr) {
+                        console.error("[AutoDownload] Failed to resume original run:", resumeErr);
+                    }
+                }, 0);
+            };
+
+            const hookEnabled = getRunHookEnabled();
+            const graphData = serializeWorkflowForModelScan();
+            const missingNodeTypes = getMissingNodeTypesNativeLike(graphData);
+            const hasMissingNodes = missingNodeTypes.length > 0;
+            const hadDialogBeforeRun = hasNativeMissingModelsDialog();
+            const hadValidationDialogBeforeRun = hasNativePromptValidationDialog();
+            const beforeNodeErrorSignature = getNodeErrorsSignature(getNodeErrorsSnapshot());
+            let preRunEligibleMissingModels = [];
+            let preRunPathMismatches = [];
+
+            if (hookEnabled && !hasMissingNodes) {
+                const preRunMissingModels = await getPreRunMissingModelsNativeLike(graphData);
+                preRunEligibleMissingModels =
+                    filterRunHookEligibleMissingModels(preRunMissingModels);
+                if (!preRunEligibleMissingModels.length) {
+                    const backendPreflight =
+                        await getPreRunMissingModelsBackendFallback(graphData);
+                    preRunEligibleMissingModels = backendPreflight.missing;
+                    preRunPathMismatches = backendPreflight.pathMismatches;
+                }
+                // Third fallback: scan live graph widget values against combo
+                // options. This catches models in nodes that were just un-bypassed
+                // and whose properties.models metadata was never embedded.
+                if (!preRunEligibleMissingModels.length && !preRunPathMismatches.length) {
+                    try {
+                        const liveGraphCandidates =
+                            collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, graphData);
+                        if (liveGraphCandidates.length) {
+                            preRunEligibleMissingModels =
+                                filterRunHookEligibleMissingModels(liveGraphCandidates);
+                        }
+                    } catch (_) {}
+                }
+                if (preRunEligibleMissingModels.length || preRunPathMismatches.length) {
+                    const preRunFailures = preRunEligibleMissingModels.map((model) => ({
+                        classType: "",
+                        inputName: "",
+                        missingValue: String(model?.name || "").trim(),
+                        details: `${String(model?.directory || "").trim()}/${String(model?.name || "").trim()}`
+                    })).concat(
+                        preRunPathMismatches.map((item) => ({
+                            classType: "",
+                            inputName: "",
+                            missingValue:
+                                String(item?.filename || item?.requested_path || "").trim(),
+                            details:
+                                String(item?.expected_path || item?.requested_path || "").trim() ||
+                                String(item?.actual_path || "").trim()
+                        }))
+                    );
+                    const preRunReason = preRunEligibleMissingModels.length
+                        ? "native-missing-models"
+                        : "missing-dialog";
+                    if (triggerAutoDownloadFromRunHook(preRunReason, preRunFailures, { resumeRun })) {
+                        return false;
+                    }
+                }
+            }
+
+            let result;
+            let error;
+            try {
+                result = await fallbackFn.apply(contextThis, args);
+            } catch (err) {
+                error = err;
+            }
+
+            if (hookEnabled && !hasMissingNodes) {
+                const immediateHasDialog = !hadDialogBeforeRun && hasNativeMissingModelsDialog();
+                const immediateValidationFailures = getImmediateValidationFailures({
+                    beforeSignature: beforeNodeErrorSignature,
+                    hadValidationDialogBeforeRun
+                });
+
+                let triggeredImmediately = false;
+                if (immediateHasDialog) {
+                    const shouldSuppressFlashVsrDialogTrigger =
+                        shouldSuppressMissingDialogTriggerForFlashVsr();
+                    const shouldTriggerMissingDialog =
+                        !shouldSuppressFlashVsrDialogTrigger ||
+                        preRunEligibleMissingModels.length > 0;
+                    if (shouldTriggerMissingDialog) {
+                        triggeredImmediately =
+                            triggerAutoDownloadFromRunHook("missing-dialog", [], { resumeRun }) || triggeredImmediately;
+                    }
+                }
+                if (immediateValidationFailures.length) {
+                    triggeredImmediately =
+                        triggerAutoDownloadFromRunHook("model-validation", immediateValidationFailures, { resumeRun }) ||
+                        triggeredImmediately;
+                }
+
+                if (!triggeredImmediately) {
+                    void (async () => {
+                        try {
+                            const [hasDialogNow, validationFailures] = await Promise.all([
+                                hadDialogBeforeRun
+                                    ? Promise.resolve(false)
+                                    : waitForNativeMissingModelsDialog(RUN_NATIVE_DIALOG_WAIT_MS),
+                                waitForNativeModelValidationFailure({
+                                    timeoutMs: RUN_NATIVE_VALIDATION_WAIT_MS,
+                                    beforeSignature: beforeNodeErrorSignature,
+                                    hadValidationDialogBeforeRun
+                                })
+                            ]);
+
+                            if (hasDialogNow) {
+                                const shouldSuppressFlashVsrDialogTrigger =
+                                    shouldSuppressMissingDialogTriggerForFlashVsr();
+                                const shouldTriggerMissingDialog =
+                                    !shouldSuppressFlashVsrDialogTrigger ||
+                                    preRunEligibleMissingModels.length > 0;
+                                if (shouldTriggerMissingDialog) {
+                                    triggerAutoDownloadFromRunHook("missing-dialog", [], { resumeRun });
+                                }
+                            }
+                            if (validationFailures.length) {
+                                triggerAutoDownloadFromRunHook("model-validation", validationFailures, { resumeRun });
+                            }
+                        } catch (_) {
+                            // No-op: run behavior must remain native even if hook observation fails.
+                        }
+                    })();
+                }
+            }
+
+            if (error) {
+                throw error;
+            }
+            return result;
+        };
+
         const installRunQueueCommandHooksNativeAware = () => {
             let attempts = 0;
             let timer = null;
 
-            const applyOverride = (commandId) => {
-                const commands = app?.extensionManager?.command?.commands;
-                if (!Array.isArray(commands)) {
-                    return false;
+            const applyOverride = (commandTarget) => {
+                let command = null;
+                if (typeof commandTarget === "string") {
+                    const commands = app?.extensionManager?.command?.commands;
+                    if (!Array.isArray(commands)) {
+                        return false;
+                    }
+                    command = commands.find((entry) => entry?.id === commandTarget);
+                } else if (commandTarget && typeof commandTarget === "object") {
+                    command = commandTarget;
                 }
-                const command = commands.find((entry) => entry?.id === commandId);
                 if (!command || typeof command.function !== "function") {
                     return false;
                 }
@@ -7164,197 +7349,76 @@ app.registerExtension({
                 const originalFn = command.function;
                 command[RUN_COMMAND_ORIGINAL_FN] = originalFn;
 
-                command.function = async (metadata) => {
-                    const fallback = command[RUN_COMMAND_ORIGINAL_FN];
-                    if (typeof fallback !== "function") {
-                        return undefined;
-                    }
-                    if (runHookBypassRemaining > 0) {
-                        runHookBypassRemaining = Math.max(0, runHookBypassRemaining - 1);
-                        return fallback(metadata);
-                    }
-
-                    // Align widget path separators to match the system OS before executing the workflow
-                    try {
-                        alignGraphWidgetSlashes(app?.rootGraph);
-                    } catch (e) {}
-
-                    // Sync loader widget values to match filenames from connected HF Download nodes
-                    try {
-                        syncDownloaderLinkedWidgetNames(app?.rootGraph);
-                    } catch (e) {}
-
-                    let resumeQueued = false;
-                    const resumeRun = () => {
-                        if (resumeQueued) {
-                            return;
-                        }
-                        resumeQueued = true;
-                        runHookBypassRemaining += 1;
-                        setTimeout(async () => {
-                            try {
-                                await fallback(metadata);
-                            } catch (resumeErr) {
-                                console.error("[AutoDownload] Failed to resume original run:", resumeErr);
-                            }
-                        }, 0);
-                    };
-
-                    const hookEnabled = getRunHookEnabled();
-                    const graphData = serializeWorkflowForModelScan();
-                    const missingNodeTypes = getMissingNodeTypesNativeLike(graphData);
-                    const hasMissingNodes = missingNodeTypes.length > 0;
-                    const hadDialogBeforeRun = hasNativeMissingModelsDialog();
-                    const hadValidationDialogBeforeRun = hasNativePromptValidationDialog();
-                    const beforeNodeErrorSignature = getNodeErrorsSignature(getNodeErrorsSnapshot());
-                    let preRunEligibleMissingModels = [];
-                    let preRunPathMismatches = [];
-
-                    if (hookEnabled && !hasMissingNodes) {
-                        const preRunMissingModels = await getPreRunMissingModelsNativeLike(graphData);
-                        preRunEligibleMissingModels =
-                            filterRunHookEligibleMissingModels(preRunMissingModels);
-                        if (!preRunEligibleMissingModels.length) {
-                            const backendPreflight =
-                                await getPreRunMissingModelsBackendFallback(graphData);
-                            preRunEligibleMissingModels = backendPreflight.missing;
-                            preRunPathMismatches = backendPreflight.pathMismatches;
-                        }
-                        // Third fallback: scan live graph widget values against combo
-                        // options. This catches models in nodes that were just un-bypassed
-                        // and whose properties.models metadata was never embedded.
-                        if (!preRunEligibleMissingModels.length && !preRunPathMismatches.length) {
-                            try {
-                                const liveGraphCandidates =
-                                    collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, graphData);
-                                if (liveGraphCandidates.length) {
-                                    preRunEligibleMissingModels =
-                                        filterRunHookEligibleMissingModels(liveGraphCandidates);
-                                }
-                            } catch (_) {}
-                        }
-                        if (preRunEligibleMissingModels.length || preRunPathMismatches.length) {
-                            const preRunFailures = preRunEligibleMissingModels.map((model) => ({
-                                classType: "",
-                                inputName: "",
-                                missingValue: String(model?.name || "").trim(),
-                                details: `${String(model?.directory || "").trim()}/${String(model?.name || "").trim()}`
-                            })).concat(
-                                preRunPathMismatches.map((item) => ({
-                                    classType: "",
-                                    inputName: "",
-                                    missingValue:
-                                        String(item?.filename || item?.requested_path || "").trim(),
-                                    details:
-                                        String(item?.expected_path || item?.requested_path || "").trim() ||
-                                        String(item?.actual_path || "").trim()
-                                }))
-                            );
-                            const preRunReason = preRunEligibleMissingModels.length
-                                ? "native-missing-models"
-                                : "missing-dialog";
-                            if (triggerAutoDownloadFromRunHook(preRunReason, preRunFailures, { resumeRun })) {
-                                return false;
-                            }
-                        }
-                    }
-
-                    let result;
-                    let error;
-                    try {
-                        result = await fallback(metadata);
-                    } catch (err) {
-                        error = err;
-                    }
-
-                    if (hookEnabled && !hasMissingNodes) {
-                        const immediateHasDialog = !hadDialogBeforeRun && hasNativeMissingModelsDialog();
-                        const immediateValidationFailures = getImmediateValidationFailures({
-                            beforeSignature: beforeNodeErrorSignature,
-                            hadValidationDialogBeforeRun
-                        });
-
-                        let triggeredImmediately = false;
-                        if (immediateHasDialog) {
-                            const shouldSuppressFlashVsrDialogTrigger =
-                                shouldSuppressMissingDialogTriggerForFlashVsr();
-                            const shouldTriggerMissingDialog =
-                                !shouldSuppressFlashVsrDialogTrigger ||
-                                preRunEligibleMissingModels.length > 0;
-                            if (shouldTriggerMissingDialog) {
-                                triggeredImmediately =
-                                    triggerAutoDownloadFromRunHook("missing-dialog", [], { resumeRun }) || triggeredImmediately;
-                            }
-                        }
-                        if (immediateValidationFailures.length) {
-                            triggeredImmediately =
-                                triggerAutoDownloadFromRunHook("model-validation", immediateValidationFailures, { resumeRun }) ||
-                                triggeredImmediately;
-                        }
-
-                        if (!triggeredImmediately) {
-                            void (async () => {
-                                try {
-                                    const [hasDialogNow, validationFailures] = await Promise.all([
-                                        hadDialogBeforeRun
-                                            ? Promise.resolve(false)
-                                            : waitForNativeMissingModelsDialog(RUN_NATIVE_DIALOG_WAIT_MS),
-                                        waitForNativeModelValidationFailure({
-                                            timeoutMs: RUN_NATIVE_VALIDATION_WAIT_MS,
-                                            beforeSignature: beforeNodeErrorSignature,
-                                            hadValidationDialogBeforeRun
-                                        })
-                                    ]);
-
-                                    if (hasDialogNow) {
-                                        const shouldSuppressFlashVsrDialogTrigger =
-                                            shouldSuppressMissingDialogTriggerForFlashVsr();
-                                        const shouldTriggerMissingDialog =
-                                            !shouldSuppressFlashVsrDialogTrigger ||
-                                            preRunEligibleMissingModels.length > 0;
-                                        if (shouldTriggerMissingDialog) {
-                                            triggerAutoDownloadFromRunHook("missing-dialog", [], { resumeRun });
-                                        }
-                                    }
-                                    if (validationFailures.length) {
-                                        triggerAutoDownloadFromRunHook("model-validation", validationFailures, { resumeRun });
-                                    }
-                                } catch (_) {
-                                    // No-op: run behavior must remain native even if hook observation fails.
-                                }
-                            })();
-                        }
-                    }
-
-                    if (error) {
-                        throw error;
-                    }
-                    return result;
+                command.function = function(...args) {
+                    return executeRunWithAutoDownload(command[RUN_COMMAND_ORIGINAL_FN], args, this);
                 };
 
                 command[RUN_COMMAND_OVERRIDE_MARKER] = true;
                 return true;
             };
 
+            const hookAppQueuePrompt = () => {
+                if (!app || typeof app.queuePrompt !== "function") return false;
+                if (app[RUN_COMMAND_OVERRIDE_MARKER]) return true;
+
+                const originalFn = app.queuePrompt;
+                app[RUN_COMMAND_ORIGINAL_FN] = originalFn;
+
+                app.queuePrompt = function(...args) {
+                    return executeRunWithAutoDownload(app[RUN_COMMAND_ORIGINAL_FN], args, this);
+                };
+
+                app[RUN_COMMAND_OVERRIDE_MARKER] = true;
+                return true;
+            };
+
+            const hookApiQueuePrompt = () => {
+                if (!api || typeof api.queuePrompt !== "function") return false;
+                if (api[RUN_COMMAND_OVERRIDE_MARKER]) return true;
+
+                const originalFn = api.queuePrompt;
+                api[RUN_COMMAND_ORIGINAL_FN] = originalFn;
+
+                api.queuePrompt = function(...args) {
+                    return executeRunWithAutoDownload(api[RUN_COMMAND_ORIGINAL_FN], args, this);
+                };
+
+                api[RUN_COMMAND_OVERRIDE_MARKER] = true;
+                return true;
+            };
+
             const runAttempt = () => {
                 attempts += 1;
-                let allApplied = true;
+                let anyApplied = false;
+
+                if (hookAppQueuePrompt()) anyApplied = true;
+                if (hookApiQueuePrompt()) anyApplied = true;
+
                 for (const commandId of RUN_QUEUE_COMMAND_IDS) {
-                    if (!applyOverride(commandId)) {
-                        allApplied = false;
+                    if (applyOverride(commandId)) {
+                        anyApplied = true;
                     }
                 }
 
-                if (allApplied || attempts >= RUN_COMMAND_OVERRIDE_MAX_ATTEMPTS) {
+                const commands = app?.extensionManager?.command?.commands;
+                if (Array.isArray(commands)) {
+                    for (const cmd of commands) {
+                        const id = String(cmd?.id || "");
+                        if (/^Comfy\.(Queue|Execute)/i.test(id) || /Queue|Execute/i.test(id)) {
+                            if (applyOverride(cmd)) {
+                                anyApplied = true;
+                            }
+                        }
+                    }
+                }
+
+                if (anyApplied || attempts >= RUN_COMMAND_OVERRIDE_MAX_ATTEMPTS) {
                     if (timer) {
                         clearInterval(timer);
                         timer = null;
                     }
-                    if (!allApplied) {
-                        console.warn("[AutoDownload] Could not hook all Run commands.");
-                    }
                 }
-                return allApplied;
+                return anyApplied;
             };
 
             const firstApplied = runAttempt();
