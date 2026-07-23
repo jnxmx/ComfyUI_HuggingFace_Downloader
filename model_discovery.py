@@ -27,6 +27,7 @@ PRIORITY_AUTHORS = [
     "unsloth",
     "nunchaku-ai",
     "black-forest-labs",
+    "Winnougan",
 ]
 
 POPULAR_MODELS_FILE = os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json")
