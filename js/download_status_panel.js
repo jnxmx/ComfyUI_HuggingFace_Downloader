@@ -565,10 +565,12 @@ app.registerExtension({
                 if (rect.height > 0 && rect.width > 0 && rect.top < 300) {
                     const top = Math.round(rect.bottom + 8);
                     const right = Math.max(16, Math.round(window.innerWidth - rect.right));
+                    const width = Math.round(rect.width);
 
                     panel.style.position = "fixed";
                     panel.style.top = `${top}px`;
                     panel.style.right = `${right}px`;
+                    panel.style.width = `${width}px`;
                     panel.style.bottom = "auto";
                     panel.style.left = "auto";
                     panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
@@ -583,6 +585,7 @@ app.registerExtension({
             panel.style.position = "fixed";
             panel.style.top = `${top}px`;
             panel.style.right = `${right}px`;
+            panel.style.width = "400px";
             panel.style.bottom = "auto";
             panel.style.left = "auto";
             panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
