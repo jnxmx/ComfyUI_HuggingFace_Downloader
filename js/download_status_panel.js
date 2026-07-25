@@ -552,6 +552,8 @@ app.registerExtension({
             return stack;
         };
 
+        let cachedErrorOverlayTop = 12;
+
         const updatePanelPosition = () => {
             if (!panel) return;
             const stack = ensureOverlayStack();
@@ -565,14 +567,17 @@ app.registerExtension({
                 const canvas = document.querySelector('.graph-canvas-container');
                 if (canvas && rect.height > 0 && rect.top < 300) {
                     const canvasRect = canvas.getBoundingClientRect();
-                    const topOffset = Math.max(12, Math.round(rect.bottom - canvasRect.top + 8));
+                    const nativeTop = Math.max(12, Math.round(rect.top - canvasRect.top));
+                    cachedErrorOverlayTop = nativeTop;
+
+                    const topOffset = Math.max(nativeTop, Math.round(rect.bottom - canvasRect.top + 8));
                     stack.style.top = `${topOffset}px`;
                     syncPanelThemeFromJobQueue();
                     return;
                 }
             }
 
-            stack.style.top = "12px";
+            stack.style.top = `${cachedErrorOverlayTop}px`;
             syncPanelThemeFromJobQueue();
         };
 
