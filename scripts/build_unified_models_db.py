@@ -601,12 +601,16 @@ def main() -> int:
         priority_family_supported = bool(category) and bool(stem_key) and (
             (category, stem_key) in curated_family_keys
         )
+        is_priority_author_model = (
+            row_owner in {"winnougan", "comfy-org"}
+            or "convrot" in row_filename.lower()
+            or "krea" in row_filename.lower()
+        )
         explorer_enabled_priority = (
             source == "priority_repo_scrape"
             and bool(category)
             and (not base_applicable or bool(base_value))
-            and allow_priority_gguf
-            and priority_family_supported
+            and (is_priority_author_model or (allow_priority_gguf and priority_family_supported))
             and bool(entry.get("library_visible", True))
         )
         explorer_enabled = bool(explorer_enabled_core or explorer_enabled_priority)

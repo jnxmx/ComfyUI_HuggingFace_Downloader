@@ -2324,7 +2324,13 @@ class ModelExplorerDialog {
         if (!normalized) return "";
         if (normalized === "gguf") return "gguf";
         if (normalized.endsWith(".gguf")) return "gguf";
-        if (normalized.startsWith("q")) return "gguf";
+        if (normalized.startsWith("q") && !normalized.includes("qwen")) return "gguf";
+        if (normalized.includes("convrot")) {
+            if (normalized.includes("int4") || normalized.includes("int_4") || normalized.includes("fp4")) {
+                return "int4 convrot";
+            }
+            return "int8 convrot";
+        }
         return normalized;
     }
 
@@ -2353,6 +2359,12 @@ class ModelExplorerDialog {
         const precision = this.normalizePrecision(value);
         if (!precision || precision === "unknown") return "";
         if (precision === "gguf") return "GGUF";
+        if (precision === "int8 convrot") return "INT8 ConvRot";
+        if (precision === "int4 convrot") return "INT4 ConvRot";
+        if (precision === "fp8 mixed") return "FP8 Mixed";
+        if (precision === "fp8 scaled") return "FP8 Scaled";
+        if (precision === "mxfp8") return "MXFP8";
+        if (precision === "nvfp4") return "NVFP4";
         return precision.toUpperCase();
     }
 

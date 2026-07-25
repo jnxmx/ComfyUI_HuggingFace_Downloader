@@ -194,13 +194,20 @@ _model_explorer_precision_pattern = re.compile(
     r"fp(?:32|16|8|4)"
     r"|bf16"
     r"|int(?:8|4)"
+    r"|convrot"
+    r"|int8_convrot"
+    r"|int4_convrot"
+    r"|int8mixed"
+    r"|int4mixed"
+    r"|nvfp4"
+    r"|mxfp8"
     r"|q\d(?:_[a-z0-9]+)*"
     r"|iq\d(?:_[a-z0-9]+)*"
     r")(?:$|[-_.])",
     re.IGNORECASE,
 )
 _model_explorer_filename_precision_pattern = re.compile(
-    r"(fp32|fp16|bf16|fp8|int8|int4|fp4|q\d(?:_[a-z0-9]+)*|iq\d(?:_[a-z0-9]+)*)",
+    r"(fp32|fp16|bf16|fp8|int8_convrot|int4_convrot|convrot|int8|int4|fp4|nvfp4|mxfp8|q\d(?:_[a-z0-9]+)*|iq\d(?:_[a-z0-9]+)*)",
     re.IGNORECASE,
 )
 _model_explorer_fp8_compact_pattern = re.compile(
@@ -3943,8 +3950,14 @@ def _model_explorer_precision(filename: str) -> str:
     lowered = os.path.basename(str(filename or "")).lower().replace("-", "_")
     if lowered.endswith(".gguf"):
         return "gguf"
+    if "convrot" in lowered:
+        if "int4" in lowered or "int_4" in lowered or "fp4" in lowered:
+            return "int4 convrot"
+        return "int8 convrot"
     if "nvfp4" in lowered:
         return "nvfp4"
+    if "mxfp8" in lowered:
+        return "mxfp8"
     if "fp8" in lowered:
         if "mixed" in lowered:
             return "fp8 mixed"
@@ -3964,7 +3977,7 @@ def _model_explorer_normalize_group_stem(filename: str) -> str:
     stem = os.path.splitext(str(filename or ""))[0].lower().replace("-", "_")
     stem = _model_explorer_fp8_compact_pattern.sub("_", stem)
     stem = _model_explorer_precision_pattern.sub("_", stem)
-    stem = re.sub(r"(?:^|_)(?:mixed|scaled)(?:_|$)", "_", stem)
+    stem = re.sub(r"(?:^|_)(?:mixed|scaled|convrot|int8mixed|int4mixed|int8_convrot|int4_convrot|nvfp4|mxfp8)(?:_|$)", "_", stem)
     stem = re.sub(r"(?<=[a-z])_(?=\d)", "", stem)
     stem = re.sub(r"(?<=\d)_(?=[a-z])", "", stem)
     stem = re.sub(r"_+", "_", stem).strip("_")
@@ -3993,10 +4006,12 @@ def _model_explorer_variant_precision_rank(precision: str) -> int:
         return 1
     if normalized == "fp8":
         return 2
-    if normalized.startswith("fp8"):
+    if normalized.startswith("fp8") or normalized == "mxfp8":
         return 3
-    if normalized in {"bf16", "fp16", "fp32", "int8", "int4", "fp4"}:
+    if normalized in {"bf16", "fp16", "fp32"}:
         return 10
+    if normalized in {"int8", "int8 convrot", "int4", "int4 convrot", "fp4", "nvfp4"}:
+        return 12
     if normalized == "gguf":
         return 50
     if normalized == "unknown":
