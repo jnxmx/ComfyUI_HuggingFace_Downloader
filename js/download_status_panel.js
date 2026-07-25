@@ -505,12 +505,33 @@ app.registerExtension({
             }
         };
 
-        let cachedErrorRight = 16;
-        let cachedErrorTop = 76;
-
         const getRightOffset = () => {
+            // 1. Try native overlay flex container if present
+            const overlayContainer = document.querySelector('.pointer-events-none.flex.w-full.justify-end');
+            if (overlayContainer && overlayContainer.offsetParent !== null) {
+                const rect = overlayContainer.getBoundingClientRect();
+                if (rect.width > 0 && rect.right < window.innerWidth) {
+                    const offset = window.innerWidth - rect.right + 12;
+                    if (offset > 12 && offset < window.innerWidth * 0.7) {
+                        return Math.round(offset);
+                    }
+                }
+            }
+
+            // 2. Try graph-canvas-container bounding rect
+            const canvas = document.querySelector('.graph-canvas-container');
+            if (canvas) {
+                const rect = canvas.getBoundingClientRect();
+                const offset = window.innerWidth - rect.right + 12;
+                if (offset > 12 && offset < window.innerWidth * 0.7) {
+                    return Math.round(offset);
+                }
+            }
+
+            // 3. Fallback: inspect any right sidebars
             const sidebars = document.querySelectorAll(`
                 .comfyui-body-right,
+                [data-testid="sidebar-right"],
                 [class*="sidebar"][class*="right"],
                 [class*="side-bar"][class*="right"],
                 aside
@@ -521,10 +542,10 @@ app.registerExtension({
                 const style = window.getComputedStyle(sb);
                 if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
                 const rect = sb.getBoundingClientRect();
-                if (rect.width > 120 && rect.right >= (window.innerWidth - 20) && rect.left < (window.innerWidth - 60)) {
-                    const w = Math.round(window.innerWidth - rect.left);
-                    if (w > 100 && w < window.innerWidth * 0.6) {
-                        return w + 12;
+                if (rect.width > 80 && rect.left < window.innerWidth) {
+                    const offset = window.innerWidth - rect.left + 12;
+                    if (offset > 12 && offset < window.innerWidth * 0.7) {
+                        return Math.round(offset);
                     }
                 }
             }
@@ -542,11 +563,8 @@ app.registerExtension({
             if (errorOverlay && errorOverlay.offsetParent !== null) {
                 const rect = errorOverlay.getBoundingClientRect();
                 if (rect.height > 0 && rect.width > 0 && rect.top < 300) {
-                    cachedErrorTop = Math.max(76, Math.round(rect.top));
-                    cachedErrorRight = Math.max(16, Math.round(window.innerWidth - rect.right));
-
                     const top = Math.round(rect.bottom + 8);
-                    const right = cachedErrorRight;
+                    const right = Math.max(16, Math.round(window.innerWidth - rect.right));
 
                     panel.style.position = "fixed";
                     panel.style.top = `${top}px`;
@@ -559,8 +577,7 @@ app.registerExtension({
                 }
             }
 
-            const sidebarRightOffset = getRightOffset();
-            const right = sidebarRightOffset > 16 ? sidebarRightOffset : cachedErrorRight;
+            const right = getRightOffset();
             const top = 76;
 
             panel.style.position = "fixed";
