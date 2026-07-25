@@ -190,18 +190,16 @@ app.registerExtension({
             style.id = STYLE_ID;
             style.textContent = `
                 #${PANEL_ID} {
-                    position: fixed;
-                    right: 16px;
-                    top: 16px;
-                    width: 350px;
-                    min-width: 310px;
-                    max-width: 420px;
+                    position: relative;
+                    width: 380px;
+                    min-width: 320px;
+                    max-width: 480px;
                     max-height: 60vh;
                     background: var(--interface-panel-surface, var(--hf-queue-bg, var(--p-content-background, var(--comfy-menu-bg, #1f2128))));
                     border: 1px solid var(--interface-stroke, var(--hf-queue-border, var(--border-color, var(--p-content-border-color, #3c4452))));
                     border-radius: 12px;
                     color: var(--fg-color, var(--p-text-color, #ddd));
-                    z-index: 9999;
+                    z-index: 50;
                     display: flex;
                     flex-direction: column;
                     overflow: hidden;
@@ -524,85 +522,37 @@ app.registerExtension({
             return 0;
         };
 
-        let animFrameId = null;
-        const startPositionLoop = () => {
-            if (animFrameId) return;
-            const loop = () => {
-                if (panel && panel.style.display !== "none") {
-                    updatePanelPosition();
-                    animFrameId = requestAnimationFrame(loop);
-                } else {
-                    animFrameId = null;
+        const ensureOverlayStack = () => {
+            let stack = document.getElementById("hf-downloader-overlay-stack");
+            const canvas = document.querySelector(".graph-canvas-container") || document.querySelector(".comfyui-body") || document.body;
+
+            if (!stack) {
+                stack = document.createElement("div");
+                stack.id = "hf-downloader-overlay-stack";
+                stack.className = "pointer-events-none absolute top-3 right-3 z-50 flex flex-col items-end gap-2 max-w-120";
+                canvas.appendChild(stack);
+            } else if (stack.parentElement !== canvas) {
+                canvas.appendChild(stack);
+            }
+
+            // Sync native ErrorOverlay into our stack if active so it sits on top
+            const errorOverlay = document.querySelector('[data-testid="error-overlay"]');
+            if (errorOverlay) {
+                const nativeCard = errorOverlay.closest('.pointer-events-auto') || errorOverlay;
+                if (nativeCard && nativeCard.parentElement !== stack && !stack.contains(nativeCard)) {
+                    stack.prepend(nativeCard);
                 }
-            };
-            animFrameId = requestAnimationFrame(loop);
+            }
+
+            return stack;
         };
 
         const updatePanelPosition = () => {
             if (!panel) return;
-
-            // 1. If a native error overlay card ("ERRORS") is active, position
-            // directly below it, inheriting its exact right edge position!
-            const errorOverlay = document.querySelector('[data-testid="error-overlay"]');
-            if (errorOverlay && errorOverlay.offsetParent !== null) {
-                const rect = errorOverlay.getBoundingClientRect();
-                if (rect.height > 0 && rect.width > 0 && rect.top < 300) {
-                    const top = Math.round(rect.bottom + 8);
-                    const right = Math.max(16, Math.round(window.innerWidth - rect.right));
-
-                    panel.style.position = "fixed";
-                    panel.style.top = `${top}px`;
-                    panel.style.right = `${right}px`;
-                    panel.style.bottom = "auto";
-                    panel.style.left = "auto";
-                    panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
-                    syncPanelThemeFromJobQueue();
-                    return;
-                }
+            const stack = ensureOverlayStack();
+            if (panel.parentElement !== stack) {
+                stack.appendChild(panel);
             }
-
-            // 2. If a PrimeVue toast banner is active near top-right
-            const toast = document.querySelector('.p-toast.p-toast-top-right');
-            if (toast && toast.offsetParent !== null) {
-                const rect = toast.getBoundingClientRect();
-                if (rect.height > 0 && rect.top < 300) {
-                    const top = Math.round(rect.bottom + 8);
-                    const right = Math.max(16, Math.round(window.innerWidth - rect.right));
-
-                    panel.style.position = "fixed";
-                    panel.style.top = `${top}px`;
-                    panel.style.right = `${right}px`;
-                    panel.style.bottom = "auto";
-                    panel.style.left = "auto";
-                    panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
-                    syncPanelThemeFromJobQueue();
-                    return;
-                }
-            }
-
-            // 3. Position relative to canvas container & right sidebar
-            const canvas = document.querySelector('.graph-canvas-container');
-            let top = 96;
-            let canvasRightOffset = 16;
-            if (canvas) {
-                const rect = canvas.getBoundingClientRect();
-                top = Math.max(96, Math.round(rect.top + 28));
-                const distFromRight = Math.round(window.innerWidth - rect.right);
-                if (distFromRight > 0 && distFromRight < window.innerWidth * 0.6) {
-                    canvasRightOffset = distFromRight + 16;
-                }
-            }
-
-            const sidebarWidth = getRightSidebarWidth();
-            const sidebarRightOffset = sidebarWidth > 0 ? (sidebarWidth + 16) : 16;
-            const right = Math.max(canvasRightOffset, sidebarRightOffset);
-
-            panel.style.position = "fixed";
-            panel.style.top = `${top}px`;
-            panel.style.right = `${right}px`;
-            panel.style.bottom = "auto";
-            panel.style.left = "auto";
-            panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
             syncPanelThemeFromJobQueue();
         };
 
