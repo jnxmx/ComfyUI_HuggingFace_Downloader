@@ -492,7 +492,11 @@ app.registerExtension({
         const getTargetOverlayContainer = () => {
             const errorOverlay = document.querySelector('[data-testid="error-overlay"]');
             if (errorOverlay && errorOverlay.parentElement) {
-                return errorOverlay.parentElement;
+                const parent = errorOverlay.parentElement;
+                parent.style.setProperty("flex-direction", "column", "important");
+                parent.style.setProperty("align-items", "flex-end", "important");
+                parent.style.setProperty("gap", "8px", "important");
+                return parent;
             }
 
             const nativeStackSelectors = [
@@ -503,7 +507,12 @@ app.registerExtension({
 
             for (const selector of nativeStackSelectors) {
                 const el = document.querySelector(selector);
-                if (el) return el;
+                if (el) {
+                    el.style.setProperty("flex-direction", "column", "important");
+                    el.style.setProperty("align-items", "flex-end", "important");
+                    el.style.setProperty("gap", "8px", "important");
+                    return el;
+                }
             }
 
             return null;
@@ -586,6 +595,10 @@ app.registerExtension({
 
             const overlayContainer = getTargetOverlayContainer();
             if (overlayContainer && overlayContainer.contains(panel)) {
+                // Ensure parent container stacks vertically
+                overlayContainer.style.setProperty("flex-direction", "column", "important");
+                overlayContainer.style.setProperty("align-items", "flex-end", "important");
+                overlayContainer.style.setProperty("gap", "8px", "important");
                 panel.classList.add("hf-downloader-native-overlay");
                 syncPanelThemeFromJobQueue();
                 return;
