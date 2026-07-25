@@ -505,37 +505,30 @@ app.registerExtension({
             }
         };
 
-        const getRightOffset = () => {
-            const canvas = document.querySelector('.graph-canvas-container');
-            if (canvas) {
-                const rect = canvas.getBoundingClientRect();
-                const distFromRight = Math.round(window.innerWidth - rect.right);
-                if (distFromRight > 30 && distFromRight < window.innerWidth * 0.6) {
-                    return distFromRight + 16;
-                }
-            }
+        let cachedErrorRight = 16;
+        let cachedErrorTop = 76;
 
-            const sidebarCandidates = document.querySelectorAll(`
+        const getRightOffset = () => {
+            const sidebars = document.querySelectorAll(`
+                .comfyui-body-right,
                 [class*="sidebar"][class*="right"],
                 [class*="side-bar"][class*="right"],
-                .comfyui-body-right,
-                .comfy-sidebar-right,
-                .sidebar-container,
                 aside
             `);
 
-            for (const el of sidebarCandidates) {
-                if (!el || el.closest(`#${PANEL_ID}`)) continue;
-                const style = window.getComputedStyle(el);
+            for (const sb of sidebars) {
+                if (!sb || sb.closest(`#${PANEL_ID}`)) continue;
+                const style = window.getComputedStyle(sb);
                 if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
-                const rect = el.getBoundingClientRect();
-                if (rect.width > 100 && rect.height > 200 && rect.right >= (window.innerWidth - 10) && rect.left < (window.innerWidth - 60)) {
-                    const widthFromRight = window.innerWidth - rect.left;
-                    if (widthFromRight > 100 && widthFromRight < (window.innerWidth * 0.6)) {
-                        return widthFromRight + 16;
+                const rect = sb.getBoundingClientRect();
+                if (rect.width > 120 && rect.right >= (window.innerWidth - 20) && rect.left < (window.innerWidth - 60)) {
+                    const w = Math.round(window.innerWidth - rect.left);
+                    if (w > 100 && w < window.innerWidth * 0.6) {
+                        return w + 12;
                     }
                 }
             }
+
             return 16;
         };
 
@@ -549,8 +542,11 @@ app.registerExtension({
             if (errorOverlay && errorOverlay.offsetParent !== null) {
                 const rect = errorOverlay.getBoundingClientRect();
                 if (rect.height > 0 && rect.width > 0 && rect.top < 300) {
+                    cachedErrorTop = Math.max(76, Math.round(rect.top));
+                    cachedErrorRight = Math.max(16, Math.round(window.innerWidth - rect.right));
+
                     const top = Math.round(rect.bottom + 8);
-                    const right = Math.max(16, Math.round(window.innerWidth - rect.right));
+                    const right = cachedErrorRight;
 
                     panel.style.position = "fixed";
                     panel.style.top = `${top}px`;
@@ -563,14 +559,9 @@ app.registerExtension({
                 }
             }
 
-            const canvas = document.querySelector('.graph-canvas-container');
-            let top = 76;
-            if (canvas) {
-                const rect = canvas.getBoundingClientRect();
-                top = Math.max(76, Math.round(rect.top + 16));
-            }
-
-            const right = getRightOffset();
+            const sidebarRightOffset = getRightOffset();
+            const right = sidebarRightOffset > 16 ? sidebarRightOffset : cachedErrorRight;
+            const top = 76;
 
             panel.style.position = "fixed";
             panel.style.top = `${top}px`;
