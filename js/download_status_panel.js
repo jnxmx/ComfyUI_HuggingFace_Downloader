@@ -489,7 +489,7 @@ app.registerExtension({
             }
         };
 
-        const getRightOffset = () => {
+        const getRightSidebarWidth = () => {
             const sidebarCandidates = document.querySelectorAll(`
                 [class*="sidebar"][class*="right"],
                 [class*="side-bar"][class*="right"],
@@ -507,7 +507,7 @@ app.registerExtension({
                 if (rect.width > 120 && rect.height > 200 && rect.right >= (window.innerWidth - 10) && rect.left < (window.innerWidth - 60)) {
                     const widthFromRight = window.innerWidth - rect.left;
                     if (widthFromRight > 100 && widthFromRight < (window.innerWidth * 0.6)) {
-                        return widthFromRight + 16;
+                        return widthFromRight;
                     }
                 }
             }
@@ -515,47 +515,66 @@ app.registerExtension({
             const canvas = document.querySelector('.graph-canvas-container');
             if (canvas) {
                 const rect = canvas.getBoundingClientRect();
-                const offset = window.innerWidth - rect.right + 16;
-                if (offset > 16 && offset < window.innerWidth * 0.6) {
+                const offset = window.innerWidth - rect.right;
+                if (offset > 10 && offset < window.innerWidth * 0.6) {
                     return offset;
                 }
             }
-            return 16;
-        };
-
-        const getToastBottom = (defaultTop) => {
-            let maxBottom = defaultTop;
-
-            const candidates = document.querySelectorAll(`
-                .p-toast.p-toast-top-right,
-                [data-testid="error-overlay"],
-                [data-testid="queue-notification"]
-            `);
-
-            for (const el of candidates) {
-                if (!el || el.closest(`#${PANEL_ID}`)) continue;
-                if (el.offsetParent === null) continue;
-                const rect = el.getBoundingClientRect();
-                if (rect.height > 20 && rect.top >= 0 && rect.top < 250) {
-                    maxBottom = Math.max(maxBottom, Math.round(rect.bottom + 12));
-                }
-            }
-
-            return maxBottom;
+            return 0;
         };
 
         const updatePanelPosition = () => {
             if (!panel) return;
 
-            const canvas = document.querySelector('.graph-canvas-container');
-            let baseTop = 60;
-            if (canvas) {
-                const rect = canvas.getBoundingClientRect();
-                baseTop = Math.max(60, Math.round(rect.top + 16));
+            // 1. If a native error overlay card ("ERRORS") is active, position
+            // directly below it, inheriting its exact right edge position!
+            const errorOverlay = document.querySelector('[data-testid="error-overlay"]');
+            if (errorOverlay && errorOverlay.offsetParent !== null) {
+                const rect = errorOverlay.getBoundingClientRect();
+                if (rect.height > 0 && rect.width > 0 && rect.top < 300) {
+                    const top = Math.round(rect.bottom + 8);
+                    const right = Math.max(16, Math.round(window.innerWidth - rect.right));
+
+                    panel.style.position = "fixed";
+                    panel.style.top = `${top}px`;
+                    panel.style.right = `${right}px`;
+                    panel.style.bottom = "auto";
+                    panel.style.left = "auto";
+                    panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
+                    syncPanelThemeFromJobQueue();
+                    return;
+                }
             }
 
-            const top = getToastBottom(baseTop);
-            const right = getRightOffset();
+            // 2. If a PrimeVue toast banner is active near top-right
+            const toast = document.querySelector('.p-toast.p-toast-top-right');
+            if (toast && toast.offsetParent !== null) {
+                const rect = toast.getBoundingClientRect();
+                if (rect.height > 0 && rect.top < 300) {
+                    const top = Math.round(rect.bottom + 8);
+                    const right = Math.max(16, Math.round(window.innerWidth - rect.right));
+
+                    panel.style.position = "fixed";
+                    panel.style.top = `${top}px`;
+                    panel.style.right = `${right}px`;
+                    panel.style.bottom = "auto";
+                    panel.style.left = "auto";
+                    panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
+                    syncPanelThemeFromJobQueue();
+                    return;
+                }
+            }
+
+            // 3. Fallback: position at top-right of canvas area / sidebar boundary
+            const canvas = document.querySelector('.graph-canvas-container');
+            let top = 76;
+            if (canvas) {
+                const rect = canvas.getBoundingClientRect();
+                top = Math.max(60, Math.round(rect.top + 16));
+            }
+
+            const sidebarWidth = getRightSidebarWidth();
+            const right = sidebarWidth > 0 ? (sidebarWidth + 16) : 16;
 
             panel.style.position = "fixed";
             panel.style.top = `${top}px`;
