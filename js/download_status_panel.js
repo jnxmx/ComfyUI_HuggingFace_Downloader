@@ -204,16 +204,19 @@ app.registerExtension({
             style.id = STYLE_ID;
             style.textContent = `
                 #${PANEL_ID} {
-                    position: relative;
+                    position: fixed;
+                    right: 16px;
+                    top: 76px;
                     width: 360px;
                     min-width: 320px;
                     max-width: 480px;
+                    max-height: 60vh;
                     box-sizing: border-box;
                     background: var(--interface-panel-surface, var(--hf-queue-bg, var(--p-content-background, var(--comfy-menu-bg, #1f2128))));
                     border: 1px solid var(--interface-stroke, var(--hf-queue-border, var(--border-color, var(--p-content-border-color, #3c4452))));
                     border-radius: 12px;
                     color: var(--fg-color, var(--p-text-color, #ddd));
-                    z-index: 50;
+                    z-index: 9999;
                     display: flex;
                     flex-direction: column;
                     overflow: hidden;
@@ -502,7 +505,16 @@ app.registerExtension({
             }
         };
 
-        const getRightSidebarWidth = () => {
+        const getRightOffset = () => {
+            const canvas = document.querySelector('.graph-canvas-container');
+            if (canvas) {
+                const rect = canvas.getBoundingClientRect();
+                const distFromRight = Math.round(window.innerWidth - rect.right);
+                if (distFromRight > 30 && distFromRight < window.innerWidth * 0.6) {
+                    return distFromRight + 16;
+                }
+            }
+
             const sidebarCandidates = document.querySelectorAll(`
                 [class*="sidebar"][class*="right"],
                 [class*="side-bar"][class*="right"],
@@ -517,67 +529,55 @@ app.registerExtension({
                 const style = window.getComputedStyle(el);
                 if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
                 const rect = el.getBoundingClientRect();
-                if (rect.width > 120 && rect.height > 200 && rect.right >= (window.innerWidth - 10) && rect.left < (window.innerWidth - 60)) {
+                if (rect.width > 100 && rect.height > 200 && rect.right >= (window.innerWidth - 10) && rect.left < (window.innerWidth - 60)) {
                     const widthFromRight = window.innerWidth - rect.left;
                     if (widthFromRight > 100 && widthFromRight < (window.innerWidth * 0.6)) {
-                        return widthFromRight;
+                        return widthFromRight + 16;
                     }
                 }
             }
-
-            const canvas = document.querySelector('.graph-canvas-container');
-            if (canvas) {
-                const rect = canvas.getBoundingClientRect();
-                const offset = window.innerWidth - rect.right;
-                if (offset > 10 && offset < window.innerWidth * 0.6) {
-                    return offset;
-                }
-            }
-            return 0;
+            return 16;
         };
-
-        const ensureOverlayStack = () => {
-            let stack = document.getElementById("hf-downloader-overlay-stack");
-            const canvas = document.querySelector(".graph-canvas-container") || document.querySelector(".comfyui-body") || document.body;
-
-            if (!stack) {
-                stack = document.createElement("div");
-                stack.id = "hf-downloader-overlay-stack";
-                stack.className = "pointer-events-none absolute top-3 right-3 z-45 flex flex-col items-end gap-2 max-w-120";
-                canvas.appendChild(stack);
-            } else if (stack.parentElement !== canvas) {
-                canvas.appendChild(stack);
-            }
-
-            return stack;
-        };
-
-        let cachedErrorOverlayTop = 12;
 
         const updatePanelPosition = () => {
             if (!panel) return;
-            const stack = ensureOverlayStack();
-            if (panel.parentElement !== stack) {
-                stack.appendChild(panel);
+            if (panel.parentElement !== document.body) {
+                document.body.appendChild(panel);
             }
 
             const errorOverlay = document.querySelector('[data-testid="error-overlay"]');
             if (errorOverlay && errorOverlay.offsetParent !== null) {
                 const rect = errorOverlay.getBoundingClientRect();
-                const canvas = document.querySelector('.graph-canvas-container');
-                if (canvas && rect.height > 0 && rect.top < 300) {
-                    const canvasRect = canvas.getBoundingClientRect();
-                    const nativeTop = Math.max(12, Math.round(rect.top - canvasRect.top));
-                    cachedErrorOverlayTop = nativeTop;
+                if (rect.height > 0 && rect.width > 0 && rect.top < 300) {
+                    const top = Math.round(rect.bottom + 8);
+                    const right = Math.max(16, Math.round(window.innerWidth - rect.right));
 
-                    const topOffset = Math.max(nativeTop, Math.round(rect.bottom - canvasRect.top + 8));
-                    stack.style.top = `${topOffset}px`;
+                    panel.style.position = "fixed";
+                    panel.style.top = `${top}px`;
+                    panel.style.right = `${right}px`;
+                    panel.style.bottom = "auto";
+                    panel.style.left = "auto";
+                    panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
                     syncPanelThemeFromJobQueue();
                     return;
                 }
             }
 
-            stack.style.top = `${cachedErrorOverlayTop}px`;
+            const canvas = document.querySelector('.graph-canvas-container');
+            let top = 76;
+            if (canvas) {
+                const rect = canvas.getBoundingClientRect();
+                top = Math.max(76, Math.round(rect.top + 16));
+            }
+
+            const right = getRightOffset();
+
+            panel.style.position = "fixed";
+            panel.style.top = `${top}px`;
+            panel.style.right = `${right}px`;
+            panel.style.bottom = "auto";
+            panel.style.left = "auto";
+            panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
             syncPanelThemeFromJobQueue();
         };
 
