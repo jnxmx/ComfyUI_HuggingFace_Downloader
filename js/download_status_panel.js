@@ -194,61 +194,84 @@ app.registerExtension({
                     top: 16px;
                     width: 350px;
                     min-width: 310px;
+                    max-width: 420px;
                     max-height: 60vh;
                     background: var(--interface-panel-surface, var(--hf-queue-bg, var(--p-content-background, var(--comfy-menu-bg, #1f2128))));
                     border: 1px solid var(--interface-stroke, var(--hf-queue-border, var(--border-color, var(--p-content-border-color, #3c4452))));
-                    border-radius: 8px;
+                    border-radius: 12px;
                     color: var(--fg-color, var(--p-text-color, #ddd));
                     z-index: 9999;
                     display: flex;
                     flex-direction: column;
                     overflow: hidden;
+                    pointer-events: auto;
+                    box-shadow: var(--shadow-interface, 0 10px 25px -5px rgba(0, 0, 0, 0.4));
+                    transition: transform 0.2s ease-out, opacity 0.2s ease-out;
+                }
+                #${PANEL_ID}.hf-downloader-native-overlay {
+                    position: relative !important;
+                    top: auto !important;
+                    right: auto !important;
+                    bottom: auto !important;
+                    left: auto !important;
+                    z-index: auto !important;
+                    margin-top: 8px;
                 }
                 #${PANEL_ID} .hf-downloader-header {
                     display: flex;
                     align-items: center;
                     justify-content: space-between;
                     gap: 8px;
-                    min-height: 48px;
-                    padding: 0 8px;
+                    min-height: 44px;
+                    padding: 0 12px;
                     border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--p-content-border-color, #333)));
                     background: transparent;
                 }
                 #${PANEL_ID} .hf-downloader-header-title {
-                    padding: 0 8px;
-                    font-size: 14px;
-                    font-weight: 400;
+                    padding: 0;
+                    font-size: 13px;
+                    font-weight: 600;
+                    letter-spacing: 0.02em;
                     color: var(--text-color, var(--input-text, var(--p-text-color, #e5e7eb)));
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
                 }
                 #${PANEL_ID} .hf-downloader-header-controls {
                     display: inline-flex;
                     align-items: center;
-                    gap: 4px;
+                    gap: 6px;
                 }
                 #${PANEL_ID} .hf-downloader-count {
-                    min-width: 24px;
-                    height: 24px;
+                    min-width: 20px;
+                    height: 20px;
                     background: var(--secondary-background, var(--p-surface-800, #2f323a));
                     color: var(--text-color, var(--input-text, var(--p-text-color, #e5e7eb)));
-                    padding: 0 8px;
+                    padding: 0 6px;
                     border-radius: 999px;
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    font-size: 12px;
+                    font-size: 11px;
                     line-height: 1;
                     font-weight: 700;
-                    opacity: 0.9;
                 }
                 #${PANEL_ID} .hf-downloader-minimize {
-                    font-size: 16px;
+                    font-size: 14px;
                     line-height: 1;
+                    width: 24px;
+                    height: 24px;
+                    padding: 0;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    border-radius: 6px;
                 }
                 #${PANEL_ID} .hf-downloader-body {
                     flex: 1 1 auto;
                     min-height: 0;
                     overflow-y: auto;
-                    padding: 6px 10px;
+                    padding: 8px 10px;
                     display: flex;
                     flex-direction: column;
                     gap: 6px;
@@ -258,6 +281,7 @@ app.registerExtension({
                     min-height: 48px;
                     max-height: 48px;
                     box-sizing: border-box;
+                    border-radius: 8px;
                 }
                 #${PANEL_ID} .hf-downloader-progress-container {
                     position: absolute;
@@ -393,7 +417,8 @@ app.registerExtension({
                 #${PANEL_ID} .hf-downloader-footer {
                     display: none;
                     justify-content: flex-end;
-                    padding: 8px 12px 10px;
+                    gap: 8px;
+                    padding: 8px 12px;
                     background: transparent;
                 }
                 #${PANEL_ID} .hf-downloader-footer.visible {
@@ -464,8 +489,26 @@ app.registerExtension({
             }
         };
 
-        // Compute the right offset by scanning active right sidebar panels first,
-        // falling back to .graph-canvas-container bounding rect.
+        const getTargetOverlayContainer = () => {
+            const errorOverlay = document.querySelector('[data-testid="error-overlay"]');
+            if (errorOverlay && errorOverlay.parentElement) {
+                return errorOverlay.parentElement;
+            }
+
+            const nativeStackSelectors = [
+                '.pointer-events-none.flex.w-full.justify-end',
+                '.pointer-events-none.flex.justify-end',
+                '[data-testid="queue-notification"]'
+            ];
+
+            for (const selector of nativeStackSelectors) {
+                const el = document.querySelector(selector);
+                if (el) return el;
+            }
+
+            return null;
+        };
+
         const getRightOffset = () => {
             const sidebarCandidates = document.querySelectorAll(`
                 [class*="sidebar"][class*="right"],
@@ -498,9 +541,6 @@ app.registerExtension({
             return 16;
         };
 
-        // Query native toasts AND interactive error cards ([data-testid="error-overlay"],
-        // [role="status"], etc.) to find where active top-right notifications end,
-        // ensuring the download panel stacks cleanly below them.
         const getToastBottom = (defaultTop) => {
             let maxBottom = defaultTop;
 
@@ -523,7 +563,6 @@ app.registerExtension({
                 }
             }
 
-            // Fallback scan: check floating card containers near top-right containing error/warning text
             const floatingElements = document.querySelectorAll('div');
             for (const el of floatingElements) {
                 if (!el || el.closest(`#${PANEL_ID}`) || el.children.length > 20) continue;
@@ -545,7 +584,14 @@ app.registerExtension({
         const updatePanelPosition = () => {
             if (!panel) return;
 
-            // Derive top baseline from menu bar / canvas container
+            const overlayContainer = getTargetOverlayContainer();
+            if (overlayContainer && overlayContainer.contains(panel)) {
+                panel.classList.add("hf-downloader-native-overlay");
+                syncPanelThemeFromJobQueue();
+                return;
+            }
+
+            panel.classList.remove("hf-downloader-native-overlay");
             const canvas = document.querySelector('.graph-canvas-container');
             let baseTop = 60;
             if (canvas) {
@@ -553,10 +599,7 @@ app.registerExtension({
                 baseTop = Math.max(60, Math.round(rect.top + 16));
             }
 
-            // Stack below active toasts and error cards
             const top = getToastBottom(baseTop);
-
-            // Align to left of right sidebar
             const right = getRightOffset();
 
             panel.style.top = `${top}px`;
@@ -580,7 +623,7 @@ app.registerExtension({
 
             const title = document.createElement("div");
             title.className = "hf-downloader-header-title";
-            title.textContent = "Downloads";
+            title.innerHTML = "<i class=\"pi pi-download text-primary\"></i><span>DOWNLOADS</span>";
 
             const controls = document.createElement("div");
             controls.className = "hf-downloader-header-controls";
@@ -623,9 +666,15 @@ app.registerExtension({
             panel.appendChild(listBody);
             panel.appendChild(footer);
             panel.style.display = "none";
-            document.body.appendChild(panel);
-            updatePanelPosition();
 
+            const targetOverlay = getTargetOverlayContainer();
+            if (targetOverlay) {
+                targetOverlay.appendChild(panel);
+            } else {
+                document.body.appendChild(panel);
+            }
+
+            updatePanelPosition();
             return panel;
         };
 
