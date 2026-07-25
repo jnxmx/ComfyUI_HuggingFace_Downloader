@@ -484,6 +484,85 @@ app.registerExtension({
             return null;
         };
 
+        const getRightSidebarOffset = () => {
+            let maxSidebarWidth = 0;
+
+            // Search for active right sidebars/panels in ComfyUI
+            const sidebarCandidates = document.querySelectorAll(`
+                [class*="sidebar"][class*="right"],
+                [class*="side-bar"][class*="right"],
+                .comfyui-body-right,
+                .comfy-sidebar-right,
+                .sidebar-container,
+                aside
+            `);
+
+            for (const el of sidebarCandidates) {
+                if (!el || el.closest(`#${PANEL_ID}`)) continue;
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 50 && rect.height > 200 && rect.right >= (window.innerWidth - 20)) {
+                    const widthFromRight = window.innerWidth - rect.left;
+                    if (widthFromRight > 0 && widthFromRight < (window.innerWidth * 0.6)) {
+                        maxSidebarWidth = Math.max(maxSidebarWidth, widthFromRight);
+                    }
+                }
+            }
+
+            if (maxSidebarWidth === 0) {
+                const canvasContainer = document.querySelector('.graph-canvas-container');
+                if (canvasContainer) {
+                    const rect = canvasContainer.getBoundingClientRect();
+                    if (rect.right < window.innerWidth - 20) {
+                        maxSidebarWidth = window.innerWidth - rect.right;
+                    }
+                }
+            }
+
+            return maxSidebarWidth;
+        };
+
+        const getTopRightNotificationBottom = (defaultTop) => {
+            let maxBottom = defaultTop;
+
+            // Selector list for potential notification / alert overlays in ComfyUI
+            const candidates = document.querySelectorAll(`
+                .p-toast,
+                .p-toast-message,
+                [class*="notification"],
+                [class*="alert-window"],
+                [class*="error-window"],
+                [class*="missing-model"],
+                [role="alert"],
+                [role="status"]
+            `);
+
+            for (const el of candidates) {
+                if (!el || el.closest(`#${PANEL_ID}`)) continue;
+                const rect = el.getBoundingClientRect();
+                if (rect.height > 0 && rect.width > 0 && rect.top < 350 && rect.right > (window.innerWidth - 700)) {
+                    maxBottom = Math.max(maxBottom, Math.round(rect.bottom + 12));
+                }
+            }
+
+            // Fallback search: scan floating elements near top right for error / missing model cards
+            const allFloating = document.querySelectorAll("div, section, article");
+            for (const el of allFloating) {
+                if (!el || el.closest(`#${PANEL_ID}`) || el.children.length > 25) continue;
+                const style = window.getComputedStyle(el);
+                if (style.position === "fixed" || style.position === "absolute") {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.height > 0 && rect.height < 450 && rect.top < 350 && rect.right > (window.innerWidth - 700)) {
+                        const txt = (el.textContent || "").toLowerCase();
+                        if (txt.includes("error") || txt.includes("required model") || txt.includes("missing model")) {
+                            maxBottom = Math.max(maxBottom, Math.round(rect.bottom + 12));
+                        }
+                    }
+                }
+            }
+
+            return maxBottom;
+        };
+
         const updatePanelPosition = () => {
             if (!panel) return;
 
@@ -496,40 +575,12 @@ app.registerExtension({
                 }
             }
 
-            // Connect to right panel/sidebar instead of right edge of screen
-            const canvasContainer = document.querySelector('.graph-canvas-container');
-            let right = PANEL_RIGHT_MARGIN;
-            if (canvasContainer) {
-                const rect = canvasContainer.getBoundingClientRect();
-                right = window.innerWidth - rect.right + PANEL_RIGHT_MARGIN;
-                
-                // Observe for size changes if we haven't yet
-                if (typeof ResizeObserver !== "undefined" && !observedElements.has(canvasContainer)) {
-                    if (!resizeObserver) {
-                        resizeObserver = new ResizeObserver(() => updatePanelPosition());
-                    }
-                    resizeObserver.observe(canvasContainer);
-                    observedElements.add(canvasContainer);
-                }
-            }
+            // Compute vertical top position below top-right error/notification cards
+            top = getTopRightNotificationBottom(top);
 
-            // Position below the toast notification if it is visible
-            const toast = document.querySelector('.p-toast.p-toast-top-right') || document.querySelector('.p-toast');
-            if (toast) {
-                const toastRect = toast.getBoundingClientRect();
-                if (toastRect.height > 0 && toastRect.bottom > 0) {
-                    top = Math.max(top, Math.round(toastRect.bottom + 12));
-                }
-                
-                // Observe toast for height changes if we haven't yet
-                if (typeof ResizeObserver !== "undefined" && !observedElements.has(toast)) {
-                    if (!resizeObserver) {
-                        resizeObserver = new ResizeObserver(() => updatePanelPosition());
-                    }
-                    resizeObserver.observe(toast);
-                    observedElements.add(toast);
-                }
-            }
+            // Compute right offset to anchor to the left edge of the right sidebar
+            const sidebarWidth = getRightSidebarOffset();
+            const right = sidebarWidth + PANEL_RIGHT_MARGIN;
 
             panel.style.top = `${top}px`;
             panel.style.right = `${right}px`;
@@ -1390,5 +1441,14 @@ app.registerExtension({
         setInterval(pollStatus, POLL_INTERVAL_MS);
         window.addEventListener("resize", updatePanelPosition, { passive: true });
         window.addEventListener("scroll", updatePanelPosition, { passive: true });
+
+        if (typeof MutationObserver !== "undefined") {
+            const bodyObserver = new MutationObserver(() => {
+                if (panel && panel.style.display !== "none") {
+                    updatePanelPosition();
+                }
+            });
+            bodyObserver.observe(document.body, { childList: true, subtree: true });
+        }
     }
 });
