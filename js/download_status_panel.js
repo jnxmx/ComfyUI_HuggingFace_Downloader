@@ -45,8 +45,6 @@ app.registerExtension({
         const observedElements = new Set();
         let resizeObserver = null;
 
-        const PANEL_RIGHT_MARGIN = 16;
-        const PANEL_TOP_MARGIN = 10;
         const BUTTON_BASE_CLASS = "relative inline-flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap appearance-none border-none rounded-md text-sm font-medium font-inter transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50";
         const BUTTON_DESTRUCTIVE_CLASS = `${BUTTON_BASE_CLASS} bg-destructive-background text-base-foreground hover:bg-destructive-background-hover size-8`;
         const BUTTON_TEXONLY_ICON_CLASS = `${BUTTON_BASE_CLASS} text-base-foreground bg-transparent hover:bg-secondary-background-hover size-8`;
@@ -201,7 +199,7 @@ app.registerExtension({
                     border: 1px solid var(--interface-stroke, var(--hf-queue-border, var(--border-color, var(--p-content-border-color, #3c4452))));
                     border-radius: 8px;
                     color: var(--fg-color, var(--p-text-color, #ddd));
-                    z-index: 10000;
+                    z-index: 9999;
                     display: flex;
                     flex-direction: column;
                     overflow: hidden;
@@ -466,121 +464,50 @@ app.registerExtension({
             }
         };
 
-        const getTopAnchor = () => {
-            const appAnchor = app?.menu?.settingsGroup?.element?.parentElement;
-            if (appAnchor?.getBoundingClientRect) return appAnchor;
-
-            const selectors = [
-                ".comfyui-menu-bar",
-                ".comfyui-menu",
-                ".comfyui-header",
-                ".p-menubar",
-                "header"
-            ];
-            for (const selector of selectors) {
-                const el = document.querySelector(selector);
-                if (el?.getBoundingClientRect) return el;
+        // Compute the right offset using .graph-canvas-container, the same
+        // element ComfyUI's native GlobalToast uses to position .p-toast-top-right.
+        // This automatically accounts for the right sidebar width.
+        const getRightOffset = () => {
+            const canvas = document.querySelector('.graph-canvas-container');
+            if (canvas) {
+                const rect = canvas.getBoundingClientRect();
+                const offset = window.innerWidth - (rect.left + rect.width) + 20;
+                if (offset > 0 && offset < window.innerWidth * 0.6) {
+                    return offset;
+                }
             }
-            return null;
+            return 20;
         };
 
-        const getRightSidebarOffset = () => {
-            let maxSidebarWidth = 0;
-
-            // Search for active right sidebars/panels in ComfyUI
-            const sidebarCandidates = document.querySelectorAll(`
-                [class*="sidebar"][class*="right"],
-                [class*="side-bar"][class*="right"],
-                .comfyui-body-right,
-                .comfy-sidebar-right,
-                .sidebar-container,
-                aside
-            `);
-
-            for (const el of sidebarCandidates) {
-                if (!el || el.closest(`#${PANEL_ID}`)) continue;
-                const rect = el.getBoundingClientRect();
-                if (rect.width > 50 && rect.height > 200 && rect.right >= (window.innerWidth - 20)) {
-                    const widthFromRight = window.innerWidth - rect.left;
-                    if (widthFromRight > 0 && widthFromRight < (window.innerWidth * 0.6)) {
-                        maxSidebarWidth = Math.max(maxSidebarWidth, widthFromRight);
-                    }
+        // Query the native PrimeVue toast container directly to find where
+        // active toasts end, so the download panel stacks below them.
+        const getToastBottom = (defaultTop) => {
+            const toastContainer = document.querySelector('.p-toast.p-toast-top-right');
+            if (toastContainer) {
+                const rect = toastContainer.getBoundingClientRect();
+                if (rect.height > 0 && rect.bottom > defaultTop) {
+                    return Math.round(rect.bottom + 12);
                 }
             }
-
-            if (maxSidebarWidth === 0) {
-                const canvasContainer = document.querySelector('.graph-canvas-container');
-                if (canvasContainer) {
-                    const rect = canvasContainer.getBoundingClientRect();
-                    if (rect.right < window.innerWidth - 20) {
-                        maxSidebarWidth = window.innerWidth - rect.right;
-                    }
-                }
-            }
-
-            return maxSidebarWidth;
-        };
-
-        const getTopRightNotificationBottom = (defaultTop) => {
-            let maxBottom = defaultTop;
-
-            // Selector list for potential notification / alert overlays in ComfyUI
-            const candidates = document.querySelectorAll(`
-                .p-toast,
-                .p-toast-message,
-                [class*="notification"],
-                [class*="alert-window"],
-                [class*="error-window"],
-                [class*="missing-model"],
-                [role="alert"],
-                [role="status"]
-            `);
-
-            for (const el of candidates) {
-                if (!el || el.closest(`#${PANEL_ID}`)) continue;
-                const rect = el.getBoundingClientRect();
-                if (rect.height > 0 && rect.width > 0 && rect.top < 350 && rect.right > (window.innerWidth - 700)) {
-                    maxBottom = Math.max(maxBottom, Math.round(rect.bottom + 12));
-                }
-            }
-
-            // Fallback search: scan floating elements near top right for error / missing model cards
-            const allFloating = document.querySelectorAll("div, section, article");
-            for (const el of allFloating) {
-                if (!el || el.closest(`#${PANEL_ID}`) || el.children.length > 25) continue;
-                const style = window.getComputedStyle(el);
-                if (style.position === "fixed" || style.position === "absolute") {
-                    const rect = el.getBoundingClientRect();
-                    if (rect.height > 0 && rect.height < 450 && rect.top < 350 && rect.right > (window.innerWidth - 700)) {
-                        const txt = (el.textContent || "").toLowerCase();
-                        if (txt.includes("error") || txt.includes("required model") || txt.includes("missing model")) {
-                            maxBottom = Math.max(maxBottom, Math.round(rect.bottom + 12));
-                        }
-                    }
-                }
-            }
-
-            return maxBottom;
+            return defaultTop;
         };
 
         const updatePanelPosition = () => {
             if (!panel) return;
 
-            const anchor = getTopAnchor();
-            let top = 16;
-            if (anchor) {
-                const rect = anchor.getBoundingClientRect();
-                if (Number.isFinite(rect.bottom)) {
-                    top = Math.max(8, Math.round(rect.bottom + PANEL_TOP_MARGIN));
-                }
+            // Derive the same top baseline that GlobalToast uses:
+            // canvas.top + 100, which accounts for the menu bar.
+            const canvas = document.querySelector('.graph-canvas-container');
+            let baseTop = 60;
+            if (canvas) {
+                baseTop = Math.round(canvas.getBoundingClientRect().top + 100);
             }
 
-            // Compute vertical top position below top-right error/notification cards
-            top = getTopRightNotificationBottom(top);
+            // Stack below any active native toasts (error cards, etc.)
+            const top = getToastBottom(baseTop);
 
-            // Compute right offset to anchor to the left edge of the right sidebar
-            const sidebarWidth = getRightSidebarOffset();
-            const right = sidebarWidth + PANEL_RIGHT_MARGIN;
+            // Use the same right offset as native toasts
+            const right = getRightOffset();
 
             panel.style.top = `${top}px`;
             panel.style.right = `${right}px`;
