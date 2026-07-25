@@ -489,35 +489,6 @@ app.registerExtension({
             }
         };
 
-        const getTargetOverlayContainer = () => {
-            const errorOverlay = document.querySelector('[data-testid="error-overlay"]');
-            if (errorOverlay && errorOverlay.parentElement) {
-                const parent = errorOverlay.parentElement;
-                parent.style.setProperty("flex-direction", "column", "important");
-                parent.style.setProperty("align-items", "flex-end", "important");
-                parent.style.setProperty("gap", "8px", "important");
-                return parent;
-            }
-
-            const nativeStackSelectors = [
-                '.pointer-events-none.flex.w-full.justify-end',
-                '.pointer-events-none.flex.justify-end',
-                '[data-testid="queue-notification"]'
-            ];
-
-            for (const selector of nativeStackSelectors) {
-                const el = document.querySelector(selector);
-                if (el) {
-                    el.style.setProperty("flex-direction", "column", "important");
-                    el.style.setProperty("align-items", "flex-end", "important");
-                    el.style.setProperty("gap", "8px", "important");
-                    return el;
-                }
-            }
-
-            return null;
-        };
-
         const getRightOffset = () => {
             const sidebarCandidates = document.querySelectorAll(`
                 [class*="sidebar"][class*="right"],
@@ -593,18 +564,6 @@ app.registerExtension({
         const updatePanelPosition = () => {
             if (!panel) return;
 
-            const overlayContainer = getTargetOverlayContainer();
-            if (overlayContainer && overlayContainer.contains(panel)) {
-                // Ensure parent container stacks vertically
-                overlayContainer.style.setProperty("flex-direction", "column", "important");
-                overlayContainer.style.setProperty("align-items", "flex-end", "important");
-                overlayContainer.style.setProperty("gap", "8px", "important");
-                panel.classList.add("hf-downloader-native-overlay");
-                syncPanelThemeFromJobQueue();
-                return;
-            }
-
-            panel.classList.remove("hf-downloader-native-overlay");
             const canvas = document.querySelector('.graph-canvas-container');
             let baseTop = 60;
             if (canvas) {
@@ -615,6 +574,7 @@ app.registerExtension({
             const top = getToastBottom(baseTop);
             const right = getRightOffset();
 
+            panel.style.position = "fixed";
             panel.style.top = `${top}px`;
             panel.style.right = `${right}px`;
             panel.style.bottom = "auto";
@@ -680,13 +640,7 @@ app.registerExtension({
             panel.appendChild(footer);
             panel.style.display = "none";
 
-            const targetOverlay = getTargetOverlayContainer();
-            if (targetOverlay) {
-                targetOverlay.appendChild(panel);
-            } else {
-                document.body.appendChild(panel);
-            }
-
+            document.body.appendChild(panel);
             updatePanelPosition();
             return panel;
         };
