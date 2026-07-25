@@ -582,11 +582,11 @@ app.registerExtension({
 
             // 3. Position relative to canvas container & right sidebar
             const canvas = document.querySelector('.graph-canvas-container');
-            let top = 76;
+            let top = 96;
             let canvasRightOffset = 16;
             if (canvas) {
                 const rect = canvas.getBoundingClientRect();
-                top = Math.max(60, Math.round(rect.top + 16));
+                top = Math.max(96, Math.round(rect.top + 28));
                 const distFromRight = Math.round(window.innerWidth - rect.right);
                 if (distFromRight > 0 && distFromRight < window.innerWidth * 0.6) {
                     canvasRightOffset = distFromRight + 16;
