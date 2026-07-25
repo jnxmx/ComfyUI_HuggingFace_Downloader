@@ -81,6 +81,7 @@ app.registerExtension({
                 panel.style.display = "none";
             } else {
                 panel.style.display = "flex";
+                startPositionLoop();
             }
         };
 
@@ -523,6 +524,20 @@ app.registerExtension({
             return 0;
         };
 
+        let animFrameId = null;
+        const startPositionLoop = () => {
+            if (animFrameId) return;
+            const loop = () => {
+                if (panel && panel.style.display !== "none") {
+                    updatePanelPosition();
+                    animFrameId = requestAnimationFrame(loop);
+                } else {
+                    animFrameId = null;
+                }
+            };
+            animFrameId = requestAnimationFrame(loop);
+        };
+
         const updatePanelPosition = () => {
             if (!panel) return;
 
@@ -565,16 +580,22 @@ app.registerExtension({
                 }
             }
 
-            // 3. Fallback: position at top-right of canvas area / sidebar boundary
+            // 3. Position relative to canvas container & right sidebar
             const canvas = document.querySelector('.graph-canvas-container');
             let top = 76;
+            let canvasRightOffset = 16;
             if (canvas) {
                 const rect = canvas.getBoundingClientRect();
                 top = Math.max(60, Math.round(rect.top + 16));
+                const distFromRight = Math.round(window.innerWidth - rect.right);
+                if (distFromRight > 0 && distFromRight < window.innerWidth * 0.6) {
+                    canvasRightOffset = distFromRight + 16;
+                }
             }
 
             const sidebarWidth = getRightSidebarWidth();
-            const right = sidebarWidth > 0 ? (sidebarWidth + 16) : 16;
+            const sidebarRightOffset = sidebarWidth > 0 ? (sidebarWidth + 16) : 16;
+            const right = Math.max(canvasRightOffset, sidebarRightOffset);
 
             panel.style.position = "fixed";
             panel.style.top = `${top}px`;
