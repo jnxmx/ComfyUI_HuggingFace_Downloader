@@ -75,6 +75,20 @@ app.registerExtension({
             window.dispatchEvent(new CustomEvent("hfDownloader:panelState", { detail: state }));
         };
 
+        let animFrameId = null;
+        const startPositionLoop = () => {
+            if (animFrameId) return;
+            const loop = () => {
+                if (panel && panel.style.display !== "none") {
+                    updatePanelPosition();
+                    animFrameId = requestAnimationFrame(loop);
+                } else {
+                    animFrameId = null;
+                }
+            };
+            animFrameId = requestAnimationFrame(loop);
+        };
+
         const applyPanelVisibility = () => {
             if (!panel) return;
             if (!lastVisibleCount || panelMinimized) {
@@ -529,19 +543,10 @@ app.registerExtension({
             if (!stack) {
                 stack = document.createElement("div");
                 stack.id = "hf-downloader-overlay-stack";
-                stack.className = "pointer-events-none absolute top-3 right-3 z-50 flex flex-col items-end gap-2 max-w-120";
+                stack.className = "pointer-events-none absolute top-3 right-3 z-45 flex flex-col items-end gap-2 max-w-120";
                 canvas.appendChild(stack);
             } else if (stack.parentElement !== canvas) {
                 canvas.appendChild(stack);
-            }
-
-            // Sync native ErrorOverlay into our stack if active so it sits on top
-            const errorOverlay = document.querySelector('[data-testid="error-overlay"]');
-            if (errorOverlay) {
-                const nativeCard = errorOverlay.closest('.pointer-events-auto') || errorOverlay;
-                if (nativeCard && nativeCard.parentElement !== stack && !stack.contains(nativeCard)) {
-                    stack.prepend(nativeCard);
-                }
             }
 
             return stack;
@@ -553,6 +558,21 @@ app.registerExtension({
             if (panel.parentElement !== stack) {
                 stack.appendChild(panel);
             }
+
+            const errorOverlay = document.querySelector('[data-testid="error-overlay"]');
+            if (errorOverlay && errorOverlay.offsetParent !== null) {
+                const rect = errorOverlay.getBoundingClientRect();
+                const canvas = document.querySelector('.graph-canvas-container');
+                if (canvas && rect.height > 0 && rect.top < 300) {
+                    const canvasRect = canvas.getBoundingClientRect();
+                    const topOffset = Math.max(12, Math.round(rect.bottom - canvasRect.top + 8));
+                    stack.style.top = `${topOffset}px`;
+                    syncPanelThemeFromJobQueue();
+                    return;
+                }
+            }
+
+            stack.style.top = "12px";
             syncPanelThemeFromJobQueue();
         };
 
