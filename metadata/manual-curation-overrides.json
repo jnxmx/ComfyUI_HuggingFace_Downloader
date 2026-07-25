@@ -835,81 +835,6 @@
     "flux1-kontext-dev.safetensors": {
       "explorer_base": "FLUX.1 Kontext [dev]"
     },
-    "flux1-krea-dev-Q2_K.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q3_K_M.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q3_K_S.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q4_0.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q4_1.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q4_K_M.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q4_K_S.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q5_0.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q5_1.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q5_K_M.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q5_K_S.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q6_K.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev-Q8_0.gguf": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev.safetensors": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux1-krea-dev_fp8_scaled.safetensors": {
-      "explorer_base": "FLUX.1 [dev]",
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
     "flux1-lenovo_ultrareal.safetensors": {
       "explorer_base": "FLUX.1 [dev]"
     },
@@ -4363,52 +4288,9 @@
     "zimage-zyd232_s_ink_style.safetensors": {
       "explorer_base": "Z-Image"
     },
-    "10Eros_v1.2_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "2xHFA2kReal-CUGAN.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "upscale_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "Fal_Ideo_4_NSFW-int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
     "Fal_Ideo_4_NSFW_BF16.safetensors": {
       "explorer_enabled": true,
       "explorer_category": "diffusion_models"
-    },
-    "Krea2_FantasyRealism.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "Krea2_Raw_convrot_int8mixed.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "Krea2_Turbo_convrot_int8mixed.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "Krea2_Turbo_fp8mixed.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "Krea2_Turbo_int8mixed.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "Qwen3-VL-8B-Instruct-int4_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen"
     },
     "Qwen3.5-0.8B_Abliterated.Q4_K_M.gguf": {
       "explorer_enabled": true,
@@ -4428,51 +4310,11 @@
       "explorer_enabled": true,
       "explorer_category": "diffusion_models"
     },
-    "boogu_image_edit_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "boogu_image_edit_turbo_hotfix_1k_20260708_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "boogu_image_edit_turbo_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
     "boogu_image_turbo_hotfix_int8.safetensors": {
       "explorer_enabled": true,
       "explorer_category": "diffusion_models"
     },
-    "boogu_image_turbo_hotfix_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "flux-2-klein-9b-int8-convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.2 [klein] 9B"
-    },
-    "flux-2-klein-9b-kv_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.2 [klein] 9B"
-    },
-    "flux1-dev-int8-convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "flux2-dev-int4_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.2 [dev]"
-    },
     "gemma-4-E2B-it-uncensored.Q6_K.gguf": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "gemma_3_12B_it-int4_convrot.safetensors": {
       "explorer_enabled": true,
       "explorer_category": "diffusion_models"
     },
@@ -4484,172 +4326,11 @@
       "explorer_enabled": true,
       "explorer_category": "diffusion_models"
     },
-    "global_model-int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "ideogram4_fast_comfy-int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "ideogram4_instant_comfy-int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "ideogram4_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "ideogram4_unconditional_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "joyai_image_edit_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "krea2_Enhancer.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_coolblue.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_darkbrush.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_dotmatrix.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_kidsdrawing.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_neondrip.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_plasmoid.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_rainywindow.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_raw_bf16.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_raw_fp8_scaled.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_raw_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_retroanime.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_softwatercolor.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_style_reference.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_sunsetblur.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_turbo-int4_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_turbo_bf16.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_turbo_convrot_int4_fast.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_turbo_fp8_scaled.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_turbo_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_turbo_lora_rank_64_bf16.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_turbo_mxfp8.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_turbo_nvfp4.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_vintagetarot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "krea2_warmpastel.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "loras",
-      "explorer_base": "FLUX.1 [dev]"
-    },
     "ltx-2.3-22b-dev_int8mixed_rowwise.safetensors": {
       "explorer_enabled": true,
       "explorer_category": "diffusion_models"
     },
-    "ltx-2.3-22b-dev_transformer_only_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
     "ltx-2.3-22b-distilled-1.1_int8mixed_rowwise.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "ltx-2.3-22b-distilled-1.1_transformer_only-int4_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "ltx-2.3-22b-distilled-1.1_transformer_only_int8_convrot.safetensors": {
       "explorer_enabled": true,
       "explorer_category": "diffusion_models"
     },
@@ -4669,60 +4350,6 @@
       "explorer_enabled": true,
       "explorer_category": "diffusion_models"
     },
-    "mistral_3_small_flux2-int4_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Flux2"
-    },
-    "pid_1.5_flux1_1024_to_4096_4step_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "pid_1.5_flux1_1024_to_4096_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "pid_1.5_flux2_1024_to_4096_4step_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Flux2"
-    },
-    "pid_1.5_flux2_1024_to_4096_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Flux2"
-    },
-    "pid_1.5_qwenimage_1024_to_4096_4step_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen"
-    },
-    "pid_1.5_qwenimage_1024_to_4096_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen"
-    },
-    "pixal3d_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "qwen3.5_2b_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen"
-    },
-    "qwen3.5_4b_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen"
-    },
-    "qwen3.5_9b_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen"
-    },
     "qwen3vl_4b_bf16.safetensors": {
       "explorer_enabled": true,
       "explorer_category": "text_encoders",
@@ -4733,142 +4360,16 @@
       "explorer_category": "diffusion_models",
       "explorer_base": "FLUX.1 [dev]"
     },
-    "qwen3vl_4b_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen"
-    },
-    "qwen3vl_4b_uncensored_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
     "qwen3vl_8b_int8.safetensors": {
       "explorer_enabled": true,
       "explorer_category": "diffusion_models",
       "explorer_base": "Qwen"
     },
-    "qwen3vl_8b_joyimage_edit_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "text_encoders",
-      "explorer_base": "Qwen"
-    },
-    "qwen_2.5_vl_7b_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen Image"
-    },
-    "qwen_3_4b_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen"
-    },
-    "qwen_3_8b_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen"
-    },
-    "qwen_image_2512_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen Image"
-    },
-    "qwen_image_edit_2511_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Qwen Image Edit"
-    },
-    "sam3.1_multiplex-int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "seedvr2_3b_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "seedvr2_7b-int4_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "seedvr2_7b_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "seedvr2_7b_sharp_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
     "sulphur_dev_int8mixed_tensorwise.safetensors": {
       "explorer_enabled": true,
       "explorer_category": "diffusion_models"
     },
-    "sulphur_distil-int4_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "sulphur_distil_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
     "sulphur_distill_fp8.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "svdq-fp4_r32-flux.1-krea-dev.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "svdq-int4_r32-flux.1-krea-dev.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "FLUX.1 [dev]"
-    },
-    "umt5_xxl_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "text_encoders",
-      "explorer_base": "Wan2.2"
-    },
-    "wan2.1_14B_SCAIL_2_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Wan2.1"
-    },
-    "wan2.2_animate_14B_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Wan2.2"
-    },
-    "wan2.2_bernini_r_high_noise_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Wan2.2"
-    },
-    "wan2.2_bernini_r_low_noise_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Wan2.2"
-    },
-    "wan2.2_i2v_high_noise_14B_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Wan2.2"
-    },
-    "wan2.2_i2v_low_noise_14B_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Wan2.2"
-    },
-    "wan2.2_s2v_14B_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models",
-      "explorer_base": "Wan2.2"
-    },
-    "z_image_int8_convrot.safetensors": {
-      "explorer_enabled": true,
-      "explorer_category": "diffusion_models"
-    },
-    "z_image_turbo_int8_convrot.safetensors": {
       "explorer_enabled": true,
       "explorer_category": "diffusion_models"
     }

@@ -491,16 +491,26 @@ def main() -> int:
         repo_id_for_category = str(entry.get("repo_id") or "").strip()
         if not repo_id_for_category:
             repo_id_for_category, _ = parse_hf_repo_and_path(entry.get("url"))
-        if category == "checkpoints":
-            inferred_flux_base_for_category = infer_flux_base(repo_id_for_category, row_filename)
-            if inferred_flux_base_for_category and "lora" not in row_filename.lower():
+        url_lower = str(entry.get("url") or "").lower()
+        directory_lower = str(entry.get("directory") or "").lower()
+        row_fn_lower = row_filename.lower()
+        repo_lower = repo_id_for_category.lower()
+
+        if category in {"checkpoints", "", "unknown"}:
+            if "loras/" in url_lower or "loras" in directory_lower or "lora" in row_fn_lower:
+                category = "loras"
+                category_verified = True
+            elif "text_encoders/" in url_lower or "text_encoders" in directory_lower or "text_encoder" in row_fn_lower or "qwen3vl" in row_fn_lower or "umt5" in row_fn_lower or "clip" in row_fn_lower:
+                category = "text_encoders"
+                category_verified = True
+            elif "vae/" in url_lower or "vae" in directory_lower:
+                category = "vae"
+                category_verified = True
+            elif "diffusion_models/" in url_lower or "diffusion_models" in directory_lower or "krea" in row_fn_lower or "convrot" in row_fn_lower or repo_lower.startswith("winnougan/") or repo_lower.startswith("comfy-org/"):
                 category = "diffusion_models"
-                if str(entry.get("directory") or "").strip() in {"", "checkpoints"}:
+                if directory_lower in {"", "checkpoints"}:
                     entry["directory"] = "diffusion_models"
-                category_verified = category_verified or source in {
-                    "cloud_marketplace_export",
-                    "comfyui_manager_model_list",
-                }
+                category_verified = True
 
         stem_key = normalize_group_stem(row_filename)
         if allow_priority_gguf and source == "priority_repo_scrape" and stem_key:
@@ -550,17 +560,21 @@ def main() -> int:
                 else:
                     if inferred_flux_base:
                         base_value = inferred_flux_base
-                        base_verified = source in {"comfyui_manager_model_list", "cloud_marketplace_export"}
+                        base_verified = source in {"comfyui_manager_model_list", "cloud_marketplace_export", "priority_repo_scrape"}
                         base_from = "inferred_flux_family"
                     else:
                         if inferred_wan:
                             base_value = inferred_wan
-                            base_verified = source in {"comfyui_manager_model_list", "cloud_marketplace_export"}
+                            base_verified = source in {"comfyui_manager_model_list", "cloud_marketplace_export", "priority_repo_scrape"}
                             base_from = "inferred_wan_family"
                         elif inferred_qwen:
                             base_value = inferred_qwen
-                            base_verified = source in {"comfyui_manager_model_list", "cloud_marketplace_export"}
+                            base_verified = source in {"comfyui_manager_model_list", "cloud_marketplace_export", "priority_repo_scrape"}
                             base_from = "inferred_qwen_family"
+                        elif "krea" in row_fn_lower or "krea" in repo_lower:
+                            base_value = "FLUX.1 [dev]"
+                            base_verified = True
+                            base_from = "inferred_krea"
                         else:
                             base_value = "unknown"
                             base_verified = False
