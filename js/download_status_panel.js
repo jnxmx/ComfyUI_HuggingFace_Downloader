@@ -464,49 +464,99 @@ app.registerExtension({
             }
         };
 
-        // Compute the right offset using .graph-canvas-container, the same
-        // element ComfyUI's native GlobalToast uses to position .p-toast-top-right.
-        // This automatically accounts for the right sidebar width.
+        // Compute the right offset by scanning active right sidebar panels first,
+        // falling back to .graph-canvas-container bounding rect.
         const getRightOffset = () => {
+            const sidebarCandidates = document.querySelectorAll(`
+                [class*="sidebar"][class*="right"],
+                [class*="side-bar"][class*="right"],
+                .comfyui-body-right,
+                .comfy-sidebar-right,
+                .sidebar-container,
+                aside
+            `);
+
+            for (const el of sidebarCandidates) {
+                if (!el || el.closest(`#${PANEL_ID}`)) continue;
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 50 && rect.height > 200 && rect.right >= (window.innerWidth - 30)) {
+                    const widthFromRight = window.innerWidth - rect.left;
+                    if (widthFromRight > 0 && widthFromRight < (window.innerWidth * 0.6)) {
+                        return widthFromRight + 16;
+                    }
+                }
+            }
+
             const canvas = document.querySelector('.graph-canvas-container');
             if (canvas) {
                 const rect = canvas.getBoundingClientRect();
-                const offset = window.innerWidth - (rect.left + rect.width) + 20;
+                const offset = window.innerWidth - (rect.left + rect.width) + 16;
                 if (offset > 0 && offset < window.innerWidth * 0.6) {
                     return offset;
                 }
             }
-            return 20;
+            return 16;
         };
 
-        // Query the native PrimeVue toast container directly to find where
-        // active toasts end, so the download panel stacks below them.
+        // Query native toasts AND interactive error cards ([data-testid="error-overlay"],
+        // [role="status"], etc.) to find where active top-right notifications end,
+        // ensuring the download panel stacks cleanly below them.
         const getToastBottom = (defaultTop) => {
-            const toastContainer = document.querySelector('.p-toast.p-toast-top-right');
-            if (toastContainer) {
-                const rect = toastContainer.getBoundingClientRect();
-                if (rect.height > 0 && rect.bottom > defaultTop) {
-                    return Math.round(rect.bottom + 12);
+            let maxBottom = defaultTop;
+
+            const candidates = document.querySelectorAll(`
+                .p-toast.p-toast-top-right,
+                .p-toast,
+                [data-testid="error-overlay"],
+                [data-testid="queue-notification"],
+                [role="status"],
+                [role="alert"],
+                [class*="error-overlay"],
+                [class*="missing-model"]
+            `);
+
+            for (const el of candidates) {
+                if (!el || el.closest(`#${PANEL_ID}`)) continue;
+                const rect = el.getBoundingClientRect();
+                if (rect.height > 0 && rect.width > 0 && rect.top < 350 && rect.right > (window.innerWidth - 700)) {
+                    maxBottom = Math.max(maxBottom, Math.round(rect.bottom + 12));
                 }
             }
-            return defaultTop;
+
+            // Fallback scan: check floating card containers near top-right containing error/warning text
+            const floatingElements = document.querySelectorAll('div');
+            for (const el of floatingElements) {
+                if (!el || el.closest(`#${PANEL_ID}`) || el.children.length > 20) continue;
+                const style = window.getComputedStyle(el);
+                if ((style.position === 'fixed' || style.position === 'absolute') && el.offsetWidth > 150) {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.height > 40 && rect.height < 400 && rect.top < 300 && rect.right > (window.innerWidth - 700)) {
+                        const text = (el.textContent || '').toLowerCase();
+                        if (text.includes('error') || text.includes('missing model') || text.includes('required model')) {
+                            maxBottom = Math.max(maxBottom, Math.round(rect.bottom + 12));
+                        }
+                    }
+                }
+            }
+
+            return maxBottom;
         };
 
         const updatePanelPosition = () => {
             if (!panel) return;
 
-            // Derive the same top baseline that GlobalToast uses:
-            // canvas.top + 100, which accounts for the menu bar.
+            // Derive top baseline from menu bar / canvas container
             const canvas = document.querySelector('.graph-canvas-container');
             let baseTop = 60;
             if (canvas) {
-                baseTop = Math.round(canvas.getBoundingClientRect().top + 100);
+                const rect = canvas.getBoundingClientRect();
+                baseTop = Math.max(60, Math.round(rect.top + 16));
             }
 
-            // Stack below any active native toasts (error cards, etc.)
+            // Stack below active toasts and error cards
             const top = getToastBottom(baseTop);
 
-            // Use the same right offset as native toasts
+            // Align to left of right sidebar
             const right = getRightOffset();
 
             panel.style.top = `${top}px`;
