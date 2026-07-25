@@ -42,6 +42,8 @@ app.registerExtension({
         let panelMinimized = false;
         let lastVisibleCount = 0;
         let lastHasRunning = false;
+        const observedElements = new Set();
+        let resizeObserver = null;
 
         const PANEL_RIGHT_MARGIN = 16;
         const PANEL_TOP_MARGIN = 10;
@@ -494,8 +496,43 @@ app.registerExtension({
                 }
             }
 
+            // Connect to right panel/sidebar instead of right edge of screen
+            const canvasContainer = document.querySelector('.graph-canvas-container');
+            let right = PANEL_RIGHT_MARGIN;
+            if (canvasContainer) {
+                const rect = canvasContainer.getBoundingClientRect();
+                right = window.innerWidth - rect.right + PANEL_RIGHT_MARGIN;
+                
+                // Observe for size changes if we haven't yet
+                if (typeof ResizeObserver !== "undefined" && !observedElements.has(canvasContainer)) {
+                    if (!resizeObserver) {
+                        resizeObserver = new ResizeObserver(() => updatePanelPosition());
+                    }
+                    resizeObserver.observe(canvasContainer);
+                    observedElements.add(canvasContainer);
+                }
+            }
+
+            // Position below the toast notification if it is visible
+            const toast = document.querySelector('.p-toast.p-toast-top-right') || document.querySelector('.p-toast');
+            if (toast) {
+                const toastRect = toast.getBoundingClientRect();
+                if (toastRect.height > 0 && toastRect.bottom > 0) {
+                    top = Math.max(top, Math.round(toastRect.bottom + 12));
+                }
+                
+                // Observe toast for height changes if we haven't yet
+                if (typeof ResizeObserver !== "undefined" && !observedElements.has(toast)) {
+                    if (!resizeObserver) {
+                        resizeObserver = new ResizeObserver(() => updatePanelPosition());
+                    }
+                    resizeObserver.observe(toast);
+                    observedElements.add(toast);
+                }
+            }
+
             panel.style.top = `${top}px`;
-            panel.style.right = `${PANEL_RIGHT_MARGIN}px`;
+            panel.style.right = `${right}px`;
             panel.style.bottom = "auto";
             panel.style.left = "auto";
             panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
