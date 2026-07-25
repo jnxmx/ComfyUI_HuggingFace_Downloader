@@ -501,10 +501,12 @@ app.registerExtension({
 
             for (const el of sidebarCandidates) {
                 if (!el || el.closest(`#${PANEL_ID}`)) continue;
+                const style = window.getComputedStyle(el);
+                if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
                 const rect = el.getBoundingClientRect();
-                if (rect.width > 50 && rect.height > 200 && rect.right >= (window.innerWidth - 30)) {
+                if (rect.width > 120 && rect.height > 200 && rect.right >= (window.innerWidth - 10) && rect.left < (window.innerWidth - 60)) {
                     const widthFromRight = window.innerWidth - rect.left;
-                    if (widthFromRight > 0 && widthFromRight < (window.innerWidth * 0.6)) {
+                    if (widthFromRight > 100 && widthFromRight < (window.innerWidth * 0.6)) {
                         return widthFromRight + 16;
                     }
                 }
@@ -513,8 +515,8 @@ app.registerExtension({
             const canvas = document.querySelector('.graph-canvas-container');
             if (canvas) {
                 const rect = canvas.getBoundingClientRect();
-                const offset = window.innerWidth - (rect.left + rect.width) + 16;
-                if (offset > 0 && offset < window.innerWidth * 0.6) {
+                const offset = window.innerWidth - rect.right + 16;
+                if (offset > 16 && offset < window.innerWidth * 0.6) {
                     return offset;
                 }
             }
@@ -526,35 +528,16 @@ app.registerExtension({
 
             const candidates = document.querySelectorAll(`
                 .p-toast.p-toast-top-right,
-                .p-toast,
                 [data-testid="error-overlay"],
-                [data-testid="queue-notification"],
-                [role="status"],
-                [role="alert"],
-                [class*="error-overlay"],
-                [class*="missing-model"]
+                [data-testid="queue-notification"]
             `);
 
             for (const el of candidates) {
                 if (!el || el.closest(`#${PANEL_ID}`)) continue;
+                if (el.offsetParent === null) continue;
                 const rect = el.getBoundingClientRect();
-                if (rect.height > 0 && rect.width > 0 && rect.top < 350 && rect.right > (window.innerWidth - 700)) {
+                if (rect.height > 20 && rect.top >= 0 && rect.top < 250) {
                     maxBottom = Math.max(maxBottom, Math.round(rect.bottom + 12));
-                }
-            }
-
-            const floatingElements = document.querySelectorAll('div');
-            for (const el of floatingElements) {
-                if (!el || el.closest(`#${PANEL_ID}`) || el.children.length > 20) continue;
-                const style = window.getComputedStyle(el);
-                if ((style.position === 'fixed' || style.position === 'absolute') && el.offsetWidth > 150) {
-                    const rect = el.getBoundingClientRect();
-                    if (rect.height > 40 && rect.height < 400 && rect.top < 300 && rect.right > (window.innerWidth - 700)) {
-                        const text = (el.textContent || '').toLowerCase();
-                        if (text.includes('error') || text.includes('missing model') || text.includes('required model')) {
-                            maxBottom = Math.max(maxBottom, Math.round(rect.bottom + 12));
-                        }
-                    }
                 }
             }
 
