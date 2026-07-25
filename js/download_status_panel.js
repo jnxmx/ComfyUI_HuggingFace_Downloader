@@ -205,10 +205,10 @@ app.registerExtension({
             style.textContent = `
                 #${PANEL_ID} {
                     position: relative;
-                    width: 380px;
+                    width: 360px;
                     min-width: 320px;
                     max-width: 480px;
-                    max-height: 60vh;
+                    box-sizing: border-box;
                     background: var(--interface-panel-surface, var(--hf-queue-bg, var(--p-content-background, var(--comfy-menu-bg, #1f2128))));
                     border: 1px solid var(--interface-stroke, var(--hf-queue-border, var(--border-color, var(--p-content-border-color, #3c4452))));
                     border-radius: 12px;
