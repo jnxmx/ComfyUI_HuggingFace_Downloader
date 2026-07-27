@@ -7,7 +7,7 @@ app.registerExtension({
       id: "downloader.hf_token",
       category: ["Hugging Face Download & Backup", "Tokens", "Hugging Face Token"],
       name: "Hugging Face Token",
-      type: "password",
+      type: "text",
       defaultValue: "",
       tooltip: "Enter your Hugging Face token to enable downloads from gated repos.",
     },
