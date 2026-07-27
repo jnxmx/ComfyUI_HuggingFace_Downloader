@@ -1882,7 +1882,9 @@ app.registerExtension({
                 backupPanel.errorEl.style.display = "none";
                 localPanel.errorEl.style.display = "none";
 
-                const payload = await requestJson("/backup_browser_tree");
+                const repoVal = repoInput ? parseRepoName(repoInput.value) : "";
+                const url = repoVal ? `/backup_browser_tree?repo_name=${encodeURIComponent(repoVal)}` : "/backup_browser_tree";
+                const payload = await requestJson(url);
 
                 backupPanel.tree.innerHTML = "";
                 localPanel.tree.innerHTML = "";

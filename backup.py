@@ -390,26 +390,75 @@ def _copy_settings_without_token(src_file: str, temp_dir: str) -> str:
         print(f"[WARNING] Failed to sanitize settings file '{src_file}': {e}")
     return dst_file
 
+def _get_candidate_settings_paths() -> list[str]:
+    candidates = []
+    try:
+        import folder_paths
+        base_path = getattr(folder_paths, "base_path", None)
+        if base_path:
+            candidates.append(os.path.join(base_path, "user", "default", "comfy.settings.json"))
+            candidates.append(os.path.join(base_path, "comfy.settings.json"))
+    except Exception:
+        pass
+
+    try:
+        curr = os.path.abspath(os.path.dirname(__file__))
+        while curr != os.path.dirname(curr):
+            if os.path.isdir(os.path.join(curr, "custom_nodes")):
+                candidates.append(os.path.join(curr, "user", "default", "comfy.settings.json"))
+                candidates.append(os.path.join(curr, "comfy.settings.json"))
+                break
+            curr = os.path.dirname(curr)
+    except Exception:
+        pass
+
+    cwd = os.getcwd()
+    candidates.append(os.path.join(cwd, "user", "default", "comfy.settings.json"))
+    candidates.append(os.path.join(cwd, "comfy.settings.json"))
+    candidates.append(os.path.join("user", "default", "comfy.settings.json"))
+
+    unique = []
+    seen = set()
+    for path in candidates:
+        normalized = os.path.abspath(path)
+        if normalized not in seen:
+            seen.add(normalized)
+            unique.append(normalized)
+    return unique
+
+
+def _load_comfy_settings_dict() -> dict:
+    for path in _get_candidate_settings_paths():
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
+            except Exception:
+                pass
+    return {}
+
+
 def get_token_and_size_limit():
     """
     Load the Hugging Face token and backup file size limit from comfy.settings.json.
     If not found or empty, fall back to the HF_TOKEN environment variable and default size limit 5.
     """
-    settings_path = os.path.join("user", "default", "comfy.settings.json")
-    token = ""
+    settings = _load_comfy_settings_dict()
+    token = settings.get("downloader.hf_token", "").strip()
     size_limit_gb = None
-    if os.path.exists(settings_path):
+    size_raw = settings.get("downloaderbackup.file_size_limit")
+    if size_raw is not None:
         try:
-            with open(settings_path, "r") as f:
-                settings = json.load(f)
-            token = settings.get("downloader.hf_token", "").strip()
-            size_limit_gb = float(settings.get("downloaderbackup.file_size_limit"))
+            size_limit_gb = float(size_raw)
         except Exception:
             pass
+
     if not token:
         token = os.getenv("HF_TOKEN", "").strip()
     if size_limit_gb is None:
-        size_limit_gb = 5
+        size_limit_gb = 5.0
     return (token if token else None), size_limit_gb
 
 
@@ -822,7 +871,7 @@ def create_hf_backup_repo(repo_name_or_link: str) -> str:
         raise ValueError("Hugging Face token not found. Please create a token with 'Write' permissions at https://huggingface.co/settings/tokens and set it in ComfyUI settings.")
 
     try:
-        api = HfApi()
+        api = HfApi(token=token)
         repo_id = _parse_repo_name(repo_name_or_link)
         
         # If the repository ID doesn't contain a namespace (e.g. 'my-backup'),
@@ -858,10 +907,10 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
         on_backup_start(): Called when backup starts 
         on_backup_progress(folder, progress_pct): Called during backup with current folder and progress
     """
-    api = HfApi()
     token, default_size_limit = get_token_and_size_limit()
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
+    api = HfApi(token=token)
 
     # Use provided size_limit_gb if set, otherwise use the one from settings
     size_limit_gb = size_limit_gb if size_limit_gb is not None else default_size_limit
@@ -1024,10 +1073,10 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     from collections import defaultdict
     from .downloader import clear_cache_for_path
     
-    api = HfApi()
     token, _ = get_token_and_size_limit()
     if not token:
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
+    api = HfApi(token=token)
 
     parsed = parse_link(repo_name_or_link)
     repo_name = parsed.get("repo", repo_name_or_link)
@@ -1617,7 +1666,7 @@ def get_backup_browser_tree(repo_name_or_link: str) -> dict:
         repo_name = repo_name_or_link
 
     try:
-        api = HfApi()
+        api = HfApi(token=token)
         comfy_files = []
         siblings = None
         try:
@@ -1752,7 +1801,7 @@ def restore_selected_from_huggingface(repo_name_or_link: str, selections: list, 
     if target_dir is None:
         target_dir = os.getcwd()
 
-    api = HfApi()
+    api = HfApi(token=token)
     repo_files = api.list_repo_files(repo_id=repo_name, token=token)
     comfy_files = sorted([path for path in repo_files if path.startswith("ComfyUI/")])
     comfy_set = set(comfy_files)
@@ -1876,7 +1925,7 @@ def delete_selected_from_huggingface(repo_name_or_link: str, selections: list) -
         raise ValueError("Hugging Face token not found. Please set it in the settings.")
 
     repo_name = _parse_repo_name(repo_name_or_link)
-    api = HfApi()
+    api = HfApi(token=token)
     repo_files = api.list_repo_files(repo_id=repo_name, token=token)
     comfy_files = sorted([path for path in repo_files if path.startswith("ComfyUI/")])
     comfy_set = set(comfy_files)

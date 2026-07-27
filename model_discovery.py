@@ -2401,6 +2401,7 @@ def search_huggingface_model(
         print(f"[DEBUG] Skipping search_huggingface_model for {filename} (model skipped)")
         return None
 
+    token = token or get_token()
     api = HfApi(token=token)
 
     key = _normalize_hf_search_key(filename)

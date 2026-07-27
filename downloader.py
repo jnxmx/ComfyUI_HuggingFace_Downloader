@@ -125,20 +125,62 @@ def clear_cache_for_repo(repo_id: str):
         print(f"[DEBUG] Repo cache directory cleanup failed: {e}")
 
 
+def _get_candidate_settings_paths() -> list[str]:
+    candidates = []
+    try:
+        import folder_paths
+        base_path = getattr(folder_paths, "base_path", None)
+        if base_path:
+            candidates.append(os.path.join(base_path, "user", "default", "comfy.settings.json"))
+            candidates.append(os.path.join(base_path, "comfy.settings.json"))
+    except Exception:
+        pass
+
+    try:
+        curr = os.path.abspath(os.path.dirname(__file__))
+        while curr != os.path.dirname(curr):
+            if os.path.isdir(os.path.join(curr, "custom_nodes")):
+                candidates.append(os.path.join(curr, "user", "default", "comfy.settings.json"))
+                candidates.append(os.path.join(curr, "comfy.settings.json"))
+                break
+            curr = os.path.dirname(curr)
+    except Exception:
+        pass
+
+    cwd = os.getcwd()
+    candidates.append(os.path.join(cwd, "user", "default", "comfy.settings.json"))
+    candidates.append(os.path.join(cwd, "comfy.settings.json"))
+    candidates.append(os.path.join("user", "default", "comfy.settings.json"))
+
+    unique = []
+    seen = set()
+    for path in candidates:
+        normalized = os.path.abspath(path)
+        if normalized not in seen:
+            seen.add(normalized)
+            unique.append(normalized)
+    return unique
+
+
+def _load_comfy_settings_dict() -> dict:
+    for path in _get_candidate_settings_paths():
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
+            except Exception:
+                pass
+    return {}
+
+
 def get_token():
     """
-    Load the Hugging Face token from comfy.settings.json.
-    If not found or empty, fall back to the HF_TOKEN environment variable.
+    Load the Hugging Face token from comfy.settings.json or environment variables.
     """
-    settings_path = os.path.join("user", "default", "comfy.settings.json")
-    token = ""
-    if os.path.exists(settings_path):
-        try:
-            with open(settings_path, "r") as f:
-                settings = json.load(f)
-            token = settings.get("downloader.hf_token", "").strip()
-        except Exception:
-            pass
+    settings = _load_comfy_settings_dict()
+    token = settings.get("downloader.hf_token", "").strip()
     if not token:  # Fallback to HF_TOKEN environment variable
         token = os.getenv("HF_TOKEN", "").strip()
     return token if token else None

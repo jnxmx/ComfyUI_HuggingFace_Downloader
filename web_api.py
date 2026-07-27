@@ -2616,15 +2616,14 @@ async def install_models(request):
          return web.json_response({"error": str(e)}, status=500)
 
 def _read_backup_repo_name() -> str:
-    settings_path = os.path.join("user", "default", "comfy.settings.json")
-    if not os.path.exists(settings_path):
-        return ""
     try:
-        with open(settings_path, "r", encoding="utf-8") as handle:
-            settings = json.load(handle)
-        return settings.get("downloaderbackup.repo_name", "").strip()
+        settings = _read_settings_dict()
+        repo = settings.get("downloaderbackup.repo_name", "").strip()
+        if repo:
+            return repo
     except Exception:
-        return ""
+        pass
+    return os.getenv("COMFYUI_BACKUP", "").strip()
 
 
 def _parse_size_limit(value, default=5.0) -> float:
@@ -2647,7 +2646,8 @@ async def create_hf_backup_repo_endpoint(request):
 
 
 async def backup_browser_tree(request):
-    repo_name = _read_backup_repo_name()
+    query_repo = request.rel_url.query.get("repo_name", "").strip()
+    repo_name = query_repo or _read_backup_repo_name()
     try:
         payload = get_backup_browser_tree(repo_name)
         
