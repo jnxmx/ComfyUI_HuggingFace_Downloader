@@ -11,6 +11,7 @@ import sys
 from importlib import metadata
 from huggingface_hub import HfApi
 from .parse_link import parse_link
+from .file_manager import get_comfy_root, get_models_root
 
 PLACEHOLDER_MODEL_FILE_RE = re.compile(r"^put[\s._-]*models?[\s._-]*here(?:\.[^/\\]+)?$", re.IGNORECASE)
 LOCAL_SUBGRAPH_PATHS = (
@@ -584,15 +585,10 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, ignore_patte
 
 def find_comfy_root() -> str:
     """
-    Dynamically locate the ComfyUI root directory by searching for the 'custom_nodes' folder.
+    Dynamically locate the ComfyUI root directory.
     Returns the path to the ComfyUI root directory.
     """
-    current_dir = os.getcwd()
-    while current_dir != os.path.dirname(current_dir):  # Stop at the root of the filesystem
-        if os.path.isdir(os.path.join(current_dir, "custom_nodes")):
-            return current_dir
-        current_dir = os.path.dirname(current_dir)
-    raise RuntimeError("Could not locate the ComfyUI root directory (custom_nodes folder not found).")
+    return get_comfy_root()
 
 def _backup_custom_nodes(target_dir: str):
     """
@@ -602,15 +598,9 @@ def _backup_custom_nodes(target_dir: str):
     temp_dir = tempfile.mkdtemp(prefix="comfyui_nodes_snapshot_")
     
     try:
-        # Find ComfyUI root directory
-        comfy_dir = os.getcwd()
-        while comfy_dir != os.path.dirname(comfy_dir):  # Stop at filesystem root
-            if os.path.isdir(os.path.join(comfy_dir, "custom_nodes")):
-                break
-            comfy_dir = os.path.dirname(comfy_dir)
-        
+        comfy_dir = get_comfy_root()
         if not os.path.isdir(os.path.join(comfy_dir, "custom_nodes")):
-            raise RuntimeError("Could not locate ComfyUI root directory (custom_nodes folder not found)")
+            raise RuntimeError(f"Could not locate custom_nodes folder in ComfyUI root directory '{comfy_dir}'")
 
         manager_cli_script = _find_manager_cli_script(comfy_dir)
 
@@ -744,7 +734,7 @@ def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     """
     Use comfy-cli to restore nodes from a snapshot.
     """
-    comfy_dir = os.getcwd()
+    comfy_dir = get_comfy_root()
     custom_nodes_dir = os.path.join(comfy_dir, "custom_nodes")
     os.makedirs(custom_nodes_dir, exist_ok=True)
 
@@ -1082,7 +1072,7 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
     repo_name = parsed.get("repo", repo_name_or_link)
 
     if target_dir is None:
-        target_dir = os.getcwd()
+        target_dir = get_comfy_root()
 
     print(f"[INFO] Starting download from '{repo_name}' (using parallel download)...")
     try:
@@ -1799,7 +1789,7 @@ def restore_selected_from_huggingface(repo_name_or_link: str, selections: list, 
 
     repo_name = _parse_repo_name(repo_name_or_link)
     if target_dir is None:
-        target_dir = os.getcwd()
+        target_dir = get_comfy_root()
 
     api = HfApi(token=token)
     repo_files = api.list_repo_files(repo_id=repo_name, token=token)

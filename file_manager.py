@@ -31,6 +31,56 @@ def _find_subdirs_recursive(base_path: str, max_depth: int = 3) -> list:
     walk_dir(base_path, 1)
     return subdirs
 
+def get_comfy_root() -> str:
+    """
+    Returns the authoritative ComfyUI root directory.
+    Prioritizes folder_paths.base_path, then searching upwards from __file__
+    for the directory containing 'custom_nodes', then searching upwards from cwd, and finally os.getcwd().
+    """
+    try:
+        import folder_paths
+        base = getattr(folder_paths, "base_path", None)
+        if base and os.path.isdir(base):
+            return os.path.abspath(base)
+    except Exception:
+        pass
+
+    try:
+        curr = os.path.abspath(os.path.dirname(__file__))
+        while curr != os.path.dirname(curr):
+            if os.path.isdir(os.path.join(curr, "custom_nodes")):
+                return curr
+            curr = os.path.dirname(curr)
+    except Exception:
+        pass
+
+    try:
+        curr = os.path.abspath(os.getcwd())
+        while curr != os.path.dirname(curr):
+            if os.path.isdir(os.path.join(curr, "custom_nodes")):
+                return curr
+            curr = os.path.dirname(curr)
+    except Exception:
+        pass
+
+    return os.path.abspath(os.getcwd())
+
+
+def get_models_root() -> str:
+    """
+    Returns the authoritative ComfyUI models directory.
+    Prioritizes folder_paths.models_dir, then falls back to <get_comfy_root()>/models.
+    """
+    try:
+        import folder_paths
+        models_dir = getattr(folder_paths, "models_dir", None)
+        if models_dir and os.path.isdir(models_dir):
+            return os.path.abspath(models_dir)
+    except Exception:
+        pass
+    return os.path.join(get_comfy_root(), "models")
+
+
 def get_model_subfolders(models_dir: str = None) -> list:
     try:
         import folder_paths
@@ -38,10 +88,7 @@ def get_model_subfolders(models_dir: str = None) -> list:
         folder_paths = None
 
     if models_dir is None:
-        if folder_paths and hasattr(folder_paths, "models_dir") and folder_paths.models_dir:
-            models_dir = folder_paths.models_dir
-    if models_dir is None:
-        models_dir = os.path.join(os.getcwd(), "models")
+        models_dir = get_models_root()
 
     # Get candidate folder types (base names like checkpoints, loras, etc.)
     base_types = []
@@ -119,12 +166,7 @@ def resolve_target_dir(final_folder: str) -> str:
     except ImportError:
         folder_paths = None
 
-    # Determine default models dir
-    default_models_dir = None
-    if folder_paths and hasattr(folder_paths, "models_dir") and folder_paths.models_dir:
-        default_models_dir = folder_paths.models_dir
-    if not default_models_dir:
-        default_models_dir = os.path.join(os.getcwd(), "models")
+    default_models_dir = get_models_root()
 
     # Split final_folder to check if the first part is a known model folder type
     normalized = final_folder.replace("\\", "/")
@@ -160,7 +202,7 @@ def get_all_subfolders_flat(root_dir: str = None) -> list:
     If no root directory is provided, defaults to the ComfyUI root directory.
     """
     if root_dir is None:
-        root_dir = os.getcwd()  # Default to ComfyUI root directory
+        root_dir = get_comfy_root()
     if not os.path.exists(root_dir):
         return []
     subfolders = []
@@ -192,11 +234,7 @@ def resolve_model_absolute_path(rel_path: str) -> str:
         except KeyError:
             pass
 
-    default_models_dir = None
-    if folder_paths and hasattr(folder_paths, "models_dir") and folder_paths.models_dir:
-        default_models_dir = folder_paths.models_dir
-    if not default_models_dir:
-        default_models_dir = os.path.join(os.getcwd(), "models")
+    default_models_dir = get_models_root()
     
     default_path = os.path.join(default_models_dir, base_type)
     if default_path not in search_paths:

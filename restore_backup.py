@@ -14,12 +14,25 @@ _GIT_HASH_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 def find_comfy_root(start_dir: str = None) -> str:
     """Dynamically locate the ComfyUI root directory."""
-    current_dir = os.path.abspath(start_dir or os.path.dirname(__file__))
+    if start_dir and os.path.isdir(start_dir):
+        current_dir = os.path.abspath(start_dir)
+        while current_dir != os.path.dirname(current_dir):
+            if os.path.isdir(os.path.join(current_dir, "custom_nodes")):
+                return current_dir
+            current_dir = os.path.dirname(current_dir)
+
+    try:
+        from file_manager import get_comfy_root
+        return get_comfy_root()
+    except Exception:
+        pass
+
+    current_dir = os.path.abspath(os.path.dirname(__file__))
     while current_dir != os.path.dirname(current_dir):
         if os.path.isdir(os.path.join(current_dir, "custom_nodes")):
             return current_dir
         current_dir = os.path.dirname(current_dir)
-    raise RuntimeError("Could not locate the ComfyUI root directory (custom_nodes folder not found).")
+    return os.getcwd()
 
 def find_manager_cli(comfy_dir: str) -> str:
     candidates = [
