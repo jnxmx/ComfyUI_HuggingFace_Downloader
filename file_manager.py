@@ -166,38 +166,51 @@ def resolve_target_dir(final_folder: str) -> str:
     except ImportError:
         folder_paths = None
 
-    default_models_dir = get_models_root()
+    comfy_root = get_comfy_root()
+    norm_comfy_root = os.path.abspath(comfy_root).replace("\\", "/").lower()
 
-    # Split final_folder to check if the first part is a known model folder type
     normalized = final_folder.replace("\\", "/")
     parts = normalized.split("/", 1)
     base_type = parts[0]
     sub_path = parts[1] if len(parts) > 1 else ""
 
-    # Check if folder_paths can resolve this type
     if folder_paths and hasattr(folder_paths, "get_folder_paths"):
         try:
             paths = folder_paths.get_folder_paths(base_type)
             if paths:
                 primary_path = None
 
-                # 1. Prioritize a path in paths that lives inside default_models_dir (e.g. ComfyUI-Shared\models)
-                norm_default_models = os.path.abspath(default_models_dir).replace("\\", "/").lower()
+                non_instance_paths = []
+                instance_paths = []
+
                 for p in paths:
                     norm_p = os.path.abspath(p).replace("\\", "/").lower()
-                    if norm_p == norm_default_models or norm_p.startswith(norm_default_models + "/"):
-                        primary_path = p
-                        break
+                    if norm_p.startswith(norm_comfy_root + "/") or norm_p == norm_comfy_root:
+                        instance_paths.append(p)
+                    else:
+                        non_instance_paths.append(p)
 
-                # 2. If not found in default_models_dir, prioritize a path ending with base_type
-                if not primary_path:
-                    for p in paths:
+                # 1. Prioritize non-instance path ending with base_type (e.g. ComfyUI-Shared/models/loras)
+                if non_instance_paths:
+                    for p in non_instance_paths:
                         norm_p = p.replace("\\", "/").rstrip("/").lower()
                         if norm_p.endswith(f"/{base_type.lower()}"):
                             primary_path = p
                             break
+                    if not primary_path:
+                        primary_path = non_instance_paths[0]
 
-                # 3. Fallback to the first path in paths
+                # 2. If no non-instance path exists, check instance paths ending with base_type
+                if not primary_path and instance_paths:
+                    for p in instance_paths:
+                        norm_p = p.replace("\\", "/").rstrip("/").lower()
+                        if norm_p.endswith(f"/{base_type.lower()}"):
+                            primary_path = p
+                            break
+                    if not primary_path:
+                        primary_path = instance_paths[0]
+
+                # 3. Fallback to paths[0]
                 if not primary_path:
                     primary_path = paths[0]
 
@@ -207,7 +220,7 @@ def resolve_target_dir(final_folder: str) -> str:
         except KeyError:
             pass
 
-    # Fallback: combine default_models_dir with final_folder
+    default_models_dir = get_models_root()
     return os.path.join(default_models_dir, final_folder)
 
 def get_all_subfolders_flat(root_dir: str = None) -> list:
