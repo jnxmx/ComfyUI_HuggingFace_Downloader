@@ -179,14 +179,28 @@ def resolve_target_dir(final_folder: str) -> str:
         try:
             paths = folder_paths.get_folder_paths(base_type)
             if paths:
-                primary_path = paths[0]
-                # If there are multiple paths, prioritize the one ending with base_type
-                # to handle overlapping aliases like diffusion_models -> [unet, diffusion_models]
+                primary_path = None
+
+                # 1. Prioritize a path in paths that lives inside default_models_dir (e.g. ComfyUI-Shared\models)
+                norm_default_models = os.path.abspath(default_models_dir).replace("\\", "/").lower()
                 for p in paths:
-                    norm_p = p.replace("\\", "/").rstrip("/")
-                    if norm_p.endswith(f"/{base_type}"):
+                    norm_p = os.path.abspath(p).replace("\\", "/").lower()
+                    if norm_p == norm_default_models or norm_p.startswith(norm_default_models + "/"):
                         primary_path = p
                         break
+
+                # 2. If not found in default_models_dir, prioritize a path ending with base_type
+                if not primary_path:
+                    for p in paths:
+                        norm_p = p.replace("\\", "/").rstrip("/").lower()
+                        if norm_p.endswith(f"/{base_type.lower()}"):
+                            primary_path = p
+                            break
+
+                # 3. Fallback to the first path in paths
+                if not primary_path:
+                    primary_path = paths[0]
+
                 if sub_path:
                     return os.path.join(primary_path, sub_path)
                 return primary_path
