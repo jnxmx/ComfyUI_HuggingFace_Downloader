@@ -48,10 +48,13 @@ def _normalize_repo_path(path: str) -> str:
 
 
 def _to_os_path(path: str) -> str:
-    """Convert a normalized '/' path to an OS-native relative path."""
+    """Convert a normalized '/' path to an OS-native path relative to ComfyUI root."""
     if not path:
         return path
-    return os.path.normpath(path.replace("/", os.sep))
+    norm = os.path.normpath(path.replace("/", os.sep))
+    if os.path.isabs(norm):
+        return norm
+    return os.path.join(get_comfy_root(), norm)
 
 
 def _is_placeholder_model_file(filename: str) -> bool:
@@ -129,20 +132,52 @@ def _get_local_files(path: str, include_hidden: bool = True) -> list:
     rel = _normalize_local_path(path)
     if not rel:
         return []
+
+    comfy_root = get_comfy_root()
     abs_path = _to_os_path(rel)
-    if not os.path.exists(abs_path):
+
+    search_paths = []
+    if os.path.exists(abs_path):
+        search_paths.append(abs_path)
+
+    # Check if rel corresponds to a model base type (e.g. 'models/checkpoints' -> base_type 'checkpoints')
+    if rel.startswith("models/"):
+        base_type = rel[len("models/"):].split("/")[0]
+        try:
+            import folder_paths
+            if hasattr(folder_paths, "get_folder_paths"):
+                fp_paths = folder_paths.get_folder_paths(base_type) or []
+                for p in fp_paths:
+                    p_abs = os.path.abspath(p)
+                    if p_abs not in search_paths and os.path.isdir(p_abs):
+                        search_paths.append(p_abs)
+        except Exception:
+            pass
+
+    if not search_paths:
         return []
-    if os.path.isfile(abs_path):
-        return [rel]
 
     files = []
-    for root, _, names in os.walk(abs_path):
-        for name in names:
-            if (not include_hidden) and name.startswith("."):
-                continue
-            full = os.path.join(root, name)
-            rel_file = os.path.relpath(full, os.getcwd()).replace("\\", "/")
-            files.append(_normalize_local_path(rel_file))
+    seen = set()
+    for s_path in search_paths:
+        if os.path.isfile(s_path):
+            rel_file = _normalize_local_path(os.path.relpath(s_path, comfy_root))
+            if rel_file not in seen:
+                seen.add(rel_file)
+                files.append(rel_file)
+        elif os.path.isdir(s_path):
+            for root, _, names in os.walk(s_path):
+                for name in names:
+                    if (not include_hidden) and name.startswith("."):
+                        continue
+                    full = os.path.join(root, name)
+                    # If file is inside s_path, format relative path as <rel>/<subpath>
+                    rel_sub = os.path.relpath(full, s_path).replace("\\", "/")
+                    formatted_rel = _normalize_local_path(f"{rel}/{rel_sub}")
+                    if formatted_rel not in seen:
+                        seen.add(formatted_rel)
+                        files.append(formatted_rel)
+
     return files
 
 
@@ -1405,6 +1440,16 @@ def _build_local_panel_nodes() -> list:
             full = os.path.join(models_root, name)
             if os.path.isdir(full):
                 model_dirs.append(name)
+
+    try:
+        import folder_paths
+        if hasattr(folder_paths, "folder_names_and_paths"):
+            for k in folder_paths.folder_names_and_paths.keys():
+                if k not in ["custom_nodes", "user", "input", "output", "temp"]:
+                    if k not in model_dirs:
+                        model_dirs.append(k)
+    except Exception:
+        pass
 
     for folder in _order_model_folders(model_dirs):
         base = f"models/{folder}"
