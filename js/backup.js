@@ -1222,7 +1222,7 @@ app.registerExtension({
             }
         };
 
-        const showOperationDone = ({ title, detail, showRefresh = false }) => {
+        const showOperationDone = ({ title, detail, showRefresh = true }) => {
             clearOpStatusTimers();
             const refs = ensureOperationStatusPanel();
             refs.panel.style.display = "flex";
@@ -1937,7 +1937,7 @@ app.registerExtension({
                         showOperationDone({
                             title: "Backup restore complete",
                             detail: `Restored ${restoredFiles} file(s).`,
-                            showRefresh: false,
+                            showRefresh: true,
                         });
                         if (result.restart_required) {
                             showRestartDialog();
@@ -1976,7 +1976,8 @@ app.registerExtension({
                     await loadTree();
                     showOperationDone({
                         title: "Backup restore complete",
-                        showRefresh: false,
+                        detail: "Restored backup items.",
+                        showRefresh: true,
                     });
                     if (result.restart_required) {
                         showRestartDialog();
