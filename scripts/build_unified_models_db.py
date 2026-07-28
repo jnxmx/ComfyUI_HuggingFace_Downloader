@@ -653,6 +653,15 @@ def main() -> int:
                 entry["explorer_enabled"] = bool(row_override["explorer_enabled"])
                 explorer_enabled = entry["explorer_enabled"]
 
+        if category and category != "other":
+            curr_dir = str(entry.get("directory") or "").strip().replace("\\", "/").strip("/")
+            if not curr_dir or curr_dir.lower() in {"checkpoints", "checkpoint"}:
+                entry["directory"] = category
+            elif not curr_dir.startswith(category):
+                suffix = curr_dir.split("/", 1)[1] if "/" in curr_dir else ""
+                entry["directory"] = f"{category}/{suffix}" if suffix else category
+            entry["type"] = category
+
         entry["explorer_group_stem"] = normalize_group_stem(row_filename)
         entry["source_rank"] = resolve_source_rank(source)
         entry["updated_from"] = {

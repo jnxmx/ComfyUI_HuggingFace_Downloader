@@ -1527,6 +1527,12 @@ def _resolve_model_library_category(entry: dict) -> str | None:
     if resolved_override:
         return resolved_override
 
+    explorer_category = str(entry.get("explorer_category", "") or "").strip()
+    if explorer_category and explorer_category != "other":
+        category = _canonical_model_library_category(explorer_category)
+        if category:
+            return category
+
     manager_type = str(entry.get("manager_type", "") or "").strip()
     model_type = str(entry.get("type", "") or "").strip()
     directory = _normalize_rel_path(str(entry.get("directory", "") or "").strip())
