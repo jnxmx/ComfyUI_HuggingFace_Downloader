@@ -1570,15 +1570,10 @@ app.registerExtension({
 
                         const widgetType = String(widget?.type || "").trim().toLowerCase();
                         const options = resolveComboWidgetOptionsNativeLike(widget);
+                        const hasOptions = Array.isArray(options) && options.length > 0;
                         const isComboLike =
-                            widgetType === "combo" ||
-                            Array.isArray(options) && options.length > 0;
+                            widgetType === "combo" || hasOptions;
                         if (!isComboLike) {
-                            continue;
-                        }
-
-                        const inOptions = Array.isArray(options) && options.includes(value);
-                        if (inOptions) {
                             continue;
                         }
 
@@ -1592,6 +1587,17 @@ app.registerExtension({
                             if (!upstreamUrlInfo) {
                                 continue;
                             }
+                        }
+
+                        // If options list is empty/unpopulated and there is no linked HF downloader,
+                        // do not falsely treat every valid model name as missing on startup.
+                        if (!hasOptions && !upstreamUrlInfo) {
+                            continue;
+                        }
+
+                        const inOptions = hasOptions && options.includes(value);
+                        if (inOptions) {
+                            continue;
                         }
 
                         const directory = upstreamUrlInfo
@@ -4363,11 +4369,6 @@ app.registerExtension({
                 const resume = options?.resumeRun;
                 if (typeof resume !== "function") {
                     return;
-                }
-                if (typeof useCommandStore !== "undefined") {
-                    try {
-                        await useCommandStore().execute('Comfy.RefreshNodeDefinitions');
-                    } catch (e) {}
                 }
                 if (app && typeof app.refreshComboInNodes === "function") {
                     try {
