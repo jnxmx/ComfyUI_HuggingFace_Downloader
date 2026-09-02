@@ -882,6 +882,11 @@ def _guess_folder_from_filename(filename: str | None) -> str | None:
         return "nlf"
     if "audio" in name and "encoder" in name:
         return "audio_encoders"
+    if "latent" in name and ("upscale" in name or "upscaler" in name):
+        return "latent_upscale_models"
+    if "minimax_h3" in name or "minimaxh3" in name:
+        if "latent" in name or "upscale" in name or "upscaler" in name:
+            return "latent_upscale_models"
     return None
 
 def _is_specific_model_bucket(folder: str | None) -> bool:
@@ -899,6 +904,11 @@ def _is_specific_model_bucket(folder: str | None) -> bool:
         "wav2vec2",
         "nlf",
         "mmaudio",
+        "latent_upscale_models",
+        "upscale_models",
+        "frame_interpolation",
+        "background_removal",
+        "model_patches",
     }
 
 def _choose_best_folder_candidate(
@@ -1402,6 +1412,18 @@ NODE_TYPE_MAPPING = {
 
     # Native ComfyUI Hook LoRA
     "CreateHookLora": "loras",
+
+    # ComfyUI-Minimax_h3_latent_Upscaler
+    "MinimaxH3LatentUpscalerNode2D": "latent_upscale_models",
+    "MinimaxH3LatentUpscalerNode3D": "latent_upscale_models",
+    "MinimaxH3LatentUpscaler2D": "latent_upscale_models",
+    "MinimaxH3LatentUpscaler3D": "latent_upscale_models",
+    "MinimaxH3LatentUpscalerNode": "latent_upscale_models",
+    "MinimaxH3LatentUpscaler": "latent_upscale_models",
+    "Minimax_h3_latent_Upscaler": "latent_upscale_models",
+    "Minimax_h3_latent_Upscaler_2D": "latent_upscale_models",
+    "Minimax_h3_latent_Upscaler_3D": "latent_upscale_models",
+    "MMH3_Split_Upscale": "latent_upscale_models",
 }
 
 
@@ -1603,6 +1625,8 @@ def resolve_proxy_widget_folder(widget_name: str | None) -> str | None:
         return "model_patches"
     if "rife" in name or "film" in name or "frame_interpolation" in name or "frame interpolation" in name:
         return "frame_interpolation"
+    if ("minimax" in name or "mmh3" in name) and ("upscale" in name or "latent" in name):
+        return "latent_upscale_models"
     return None
 
 def collect_proxy_widget_models(

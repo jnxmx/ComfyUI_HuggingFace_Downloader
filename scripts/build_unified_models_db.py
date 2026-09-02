@@ -496,7 +496,11 @@ def main() -> int:
         row_fn_lower = row_filename.lower()
         repo_lower = repo_id_for_category.lower()
 
-        if category in {"checkpoints", "", "unknown"}:
+        if "minimax_h3" in row_fn_lower or "minimaxh3" in row_fn_lower or ("latent" in row_fn_lower and ("upscale" in row_fn_lower or "upscaler" in row_fn_lower or "resizer" in row_fn_lower)):
+            category = "latent_upscale_models"
+            entry["directory"] = "latent_upscale_models"
+            category_verified = True
+        elif category in {"checkpoints", "", "unknown"}:
             if "loras/" in url_lower or "loras" in directory_lower or "lora" in row_fn_lower:
                 category = "loras"
                 category_verified = True
@@ -505,6 +509,11 @@ def main() -> int:
                 category_verified = True
             elif "vae/" in url_lower or "vae" in directory_lower:
                 category = "vae"
+                category_verified = True
+            elif "latent_upscale_models/" in url_lower or "latent_upscale_models" in directory_lower:
+                category = "latent_upscale_models"
+                if directory_lower in {"", "checkpoints"}:
+                    entry["directory"] = "latent_upscale_models"
                 category_verified = True
             elif "diffusion_models/" in url_lower or "diffusion_models" in directory_lower or "krea" in row_fn_lower or "convrot" in row_fn_lower or repo_lower.startswith("winnougan/") or repo_lower.startswith("comfy-org/"):
                 category = "diffusion_models"
