@@ -58,6 +58,7 @@ PRIORITY_AUTHORS = [
     "vrgamedevgirl84",
     "Lightricks",
     "Winnougan",
+    "LBH-123-AI",
 ]
 
 EXCLUDED_REPO_IDS = {
