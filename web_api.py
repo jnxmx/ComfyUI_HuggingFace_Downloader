@@ -1609,6 +1609,9 @@ def _canonical_model_explorer_base(value: str | None) -> str:
         if MODEL_EXPLORER_HUNYUAN_VIDEO_15_RE.search(normalized) or normalized in {"hunyuan video", "hunyuanvideo"}:
             return "HunyuanVideo-1.5"
 
+    if "minimax" in compact:
+        return "MiniMax-H3"
+
     return raw
 
 def _split_csv_query(value: str | None) -> list[str]:
