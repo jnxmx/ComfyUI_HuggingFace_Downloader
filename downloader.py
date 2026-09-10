@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.request
 from typing import Optional, Tuple, Callable
 
-from .file_manager import resolve_target_dir
+from .file_manager import resolve_target_dir, is_path_within_allowed_roots, sanitize_rel_folder
 
 
 from huggingface_hub import (
@@ -419,7 +419,9 @@ def run_download(parsed_data: dict,
     try:
         target_dir = resolve_target_dir(final_folder)
         os.makedirs(target_dir, exist_ok=True)
-        dest_path = os.path.join(target_dir, target_name)
+        dest_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, target_name)))
+        if not is_path_within_allowed_roots(dest_path):
+            raise RuntimeError(f"Destination path '{dest_path}' is outside allowed model directories.")
 
         if os.path.exists(dest_path):
             if os.path.getsize(dest_path) == 0:
@@ -772,7 +774,9 @@ def run_download_url(url: str,
                     or "download.bin"
                 )
                 target_name = _sanitize_download_filename(resolved_name) or "download.bin"
-                dest_path = os.path.join(target_dir, target_name)
+                dest_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, target_name)))
+                if not is_path_within_allowed_roots(dest_path):
+                    raise RuntimeError(f"Destination path '{dest_path}' is outside allowed model directories.")
 
                 if os.path.exists(dest_path):
                     if os.path.getsize(dest_path) == 0:
@@ -917,11 +921,14 @@ def run_download_folder(parsed_data: dict,
     
     # Determine destination folder name based on whether it's a subfolder or root link
     if remote_subfolder_path and last_segment:
-        # If it's a subfolder link, use the last segment
-        dest_path = os.path.join(base_dir, last_segment)
+        safe_segment = sanitize_rel_folder(last_segment) or "subfolder"
+        dest_path = os.path.realpath(os.path.abspath(os.path.join(base_dir, safe_segment)))
     else:
-        # If it's a root link, use the repo name
-        dest_path = os.path.join(base_dir, repo_name)
+        safe_repo = sanitize_rel_folder(repo_name) or "repo"
+        dest_path = os.path.realpath(os.path.abspath(os.path.join(base_dir, safe_repo)))
+
+    if not is_path_within_allowed_roots(dest_path):
+        raise RuntimeError(f"Destination folder '{dest_path}' is outside allowed model directories.")
 
     if os.path.exists(dest_path) and os.listdir(dest_path):
         fz = folder_size(dest_path)
@@ -1147,9 +1154,13 @@ def extract_custom_nodes(zip_path: str, comfy_root: str) -> str:
     custom_nodes_dir = os.path.join(comfy_root, "custom_nodes")
     os.makedirs(custom_nodes_dir, exist_ok=True)
     
-    print(f"[INFO] Extracting custom_nodes.zip to {custom_nodes_dir}")
+    real_custom_nodes = os.path.realpath(os.path.abspath(custom_nodes_dir))
     with zipfile.ZipFile(zip_path, 'r') as zipf:
-        zipf.extractall(custom_nodes_dir)
+        for member in zipf.infolist():
+            member_path = os.path.realpath(os.path.abspath(os.path.join(real_custom_nodes, member.filename)))
+            if os.path.commonpath([real_custom_nodes, member_path]) != real_custom_nodes:
+                raise RuntimeError(f"Zip Slip detected: '{member.filename}' escapes destination directory")
+            zipf.extract(member, real_custom_nodes)
     
     return custom_nodes_dir
 

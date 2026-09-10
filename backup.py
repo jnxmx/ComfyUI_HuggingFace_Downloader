@@ -11,7 +11,7 @@ import sys
 from importlib import metadata
 from huggingface_hub import HfApi
 from .parse_link import parse_link
-from .file_manager import get_comfy_root, get_models_root
+from .file_manager import get_comfy_root, get_models_root, sanitize_rel_folder, is_path_within_allowed_roots
 
 PLACEHOLDER_MODEL_FILE_RE = re.compile(r"^put[\s._-]*models?[\s._-]*here(?:\.[^/\\]+)?$", re.IGNORECASE)
 LOCAL_SUBGRAPH_PATHS = (
@@ -767,102 +767,31 @@ def _backup_custom_nodes(target_dir: str):
 
 def _restore_custom_nodes_from_snapshot(snapshot_file: str):
     """
-    Use comfy-cli to restore nodes from a snapshot.
+    Safely stages custom nodes snapshot into ComfyUI-Manager's snapshots directory.
+    Prevents arbitrary remote execution (RCE) by avoiding unauthorized git clone / subprocess execution.
+    Users can safely review and apply the snapshot in ComfyUI-Manager.
     """
     comfy_dir = get_comfy_root()
-    custom_nodes_dir = os.path.join(comfy_dir, "custom_nodes")
-    os.makedirs(custom_nodes_dir, exist_ok=True)
+    snapshot_targets = [
+        os.path.join(comfy_dir, "user", "__manager", "snapshots"),
+        os.path.join(comfy_dir, "custom_nodes", "ComfyUI-Manager", "snapshots")
+    ]
+    saved_paths = []
+    base_name = os.path.basename(snapshot_file)
+    if not base_name.endswith((".yaml", ".yml", ".json")):
+        base_name = "restored_custom_nodes_snapshot.yaml"
 
-    failed_nodes = []
+    for target_dir in snapshot_targets:
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+            dst = os.path.join(target_dir, base_name)
+            shutil.copy2(snapshot_file, dst)
+            saved_paths.append(dst)
+            print(f"[INFO] Saved custom nodes snapshot to: {dst}")
+        except Exception as e:
+            print(f"[DEBUG] Could not save snapshot to {target_dir}: {e}")
 
-    try:
-        with open(snapshot_file, "r") as f:
-            snapshot_data = yaml.safe_load(f)
-
-        # Install git nodes first
-        print("\n[INFO] Installing nodes from git repositories...")
-        git_custom_nodes = snapshot_data.get("git_custom_nodes", {})
-        if git_custom_nodes:
-            for repo_url, node_data in git_custom_nodes.items():
-                if node_data.get("disabled", False):
-                    print(f"[INFO] Skipping disabled node: {repo_url}")
-                    continue
-
-                try:
-                    repo_name = os.path.splitext(os.path.basename(repo_url))[0]
-                    repo_dir = os.path.join(custom_nodes_dir, repo_name)
-
-                    if os.path.exists(repo_dir):
-                        print(f"[INFO] Node {repo_name} already exists, skipping")
-                        continue
-
-                    print(f"[INFO] Cloning: {repo_url}")
-                    clone_result = subprocess.run(
-                        ["git", "clone", repo_url],
-                        capture_output=True,
-                        text=True,
-                        cwd=custom_nodes_dir
-                    )
-                    
-                    if clone_result.returncode != 0:
-                        print(f"[ERROR] Failed to clone {repo_url}:")
-                        print(f"stderr: {clone_result.stderr}")
-                        print(f"stdout: {clone_result.stdout}")
-                        failed_nodes.append(repo_url)
-                    else:
-                        print(f"[SUCCESS] Cloned {repo_url}")
-
-                except Exception as e:
-                    print(f"[ERROR] Failed to install {repo_url}: {str(e)}")
-                    failed_nodes.append(repo_url)
-        else:
-            print("[INFO] No git custom nodes found to install")
-
-        # Install CNR nodes using comfy-cli
-        print("\n[INFO] Installing nodes from CNR registry...")
-        cnr_custom_nodes = snapshot_data.get("cnr_custom_nodes", {})
-        if cnr_custom_nodes:
-            for node_name, version in cnr_custom_nodes.items():
-                try:
-                    print(f"[INFO] Installing CNR node: {node_name}")
-                    # Answer N to tracking prompt for each node installation
-                    process = subprocess.Popen(
-                        ["comfy", "node", "install", node_name],
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        cwd=comfy_dir
-                    )
-                    
-                    stdout, stderr = process.communicate(input="N\n")
-                    
-                    if process.returncode != 0:
-                        print(f"[ERROR] Failed to install CNR node {node_name}:")
-                        print(f"stderr: {stderr}")
-                        print(f"stdout: {stdout}")
-                        failed_nodes.append(node_name)
-                    else:
-                        print(f"[SUCCESS] Installed CNR node {node_name}")
-                        if stdout:
-                            print(f"[DEBUG] Install output:\n{stdout}")
-
-                except Exception as e:
-                    print(f"[ERROR] Failed to install CNR node {node_name}: {str(e)}")
-                    failed_nodes.append(node_name)
-        else:
-            print("[INFO] No CNR nodes found to install")
-
-        if failed_nodes:
-            print("\n[WARNING] The following nodes failed to install:")
-            for node in failed_nodes:
-                print(f"- {node}")
-        else:
-            print("\n[SUCCESS] All nodes were installed successfully")
-
-    except Exception as e:
-        print(f"[ERROR] Failed to restore nodes: {str(e)}")
-        raise
+    print("[INFO] Custom nodes snapshot safely saved. To install or restore these nodes, open ComfyUI-Manager -> Snapshot Manager and click Restore.")
 
 def _copy_and_restore_token(src_folder, temp_dir):
     """
@@ -1073,13 +1002,18 @@ def _safe_move_or_copy(src, dst):
 
 def _extract_custom_nodes_archive(src_file, target_dir):
     """
-    Extract custom_nodes.zip to the target directory.
+    Safely extract custom_nodes.zip to the target directory with Zip Slip protection.
     """
     custom_nodes_dir = os.path.join(target_dir, "custom_nodes")
     print(f"[INFO] Extracting custom_nodes archive to '{custom_nodes_dir}'")
     
+    real_custom_nodes = os.path.realpath(os.path.abspath(custom_nodes_dir))
     with zipfile.ZipFile(src_file, 'r') as zipf:
-        zipf.extractall(custom_nodes_dir)
+        for member in zipf.infolist():
+            member_path = os.path.realpath(os.path.abspath(os.path.join(real_custom_nodes, member.filename)))
+            if os.path.commonpath([real_custom_nodes, member_path]) != real_custom_nodes:
+                raise RuntimeError(f"Zip Slip security error: '{member.filename}' escapes target directory")
+            zipf.extract(member, real_custom_nodes)
     
     print(f"[INFO] Successfully extracted custom_nodes archive")
     return custom_nodes_dir
@@ -1227,21 +1161,25 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
                     # Process files in current directory
                     if "files" in struct:
                         for f in struct["files"]:
-                            rel_path = f.split("ComfyUI/", 1)[1]
-                            
+                            raw_rel = f.split("ComfyUI/", 1)[1]
+                            rel_path = sanitize_rel_folder(raw_rel)
+                            if not rel_path or rel_path == "custom_nodes_snapshot.yaml":
+                                continue
+
                             # Remap legacy ComfyUI-Manager path to new path
                             # user/default/ComfyUI-Manager/... -> user/__manager/...
-                            if "user/default/ComfyUI-Manager/" in rel_path:
+                            if "user/default/ComfyUI-Manager/" in raw_rel:
                                 new_rel_path = rel_path.replace("user/default/ComfyUI-Manager/", "user/__manager/")
                                 print(f"[INFO] in-flight migration: {rel_path} -> {new_rel_path}")
                                 rel_path = new_rel_path
 
-                            src_file = os.path.join(source_dir, f.split("ComfyUI/", 1)[1]) # src is still the downloaded path
-                            dst_file = os.path.join(target_dir, rel_path)
-                            
-                            if rel_path == "custom_nodes_snapshot.yaml":
+                            src_file = os.path.join(source_dir, raw_rel)
+                            real_target = os.path.realpath(os.path.abspath(target_dir))
+                            dst_file = os.path.realpath(os.path.abspath(os.path.join(real_target, rel_path)))
+                            if os.path.commonpath([real_target, dst_file]) != real_target:
+                                print(f"[SECURITY] Skipping path traversal item: {f}")
                                 continue
-                                
+
                             # Create parent directory if needed
                             os.makedirs(os.path.dirname(dst_file), exist_ok=True)
                             
@@ -1795,13 +1733,19 @@ def _path_has_uploadable_content(path: str) -> bool:
 
 
 def _copy_repo_file_to_target(src_file: str, repo_file: str, target_dir: str, token: str):
-    rel_path = repo_file.split("ComfyUI/", 1)[1] if repo_file.startswith("ComfyUI/") else repo_file
-    rel_path = rel_path.replace("\\", "/")
+    raw_rel = repo_file.split("ComfyUI/", 1)[1] if repo_file.startswith("ComfyUI/") else repo_file
+    rel_path = sanitize_rel_folder(raw_rel)
+    if not rel_path:
+        return
 
-    if "user/default/ComfyUI-Manager/" in rel_path:
+    if "user/default/ComfyUI-Manager/" in raw_rel:
         rel_path = rel_path.replace("user/default/ComfyUI-Manager/", "user/__manager/")
 
-    dst_file = os.path.join(target_dir, rel_path)
+    real_target = os.path.realpath(os.path.abspath(target_dir))
+    dst_file = os.path.realpath(os.path.abspath(os.path.join(real_target, rel_path)))
+    if os.path.commonpath([real_target, dst_file]) != real_target:
+        raise RuntimeError(f"Path traversal detected in backup file: {repo_file}")
+
     os.makedirs(os.path.dirname(dst_file), exist_ok=True)
 
     if rel_path == "user/default/comfy.settings.json":

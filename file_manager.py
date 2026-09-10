@@ -146,19 +146,105 @@ def get_model_subfolders(models_dir: str = None) -> list:
 
     return result_folders
 
+def get_allowed_model_roots() -> list:
+    """
+    Returns a list of all authoritative, registered model root directories.
+    Includes get_models_root() and all non-system paths registered in folder_paths.
+    """
+    roots = []
+    default_root = get_models_root()
+    if default_root:
+        roots.append(os.path.realpath(os.path.abspath(default_root)))
+
+    try:
+        import folder_paths
+        if hasattr(folder_paths, "folder_names_and_paths"):
+            for base_type in folder_paths.folder_names_and_paths.keys():
+                if base_type in ["custom_nodes", "user", "input", "output", "temp"]:
+                    continue
+                try:
+                    paths = folder_paths.get_folder_paths(base_type) or []
+                    for p in paths:
+                        if p:
+                            real_p = os.path.realpath(os.path.abspath(p))
+                            if real_p not in roots:
+                                roots.append(real_p)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return roots
+
+def is_path_within_allowed_roots(candidate_path: str, allowed_roots: list = None) -> bool:
+    """
+    Validates that candidate_path resolves strictly within one of the allowed model root directories.
+    Uses os.path.realpath and os.path.commonpath to prevent any path traversal or symlink escape.
+    """
+    if not candidate_path or not str(candidate_path).strip():
+        return False
+    if allowed_roots is None:
+        allowed_roots = get_allowed_model_roots()
+    if not allowed_roots:
+        return False
+
+    try:
+        candidate_real = os.path.realpath(os.path.abspath(candidate_path))
+        for root in allowed_roots:
+            root_real = os.path.realpath(os.path.abspath(root))
+            try:
+                if os.path.commonpath([root_real, candidate_real]) == root_real:
+                    return True
+            except (ValueError, Exception):
+                continue
+        return False
+    except Exception:
+        return False
+
+def sanitize_rel_folder(folder_str: str) -> str:
+    """
+    Sanitizes a relative folder string:
+    - Normalizes separators to '/'
+    - Rejects or removes '..' traversal components
+    - Strips leading and trailing slashes and whitespace
+    """
+    if not folder_str:
+        return ""
+    normalized = str(folder_str).replace("\\", "/").strip().strip("/")
+    parts = [part.strip() for part in normalized.split("/") if part.strip()]
+    safe_parts = []
+    for part in parts:
+        if part in (".", ".."):
+            continue
+        clean_part = part.replace("\x00", "").strip()
+        if clean_part and clean_part not in (".", ".."):
+            safe_parts.append(clean_part)
+    return "/".join(safe_parts)
+
 def resolve_target_dir(final_folder: str) -> str:
     """
     Resolves the final folder path using ComfyUI's folder_paths configuration,
-    especially useful for multi-instance ComfyUI and custom model directories.
-    If the first segment of final_folder matches a registered folder type,
-    it uses the primary path for that type from folder_paths.
-    Otherwise, it falls back to the default models/final_folder path.
+    strictly confining the resolved target within allowed model roots.
+    Prevents path traversal, directory escape, and unauthorized absolute paths.
     """
-    final_folder = final_folder.strip().rstrip("/\\")
-    
-    # If it is already an absolute path, return it directly
+    final_folder = (final_folder or "").strip().rstrip("/\\")
+    allowed_roots = get_allowed_model_roots()
+    default_models_dir = get_models_root()
+
+    # If it is an absolute path, verify it is strictly within allowed roots
     if os.path.isabs(final_folder):
-        return final_folder
+        if is_path_within_allowed_roots(final_folder, allowed_roots):
+            return os.path.realpath(os.path.abspath(final_folder))
+        # Refuse to return unconfined absolute path; fallback safely inside default models dir
+        print(f"[SECURITY] Refusing unconfined absolute target directory: {final_folder}")
+        safe_rel = sanitize_rel_folder(os.path.basename(final_folder))
+        candidate = os.path.join(default_models_dir, safe_rel) if safe_rel else default_models_dir
+        return os.path.realpath(os.path.abspath(candidate))
+
+    # Sanitize relative folder components (disallowing '..')
+    safe_rel_folder = sanitize_rel_folder(final_folder)
+    if not safe_rel_folder:
+        return default_models_dir
 
     # Import folder_paths dynamically to access current configuration
     try:
@@ -169,8 +255,7 @@ def resolve_target_dir(final_folder: str) -> str:
     comfy_root = get_comfy_root()
     norm_comfy_root = os.path.abspath(comfy_root).replace("\\", "/").lower()
 
-    normalized = final_folder.replace("\\", "/")
-    parts = normalized.split("/", 1)
+    parts = safe_rel_folder.split("/", 1)
     base_type = parts[0]
     sub_path = parts[1] if len(parts) > 1 else ""
 
@@ -179,7 +264,6 @@ def resolve_target_dir(final_folder: str) -> str:
             paths = folder_paths.get_folder_paths(base_type)
             if paths:
                 primary_path = None
-
                 non_instance_paths = []
                 instance_paths = []
 
@@ -190,7 +274,7 @@ def resolve_target_dir(final_folder: str) -> str:
                     else:
                         non_instance_paths.append(p)
 
-                # 1. Prioritize non-instance path ending with base_type (e.g. ComfyUI-Shared/models/loras)
+                # 1. Prioritize non-instance path ending with base_type
                 if non_instance_paths:
                     for p in non_instance_paths:
                         norm_p = p.replace("\\", "/").rstrip("/").lower()
@@ -200,7 +284,7 @@ def resolve_target_dir(final_folder: str) -> str:
                     if not primary_path:
                         primary_path = non_instance_paths[0]
 
-                # 2. If no non-instance path exists, check instance paths ending with base_type
+                # 2. Check instance paths ending with base_type
                 if not primary_path and instance_paths:
                     for p in instance_paths:
                         norm_p = p.replace("\\", "/").rstrip("/").lower()
@@ -214,14 +298,18 @@ def resolve_target_dir(final_folder: str) -> str:
                 if not primary_path:
                     primary_path = paths[0]
 
-                if sub_path:
-                    return os.path.join(primary_path, sub_path)
-                return primary_path
-        except KeyError:
+                candidate = os.path.join(primary_path, sub_path) if sub_path else primary_path
+                if is_path_within_allowed_roots(candidate, allowed_roots):
+                    return os.path.realpath(os.path.abspath(candidate))
+        except (KeyError, Exception):
             pass
 
-    default_models_dir = get_models_root()
-    return os.path.join(default_models_dir, final_folder)
+    candidate = os.path.join(default_models_dir, safe_rel_folder)
+    if is_path_within_allowed_roots(candidate, allowed_roots):
+        return os.path.realpath(os.path.abspath(candidate))
+
+    # Safe fallback: default models root
+    return default_models_dir
 
 def get_all_subfolders_flat(root_dir: str = None) -> list:
     """
@@ -243,7 +331,7 @@ def resolve_model_absolute_path(rel_path: str) -> str:
     Given a relative path like 'checkpoints/sdxl/model.safetensors',
     finds the actual absolute path by searching all registered directories for that type.
     """
-    rel_path = rel_path.strip().replace("\\", "/").strip("/")
+    rel_path = sanitize_rel_folder(rel_path)
     parts = rel_path.split("/", 1)
     if len(parts) < 2:
         return ""
@@ -269,7 +357,8 @@ def resolve_model_absolute_path(rel_path: str) -> str:
 
     for root_path in search_paths:
         candidate = os.path.join(root_path, sub_path)
-        if os.path.exists(candidate):
-            return os.path.abspath(candidate)
+        if os.path.exists(candidate) and is_path_within_allowed_roots(candidate):
+            return os.path.realpath(os.path.abspath(candidate))
     
-    return os.path.abspath(os.path.join(default_models_dir, rel_path))
+    fallback = os.path.join(default_models_dir, rel_path)
+    return os.path.realpath(os.path.abspath(fallback))

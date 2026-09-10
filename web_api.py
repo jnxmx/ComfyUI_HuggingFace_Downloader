@@ -21,7 +21,14 @@ from .backup import (
     delete_selected_from_huggingface,
     create_hf_backup_repo,
 )
-from .file_manager import get_model_subfolders, resolve_target_dir, resolve_model_absolute_path
+from .file_manager import (
+    get_model_subfolders,
+    resolve_target_dir,
+    resolve_model_absolute_path,
+    get_allowed_model_roots,
+    is_path_within_allowed_roots,
+    sanitize_rel_folder,
+)
 from .model_discovery import process_workflow_for_missing_models, SearchCancelledException
 from .downloader import (
     run_download,
@@ -2437,32 +2444,38 @@ def _is_path_like(value: str) -> bool:
 
 
 def _resolve_model_search_paths(folder_hint: str) -> list[str]:
-    folder_value = str(folder_hint or "checkpoints").strip() or "checkpoints"
+    raw_folder = str(folder_hint or "checkpoints").strip() or "checkpoints"
+    safe_folder = sanitize_rel_folder(raw_folder) or "checkpoints"
     search_paths = []
     if folder_paths is not None:
         try:
-            search_paths = folder_paths.get_folder_paths(folder_value) or []
-        except KeyError:
+            search_paths = folder_paths.get_folder_paths(raw_folder) or []
+        except (KeyError, Exception):
             search_paths = []
-        except Exception:
-            search_paths = []
+        if not search_paths and safe_folder != raw_folder:
+            try:
+                search_paths = folder_paths.get_folder_paths(safe_folder) or []
+            except (KeyError, Exception):
+                search_paths = []
 
     if not search_paths:
-        comfy_root = getattr(folder_paths, "base_path", os.getcwd()) if folder_paths else os.getcwd()
-        if folder_value and (os.path.isabs(folder_value) or _is_path_like(folder_value)):
-            fallback = folder_value if os.path.isabs(folder_value) else os.path.join(comfy_root, folder_value)
-        else:
-            fallback = os.path.join(comfy_root, "models", folder_value)
+        models_root = _get_models_root()
+        fallback = os.path.join(models_root, safe_folder)
         search_paths = [fallback]
 
     normalized = []
     seen = set()
     for path in search_paths:
-        abs_path = os.path.abspath(path)
+        abs_path = os.path.realpath(os.path.abspath(path))
         if abs_path in seen:
             continue
-        seen.add(abs_path)
-        normalized.append(abs_path)
+        if is_path_within_allowed_roots(abs_path):
+            seen.add(abs_path)
+            normalized.append(abs_path)
+
+    if not normalized:
+        normalized.append(_get_models_root())
+
     return normalized
 
 
@@ -2498,6 +2511,10 @@ async def relocate_model_file(request):
     source_path = os.path.abspath(found_path_raw)
     if not os.path.exists(source_path):
         return web.json_response({"error": f"Source not found: {source_path}"}, status=404)
+
+    # Security check: Ensure source_path is strictly within registered model roots
+    if not is_path_within_allowed_roots(source_path):
+        return web.json_response({"error": "Refusing to relocate file outside registered model directories."}, status=400)
 
     requested_path = _normalize_rel_path(requested_path_raw)
     if not requested_path:
@@ -2580,8 +2597,8 @@ async def install_models(request):
             filename = model.get("filename")
             target_filename = _sanitize_filename_hint(model.get("target_filename")) or _sanitize_filename_hint(filename)
             folder_locked = bool(model.get("folder_locked"))
-            locked_folder = str(model.get("locked_folder") or "").strip()
-            folder = locked_folder if folder_locked and locked_folder else model.get("folder", "checkpoints") # Default to checkpoints
+            folder_raw = locked_folder if folder_locked and locked_folder else model.get("folder", "checkpoints") # Default to checkpoints
+            folder = sanitize_rel_folder(folder_raw) or "checkpoints"
             
             if not url and not (model.get("hf_repo") and model.get("hf_path")):
                 results.append({"filename": filename, "status": "failed", "error": "No URL provided"})
@@ -2790,23 +2807,33 @@ async def upload_chunk(request):
         if not upload_id or not filename or not folder or chunk_index is None or not total_chunks or chunk_data is None:
             return web.json_response({"error": "Missing required chunk upload fields"}, status=400)
 
-        folder = str(folder or "loras").strip()
+        folder = sanitize_rel_folder(folder) or "loras"
         roots = _resolve_model_search_paths(folder)
         if not roots:
             return web.json_response({"error": f"Invalid folder category: {folder}"}, status=400)
 
         target_dir = roots[0]
+        if not is_path_within_allowed_roots(target_dir):
+            return web.json_response({"error": "Target directory outside allowed model roots"}, status=400)
         os.makedirs(target_dir, exist_ok=True)
 
         clean_filename = os.path.basename(filename)
-        temp_file_path = os.path.join(target_dir, f".upload-{upload_id}.tmp")
+        temp_file_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, f".upload-{upload_id}.tmp")))
+        if not is_path_within_allowed_roots(temp_file_path):
+            return web.json_response({"error": "Temporary file path outside allowed model roots"}, status=400)
 
         mode = "wb" if chunk_index == 0 else "ab"
         with open(temp_file_path, mode) as f:
             f.write(chunk_data)
 
         if chunk_index + 1 == total_chunks:
-            final_file_path = os.path.join(target_dir, clean_filename)
+            final_file_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, clean_filename)))
+            if not is_path_within_allowed_roots(final_file_path):
+                try:
+                    os.remove(temp_file_path)
+                except Exception:
+                    pass
+                return web.json_response({"error": "Final file path outside allowed model roots"}, status=400)
             if os.path.exists(final_file_path):
                 try:
                     os.remove(final_file_path)
@@ -3079,7 +3106,8 @@ def setup(app_or_server):
                         filename = folder_info.get("display_name") or ""
                 else:
                     download_mode = "file"
-                    folder = locked_folder if folder_locked and locked_folder else model.get("folder", "checkpoints")
+                    folder_raw = locked_folder if folder_locked and locked_folder else model.get("folder", "checkpoints")
+                    folder = sanitize_rel_folder(folder_raw) or "checkpoints"
                     has_hf_repo_path = bool(model.get("hf_repo") and model.get("hf_path"))
                     is_hf_file_download = has_hf_repo_path or (url and _is_supported_hf_link(url))
                     if not url and not has_hf_repo_path:
@@ -3126,8 +3154,8 @@ def setup(app_or_server):
                     try:
                         target_dir = resolve_target_dir(folder)
                         os.makedirs(target_dir, exist_ok=True)
-                        dest_path = os.path.join(target_dir, requested_filename or filename)
-                        if not os.path.exists(dest_path):
+                        dest_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, os.path.basename(requested_filename or filename))))
+                        if is_path_within_allowed_roots(dest_path) and not os.path.exists(dest_path):
                             open(dest_path, 'a').close()
                     except Exception as e:
                         print(f"[DEBUG] Failed to create empty placeholder file for {filename}: {e}")

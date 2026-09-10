@@ -1,0 +1,18 @@
+# Comfy Registry package ignore file
+scripts/
+internal_tools/
+temp_repos/
+models/
+metadata/reports/
+metadata/marketplace_extract/
+metadata/manual-curation-backups/
+ANTIGRAVITY.md
+NODEPACK_FUNCTIONALITY.md
+check_braces.py
+check_syntax.js
+test*.js
+test*.py
+.DS_Store
+.venv/
+__pycache__/
+*.pyc

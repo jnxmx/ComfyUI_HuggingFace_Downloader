@@ -67,11 +67,16 @@ class HuggingFaceDownloadModel(io.ComfyNode):
         selected_folder = target_folder["target_folder"]
         custom_path = target_folder.get("custom_path", "")
 
+        from .file_manager import sanitize_rel_folder
+
         # Step 1: final_folder logic
         if selected_folder == "custom":
-            final_folder = custom_path.strip().rstrip("/\\")
+            safe_custom = sanitize_rel_folder(custom_path)
+            if not safe_custom:
+                return io.NodeOutput("Error: custom_path cannot be empty or contain invalid/traversal characters.")
+            final_folder = safe_custom
         else:
-            final_folder = selected_folder.strip().rstrip("/\\")
+            final_folder = sanitize_rel_folder(selected_folder) or "checkpoints"
 
         # Step 2: parse link
         try:
@@ -80,7 +85,12 @@ class HuggingFaceDownloadModel(io.ComfyNode):
             return io.NodeOutput(f"Error parsing link: {e}")
 
         # Step 3: sync download
-        final_message, local_path = run_download(parsed, final_folder, sync=True)
+        try:
+            final_message, local_path = run_download(parsed, final_folder, sync=True)
+        except Exception as e:
+            print(f"[ERROR] Download failed: {e}")
+            return io.NodeOutput(f"Error downloading model: {e}")
+
         if local_path:
             try:
                 import server
@@ -94,7 +104,7 @@ class HuggingFaceDownloadModel(io.ComfyNode):
             # user wants leftover + "/" + filename if custom
             filename = os.path.basename(local_path)
             if selected_folder == "custom":
-                segments = custom_path.strip("/\\").split("/")
+                segments = safe_custom.split("/")
                 if len(segments) > 1:
                     leftover = "/".join(segments[1:]).strip("/")
                     if leftover:

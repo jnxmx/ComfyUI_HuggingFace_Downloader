@@ -6,15 +6,28 @@ ANTIGRAVITY.md
 NODEPACK_FUNCTIONALITY.md
 check_braces.py
 check_syntax.js
-/internal_tools/
-/scripts/
+internal_tools/
+scripts/
+
+# --- LOCAL TESTS & SCRIPTS ---
+restore_backup.py
+test*.js
+test*.py
+
+# --- NODE.JS DEPENDENCIES ---
+node_modules/
+package.json
+package-lock.json
 
 # --- LOCAL DATA & CACHE ---
-/temp_repos/
-/models/
-/metadata/reports/
-/metadata/marketplace_extract/
-/metadata/manual-curation-backups/
+temp_repos/
+models/
+metadata/reports/
+metadata/manual-curation-backups/
+metadata/marketplace_extract/*
+!metadata/marketplace_extract/from_dump/
+metadata/marketplace_extract/from_dump/*
+!metadata/marketplace_extract/from_dump/cloud_marketplace_models.json
 
 # --- STANDARD IGNORES ---
 .DS_Store
