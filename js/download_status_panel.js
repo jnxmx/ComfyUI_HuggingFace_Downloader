@@ -967,21 +967,24 @@ app.registerExtension({
 
             const errorText = String(info.error || "").trim();
             const isFailed = info.status === "failed";
-            const errorCode = String(info.error_code || "").trim().toLowerCase();
-            const hasGatedMarkers = /gated|accept (its|model) terms|request access|agreement/i.test(errorText);
-            const isGated = isFailed && (errorCode === "gated_repo" || hasGatedMarkers);
-            const repoUrl = String(info.repo_url || "").trim();
+            const hasGatedMarkers = /gated|accept (its|the|model) terms|acceptance of its conditions|request access|ask for access|authorized list|restricted|agreement|agree to the license|license agreement|403/i.test(errorText);
+            const isGated = isFailed && (errorCode === "gated_repo" || errorCode === "hf_forbidden" || hasGatedMarkers);
+            let repoUrl = String(info.repo_url || "").trim();
+            if (!repoUrl && info.repo_id) {
+                repoUrl = `https://huggingface.co/${info.repo_id}`;
+            }
+            if (!repoUrl) {
+                const match = errorText.match(/https:\/\/huggingface\.co\/([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)/i);
+                if (match) {
+                    repoUrl = match[0].replace(/[.,;:)]+$/, "");
+                }
+            }
             const actionMessage = String(info.action_message || "").trim();
             const retryPayload = info.retry_payload && typeof info.retry_payload === "object" ? info.retry_payload : null;
 
             if (isFailed && errorText) {
-                const renderedError = isGated
-                    ? (errorText.includes("Hugging Face Token") || errorText.includes("Token")
-                        ? errorText
-                        : "Gated repository. Ensure you accepted the agreement on Hugging Face AND configured your HF Token in ComfyUI settings.")
-                    : errorText;
-                renderErrorWithLinks(refs.error, renderedError);
-                refs.error.title = renderedError;
+                renderErrorWithLinks(refs.error, errorText);
+                refs.error.title = errorText;
                 refs.error.style.display = "block";
             } else {
                 renderErrorWithLinks(refs.error, "");
@@ -993,7 +996,7 @@ app.registerExtension({
 
             refs.root.classList.toggle("has-detail", (isFailed && !!errorText) || isInterrupted);
             refs.actions.classList.toggle("visible", isGated || isInterrupted);
-            refs.agreementHint.textContent = actionMessage || "Accept model agreement and verify your HF Token in ComfyUI settings.";
+            refs.agreementHint.textContent = actionMessage || "Agree to the license on Hugging Face, then retry download.";
             refs.agreementHint.style.display = isGated ? "inline" : "none";
 
             if (isGated && repoUrl) {

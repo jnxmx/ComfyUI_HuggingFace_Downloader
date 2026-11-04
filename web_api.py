@@ -498,6 +498,7 @@ VERIFY_IDLE_SECONDS = 5
 last_queue_activity = 0.0
 last_queue_activity_lock = threading.Lock()
 HF_REPO_URL_PATTERN = re.compile(r"https?://huggingface\.co/([A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)")
+HF_REPO_NAME_PATTERN = re.compile(r"(?:repository|model|repo)\s+['\"]([A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*)['\"]", re.IGNORECASE)
 
 def _touch_queue_activity():
     global last_queue_activity
@@ -508,6 +509,9 @@ def _touch_queue_activity():
 def _extract_repo_id_from_error(message: str) -> str:
     text = str(message or "")
     match = HF_REPO_URL_PATTERN.search(text)
+    if match:
+        return str(match.group(1) or "").strip()
+    match = HF_REPO_NAME_PATTERN.search(text)
     if match:
         return str(match.group(1) or "").strip()
     return ""
@@ -655,11 +659,19 @@ def _classify_download_failure(item: dict, error_message: str) -> dict:
         result["repo_url"] = repo_url
 
     gated_markers = (
-        " gated",
-        "gated ",
+        "gated",
         "accept its terms",
+        "accept the terms",
         "accept model agreement",
+        "acceptance of its conditions",
+        "agree to the license",
+        "license agreement",
         "request access",
+        "ask for access",
+        "authorized list",
+        "restricted",
+        "gatedrepo",
+        "403",
     )
     is_hf_related = bool(repo_id) or "huggingface.co" in lowered or _is_supported_hf_link(str(item.get("url") or ""))
     if is_hf_related and any(marker in lowered for marker in gated_markers):
@@ -667,7 +679,7 @@ def _classify_download_failure(item: dict, error_message: str) -> dict:
             {
                 "error_code": "gated_repo",
                 "action_hint": "accept_model_agreement",
-                "action_message": "Accept model agreement on Hugging Face, then retry download.",
+                "action_message": "Agree to the license on Hugging Face, then retry download.",
             }
         )
         return result
@@ -678,16 +690,6 @@ def _classify_download_failure(item: dict, error_message: str) -> dict:
                 "error_code": "hf_auth",
                 "action_hint": "check_hf_token",
                 "action_message": "Check Hugging Face token, then retry download.",
-            }
-        )
-        return result
-
-    if "403" in lowered and is_hf_related:
-        result.update(
-            {
-                "error_code": "hf_forbidden",
-                "action_hint": "check_repo_access",
-                "action_message": "Confirm repository access on Hugging Face, then retry download.",
             }
         )
         return result

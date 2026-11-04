@@ -231,6 +231,60 @@ def get_remote_file_metadata(repo_id: str,
     return None, None, None
 
 
+def format_download_error(e: Exception | str, repo_name: str = "", token: Optional[str] = None) -> str:
+    raw_error = str(e or "").strip()
+    raw_error_lower = raw_error.lower()
+    clean_repo = str(repo_name or "").strip()
+    repo_url = f"https://huggingface.co/{clean_repo}" if clean_repo else "https://huggingface.co"
+
+    is_gated = any(
+        m in raw_error_lower
+        for m in (
+            "gated",
+            "request access",
+            "ask for access",
+            "authorized list",
+            "restricted",
+            "agreement",
+            "agree",
+            "accept its terms",
+            "accept the terms",
+            "accept model agreement",
+            "acceptance of its conditions",
+            "gatedrepo",
+            "403",
+        )
+    )
+
+    if is_gated and clean_repo:
+        if token:
+            return (
+                f"The repository '{clean_repo}' is gated and requires agreeing to its license.\n"
+                f"Please visit {repo_url} to accept the model license agreement, then retry the download."
+            )
+        else:
+            return (
+                f"The repository '{clean_repo}' is gated and requires agreeing to its license.\n"
+                f"1. Visit {repo_url} to accept the model license agreement.\n"
+                f"2. Add your Hugging Face token in ComfyUI settings or set the HF_TOKEN environment variable."
+            )
+
+    if "invalid credentials" in raw_error_lower or "401" in raw_error_lower:
+        if clean_repo:
+            return (
+                f"Invalid or missing Hugging Face token for repository '{clean_repo}'. "
+                "Please add a valid token in the ComfyUI settings or set the HF_TOKEN environment variable. "
+                "You can create or manage your tokens at https://huggingface.co/settings/tokens/"
+            )
+        return (
+            "Invalid or missing Hugging Face token. "
+            "Please add a valid token in the ComfyUI settings or set the HF_TOKEN environment variable. "
+            "You can create or manage your tokens at https://huggingface.co/settings/tokens/"
+        )
+
+    return f"Download failed: {e}"
+
+
 def _get_hf_cache_dir() -> str:
     try:
         from huggingface_hub.constants import HF_HUB_CACHE
@@ -497,7 +551,12 @@ def run_download(parsed_data: dict,
                 "    path = hf_hub_download(**kwargs)\n"
                 "    result = {'ok': True, 'path': path}\n"
                 "except Exception as e1:\n"
-                "    try:\n"
+                "    err1_low = str(e1).lower()\n"
+                "    is_gated1 = any(m in err1_low for m in ['gated', 'restricted', 'authorized list', 'ask for access', 'request access', 'agreement', 'terms', 'conditions', '403'])\n"
+                "    if is_gated1:\n"
+                "        result = {'ok': False, 'error': str(e1)}\n"
+                "    else:\n"
+                "        try:\n"
                 "        # Stage 2: huggingface_hub download without token (handles restricted fine-grained tokens on public repos)\n"
                 "        no_tok_kwargs = kwargs.copy()\n"
                 "        no_tok_kwargs['token'] = False\n"
@@ -687,24 +746,8 @@ def run_download(parsed_data: dict,
             return (cancel_msg, "", {"expected_size": expected_size, "expected_sha": expected_sha})
         return (cancel_msg, "") if sync else ("", "")
     except Exception as e:
-        raw_error = str(e)
-        print(f"[DEBUG] Download exception (raw): {raw_error}")
-        # Provide clearer feedback for common authentication/authorization problems
-        if "Invalid credentials" in raw_error or "401" in raw_error:
-            error_msg = (
-                f"Invalid or missing Hugging Face token for repository '{parsed_data['repo']}'. "
-                "Please add a valid token in the ComfyUI settings or set the HF_TOKEN environment variable. "
-                "You can create or manage your tokens at https://huggingface.co/settings/tokens/"
-            )
-        elif "gated" in raw_error.lower() or "request access" in raw_error.lower():
-            repo_url = f"https://huggingface.co/{parsed_data['repo']}"
-            error_msg = (
-                f"The repository '{parsed_data['repo']}' is gated or requires permission.\n"
-                f"1. Visit {repo_url} and accept the model agreement.\n"
-                f"2. Ensure you have configured a valid Hugging Face Token in the ComfyUI settings or HF_TOKEN environment variable."
-            )
-        else:
-            error_msg = f"Download failed: {e}"
+        print(f"[DEBUG] Download exception (raw): {e}")
+        error_msg = format_download_error(e, parsed_data.get("repo", ""), token)
         print("[DEBUG]", error_msg)
         # Raise so ComfyUI shows the standard error dialog, not just console output
         raise RuntimeError(error_msg)
@@ -1102,7 +1145,8 @@ def run_download_folder(parsed_data: dict,
         print("[DEBUG]", cancel_msg)
         return (cancel_msg, "") if sync else ("", "")
     except Exception as e:
-        err = f"Download failed: {e}"
+        print(f"[DEBUG] Download folder exception (raw): {e}")
+        err = format_download_error(e, parsed_data.get("repo", ""), token)
         print("[DEBUG]", err)
         return (err, "") if sync else ("", "")
     finally:

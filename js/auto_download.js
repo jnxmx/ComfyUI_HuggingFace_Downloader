@@ -982,6 +982,10 @@ app.registerExtension({
             unet_name: "diffusion_models",
             vae_name: "vae",
             clip_name: "text_encoders",
+            clip_name1: "text_encoders",
+            clip_name2: "text_encoders",
+            clip_name3: "text_encoders",
+            clip_name4: "text_encoders",
             text_encoder: "text_encoders",
             text_encoder_name: "text_encoders",
             lora_name: "loras",
@@ -992,6 +996,10 @@ app.registerExtension({
             style_model_name: "style_models",
             gligen_name: "gligen",
             audio_encoder_name: "audio_encoders",
+            conditioning_name: "embeddings",
+            hypernetwork_name: "hypernetworks",
+            photomaker_model_name: "photomaker",
+            bg_removal_name: "background_removal",
         });
 
         const guessSuggestedFolderFromRunHookFilename = (value) => {
@@ -1034,9 +1042,13 @@ app.registerExtension({
             if (inputNameLower && RUN_HOOK_INPUT_FOLDER_HINTS[inputNameLower]) {
                 return RUN_HOOK_INPUT_FOLDER_HINTS[inputNameLower];
             }
+            if (inputNameLower.endsWith(".lora_name") || inputNameLower.includes("lora")) {
+                return "loras";
+            }
 
             const classTypeLower = String(signals?.classType || "").trim().toLowerCase();
             if (classTypeLower) {
+                if (classTypeLower === "ltxvaudiovaeloader") return "checkpoints";
                 if (classTypeLower.includes("clipvision")) return "clip_vision";
                 if (classTypeLower.includes("style")) return "style_models";
                 if (classTypeLower.includes("controlnet")) return "controlnet";
@@ -1045,7 +1057,18 @@ app.registerExtension({
                 if (classTypeLower.includes("clip")) return "text_encoders";
                 if (classTypeLower.includes("unet")) return "diffusion_models";
                 if (classTypeLower.includes("checkpoint") || classTypeLower.includes("ckpt")) return "checkpoints";
+                if (classTypeLower.includes("latent") && classTypeLower.includes("upscale")) return "latent_upscale_models";
                 if (classTypeLower.includes("upscale")) return "upscale_models";
+                if (classTypeLower.includes("audioencoder") || classTypeLower.includes("audio_encoder")) return "audio_encoders";
+                if (classTypeLower.includes("opticalflow") || classTypeLower.includes("optical_flow")) return "optical_flow";
+                if (classTypeLower.includes("moge") || classTypeLower.includes("da3") || classTypeLower.includes("geometry")) return "geometry_estimation";
+                if (classTypeLower.includes("mediapipe") || classTypeLower.includes("sam3d") || classTypeLower.includes("detection")) return "detection";
+                if (classTypeLower.includes("hypernetwork")) return "hypernetworks";
+                if (classTypeLower.includes("photomaker")) return "photomaker";
+                if (classTypeLower.includes("conditioning")) return "embeddings";
+                if (classTypeLower.includes("bgremoval") || classTypeLower.includes("backgroundremoval") || classTypeLower.includes("background_removal")) return "background_removal";
+                if (classTypeLower.includes("frameinterpolation") || classTypeLower.includes("frame_interpolation")) return "frame_interpolation";
+                if (classTypeLower.includes("modelpatch") || classTypeLower.includes("model_patch")) return "model_patches";
             }
 
             return guessSuggestedFolderFromRunHookFilename(

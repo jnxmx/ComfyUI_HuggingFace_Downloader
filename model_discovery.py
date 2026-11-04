@@ -804,15 +804,29 @@ def _scan_custom_node_widget_schemas() -> dict[str, list[dict[str, Any]]]:
 
     return hints
 
+_BUILTIN_NODE_WIDGET_SCHEMA_HINTS: dict[str, list[dict[str, Any]]] = {
+    "LTXAVTextEncoderLoader": [
+        {"name": "text_encoder", "folders": ["text_encoders"]},
+        {"name": "ckpt_name", "folders": ["checkpoints"]},
+    ],
+    "CheckpointLoader": [
+        {"name": "config_name", "folders": ["configs"]},
+        {"name": "ckpt_name", "folders": ["checkpoints"]},
+    ],
+}
+
 def get_node_widget_schema_hints() -> dict[str, list[dict[str, Any]]]:
     global _node_widget_schema_hints_cache
     if _node_widget_schema_hints_cache is None:
         try:
-            _node_widget_schema_hints_cache = _scan_custom_node_widget_schemas()
+            scanned = _scan_custom_node_widget_schemas()
+            for k, v in _BUILTIN_NODE_WIDGET_SCHEMA_HINTS.items():
+                scanned.setdefault(k, v)
+            _node_widget_schema_hints_cache = scanned
             print(f"[DEBUG] Scanned widget schema hints for {len(_node_widget_schema_hints_cache)} node classes")
         except Exception as e:
             print(f"[DEBUG] Failed to scan custom node widget schemas: {e}")
-            _node_widget_schema_hints_cache = {}
+            _node_widget_schema_hints_cache = dict(_BUILTIN_NODE_WIDGET_SCHEMA_HINTS)
     return _node_widget_schema_hints_cache
 
 def _lookup_known_directory_for_filename(filename: str | None) -> str | None:
@@ -891,9 +905,13 @@ def _guess_folder_from_filename(filename: str | None) -> str | None:
         return "audio_encoders"
     if "latent" in name and ("upscale" in name or "upscaler" in name):
         return "latent_upscale_models"
+    if "h3_upscaler" in name or "h3-upscaler" in name:
+        return "latent_upscale_models"
     if "minimax_h3" in name or "minimaxh3" in name:
         if "latent" in name or "upscale" in name or "upscaler" in name:
             return "latent_upscale_models"
+        if "fun_controlnet" in name:
+            return "model_patches"
     return None
 
 def _is_specific_model_bucket(folder: str | None) -> bool:
@@ -907,6 +925,8 @@ def _is_specific_model_bucket(folder: str | None) -> bool:
         "clip_vision",
         "loras",
         "controlnet",
+        "style_models",
+        "gligen",
         "audio_encoders",
         "wav2vec2",
         "nlf",
@@ -916,6 +936,12 @@ def _is_specific_model_bucket(folder: str | None) -> bool:
         "frame_interpolation",
         "background_removal",
         "model_patches",
+        "optical_flow",
+        "geometry_estimation",
+        "detection",
+        "hypernetworks",
+        "photomaker",
+        "embeddings",
     }
 
 def _choose_best_folder_candidate(
@@ -1416,6 +1442,8 @@ NODE_TYPE_MAPPING = {
 
     # Native ComfyUI Background Removal
     "LoadBackgroundRemovalModel": "background_removal",
+    "BackgroundRemovalModelLoader": "background_removal",
+    "Load Background Removal Model": "background_removal",
 
     # Native ComfyUI Model Patches
     "ModelPatchLoader": "model_patches",
@@ -1432,9 +1460,56 @@ NODE_TYPE_MAPPING = {
 
     # Native ComfyUI Frame Interpolation
     "FrameInterpolationModelLoader": "frame_interpolation",
+    "FrameInterpolationLoader": "frame_interpolation",
+    "Load Frame Interpolation Model": "frame_interpolation",
 
-    # Native ComfyUI Hook LoRA
+    # Native ComfyUI LoRA Stack / Debug / Hook LoRA
+    "LoadLoraModel": "loras",
+    "LoadLoraTextEncoder": "loras",
+    "Load LoRA (Model)": "loras",
+    "Load LoRA (Text Encoder)": "loras",
+    "Load LoRA (Model and CLIP)": "loras",
+    "Load LoRA": "loras",
+    "LoraLoaderBypass": "loras",
+    "LoraLoaderBypassModelOnly": "loras",
     "CreateHookLora": "loras",
+    "CreateHookLoraModelOnly": "loras",
+    "TrainLoraNode": "loras",
+
+    # Native ComfyUI Core Loaders
+    "TripleCLIPLoader": "text_encoders",
+    "QuadrupleCLIPLoader": "text_encoders",
+    "Load CLIP (Triple)": "text_encoders",
+    "Load CLIP (Quadruple)": "text_encoders",
+    "ImageOnlyCheckpointLoader": "checkpoints",
+    "unCLIPCheckpointLoader": "checkpoints",
+    "CreateHookModelAsLora": "checkpoints",
+    "CreateHookModelAsLoraModelOnly": "checkpoints",
+    "LTXVAudioVAELoader": "checkpoints",
+    "Load LTXV Audio VAE": "checkpoints",
+    "Load Latent Upscale Model": "latent_upscale_models",
+    "MiniMaxH3LatentUpscaleWithModel": "latent_upscale_models",
+    "MiniMax H3 Latent Upscale With Model": "latent_upscale_models",
+    "HunyuanVideoLatentUpscaleModelLoader": "latent_upscale_models",
+    "Load HunyuanVideo Latent Upscale Model": "latent_upscale_models",
+    "AudioEncoderLoader": "audio_encoders",
+    "Load Audio Encoder": "audio_encoders",
+    "OpticalFlowLoader": "optical_flow",
+    "Load Optical Flow Model": "optical_flow",
+    "LoadMoGeModel": "geometry_estimation",
+    "Load MoGe Model": "geometry_estimation",
+    "LoadDA3Model": "geometry_estimation",
+    "Load Depth Anything 3": "geometry_estimation",
+    "LoadMediaPipeFaceLandmarker": "detection",
+    "Load Face Detection Model (MediaPipe)": "detection",
+    "SAM3DBody_Loader": "detection",
+    "Load SAM3D Body Model": "detection",
+    "ConditioningLoader": "embeddings",
+    "Load Conditioning": "embeddings",
+    "HypernetworkLoader": "hypernetworks",
+    "Load Hypernetwork": "hypernetworks",
+    "PhotoMakerLoader": "photomaker",
+    "Load PhotoMaker Model": "photomaker",
 
     # ComfyUI-Minimax_h3_latent_Upscaler
     "MinimaxH3LatentUpscalerNode2D": "latent_upscale_models",
@@ -1650,6 +1725,20 @@ def resolve_proxy_widget_folder(widget_name: str | None) -> str | None:
         return "frame_interpolation"
     if ("minimax" in name or "mmh3" in name) and ("upscale" in name or "latent" in name):
         return "latent_upscale_models"
+    if "audio_encoder" in name or "audio encoder" in name:
+        return "audio_encoders"
+    if "optical_flow" in name or "optical flow" in name:
+        return "optical_flow"
+    if "geometry_estimation" in name or "moge" in name or "da3" in name:
+        return "geometry_estimation"
+    if "mediapipe" in name or "sam3d" in name or "face_detection" in name or "detection" in name:
+        return "detection"
+    if "conditioning_name" in name:
+        return "embeddings"
+    if "hypernetwork" in name:
+        return "hypernetworks"
+    if "photomaker" in name:
+        return "photomaker"
     return None
 
 def collect_proxy_widget_models(
@@ -1802,6 +1891,36 @@ def _collect_models_from_nodes(
                         if idx is not None:
                             linked_widget_indices.add(idx)
 
+        # Detect disabled dynamic LoRA stack rows in LoadLoraModel / LoadLoraTextEncoder
+        disabled_widget_indices = set()
+        disabled_widget_names = set()
+        named_widgets = node.get("widgets_values_named")
+        if not isinstance(named_widgets, dict) and isinstance(node.get("widgets_values"), dict):
+            named_widgets = node.get("widgets_values")
+
+        if isinstance(named_widgets, dict):
+            for k, v in named_widgets.items():
+                if not isinstance(k, str):
+                    continue
+                if k.endswith(".lora_name"):
+                    prefix = k[:-len(".lora_name")]
+                    enabled_val = named_widgets.get(f"{prefix}.enabled", True)
+                    strength_val = named_widgets.get(f"{prefix}.strength", 1.0)
+                    if enabled_val is False or strength_val == 0:
+                        disabled_widget_names.add(k)
+
+        if node_type in {"LoadLoraModel", "LoadLoraTextEncoder", "Load LoRA (Model)", "Load LoRA (Text Encoder)"}:
+            raw_wv = node.get("widgets_values")
+            if isinstance(raw_wv, list) and len(raw_wv) >= 4 and isinstance(raw_wv[0], int):
+                # Format: [count, lora_name_0, strength_0, enabled_0, lora_name_1, strength_1, enabled_1, ...]
+                row_idx = 1
+                while row_idx + 2 < len(raw_wv):
+                    strength_val = raw_wv[row_idx + 1]
+                    enabled_val = raw_wv[row_idx + 2]
+                    if enabled_val is False or strength_val == 0:
+                        disabled_widget_indices.add(row_idx)
+                    row_idx += 3
+
         # Gather currently selected model-like widget values for this node.
         # Some workflows keep stale entries in properties.models (template metadata),
         # so we later only trust matching property rows when widget-selected models exist.
@@ -1809,6 +1928,8 @@ def _collect_models_from_nodes(
         widgets_for_keys = node.get("widgets_values")
         if isinstance(widgets_for_keys, list):
             for idx, raw_val in enumerate(widgets_for_keys):
+                if idx in disabled_widget_indices:
+                    continue
                 if raw_val is None or not isinstance(raw_val, str):
                     continue
                 val = raw_val.strip()
@@ -1818,6 +1939,19 @@ def _collect_models_from_nodes(
                     parsed_filename = val.split("?")[0].split("/")[-1]
                     if any(parsed_filename.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
                         widget_model_keys.add(normalize_filename_key(parsed_filename))
+                    continue
+                if _looks_like_model_widget_value(val, node_type):
+                    filename, _requested_path = split_model_identifier(val)
+                    if filename:
+                        widget_model_keys.add(normalize_filename_key(filename))
+        if isinstance(named_widgets, dict):
+            for w_name, raw_val in named_widgets.items():
+                if w_name in disabled_widget_names or w_name in linked_widget_names:
+                    continue
+                if raw_val is None or not isinstance(raw_val, str):
+                    continue
+                val = raw_val.strip()
+                if not val:
                     continue
                 if _looks_like_model_widget_value(val, node_type):
                     filename, _requested_path = split_model_identifier(val)
@@ -1971,13 +2105,13 @@ def _collect_models_from_nodes(
         # 3. Check widgets_values for filenames
         # SKIP for Notes/PrimitiveStrings as we handled them specifically above
         if (
-            "widgets_values" in node
+            ("widgets_values" in node or isinstance(named_widgets, dict))
             and not ("Note" in node_type or "PrimitiveString" in node_type)
         ):
-            widgets = node["widgets_values"]
+            widgets = node.get("widgets_values")
             if isinstance(widgets, list):
                 for idx, val in enumerate(widgets):
-                    if idx in linked_widget_indices:
+                    if idx in linked_widget_indices or idx in disabled_widget_indices:
                         continue
                     if val is None or not isinstance(val, str):
                         continue
@@ -2021,6 +2155,31 @@ def _collect_models_from_nodes(
                                 node,
                                 widget_index=idx,
                                 widget_name=None,
+                                widget_value=filename
+                            )
+                            found_models.append({
+                                "filename": filename,
+                                "requested_path": requested_path,
+                                "url": None,
+                                "node_id": node_id,
+                                "node_title": node_title,
+                                "node_type": node_type,
+                                "suggested_folder": suggested_folder
+                            })
+
+            if isinstance(named_widgets, dict):
+                for w_name, val in named_widgets.items():
+                    if w_name in linked_widget_names or w_name in disabled_widget_names:
+                        continue
+                    if val is None or not isinstance(val, str):
+                        continue
+                    if _looks_like_model_widget_value(val, node_type):
+                        filename, requested_path = split_model_identifier(val)
+                        if not any(m["filename"] == filename and m["node_id"] == node_id for m in found_models):
+                            suggested_folder = resolve_node_folder_for_widget(
+                                node,
+                                widget_index=None,
+                                widget_name=w_name,
                                 widget_value=filename
                             )
                             found_models.append({
