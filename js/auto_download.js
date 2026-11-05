@@ -1326,6 +1326,7 @@ app.registerExtension({
 
                     const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
                     for (const widget of widgets) {
+                        if (isDynamicGroupWidgetDisabledInNode(node, widget?.name)) continue;
                         const val = typeof widget?.value === "string" ? widget.value.trim() : "";
                         if (val) {
                             values.add(val);
@@ -1343,24 +1344,62 @@ app.registerExtension({
 
         /**
          * Given a pending-warning candidate object, checks whether it is still
-         * referenced by a live graph node widget. Returns true if stale.
+         * referenced by an active missing live graph node widget. Returns true if stale
+         * or already resolved in the live widget's combo options.
          */
-        const isPendingCandidateStaleInLiveGraph = (candidate, liveWidgetValues) => {
+        const isPendingCandidateStaleInLiveGraph = (candidate, liveWidgetValues, graph = null) => {
             if (!candidate || typeof candidate !== "object") return false;
             const name = String(candidate?.name || candidate?.filename || "").trim();
             if (!name) return false;
-            // If the model name is still present in any widget value, it's not stale
+            const baseName = name.split(/[/\\]/).pop().trim();
+
+            const rootGraph = graph || app?.rootGraph;
+            if (rootGraph && typeof rootGraph === "object") {
+                const candNodeId = String(candidate?.nodeId ?? candidate?.node_id ?? "").trim();
+                const candWidgetName = String(candidate?.widgetName || candidate?.input_name || "").trim();
+                if (candNodeId) {
+                    const localNodeId = candNodeId.includes(":") ? candNodeId.split(":").pop() : candNodeId;
+                    const targetNode = findNodeByIdRecursive(rootGraph, localNodeId);
+                    if (targetNode) {
+                        if (isGraphNodeBypassed(targetNode)) return true;
+                        const widgets = Array.isArray(targetNode?.widgets) ? targetNode.widgets : [];
+                        const targetWidget = candWidgetName
+                            ? widgets.find(w => String(w?.name || "").trim() === candWidgetName)
+                            : widgets.find(w => {
+                                const v = typeof w?.value === "string" ? w.value.trim() : "";
+                                return v === name || (baseName && v.split(/[/\\]/).pop().trim() === baseName);
+                            });
+                        if (targetWidget) {
+                            if (isDynamicGroupWidgetDisabledInNode(targetNode, targetWidget?.name)) {
+                                return true;
+                            }
+                            const options = resolveComboWidgetOptionsNativeLike(targetWidget);
+                            const currentVal = typeof targetWidget?.value === "string" ? targetWidget.value.trim() : "";
+                            if (
+                                options.length > 0 &&
+                                (isValuePresentInComboOptions(options, currentVal) ||
+                                 isValuePresentInComboOptions(options, name))
+                            ) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If the model name is still present in any active widget value, it's not stale
             if (liveWidgetValues.has(name)) return false;
             // Also check base name (without path prefix)
-            const baseName = name.split(/[/\\]/).pop().trim();
             if (baseName && liveWidgetValues.has(baseName)) return false;
             return true;
         };
 
         /**
          * Iterates over all graph nodes and aligns their widget path slashes
-         * to match the format of the server's populated combo options.
-         * Fixes Windows-to-Linux and Linux-to-Windows workflow loading mismatches.
+         * (and relative subfolder paths when a model is installed at a different
+         * relative path under the same category) to match the server's populated
+         * combo options.
+         * Fixes Windows-to-Linux, Linux-to-Windows, and subfolder workflow loading mismatches.
          */
         const alignGraphWidgetSlashes = (graph = null) => {
             const rootGraph = graph || app?.rootGraph;
@@ -1373,9 +1412,10 @@ app.registerExtension({
                     if (!node || typeof node !== "object") continue;
 
                     const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
+                    let nodeUpdated = false;
                     for (const widget of widgets) {
                         const val = typeof widget?.value === "string" ? widget.value.trim() : "";
-                        if (!val || (!val.includes("/") && !val.includes("\\"))) {
+                        if (!val) {
                             continue;
                         }
 
@@ -1383,15 +1423,49 @@ app.registerExtension({
                         if (!Array.isArray(options) || !options.length) {
                             continue;
                         }
+                        if (options.includes(val)) {
+                            continue;
+                        }
 
                         const normalizedVal = val.replace(/\\/g, "/");
-                        const matchedOption = options.find(
+                        const normalizedValLower = normalizedVal.toLowerCase();
+                        let matchedOption = options.find(
                             opt => typeof opt === "string" && opt.replace(/\\/g, "/") === normalizedVal
                         );
-                        if (matchedOption && widget.value !== matchedOption) {
-                            console.log(`[AutoDownload] Aligning slash separator for widget "${widget.name}" on node ${node.id || node.type}: "${widget.value}" -> "${matchedOption}"`);
-                            widget.value = matchedOption;
+                        if (!matchedOption) {
+                            matchedOption = options.find(
+                                opt => typeof opt === "string" && opt.replace(/\\/g, "/").toLowerCase() === normalizedValLower
+                            );
                         }
+                        if (
+                            !matchedOption &&
+                            MODELISH_FILENAME_PATTERN.test(val) &&
+                            isLocalModelLoaderNode(node)
+                        ) {
+                            const widgetName = String(widget?.name || "").trim();
+                            const upstreamInfo = getUpstreamDownloaderNodeUrlAndFolder(node, widgetName, currentGraph);
+                            if (!upstreamInfo) {
+                                const valBaseLower = getPathBasename(normalizedVal).toLowerCase();
+                                if (valBaseLower) {
+                                    const baseMatches = options.filter(
+                                        opt => typeof opt === "string" && getPathBasename(opt).toLowerCase() === valBaseLower
+                                    );
+                                    if (baseMatches.length) {
+                                        matchedOption =
+                                            baseMatches.find(opt => opt.replace(/\\/g, "/").toLowerCase() === valBaseLower) ||
+                                            baseMatches[0];
+                                    }
+                                }
+                            }
+                        }
+                        if (matchedOption && widget.value !== matchedOption) {
+                            console.log(`[AutoDownload] Aligning path for widget "${widget.name}" on node ${node.id || node.type}: "${widget.value}" -> "${matchedOption}"`);
+                            widget.value = matchedOption;
+                            nodeUpdated = true;
+                        }
+                    }
+                    if (nodeUpdated) {
+                        node?.setDirtyCanvas?.(true);
                     }
 
                     if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
@@ -1438,7 +1512,7 @@ app.registerExtension({
                         if (!widgetName) continue;
 
                         // Only process model-like combo widgets
-                        if (!MODEL_VALIDATION_INPUT_NAMES.has(widgetName)) continue;
+                        if (!isModelValidationInputName(widgetName)) continue;
 
                         // Check if this widget has a linked input
                         const inp = inputs.find(entry =>
@@ -1551,6 +1625,44 @@ app.registerExtension({
             return null;
         };
 
+        const isDynamicGroupWidgetDisabledInNode = (node, widgetName) => {
+            const wName = String(widgetName || "").trim();
+            if (!wName.endsWith(".lora_name")) {
+                return false;
+            }
+            const prefix = wName.slice(0, -".lora_name".length);
+            const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
+            const enabledWidget = widgets.find(w => String(w?.name || "").trim() === `${prefix}.enabled`);
+            if (enabledWidget && enabledWidget.value === false) {
+                return true;
+            }
+            const strengthWidget = widgets.find(w => {
+                const n = String(w?.name || "").trim();
+                return n === `${prefix}.strength` || n === `${prefix}.strength_model`;
+            });
+            if (strengthWidget && Number(strengthWidget.value) === 0) {
+                return true;
+            }
+            return false;
+        };
+
+        const isValuePresentInComboOptions = (options, value) => {
+            if (!Array.isArray(options) || !options.length || !value) {
+                return false;
+            }
+            if (options.includes(value)) {
+                return true;
+            }
+            const normVal = String(value).replace(/\\/g, "/").trim().toLowerCase();
+            const baseLower = getPathBasename(normVal).toLowerCase();
+            return options.some(opt => {
+                if (typeof opt !== "string") return false;
+                const normOpt = opt.replace(/\\/g, "/").trim().toLowerCase();
+                if (normOpt === normVal) return true;
+                return Boolean(baseLower && getPathBasename(normOpt).toLowerCase() === baseLower);
+            });
+        };
+
         const collectLiveGraphMissingModelCandidatesNativeLike = (graph = null, graphData = null) => {
             const rootGraph = graph || app?.rootGraph;
             if (!rootGraph || typeof rootGraph !== "object") {
@@ -1601,6 +1713,9 @@ app.registerExtension({
                         }
 
                         const widgetName = String(widget?.name || "").trim();
+                        if (isDynamicGroupWidgetDisabledInNode(node, widgetName)) {
+                            continue;
+                        }
                         const hasLinkedInput = Array.isArray(node?.inputs) && node.inputs.some(inp => 
                             (String(inp?.name || "").trim() === widgetName || String(inp?.widget?.name || "").trim() === widgetName) && inp.link != null
                         );
@@ -1618,7 +1733,7 @@ app.registerExtension({
                             continue;
                         }
 
-                        const inOptions = hasOptions && options.includes(value);
+                        const inOptions = hasOptions && isValuePresentInComboOptions(options, value);
                         if (inOptions) {
                             continue;
                         }
@@ -1763,12 +1878,16 @@ app.registerExtension({
         };
 
         const getFrontendMissingModelCandidates = async (graphDataOverride = null) => {
+            try {
+                alignGraphWidgetSlashes(app?.rootGraph);
+            } catch (_) {}
             let candidates = getFrontendPendingWarningCandidates();
             if (candidates.length) {
-                // Filter out stale candidates whose model name no longer matches
-                // any live widget value (e.g. user changed the widget dropdown).
-                const liveValues = collectAllLiveWidgetValues();
-                if (liveValues.size) {
+                // Filter out stale or resolved candidates whose model name no longer matches
+                // any active missing live widget value.
+                const hasLiveNodes = Array.isArray(app?.rootGraph?.nodes) && app.rootGraph.nodes.length > 0;
+                if (hasLiveNodes) {
+                    const liveValues = collectAllLiveWidgetValues();
                     candidates = candidates.filter(c => !isPendingCandidateStaleInLiveGraph(c, liveValues));
                 }
                 if (candidates.length) {
@@ -2108,7 +2227,19 @@ app.registerExtension({
                 return null;
             }
 
-            const directory = String(candidate?.directory || candidate?.folder || "").trim() || "checkpoints";
+            const inferredDirectory = inferSuggestedFolderFromRunHookSignals({
+                classType: candidate?.nodeType || candidate?.node_type || candidate?.node_title,
+                inputName: candidate?.widgetName || candidate?.input_name,
+                filename,
+                missingValue: requestedPath || filename,
+            });
+            const rawDirectory = String(candidate?.directory || candidate?.folder || "").trim();
+            const directory =
+                (inferredDirectory && (!rawDirectory || rawDirectory === "checkpoints")
+                    ? inferredDirectory
+                    : rawDirectory) ||
+                inferredDirectory ||
+                "checkpoints";
             return {
                 filename,
                 name: filename,
@@ -2244,10 +2375,7 @@ app.registerExtension({
                 return [];
             }
 
-            const shouldCheckFrontendModelStore = !Array.isArray(providedCandidates);
-            const modelStore = shouldCheckFrontendModelStore
-                ? await resolveModelStore()
-                : null;
+            const modelStore = await resolveModelStore();
             const folderNamesCache = new Map();
             if (modelStore && typeof modelStore.loadModelFolders === "function") {
                 try {
@@ -2273,18 +2401,23 @@ app.registerExtension({
                         try {
                             const folder = await modelStore.getLoadedModelFolder(directory);
                             const values = folder?.models ? Object.values(folder.models) : [];
-                            nameSet = new Set(
-                                values
-                                    .map((entry) => String(entry?.file_name || "").trim())
-                                    .filter(Boolean)
-                            );
+                            nameSet = new Set();
+                            for (const item of values) {
+                                const rawFileName = String(item?.file_name || item?.name || "").trim();
+                                if (!rawFileName) continue;
+                                nameSet.add(rawFileName.toLowerCase());
+                                const baseName = getPathBasename(rawFileName).toLowerCase();
+                                if (baseName) {
+                                    nameSet.add(baseName);
+                                }
+                            }
                         } catch (_) {
                             nameSet = null;
                         }
                         folderNamesCache.set(directory, nameSet);
                     }
                     const namesInFolder = folderNamesCache.get(directory);
-                    if (namesInFolder && namesInFolder.has(filename)) {
+                    if (namesInFolder && namesInFolder.has(filename.toLowerCase())) {
                         continue;
                     }
                 }
@@ -2429,31 +2562,70 @@ app.registerExtension({
                     const processNodeList = (nodes) => {
                         if (!Array.isArray(nodes)) return;
                         for (const node of nodes) {
-                            const liveNode = liveNodes[node.id];
-                            if (!liveNode || !Array.isArray(liveNode.widgets) || !Array.isArray(liveNode.inputs)) continue;
-                            if (!Array.isArray(node.widgets_values)) continue;
+                            const liveNode = liveNodes[node.id] || findNodeByIdRecursive(app?.rootGraph || app?.graph, node.id);
+                            if (!liveNode || !Array.isArray(liveNode.widgets)) continue;
+
+                            const serializableWidgets = liveNode.widgets.filter(
+                                w => w?.serialize !== false && w?.options?.serialize !== false
+                            );
+                            if (Array.isArray(node.widgets_values)) {
+                                const widgetMap =
+                                    node.widgets_values.length === serializableWidgets.length
+                                        ? serializableWidgets
+                                        : (node.widgets_values.length === liveNode.widgets.length ? liveNode.widgets : null);
+                                if (widgetMap) {
+                                    for (let i = 0; i < widgetMap.length; i += 1) {
+                                        const lw = widgetMap[i];
+                                        if (typeof lw?.value === "string" && typeof node.widgets_values[i] === "string") {
+                                            node.widgets_values[i] = lw.value;
+                                        }
+                                    }
+                                }
+                            }
+                            if (node.widgets_values_named && typeof node.widgets_values_named === "object") {
+                                for (const lw of liveNode.widgets) {
+                                    const wName = String(lw?.name || "").trim();
+                                    if (wName && wName in node.widgets_values_named && typeof lw?.value === "string") {
+                                        node.widgets_values_named[wName] = lw.value;
+                                    }
+                                }
+                            }
+
+                            if (!Array.isArray(liveNode.inputs)) continue;
                             
                             const indicesToNull = new Set();
+                            const namesToNull = new Set();
                             for (const inp of liveNode.inputs) {
                                 if (inp.link != null) {
                                     if (inp.widget && typeof inp.widget === 'object') {
                                         const wName = String(inp.widget.name || "");
                                         if (wName) {
+                                            namesToNull.add(wName);
                                             const wIdx = liveNode.widgets.findIndex(w => String(w?.name || "") === wName);
                                             if (wIdx >= 0) indicesToNull.add(wIdx);
                                         }
                                     }
                                     const matchedName = String(inp.name || "");
                                     if (matchedName) {
+                                        namesToNull.add(matchedName);
                                         const wIdx = liveNode.widgets.findIndex(w => String(w?.name || "") === matchedName);
                                         if (wIdx >= 0) indicesToNull.add(wIdx);
                                     }
                                 }
                             }
                             
-                            for (const idx of indicesToNull) {
-                                if (idx < node.widgets_values.length) {
-                                    node.widgets_values[idx] = null;
+                            if (Array.isArray(node.widgets_values)) {
+                                for (const idx of indicesToNull) {
+                                    if (idx < node.widgets_values.length) {
+                                        node.widgets_values[idx] = null;
+                                    }
+                                }
+                            }
+                            if (node.widgets_values_named && typeof node.widgets_values_named === "object") {
+                                for (const wName of namesToNull) {
+                                    if (wName in node.widgets_values_named) {
+                                        node.widgets_values_named[wName] = null;
+                                    }
                                 }
                             }
                         }
@@ -2484,6 +2656,13 @@ app.registerExtension({
                             for (const v of wv) {
                                 if (typeof v === "string" && v.trim()) {
                                     allWidgetVals.add(v.trim());
+                                }
+                            }
+                            if (node?.widgets_values_named && typeof node.widgets_values_named === "object") {
+                                for (const v of Object.values(node.widgets_values_named)) {
+                                    if (typeof v === "string" && v.trim()) {
+                                        allWidgetVals.add(v.trim());
+                                    }
                                 }
                             }
                         }
@@ -2859,21 +3038,35 @@ app.registerExtension({
             const typeLower = String(node.type || "").toLowerCase();
             if (!typeLower) return false;
 
-            // Never rewrite link/download nodes (they are metadata sources, not local model loaders).
+            // Never rewrite link/download nodes or note/primitive nodes.
             if (
                 typeLower.includes("hugging face download model") ||
                 typeLower.includes("huggingface download model") ||
                 typeLower.includes("hugging face download folder") ||
-                typeLower.includes("huggingface download folder")
+                typeLower.includes("huggingface download folder") ||
+                typeLower === "note" ||
+                typeLower === "markdownnote" ||
+                typeLower === "primitivestring" ||
+                typeLower === "primitivestringmultiline"
             ) {
                 return false;
             }
 
             const props = node.properties || {};
             const hasModelMetadata = Array.isArray(props.models) && props.models.length > 0;
-            const looksLikeLoader = typeLower.includes("loader");
+            const looksLikeLoader =
+                typeLower.includes("loader") ||
+                typeLower.startsWith("load") ||
+                typeLower.includes("lora") ||
+                typeLower.includes("upscale") ||
+                isLikelyModelLoaderClass(node.type);
 
-            return hasModelMetadata || looksLikeLoader;
+            if (hasModelMetadata || looksLikeLoader) {
+                return true;
+            }
+
+            const widgets = Array.isArray(node.widgets) ? node.widgets : [];
+            return widgets.some(w => isModelValidationInputName(w?.name));
         };
 
         const buildUpdatedWidgetValue = (rowData, statusInfo = null) => {
@@ -2898,7 +3091,10 @@ app.registerExtension({
             const nextValue = buildUpdatedWidgetValue(rowData, statusInfo);
             if (!nextValue) return 0;
 
-            const graphNodes = Array.isArray(app?.graph?._nodes) ? app.graph._nodes : [];
+            const graphNodes = [];
+            forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
+                graphNodes.push(node);
+            });
             let updatedRefs = 0;
 
             for (const node of graphNodes) {
@@ -4578,7 +4774,7 @@ app.registerExtension({
                         frontendStoreFallbackMissing
                     );
                     showResultsDialog(
-                        enrichedFastPathResults && countActionableScanResults(enrichedFastPathResults)
+                        enrichedFastPathResults && typeof enrichedFastPathResults === "object"
                             ? enrichedFastPathResults
                             : {
                                 request_id: requestId,
@@ -4637,13 +4833,53 @@ app.registerExtension({
                 );
                 console.log("[AutoDownload] Scan results:", data);
 
+                const filterOutBackendFoundAndMismatchedModels = (entries, scanData) => {
+                    if (!Array.isArray(entries) || !entries.length) return [];
+                    const resolvedNames = new Set();
+                    const addResolved = (val) => {
+                        const norm = normalizeWorkflowPath(val).toLowerCase();
+                        if (!norm) return;
+                        resolvedNames.add(norm);
+                        const base = getPathBasename(norm).toLowerCase();
+                        if (base) resolvedNames.add(base);
+                    };
+                    const foundItems = Array.isArray(scanData?.found) ? scanData.found : [];
+                    for (const item of foundItems) {
+                        addResolved(item?.filename);
+                        addResolved(item?.name);
+                        addResolved(item?.requested_path);
+                        addResolved(item?.clean_path);
+                    }
+                    const mismatchItems = Array.isArray(scanData?.mismatches)
+                        ? scanData.mismatches
+                        : (Array.isArray(scanData?.path_mismatches) ? scanData.path_mismatches : []);
+                    for (const item of mismatchItems) {
+                        addResolved(item?.filename);
+                        addResolved(item?.name);
+                        addResolved(item?.requested_path);
+                        addResolved(item?.clean_path);
+                    }
+                    if (!resolvedNames.size) return entries;
+                    return entries.filter((entry) => {
+                        const fn = normalizeWorkflowPath(entry?.filename || entry?.name || "").toLowerCase();
+                        const req = normalizeWorkflowPath(entry?.requested_path || "").toLowerCase();
+                        const base = getPathBasename(fn || req).toLowerCase();
+                        if (fn && resolvedNames.has(fn)) return false;
+                        if (req && resolvedNames.has(req)) return false;
+                        if (base && resolvedNames.has(base)) return false;
+                        return true;
+                    });
+                };
+
                 if (!countActionableScanResults(data)) {
-                    const fallbackMissingFromFrontendStore =
+                    const fallbackMissingFromFrontendStore = filterOutBackendFoundAndMismatchedModels(
                         await createRunHookFallbackMissingModelsFromFrontendStore(
                             Array.isArray(options?.frontendMissingModelCandidates)
                                 ? options.frontendMissingModelCandidates
                                 : null
-                        );
+                        ),
+                        data
+                    );
                     if (fallbackMissingFromFrontendStore.length) {
                         data.missing = mergeMissingEntries(data?.missing, fallbackMissingFromFrontendStore);
                         console.info(
@@ -4655,14 +4891,18 @@ app.registerExtension({
 
                 const suppressEmptyResults = Boolean(options?.suppressEmptyResults);
                 if (suppressEmptyResults) {
-                    const fallbackMissingFromFailures =
-                        createRunHookFallbackMissingModels(options?.runHookFailures || [], workflow);
-                    const fallbackMissingFromFrontendStore =
+                    const fallbackMissingFromFailures = filterOutBackendFoundAndMismatchedModels(
+                        createRunHookFallbackMissingModels(options?.runHookFailures || [], workflow),
+                        data
+                    );
+                    const fallbackMissingFromFrontendStore = filterOutBackendFoundAndMismatchedModels(
                         await createRunHookFallbackMissingModelsFromFrontendStore(
                             Array.isArray(options?.frontendMissingModelCandidates)
                                 ? options.frontendMissingModelCandidates
                                 : null
-                        );
+                        ),
+                        data
+                    );
                     if (fallbackMissingFromFailures.length) {
                         const existingMissing = Array.isArray(data?.missing) ? data.missing : [];
                         data.missing = mergeMissingEntries(existingMissing, fallbackMissingFromFailures);
@@ -4687,9 +4927,12 @@ app.registerExtension({
                     let hasAnyResults = totalMissing > 0 || foundCount > 0 || mismatchCount > 0;
 
                     if (!hasAnyResults) {
-                        const lastChanceMissing = createLastChanceRunHookMissingModels(
-                            options?.runHookFailures || [],
-                            workflow
+                        const lastChanceMissing = filterOutBackendFoundAndMismatchedModels(
+                            createLastChanceRunHookMissingModels(
+                                options?.runHookFailures || [],
+                                workflow
+                            ),
+                            data
                         );
                         if (lastChanceMissing.length) {
                             const existingMissing = Array.isArray(data?.missing) ? data.missing : [];
@@ -4922,6 +5165,16 @@ app.registerExtension({
             "vitpose_model",
             "yolo_model"
         ]);
+        const isModelValidationInputName = (name) => {
+            const lower = String(name || "").trim().toLowerCase();
+            if (!lower) return false;
+            return (
+                MODEL_VALIDATION_INPUT_NAMES.has(lower) ||
+                lower.endsWith(".lora_name") ||
+                lower.endsWith(".model_name") ||
+                lower.endsWith(".ckpt_name")
+            );
+        };
         const RUN_HOOK_CLASS_INCLUDE_MARKERS = [
             "loader",
             "checkpoint",
@@ -4997,7 +5250,7 @@ app.registerExtension({
 
         const parseInputNameFromDetails = (details) => {
             const text = String(details || "").trim();
-            const match = text.match(/^([a-zA-Z0-9_]+)\s*:/);
+            const match = text.match(/^([a-zA-Z0-9_.]+)\s*:/);
             return match ? match[1] : "";
         };
 
@@ -5467,11 +5720,17 @@ app.registerExtension({
                 const models = Array.isArray(node?.properties?.models) ? node.properties.models : [];
                 if (!models.length) return [];
                 const widgetsValuesRaw = node?.widgets_values;
-                if (!widgetsValuesRaw) return [];
+                const widgetsValuesNamed = node?.widgets_values_named;
+                if (!widgetsValuesRaw && !widgetsValuesNamed) return [];
 
-                const widgetValues = Array.isArray(widgetsValuesRaw)
-                    ? widgetsValuesRaw
-                    : Object.values(widgetsValuesRaw || {});
+                const widgetValues = [
+                    ...(Array.isArray(widgetsValuesRaw)
+                        ? widgetsValuesRaw
+                        : Object.values(widgetsValuesRaw || {})),
+                    ...(widgetsValuesNamed && typeof widgetsValuesNamed === "object"
+                        ? Object.values(widgetsValuesNamed)
+                        : []),
+                ];
                 if (!widgetValues.length) return [];
 
                 const stringWidgetValues = new Set();
@@ -5555,6 +5814,13 @@ app.registerExtension({
                                 allSerializedWidgetValues.add(v.trim());
                             }
                         }
+                        if (node?.widgets_values_named && typeof node.widgets_values_named === "object") {
+                            for (const v of Object.values(node.widgets_values_named)) {
+                                if (typeof v === "string" && v.trim()) {
+                                    allSerializedWidgetValues.add(v.trim());
+                                }
+                            }
+                        }
                     }
                 };
                 gatherWidgetValues(graphData?.nodes);
@@ -5622,7 +5888,7 @@ app.registerExtension({
                     )
                         .trim()
                         .toLowerCase();
-                    if (widgetName && MODEL_VALIDATION_INPUT_NAMES.has(widgetName)) {
+                    if (widgetName && isModelValidationInputName(widgetName)) {
                         return true;
                     }
                 }
@@ -5632,15 +5898,21 @@ app.registerExtension({
                     const widgetName = String(input?.widget?.name || input?.name || "")
                         .trim()
                         .toLowerCase();
-                    if (widgetName && MODEL_VALIDATION_INPUT_NAMES.has(widgetName)) {
+                    if (widgetName && isModelValidationInputName(widgetName)) {
                         return true;
                     }
                 }
 
                 const widgetValuesRaw = node?.widgets_values;
-                const widgetValues = Array.isArray(widgetValuesRaw)
-                    ? widgetValuesRaw
-                    : Object.values(widgetValuesRaw || {});
+                const widgetValuesNamed = node?.widgets_values_named;
+                const widgetValues = [
+                    ...(Array.isArray(widgetValuesRaw)
+                        ? widgetValuesRaw
+                        : Object.values(widgetValuesRaw || {})),
+                    ...(widgetValuesNamed && typeof widgetValuesNamed === "object"
+                        ? Object.values(widgetValuesNamed)
+                        : []),
+                ];
                 for (const value of widgetValues) {
                     if (typeof value !== "string") continue;
                     const text = value.trim();
@@ -5871,7 +6143,7 @@ app.registerExtension({
                 return false;
             }
 
-            const looksModelInput = MODEL_VALIDATION_INPUT_NAMES.has(inputNameLower);
+            const looksModelInput = isModelValidationInputName(inputNameLower);
             const looksModelByClassAndInput =
                 isLikelyModelLoaderClass(classType) && inputNameLower.endsWith("_name");
             const looksModelByClassAndValue =
@@ -6639,16 +6911,23 @@ app.registerExtension({
             if (workflowOpenTriggeredForCurrentLoad) {
                 return false;
             }
+            try {
+                alignGraphWidgetSlashes(app?.rootGraph);
+            } catch (_) {}
             const workflowOpenCandidates = Array.isArray(candidates)
                 ? candidates
                     .filter((candidate) => isMissingModelCandidate(candidate))
                     .map((candidate) => ({ ...candidate }))
                 : [];
+            const hasLiveNodes = Array.isArray(app?.rootGraph?.nodes) && app.rootGraph.nodes.length > 0;
+            const liveValues = hasLiveNodes ? collectAllLiveWidgetValues() : new Set();
             const bypassedWorkflowOpenCandidates = workflowOpenCandidates.filter((candidate) =>
-                isFrontendMissingModelCandidateBypassed(candidate)
+                isFrontendMissingModelCandidateBypassed(candidate) ||
+                (hasLiveNodes && isPendingCandidateStaleInLiveGraph(candidate, liveValues))
             );
             const activeWorkflowOpenCandidates = workflowOpenCandidates.filter((candidate) =>
-                !isFrontendMissingModelCandidateBypassed(candidate)
+                !isFrontendMissingModelCandidateBypassed(candidate) &&
+                !(hasLiveNodes && isPendingCandidateStaleInLiveGraph(candidate, liveValues))
             );
             if (bypassedWorkflowOpenCandidates.length) {
                 clearMissingModelNodeHighlights(bypassedWorkflowOpenCandidates);
@@ -6679,10 +6958,59 @@ app.registerExtension({
                 return false;
             }
 
-            workflowOpenLastTriggeredAt = now;
             clearMissingModelNodeHighlights(activeWorkflowOpenCandidates);
             void clearModelValidationErrorsFromFrontendState();
 
+            const frontendMissingEntries =
+                await createRunHookFallbackMissingModelsFromFrontendStore(activeWorkflowOpenCandidates);
+            console.log(
+                "[AutoDownload] Workflow-open actionable entries:",
+                frontendMissingEntries.map((entry) => ({
+                    filename: entry?.filename || entry?.name || "",
+                    folder: entry?.suggested_folder || entry?.directory || "",
+                    url: entry?.url || "",
+                }))
+            );
+            if (!frontendMissingEntries.length) {
+                void applyResolvedFrontendMissingModelState(workflowOpenCandidates, [], []);
+                return false;
+            }
+
+            const preflightWorkflow =
+                serializeWorkflowForModelScan() ||
+                (workflowGraphData && typeof workflowGraphData === "object" ? workflowGraphData : null);
+            const enrichedResults = await enrichMissingEntriesViaBackend(frontendMissingEntries, {
+                workflow: preflightWorkflow,
+                requestId: `workflow_open_${Date.now()}`,
+                skipHfSearch: true,
+            });
+            if (enrichedResults && typeof enrichedResults === "object") {
+                const rawMismatches = Array.isArray(enrichedResults?.mismatches)
+                    ? [...enrichedResults.mismatches]
+                    : (Array.isArray(enrichedResults?.path_mismatches) ? [...enrichedResults.path_mismatches] : []);
+                const autoFix = autoApplyPathMismatches(rawMismatches);
+                if (autoFix.fixedRows > 0) {
+                    showToast({
+                        severity: "info",
+                        summary: "Model paths auto-fixed",
+                        detail: `Updated ${autoFix.fixedRefs} loader reference${autoFix.fixedRefs === 1 ? "" : "s"} to installed model paths.`,
+                        life: 3200,
+                    });
+                }
+                const remainingMissing = Array.isArray(enrichedResults?.missing) ? enrichedResults.missing : [];
+                const remainingMismatches = autoFix.remaining;
+                if (remainingMissing.length === 0 && remainingMismatches.length === 0) {
+                    void applyResolvedFrontendMissingModelState(
+                        workflowOpenCandidates,
+                        [],
+                        []
+                    );
+                    return false;
+                }
+            }
+
+            workflowOpenLastTriggeredAt = Date.now();
+            workflowOpenTriggeredForCurrentLoad = true;
             const runAction = window?.hfDownloader?.runAutoDownload;
             if (typeof runAction === "function") {
                 runAction(new Set(), false, {
@@ -6700,63 +7028,30 @@ app.registerExtension({
                 return true;
             }
 
-            const frontendMissingEntries =
-                await createRunHookFallbackMissingModelsFromFrontendStore(activeWorkflowOpenCandidates);
-            console.log(
-                "[AutoDownload] Workflow-open actionable entries:",
-                frontendMissingEntries.map((entry) => ({
-                    filename: entry?.filename || entry?.name || "",
-                    folder: entry?.suggested_folder || entry?.directory || "",
-                    url: entry?.url || "",
-                }))
-            );
-            if (frontendMissingEntries.length) {
-                const enrichedResults = await enrichMissingEntriesViaBackend(frontendMissingEntries, {
-                    workflow:
-                        workflowGraphData && typeof workflowGraphData === "object"
-                            ? workflowGraphData
-                            : serializeWorkflowForModelScan(),
-                    requestId: `workflow_open_${Date.now()}`,
-                    skipHfSearch: true,
-                });
-                const resultsToShow = enrichedResults && countActionableScanResults(enrichedResults)
-                    ? enrichedResults
-                    : {
-                        request_id: `workflow_open_${Date.now()}`,
-                        missing: frontendMissingEntries,
-                        found: [],
-                        mismatches: [],
-                    };
-                if (countDownloadRequiredScanResults(resultsToShow) <= 0) {
-                    void applyResolvedFrontendMissingModelState(
-                        workflowOpenCandidates,
-                        Array.isArray(resultsToShow?.missing) ? resultsToShow.missing : [],
-                        Array.isArray(resultsToShow?.mismatches)
-                            ? resultsToShow.mismatches
-                            : (Array.isArray(resultsToShow?.path_mismatches) ? resultsToShow.path_mismatches : [])
-                    );
-                    return false;
+            const resultsToShow = enrichedResults && typeof enrichedResults === "object"
+                ? enrichedResults
+                : {
+                    request_id: `workflow_open_${Date.now()}`,
+                    missing: frontendMissingEntries,
+                    found: [],
+                    mismatches: [],
+                };
+            showResultsDialog(
+                resultsToShow,
+                {
+                    suppressEmptyResults: true,
+                    triggeredByWorkflowOpen: true,
+                    frontendMissingModelCandidates: activeWorkflowOpenCandidates,
+                    reason: "workflow-open-missing-models",
                 }
-                workflowOpenTriggeredForCurrentLoad = true;
-                showResultsDialog(
-                    resultsToShow,
-                    {
-                        suppressEmptyResults: true,
-                        triggeredByWorkflowOpen: true,
-                        frontendMissingModelCandidates: activeWorkflowOpenCandidates,
-                        reason: "workflow-open-missing-models",
-                    }
-                );
-                showToast({
-                    severity: "info",
-                    summary: "Missing models detected",
-                    detail: "Opened Auto-download from ComfyUI's workflow-open missing-model scan.",
-                    life: 3200,
-                });
-                return true;
-            }
-
-            return false;
+            );
+            showToast({
+                severity: "info",
+                summary: "Missing models detected",
+                detail: "Opened Auto-download from ComfyUI's workflow-open missing-model scan.",
+                life: 3200,
+            });
+            return true;
         };
 
         const getWorkflowOpenBackendResults = async (graphData = null) => {
@@ -6796,15 +7091,25 @@ app.registerExtension({
                     return null;
                 }
                 const data = await resp.json();
+                const rawMismatches = Array.isArray(data?.mismatches)
+                    ? data.mismatches
+                    : (Array.isArray(data?.path_mismatches) ? data.path_mismatches : []);
+                const autoFix = autoApplyPathMismatches(rawMismatches);
+                if (autoFix.fixedRows > 0) {
+                    showToast({
+                        severity: "info",
+                        summary: "Model paths auto-fixed",
+                        detail: `Updated ${autoFix.fixedRefs} loader reference${autoFix.fixedRefs === 1 ? "" : "s"} to installed model paths.`,
+                        life: 3200,
+                    });
+                }
                 return {
                     request_id: data?.request_id || `workflow_open_backend_${Date.now()}`,
                     missing: filterRunHookEligibleMissingModels(
                         Array.isArray(data?.missing) ? data.missing : []
                     ),
                     found: Array.isArray(data?.found) ? data.found : [],
-                    mismatches: Array.isArray(data?.mismatches)
-                        ? data.mismatches
-                        : (Array.isArray(data?.path_mismatches) ? data.path_mismatches : []),
+                    mismatches: autoFix.remaining,
                 };
             } catch (_) {
                 return null;
@@ -6879,7 +7184,7 @@ app.registerExtension({
                             );
                             if (!signature) {
                                 const backendResults = await getWorkflowOpenBackendResults(
-                                    loadedGraphData || serializeWorkflowForModelScan()
+                                    serializeWorkflowForModelScan() || loadedGraphData
                                 );
                                 const backendTargetCount = countDownloadRequiredScanResults(backendResults || {});
                                 const backendSignature =
@@ -6964,14 +7269,37 @@ app.registerExtension({
                 executionErrorStore.surfaceMissingModels.bind(executionErrorStore);
 
             executionErrorStore.surfaceMissingModels = (models) => {
-                const result = originalSurfaceMissingModels(models);
                 try {
-                    if (getWorkflowOpenAutoEnabled() && Array.isArray(models) && models.length) {
+                    alignGraphWidgetSlashes(app?.rootGraph);
+                } catch (_) {}
+                let filteredModels = models;
+                try {
+                    const hasLiveNodes = Array.isArray(app?.rootGraph?.nodes) && app.rootGraph.nodes.length > 0;
+                    if (hasLiveNodes && Array.isArray(models) && models.length) {
+                        const liveValues = collectAllLiveWidgetValues();
+                        const resolvedCandidates = models.filter(
+                            (c) => isFrontendMissingModelCandidateBypassed(c) || isPendingCandidateStaleInLiveGraph(c, liveValues)
+                        );
+                        filteredModels = models.filter(
+                            (c) => !isFrontendMissingModelCandidateBypassed(c) && !isPendingCandidateStaleInLiveGraph(c, liveValues)
+                        );
+                        if (resolvedCandidates.length) {
+                            clearMissingModelNodeHighlights(resolvedCandidates);
+                            void clearMissingModelStoreState(resolvedCandidates);
+                        }
+                        if (!filteredModels.length) {
+                            return;
+                        }
+                    }
+                } catch (_) {}
+                const result = originalSurfaceMissingModels(filteredModels);
+                try {
+                    if (getWorkflowOpenAutoEnabled() && Array.isArray(filteredModels) && filteredModels.length) {
                         if (workflowOpenTriggeredForCurrentLoad) {
                             return result;
                         }
                         const activePath = getActiveWorkflowPathKey();
-                        const signature = buildMissingModelCandidatesSignature(models);
+                        const signature = buildMissingModelCandidatesSignature(filteredModels);
                         if (
                             signature &&
                             signature === workflowOpenLastHandledSignature &&
@@ -6983,7 +7311,7 @@ app.registerExtension({
                             workflowOpenLastHandledSignature = signature;
                             workflowOpenLastHandledPath = activePath;
                         }
-                        void triggerAutoDownloadFromWorkflowOpen(models);
+                        void triggerAutoDownloadFromWorkflowOpen(filteredModels);
                     }
                 } catch (err) {
                     console.warn(

@@ -1911,9 +1911,11 @@ def _collect_models_from_nodes(
 
         if node_type in {"LoadLoraModel", "LoadLoraTextEncoder", "Load LoRA (Model)", "Load LoRA (Text Encoder)"}:
             raw_wv = node.get("widgets_values")
-            if isinstance(raw_wv, list) and len(raw_wv) >= 4 and isinstance(raw_wv[0], int):
-                # Format: [count, lora_name_0, strength_0, enabled_0, lora_name_1, strength_1, enabled_1, ...]
-                row_idx = 1
+            if isinstance(raw_wv, list) and len(raw_wv) >= 3:
+                # Format is either:
+                # - [count, lora_name_0, strength_0, enabled_0, ...] (saved workflow with count)
+                # - [lora_name_0, strength_0, enabled_0, ...] (live serialized graph without count)
+                row_idx = 1 if (not isinstance(raw_wv[0], bool) and isinstance(raw_wv[0], int)) else 0
                 while row_idx + 2 < len(raw_wv):
                     strength_val = raw_wv[row_idx + 1]
                     enabled_val = raw_wv[row_idx + 2]
@@ -3285,12 +3287,29 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                 continue
 
             requested_path = str(item.get("requested_path") or filename).strip() or filename
-            suggested_folder = str(
+            node_title = str(item.get("node_title") or item.get("nodeType") or "").strip()
+            node_type = str(item.get("node_type") or item.get("nodeType") or "").strip()
+            input_name = str(item.get("input_name") or item.get("widgetName") or "").strip()
+            raw_folder = str(
                 item.get("suggested_folder")
                 or item.get("directory")
                 or item.get("folder")
+                or ""
+            ).strip()
+            resolved_folder = None
+            if not raw_folder or raw_folder == "checkpoints":
+                resolved_folder = resolve_node_folder_for_widget(
+                    {"type": node_type or node_title, "title": node_title or node_type},
+                    widget_index=None,
+                    widget_name=input_name or None,
+                    widget_value=filename,
+                )
+            suggested_folder = (
+                (resolved_folder if resolved_folder and resolved_folder != "checkpoints" else None)
+                or raw_folder
+                or resolved_folder
                 or "checkpoints"
-            ).strip() or "checkpoints"
+            )
             node_id = item.get("node_id") if item.get("node_id") is not None else item.get("nodeId")
             normalized_items.append({
                 "filename": filename,
@@ -3298,9 +3317,9 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
                 "suggested_folder": suggested_folder,
                 "directory": suggested_folder,
                 "node_id": node_id,
-                "node_title": str(item.get("node_title") or item.get("nodeType") or "").strip(),
-                "node_type": str(item.get("node_type") or item.get("nodeType") or "").strip(),
-                "input_name": str(item.get("input_name") or item.get("widgetName") or "").strip(),
+                "node_title": node_title,
+                "node_type": node_type,
+                "input_name": input_name,
                 "url": str(item.get("url") or "").strip(),
                 "hash": str(item.get("hash") or "").strip(),
                 "hash_type": str(item.get("hash_type") or item.get("hashType") or "").strip(),
@@ -3328,9 +3347,14 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         if incoming.get("requested_path") and not existing.get("requested_path"):
             existing["requested_path"] = incoming.get("requested_path")
 
-        if incoming.get("suggested_folder") and not existing.get("suggested_folder"):
-            existing["suggested_folder"] = incoming.get("suggested_folder")
-            existing["directory"] = incoming.get("suggested_folder")
+        incoming_folder = str(incoming.get("suggested_folder") or "").strip()
+        existing_folder = str(existing.get("suggested_folder") or "").strip()
+        if incoming_folder and (
+            not existing_folder
+            or (existing_folder == "checkpoints" and incoming_folder != "checkpoints")
+        ):
+            existing["suggested_folder"] = incoming_folder
+            existing["directory"] = incoming_folder
 
     def _merge_prefilled_missing_models(
         existing_models: list[dict],
