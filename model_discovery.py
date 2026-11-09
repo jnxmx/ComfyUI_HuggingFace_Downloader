@@ -893,7 +893,13 @@ def _guess_folder_from_filename(filename: str | None) -> str | None:
         or "qwen" in name
     ):
         return "text_encoders"
-    if "vae_approx" in name or "tinyvae" in name or "taesd" in name:
+    if (
+        "vae_approx" in name
+        or "tinyvae" in name
+        or "tiny_vae" in name
+        or name.startswith("tae")
+        or "taesd" in name
+    ):
         return "vae_approx"
     if "vae" in name:
         return "vae"
@@ -1522,6 +1528,14 @@ NODE_TYPE_MAPPING = {
     "Minimax_h3_latent_Upscaler_2D": "latent_upscale_models",
     "Minimax_h3_latent_Upscaler_3D": "latent_upscale_models",
     "MMH3_Split_Upscale": "latent_upscale_models",
+
+    # ComfyUI-KJNodes Model Preview Override
+    "ModelPreviewOverrideKJ": "vae_approx",
+    "ModelPreviewOverride": "vae_approx",
+    "Model Preview Override": "vae_approx",
+    "Model Preview Override KJ": "vae_approx",
+    "LTX2SamplingPreviewOverride": "vae_approx",
+    "LTX2 Sampling Preview Override": "vae_approx",
 }
 
 
@@ -1684,6 +1698,8 @@ def resolve_node_folder(node: dict) -> str | None:
         return "diffusion_models"
 
     if "kjnodes" in cnr_id:
+        if "preview" in node_type_lower or "tiny_vae" in node_type_lower:
+            return "vae_approx"
         if "clip" in node_type_lower:
             return "text_encoders"
         if "vae" in node_type_lower:
@@ -1692,6 +1708,9 @@ def resolve_node_folder(node: dict) -> str | None:
             return "loras"
         if "unet" in node_type_lower or "model" in node_type_lower:
             return "diffusion_models"
+
+    if "modelpreviewoverride" in node_type_lower or "previewoverride" in node_type_lower:
+        return "vae_approx"
 
     return None
 
@@ -1711,6 +1730,8 @@ def resolve_proxy_widget_folder(widget_name: str | None) -> str | None:
         return "diffusion_models"
     if "clip" in name:
         return "text_encoders"
+    if "tiny_vae" in name or "tinyvae" in name or "vae_approx" in name:
+        return "vae_approx"
     if "vae" in name:
         return "vae"
     if "lora" in name:
@@ -1947,6 +1968,7 @@ def _collect_models_from_nodes(
             "diffusion_model": 0,
             "vitpose_model": 0,
             "yolo_model": 0,
+            "tiny_vae": 5,
         }
 
         linked_widget_names = set()

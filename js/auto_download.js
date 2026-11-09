@@ -1000,6 +1000,9 @@ app.registerExtension({
             hypernetwork_name: "hypernetworks",
             photomaker_model_name: "photomaker",
             bg_removal_name: "background_removal",
+            tiny_vae: "vae_approx",
+            tiny_vae_name: "vae_approx",
+            vae_approx_name: "vae_approx",
         });
 
         const guessSuggestedFolderFromRunHookFilename = (value) => {
@@ -1030,7 +1033,13 @@ app.registerExtension({
             ) {
                 return "text_encoders";
             }
-            if (lower.includes("vae_approx") || lower.includes("tinyvae") || lower.includes("taesd")) {
+            if (
+                lower.includes("vae_approx") ||
+                lower.includes("tinyvae") ||
+                lower.includes("tiny_vae") ||
+                lower.startsWith("tae") ||
+                lower.includes("taesd")
+            ) {
                 return "vae_approx";
             }
             if (lower.includes("vae")) return "vae";
@@ -1049,6 +1058,7 @@ app.registerExtension({
             const classTypeLower = String(signals?.classType || "").trim().toLowerCase();
             if (classTypeLower) {
                 if (classTypeLower === "ltxvaudiovaeloader") return "checkpoints";
+                if (classTypeLower.includes("modelpreviewoverride") || classTypeLower.includes("previewoverride")) return "vae_approx";
                 if (classTypeLower.includes("clipvision")) return "clip_vision";
                 if (classTypeLower.includes("style")) return "style_models";
                 if (classTypeLower.includes("controlnet")) return "controlnet";
@@ -5310,7 +5320,9 @@ app.registerExtension({
             "checkpoint",
             "diffusion_model",
             "vitpose_model",
-            "yolo_model"
+            "yolo_model",
+            "tiny_vae",
+            "vae_approx"
         ]);
         const isModelValidationInputName = (name) => {
             const lower = String(name || "").trim().toLowerCase();
