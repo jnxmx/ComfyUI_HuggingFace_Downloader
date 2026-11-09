@@ -455,6 +455,36 @@ app.registerExtension({
             "clip_vision"
         ];
         const folderPickers = new Set();
+        const FOLDER_DROPDOWN_MAX_HEIGHT = 240;
+
+        const normalizeFolderQuery = (value) =>
+            String(value || "")
+                .replace(/\\/g, "/")
+                .trim()
+                .replace(/^\/+/, "")
+                .replace(/\/+$/, "")
+                .toLowerCase();
+
+        // Filter folders by every whitespace-separated term, ranking exact, prefix and
+        // segment-start matches ahead of plain substring matches (original order breaks ties).
+        const rankFolderMatches = (folders, typedQuery) => {
+            const q = normalizeFolderQuery(typedQuery);
+            const terms = q.split(/\s+/).filter(Boolean);
+            if (!terms.length) return [...folders];
+            const scored = [];
+            folders.forEach((folder, index) => {
+                const lower = folder.toLowerCase();
+                if (!terms.every((term) => lower.includes(term))) return;
+                let score = 4;
+                if (lower === q) score = 0;
+                else if (lower.startsWith(q)) score = 1;
+                else if (new RegExp(`(^|[/_\\-.])${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(lower)) score = 2;
+                else if (lower.includes(q)) score = 3;
+                scored.push({ folder, score, index });
+            });
+            scored.sort((a, b) => a.score - b.score || a.index - b.index);
+            return scored.map((s) => s.folder);
+        };
 
         const loadFolderList = () => {
             fetch("/folder_structure")
@@ -473,7 +503,8 @@ app.registerExtension({
                 });
         };
 
-        const createFolderPicker = (value, placeholder) => {
+        const createFolderPicker = (value, placeholder, options = {}) => {
+            const { autoFlip = false } = options;
             const wrapper = document.createElement("div");
             Object.assign(wrapper.style, {
                 position: "relative",
@@ -492,7 +523,7 @@ app.registerExtension({
                 background: "var(--comfy-menu-bg)",
                 border: "1px solid var(--border-default)",
                 borderTop: "none",
-                maxHeight: "180px",
+                maxHeight: `${FOLDER_DROPDOWN_MAX_HEIGHT}px`,
                 overflowY: "auto",
                 zIndex: 10,
                 display: "none",
@@ -500,52 +531,213 @@ app.registerExtension({
             });
             applyNativeScrollbarClasses(dropdown);
 
+            // query is null right after focus (show every folder, current one highlighted)
+            // and becomes the typed text once the user starts typing.
+            let query = null;
+            let valueAtFocus = input.value;
+            let listOptions = [];
+            let activeIndex = -1;
+
+            const isOpen = () => dropdown.style.display === "block";
+
+            const close = () => {
+                dropdown.style.display = "none";
+                query = null;
+            };
+
+            const choose = (folder) => {
+                input.value = folder;
+                close();
+                input.dispatchEvent(new Event("change", { bubbles: true }));
+            };
+
+            const setActive = (index, scroll = true) => {
+                const items = dropdown.querySelectorAll("[data-folder-option]");
+                items.forEach((el, i) => {
+                    el.style.background = i === index ? "var(--secondary-background-hover)" : "transparent";
+                });
+                activeIndex = index;
+                const activeItem = items[index];
+                if (scroll && activeItem) {
+                    // Scroll only the dropdown; scrollIntoView would also scroll any outer list.
+                    if (activeItem.offsetTop < dropdown.scrollTop) {
+                        dropdown.scrollTop = activeItem.offsetTop;
+                    } else if (activeItem.offsetTop + activeItem.offsetHeight > dropdown.scrollTop + dropdown.clientHeight) {
+                        dropdown.scrollTop = activeItem.offsetTop + activeItem.offsetHeight - dropdown.clientHeight;
+                    }
+                }
+            };
+
+            const appendHighlighted = (el, text, term) => {
+                const idx = term ? text.toLowerCase().indexOf(term) : -1;
+                if (idx < 0) {
+                    el.textContent = text;
+                    return;
+                }
+                el.appendChild(document.createTextNode(text.slice(0, idx)));
+                const mark = document.createElement("span");
+                mark.textContent = text.slice(idx, idx + term.length);
+                Object.assign(mark.style, { fontWeight: "700", color: "var(--p-primary-color, #6aa9ff)" });
+                el.appendChild(mark);
+                el.appendChild(document.createTextNode(text.slice(idx + term.length)));
+            };
+
             const buildList = () => {
                 dropdown.innerHTML = "";
-                if (!availableFolders.length) {
+                const typed = query === null ? "" : normalizeFolderQuery(query);
+                const matches = typed ? rankFolderMatches(availableFolders, typed) : [...availableFolders];
+                const exactExists = availableFolders.some((f) => f.toLowerCase() === typed);
+                listOptions = matches.map((folder) => ({ folder, label: folder }));
+                if (typed && !exactExists) {
+                    const newFolder = String(query).replace(/\\/g, "/").trim().replace(/^\/+|\/+$/g, "");
+                    listOptions.push({ folder: newFolder, label: `Create new folder “${newFolder}”`, isNew: true });
+                }
+
+                if (!listOptions.length) {
                     const empty = document.createElement("div");
                     empty.textContent = "No folders available";
                     empty.style.padding = "6px 8px";
                     empty.style.color = "#888";
                     dropdown.appendChild(empty);
+                    activeIndex = -1;
                     return;
                 }
-                availableFolders.forEach(folder => {
+
+                const highlightTerm = typed.split(/\s+/).filter(Boolean)[0] || "";
+                listOptions.forEach((option, index) => {
                     const item = document.createElement("div");
-                    item.textContent = folder;
+                    item.dataset.folderOption = "";
                     Object.assign(item.style, {
                         padding: "7px 10px",
                         cursor: "pointer",
-                        color: "var(--input-text)",
+                        color: option.isNew ? "#f5b14c" : "var(--input-text)",
                         fontSize: "13px",
                         fontFamily: "var(--font-inter, Inter, sans-serif)",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        borderTop: option.isNew && index > 0 ? "1px solid var(--border-default)" : "none",
                     });
-                    item.addEventListener("mouseenter", () => {
-                        item.style.background = "var(--secondary-background-hover)";
-                    });
-                    item.addEventListener("mouseleave", () => {
-                        item.style.background = "transparent";
-                    });
+                    if (option.isNew) {
+                        item.textContent = option.label;
+                    } else {
+                        appendHighlighted(item, option.label, highlightTerm);
+                    }
+                    item.title = option.folder;
+                    item.addEventListener("mouseenter", () => setActive(index, false));
                     item.addEventListener("mousedown", (e) => {
                         e.preventDefault();
-                        input.value = folder;
-                        dropdown.style.display = "none";
+                        choose(option.folder);
                     });
                     dropdown.appendChild(item);
                 });
+
+                // Typing: highlight the best match. Just opened: highlight the current value.
+                const current = normalizeFolderQuery(input.value);
+                const initialIndex = typed
+                    ? 0
+                    : Math.max(listOptions.findIndex((o) => o.folder.toLowerCase() === current), 0);
+                setActive(initialIndex);
+            };
+
+            // Open upward when the picker sits near the bottom of a scrolling list
+            // (or the viewport), so the dropdown is not clipped.
+            const positionDropdown = () => {
+                const flipUp = (() => {
+                    if (!autoFlip) return false;
+                    const rect = wrapper.getBoundingClientRect();
+                    let bottomLimit = window.innerHeight;
+                    let topLimit = 0;
+                    for (let el = wrapper.parentElement; el && el !== document.body; el = el.parentElement) {
+                        const overflowY = getComputedStyle(el).overflowY;
+                        if (overflowY === "auto" || overflowY === "scroll") {
+                            const parentRect = el.getBoundingClientRect();
+                            bottomLimit = Math.min(bottomLimit, parentRect.bottom);
+                            topLimit = Math.max(topLimit, parentRect.top);
+                            break;
+                        }
+                    }
+                    const spaceBelow = bottomLimit - rect.bottom;
+                    const spaceAbove = rect.top - topLimit;
+                    return spaceBelow < FOLDER_DROPDOWN_MAX_HEIGHT + 10 && spaceAbove > spaceBelow;
+                })();
+                Object.assign(dropdown.style, flipUp
+                    ? { top: "auto", bottom: "100%", borderTop: "1px solid var(--border-default)", borderBottom: "none", borderRadius: "8px 8px 0 0" }
+                    : { top: "100%", bottom: "auto", borderTop: "none", borderBottom: "1px solid var(--border-default)", borderRadius: "0 0 8px 8px" });
             };
 
             const showList = () => {
-                buildList();
+                positionDropdown();
                 dropdown.style.display = "block";
+                buildList();
             };
 
-            input.addEventListener("focus", showList);
-            input.addEventListener("input", showList);
-            input.addEventListener("blur", () => {
+            input.addEventListener("focus", () => {
+                valueAtFocus = input.value;
+                query = null;
+                showList();
+                // Select the current value so typing replaces it and starts filtering right away.
                 setTimeout(() => {
-                    dropdown.style.display = "none";
-                }, 150);
+                    if (document.activeElement === input) input.select();
+                }, 0);
+            });
+            let selectOnMouseUp = false;
+            input.addEventListener("mousedown", () => {
+                if (document.activeElement !== input) {
+                    // The click's mouseup would otherwise clear the select-all done on focus.
+                    selectOnMouseUp = true;
+                } else if (!isOpen()) {
+                    // Reopen when clicking an already-focused picker after choosing/escaping.
+                    query = null;
+                    showList();
+                }
+            });
+            input.addEventListener("mouseup", (event) => {
+                if (selectOnMouseUp) {
+                    selectOnMouseUp = false;
+                    event.preventDefault();
+                    input.select();
+                }
+            });
+            input.addEventListener("input", () => {
+                query = input.value;
+                showList();
+            });
+            input.addEventListener("keydown", (event) => {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    if (!isOpen()) {
+                        showList();
+                        return;
+                    }
+                    if (!listOptions.length) return;
+                    const step = event.key === "ArrowDown" ? 1 : -1;
+                    setActive((activeIndex + step + listOptions.length) % listOptions.length);
+                } else if (event.key === "Enter") {
+                    if (isOpen() && listOptions[activeIndex]) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        choose(listOptions[activeIndex].folder);
+                    }
+                } else if (event.key === "Escape") {
+                    if (isOpen()) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (query !== null && input.value !== valueAtFocus) {
+                            input.value = valueAtFocus;
+                            input.dispatchEvent(new Event("change", { bubbles: true }));
+                        }
+                        close();
+                    }
+                } else if (event.key === "Tab") {
+                    // Tab accepts the highlighted match only while filtering.
+                    if (isOpen() && query !== null && listOptions[activeIndex] && !listOptions[activeIndex].isNew) {
+                        choose(listOptions[activeIndex].folder);
+                    }
+                }
+            });
+            input.addEventListener("blur", () => {
+                setTimeout(close, 150);
             });
 
             wrapper.appendChild(input);
@@ -553,14 +745,14 @@ app.registerExtension({
 
             const picker = {
                 refresh: () => {
-                    if (dropdown.style.display === "block") {
+                    if (isOpen()) {
                         buildList();
                     }
                 }
             };
             folderPickers.add(picker);
 
-            return { wrapper, input };
+            return { wrapper, input, destroy: () => folderPickers.delete(picker) };
         };
 
         const parseFilenameFromUrl = (url) => {
@@ -4153,12 +4345,11 @@ app.registerExtension({
 
         const showManualDownloadDialog = () => {
 
-            let pollTimer = null;
+            // The repo browser can queue several batches from one dialog, each with its own poller.
+            const pollTimers = new Set();
             const stopPolling = () => {
-                if (pollTimer) {
-                    clearInterval(pollTimer);
-                    pollTimer = null;
-                }
+                pollTimers.forEach((timer) => clearInterval(timer));
+                pollTimers.clear();
             };
 
             const existing = document.getElementById("manual-download-dialog");
@@ -4170,6 +4361,8 @@ app.registerExtension({
 
             const closeDialog = () => {
                 stopPolling();
+                repoPickers.forEach((picker) => picker.destroy());
+                bulkPicker.destroy();
                 if (dlg.parentElement) {
                     dlg.remove();
                 }
@@ -4248,13 +4441,30 @@ app.registerExtension({
                 minHeight: "40px",
             });
 
+            const urlRow = document.createElement("div");
+            Object.assign(urlRow.style, {
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+            });
+            const browseBtn = createButton("Browse", "p-button p-component p-button-secondary", null);
+            applyNativeButtonStyle(browseBtn, "secondary");
+            browseBtn.style.flexShrink = "0";
+            browseBtn.style.display = "none";
+            urlRow.appendChild(urlInput);
+            urlRow.appendChild(browseBtn);
+
             const fullRepoSwitchRow = document.createElement("div");
             Object.assign(fullRepoSwitchRow.style, {
-                display: "flex",
+                // Shrink to the switch + label so clicks elsewhere across the dialog
+                // don't toggle it (turning it on clears an open repo file list).
+                display: "inline-flex",
+                alignSelf: "flex-start",
                 alignItems: "center",
                 justifyContent: "flex-start",
                 gap: "10px",
                 marginTop: "2px",
+                cursor: "pointer",
             });
 
             const fullRepoSwitchText = document.createElement("span");
@@ -4337,12 +4547,21 @@ app.registerExtension({
                 minHeight: "40px",
             });
 
+            const repoSection = document.createElement("div");
+            Object.assign(repoSection.style, {
+                display: "none",
+                flexDirection: "column",
+                gap: "8px",
+                marginTop: "4px",
+            });
+
             content.appendChild(urlLabel);
-            content.appendChild(urlInput);
+            content.appendChild(urlRow);
             content.appendChild(fullRepoSwitchRow);
             content.appendChild(destinationPreviewLine);
             content.appendChild(folderLabel);
             content.appendChild(folderPicker.wrapper);
+            content.appendChild(repoSection);
             panel.appendChild(content);
 
             const footer = document.createElement("div");
@@ -4366,6 +4585,1031 @@ app.registerExtension({
                 statusLine.textContent = msg || "";
                 statusLine.style.color = color;
             };
+
+            /* ── Shared queue submission + status polling ── */
+            const TERMINAL_DOWNLOAD_STATUSES = new Set(["downloaded", "completed", "failed", "cancelled"]);
+
+            // POST models to /queue_download and poll their status until all reach a terminal state.
+            // hooks.onQueued(queued, rejected) runs before polling starts; hooks.onStatus(id, info) on
+            // every poll; hooks.onFinished(failures, total) once everything is done.
+            const submitQueue = async (models, hooks = {}) => {
+                const resp = await fetch("/queue_download", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ models })
+                });
+                if (resp.status !== 200) {
+                    throw new Error("Server returned " + resp.status + " " + resp.statusText);
+                }
+                const res = await resp.json();
+                const queued = res.queued || [];
+                const rejected = Array.isArray(res.rejected) ? res.rejected : [];
+                const downloadIds = queued.map((q) => q.download_id).filter(Boolean);
+                hooks.onQueued?.(queued, rejected);
+                if (!downloadIds.length) {
+                    return { queued, rejected };
+                }
+
+                const pending = new Set(downloadIds);
+                let statusErrorToastShown = false;
+                let finished = false;
+                let timer = null;
+
+                const poll = async () => {
+                    if (finished) return;
+                    try {
+                        const statusResp = await fetch(`/download_status?ids=${encodeURIComponent(downloadIds.join(","))}`);
+                        if (statusResp.status !== 200) return;
+                        const statusData = await statusResp.json();
+                        const downloads = statusData.downloads || {};
+                        statusErrorToastShown = false;
+                        if (finished) return;
+
+                        for (const id of downloadIds) {
+                            const info = downloads[id];
+                            if (!info) continue;
+                            hooks.onStatus?.(id, info);
+                            if (TERMINAL_DOWNLOAD_STATUSES.has(info.status)) {
+                                pending.delete(id);
+                            }
+                        }
+
+                        if (pending.size === 0) {
+                            finished = true;
+                            clearInterval(timer);
+                            pollTimers.delete(timer);
+                            const failures = downloadIds.filter((id) => downloads[id]?.status === "failed" || downloads[id]?.status === "cancelled").length;
+                            hooks.onFinished?.(failures, downloadIds.length);
+                        }
+                    } catch (e) {
+                        if (!statusErrorToastShown) {
+                            showToast({
+                                severity: "error",
+                                summary: "Status error",
+                                detail: "Status polling failed. Retrying in background."
+                            });
+                            statusErrorToastShown = true;
+                        }
+                        setStatus("Status polling error.", "#ff6b6b");
+                    }
+                };
+
+                timer = setInterval(poll, 1000);
+                pollTimers.add(timer);
+                poll();
+                return { queued, rejected };
+            };
+
+            /* ── Repo browser: list a repo's files and queue a selection ── */
+            const DIALOG_WIDTH_DEFAULT = "min(820px, 100%)";
+            const DIALOG_WIDTH_BROWSING = "min(1080px, 100%)";
+            const MISSING_DESTINATION_BORDER = "color-mix(in srgb, var(--destructive-background) 50%, var(--border-default) 50%)";
+            const MISSING_DESTINATION_BG = "color-mix(in srgb, var(--comfy-input-bg) 88%, var(--destructive-background) 12%)";
+            const REPO_ROW_STATUS_LABELS = {
+                queued: ["Queued", "#9ad6ff"],
+                downloading: ["Downloading", "#9ad6ff"],
+                copying: ["Downloading", "#9ad6ff"],
+                cleaning_cache: ["Finalizing", "#9ad6ff"],
+                finalizing: ["Finalizing", "#9ad6ff"],
+                verifying: ["Verifying", "#9ad6ff"],
+                downloaded: ["Done", "#5bd98c"],
+                completed: ["Done", "#5bd98c"],
+                failed: ["Failed", "#ff6b6b"],
+                cancelling: ["Cancelling", "#f5b14c"],
+                cancelled: ["Cancelled", "#f5b14c"],
+            };
+
+            let downloadBtnRef = null;
+            let repoListing = null; // /hf_repo_files response plus the link it was fetched for
+            let repoBrowseRequestId = 0;
+            let showAllRepoFiles = false;
+            const repoSelected = new Set();
+            const repoDestinations = new Map();
+            const repoRowStatus = new Map();
+            let repoRowRefs = new Map(); // path -> { input, badge } for the current render
+            let repoPickers = [];
+
+            // True for HF repo / tree links and owner/repo shorthand; false for single-file links.
+            const isRepoBrowseLink = (link) => {
+                const value = String(link || "").trim();
+                if (!value) return false;
+                let pathText = value;
+                if (value.includes("://")) {
+                    try {
+                        const parsed = new URL(value);
+                        if (String(parsed.hostname || "").toLowerCase() !== "huggingface.co") return false;
+                        pathText = parsed.pathname || "";
+                    } catch {
+                        return false;
+                    }
+                }
+                const parts = String(pathText).split("?")[0].split("#")[0].split("/").filter(Boolean);
+                if (parts.length < 2) return false;
+                if (parts.includes("resolve") || parts.includes("blob")) return false;
+                if (parts.length > 2 && !parts.includes("tree") && parts[parts.length - 1].includes(".")) return false;
+                return true;
+            };
+
+            const formatRepoFileSize = (value) => {
+                if (value === null || value === undefined) return "";
+                const units = ["B", "KB", "MB", "GB", "TB"];
+                let size = Number(value) || 0;
+                let unitIndex = 0;
+                while (size >= 1024 && unitIndex < units.length - 1) {
+                    size /= 1024;
+                    unitIndex += 1;
+                }
+                const decimals = size >= 10 || unitIndex === 0 ? 0 : 1;
+                return `${size.toFixed(decimals)} ${units[unitIndex]}`;
+            };
+
+            const buildRepoFileUrl = (file) => {
+                const encodedPath = String(file.path).split("/").map(encodeURIComponent).join("/");
+                return `https://huggingface.co/${repoListing.repo}/resolve/${encodeURIComponent(repoListing.revision || "main")}/${encodedPath}`;
+            };
+
+            const visibleRepoFiles = () => (repoListing?.files || []).filter((f) => showAllRepoFiles || f.is_model);
+            const repoDestinationFor = (file) => normalizeFolderPathInput(repoDestinations.get(file.path) || "");
+
+            const styleDestinationInput = (input) => {
+                const value = normalizeFolderPathInput(input.value);
+                const missing = !value;
+                const isNewFolder = !missing && !availableFolders.some((f) => f.toLowerCase() === value.toLowerCase());
+                input.style.borderColor = missing
+                    ? MISSING_DESTINATION_BORDER
+                    : isNewFolder ? "#f5b14c" : "var(--border-default)";
+                input.style.background = missing ? MISSING_DESTINATION_BG : "var(--comfy-input-bg)";
+                input.title = isNewFolder ? `New folder: models/${value} will be created` : value ? `models/${value}` : "";
+            };
+
+            const createSmallSwitch = (labelText, onChange) => {
+                const row = document.createElement("label");
+                Object.assign(row.style, {
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                    color: "var(--input-text)",
+                    userSelect: "none",
+                });
+                const wrap = document.createElement("span");
+                wrap.className = "hf-manual-toggle p-toggleswitch p-component";
+                const input = document.createElement("input");
+                input.type = "checkbox";
+                input.className = "p-toggleswitch-input";
+                input.setAttribute("role", "switch");
+                input.setAttribute("aria-label", labelText);
+                const slider = document.createElement("span");
+                slider.className = "p-toggleswitch-slider";
+                wrap.appendChild(input);
+                wrap.appendChild(slider);
+                const text = document.createElement("span");
+                text.textContent = labelText;
+                row.appendChild(wrap);
+                row.appendChild(text);
+                const syncVisual = () => {
+                    wrap.classList.toggle("p-toggleswitch-checked", input.checked);
+                    input.setAttribute("aria-checked", input.checked ? "true" : "false");
+                };
+                input.addEventListener("change", () => {
+                    syncVisual();
+                    onChange(input.checked);
+                });
+                return {
+                    element: row,
+                    set: (checked) => {
+                        input.checked = Boolean(checked);
+                        syncVisual();
+                    },
+                };
+            };
+
+            const createLinkButton = (text, onClick) => {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.textContent = text;
+                Object.assign(btn.style, {
+                    background: "none",
+                    border: "none",
+                    padding: "0",
+                    color: "var(--p-primary-color, #6aa9ff)",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                });
+                btn.addEventListener("click", onClick);
+                return btn;
+            };
+
+            const repoHeader = document.createElement("div");
+            Object.assign(repoHeader.style, {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: "8px 16px",
+            });
+            const repoTitle = document.createElement("div");
+            Object.assign(repoTitle.style, {
+                fontSize: "14px",
+                fontWeight: "600",
+                color: "var(--input-text)",
+                minWidth: "0",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+            });
+            const repoHeaderControls = document.createElement("div");
+            Object.assign(repoHeaderControls.style, {
+                display: "flex",
+                alignItems: "center",
+                gap: "14px",
+            });
+            const showAllSwitch = createSmallSwitch("Show all files", (checked) => {
+                showAllRepoFiles = checked;
+                if (!checked) {
+                    // Don't queue files the user can no longer see.
+                    for (const f of repoListing?.files || []) {
+                        if (!f.is_model) repoSelected.delete(f.path);
+                    }
+                }
+                renderRepoList();
+            });
+            const selectAllBtn = createLinkButton("Select all", () => {
+                visibleRepoFiles().forEach((f) => repoSelected.add(f.path));
+                renderRepoList();
+            });
+            const selectNoneBtn = createLinkButton("Select none", () => {
+                repoSelected.clear();
+                renderRepoList();
+            });
+            repoHeaderControls.appendChild(showAllSwitch.element);
+            repoHeaderControls.appendChild(selectAllBtn);
+            repoHeaderControls.appendChild(selectNoneBtn);
+            repoHeader.appendChild(repoTitle);
+            repoHeader.appendChild(repoHeaderControls);
+
+            const repoNotice = document.createElement("div");
+            Object.assign(repoNotice.style, {
+                display: "none",
+                fontSize: "13px",
+                lineHeight: "1.4",
+                color: "#f5b14c",
+            });
+
+            const bulkRow = document.createElement("div");
+            Object.assign(bulkRow.style, {
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+            });
+            const bulkLabel = document.createElement("span");
+            bulkLabel.textContent = "Set destination for selected:";
+            Object.assign(bulkLabel.style, {
+                fontSize: "13px",
+                color: "var(--descrip-text, #9aa1ad)",
+                whiteSpace: "nowrap",
+            });
+            const bulkPicker = createFolderPicker("", "Folder");
+            Object.assign(bulkPicker.wrapper.style, { flex: "1", minWidth: "0" });
+            Object.assign(bulkPicker.input.style, { minHeight: "34px", padding: "4px 10px", fontSize: "13px" });
+            // createInput only tints URL placeholders; keep the bulk picker neutral.
+            bulkPicker.input.style.borderColor = "var(--border-default)";
+            bulkPicker.input.style.background = "var(--comfy-input-bg)";
+            const bulkApplyBtn = createButton("Apply", "p-button p-component p-button-secondary", () => {
+                const dest = normalizeFolderPathInput(bulkPicker.input.value);
+                if (!dest) {
+                    showToast({ severity: "warn", summary: "No folder", detail: "Choose a destination folder first." });
+                    return;
+                }
+                const selectedVisible = visibleRepoFiles().filter((f) => repoSelected.has(f.path));
+                if (!selectedVisible.length) {
+                    showToast({ severity: "warn", summary: "Nothing selected", detail: "Select the files to apply this folder to." });
+                    return;
+                }
+                selectedVisible.forEach((f) => repoDestinations.set(f.path, dest));
+                renderRepoList();
+            });
+            applyNativeButtonStyle(bulkApplyBtn, "secondary");
+            Object.assign(bulkApplyBtn.style, { minHeight: "34px", flexShrink: "0" });
+            bulkRow.appendChild(bulkLabel);
+            bulkRow.appendChild(bulkPicker.wrapper);
+            bulkRow.appendChild(bulkApplyBtn);
+
+            const repoList = document.createElement("div");
+            Object.assign(repoList.style, {
+                // Leave room for the dialog chrome above and the summary, space warnings and
+                // footer below so the Download button stays on screen (panel max is 92vh).
+                maxHeight: "max(180px, min(480px, calc(92vh - 480px)))",
+                overflowY: "auto",
+                border: "1px solid var(--border-default)",
+                borderRadius: "8px",
+                padding: "4px 0",
+            });
+            applyNativeScrollbarClasses(repoList);
+
+            const repoSummary = document.createElement("div");
+            Object.assign(repoSummary.style, {
+                fontSize: "13px",
+                color: "var(--descrip-text, #9aa1ad)",
+            });
+
+            const repoSpaceWarning = document.createElement("div");
+            Object.assign(repoSpaceWarning.style, {
+                display: "none",
+                flexDirection: "column",
+                gap: "2px",
+                fontSize: "13px",
+                lineHeight: "1.4",
+            });
+
+            repoSection.appendChild(repoHeader);
+            repoSection.appendChild(repoNotice);
+            repoSection.appendChild(bulkRow);
+            repoSection.appendChild(repoList);
+            repoSection.appendChild(repoSummary);
+            repoSection.appendChild(repoSpaceWarning);
+
+            const REPO_ROW_GRID = "20px minmax(0, 1fr) 64px minmax(220px, 320px)";
+
+            // Show the filename-based suggestion chip only while the file has no destination.
+            const updateRowHintChip = (file) => {
+                const refs = repoRowRefs.get(file.path);
+                if (!refs?.hintChip) return;
+                refs.hintChip.style.display = !repoDestinationFor(file) && file.hint_folder ? "" : "none";
+            };
+
+            // Set one file's destination and refresh its row (input, border, badge, hint chip).
+            const setFileDestination = (file, dest) => {
+                repoDestinations.set(file.path, dest);
+                const refs = repoRowRefs.get(file.path);
+                if (refs) {
+                    refs.input.value = dest;
+                    styleDestinationInput(refs.input);
+                }
+                updateRepoRowBadge(file);
+                updateRowHintChip(file);
+            };
+
+            const updateRepoRowBadge = (file) => {
+                const refs = repoRowRefs.get(file.path);
+                if (!refs) return;
+                const status = repoRowStatus.get(file.path);
+                const [label, color] = REPO_ROW_STATUS_LABELS[status] || [];
+                if (label) {
+                    refs.badge.textContent = label;
+                    refs.badge.style.color = color;
+                    refs.badge.style.display = "";
+                } else if (file.exists && repoDestinationFor(file) === normalizeFolderPathInput(file.suggested_folder)) {
+                    refs.badge.textContent = "Installed";
+                    refs.badge.style.color = "#5bd98c";
+                    refs.badge.style.display = "";
+                } else {
+                    refs.badge.style.display = "none";
+                }
+            };
+
+            /* ── Disk space: free space per destination volume vs. what the selection needs ── */
+            const DISK_INFO_MAX_AGE_MS = 15000;
+            let diskInfo = null; // /disk_space response for diskInfoKey
+            let diskInfoKey = null;
+            let diskInfoFetchedAt = 0;
+            let diskInfoRequestId = 0;
+            let diskInfoTimer = null;
+            let spaceOverrideKey = null; // selection the user chose to download despite a space warning
+            // Bytes still to be written for files queued from this listing: path -> { folder, remaining }
+            const repoPendingBytes = new Map();
+
+            const selectedRepoFiles = () => visibleRepoFiles().filter((f) => repoSelected.has(f.path));
+            // Files the downloader will skip because they already exist at the destination.
+            const isAlreadyInstalled = (f) =>
+                f.exists && repoDestinationFor(f) === normalizeFolderPathInput(f.suggested_folder);
+
+            const diskFoldersKey = () => {
+                const folders = new Set(selectedRepoFiles().map(repoDestinationFor).filter(Boolean));
+                repoPendingBytes.forEach((p) => folders.add(p.folder));
+                return [...folders].sort().join("\n");
+            };
+
+            const fetchDiskInfo = async () => {
+                const key = diskFoldersKey();
+                const requestId = ++diskInfoRequestId;
+                const params = new URLSearchParams();
+                key.split("\n").filter(Boolean).forEach((folder) => params.append("folder", folder));
+                try {
+                    const resp = await fetch(`/hf_downloader_model_explorer_v2/disk_space?${params}`);
+                    const data = await resp.json();
+                    if (requestId !== diskInfoRequestId || !resp.ok || data.error) return;
+                    diskInfo = data;
+                    diskInfoKey = key;
+                    diskInfoFetchedAt = Date.now();
+                    if (repoListing) updateRepoSelectionUi();
+                } catch (e) {
+                    console.warn("[AutoDownload] Disk space lookup failed:", e);
+                }
+            };
+
+            const scheduleDiskInfoRefresh = () => {
+                const stale = Date.now() - diskInfoFetchedAt > DISK_INFO_MAX_AGE_MS;
+                if (diskInfoKey === diskFoldersKey() && !stale) return;
+                clearTimeout(diskInfoTimer);
+                diskInfoTimer = setTimeout(fetchDiskInfo, 250);
+            };
+
+            // Per-volume space plan for the current selection, or null until disk info covers it.
+            // Downloads land in the HF cache and are then moved into place, one at a time. On the
+            // cache's own volume that move is a rename, but a file headed to another volume is
+            // copied, so the cache volume briefly needs room for the largest such file.
+            const computeSpacePlan = () => {
+                const files = selectedRepoFiles().filter((f) => repoDestinationFor(f) && !isAlreadyInstalled(f));
+                if (!diskInfo || diskInfoKey !== diskFoldersKey()) return null;
+                if (!files.length) return { volumes: [], insufficient: [], tight: [] };
+                const volumeInfo = diskInfo.volumes || {};
+                const folderVolumes = diskInfo.folders || {};
+                const needs = new Map();
+                const addNeed = (volumeId, bytes, field) => {
+                    if (!volumeId || !volumeInfo[volumeId]) return;
+                    if (!needs.has(volumeId)) needs.set(volumeId, { id: volumeId, files: 0, pending: 0, cache: 0 });
+                    needs.get(volumeId)[field] += bytes;
+                };
+                files.forEach((f) => addNeed(folderVolumes[repoDestinationFor(f)], Number(f.size) || 0, "files"));
+                repoPendingBytes.forEach((p) => addNeed(folderVolumes[p.folder], p.remaining, "pending"));
+                const crossVolumeSizes = files
+                    .filter((f) => folderVolumes[repoDestinationFor(f)] !== diskInfo.cache_volume)
+                    .map((f) => Number(f.size) || 0);
+                if (crossVolumeSizes.length) {
+                    addNeed(diskInfo.cache_volume, Math.max(...crossVolumeSizes), "cache");
+                }
+
+                const volumes = [...needs.values()].map((v) => {
+                    const info = volumeInfo[v.id];
+                    return { ...v, mount: info.mount, free: info.free, total: info.total, need: v.files + v.pending + v.cache };
+                });
+                return {
+                    volumes,
+                    insufficient: volumes.filter((v) => v.need > v.free),
+                    tight: volumes.filter((v) => v.need <= v.free && v.need > v.free * 0.9),
+                };
+            };
+
+            const selectionSignature = () =>
+                selectedRepoFiles().map((f) => `${f.path}\t${repoDestinationFor(f)}`).sort().join("\n");
+
+            const describeVolumeNeed = (v) => {
+                const extras = [];
+                if (v.pending) extras.push(`${formatRepoFileSize(v.pending)} still downloading from earlier`);
+                if (v.cache) extras.push(`${formatRepoFileSize(v.cache)} temporary download cache`);
+                return `needs ${formatRepoFileSize(v.need)}${extras.length ? ` (incl. ${extras.join(", ")})` : ""}, ${formatRepoFileSize(v.free)} free`;
+            };
+
+            const updateRepoSpaceUi = (plan) => {
+                repoSpaceWarning.innerHTML = "";
+                const lines = [];
+                (plan?.insufficient || []).forEach((v) => lines.push([`Not enough space on ${v.mount}: ${describeVolumeNeed(v)}.`, "#ff6b6b"]));
+                (plan?.tight || []).forEach((v) => lines.push([`Space is tight on ${v.mount}: ${describeVolumeNeed(v)}.`, "#f5b14c"]));
+                lines.forEach(([text, color]) => {
+                    const line = document.createElement("div");
+                    line.textContent = text;
+                    line.style.color = color;
+                    repoSpaceWarning.appendChild(line);
+                });
+                repoSpaceWarning.style.display = lines.length ? "flex" : "none";
+            };
+
+            const updateRepoSelectionUi = () => {
+                const visible = visibleRepoFiles();
+                const selected = visible.filter((f) => repoSelected.has(f.path));
+                const totalBytes = selected.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
+                const missing = selected.filter((f) => !repoDestinationFor(f)).length;
+                scheduleDiskInfoRefresh();
+                const plan = computeSpacePlan();
+
+                let summary = `${selected.length} of ${visible.length} selected`;
+                if (selected.length) summary += ` · ${formatRepoFileSize(totalBytes)}`;
+                if (plan?.volumes.length > 1) {
+                    summary += ` · free: ${plan.volumes.map((v) => `${v.mount} ${formatRepoFileSize(v.free)}`).join(", ")}`;
+                } else if (plan?.volumes.length === 1) {
+                    summary += ` · ${formatRepoFileSize(plan.volumes[0].free)} free`;
+                } else if (diskInfo) {
+                    summary += ` · ${formatRepoFileSize(diskInfo.free)} free`;
+                }
+                if (missing) summary += ` · ${missing} need a destination folder`;
+                repoSummary.textContent = summary;
+                repoSummary.style.color = missing ? "#f5b14c" : "var(--descrip-text, #9aa1ad)";
+                updateRepoSpaceUi(plan);
+
+                if (downloadBtnRef) {
+                    const overridden = plan?.insufficient.length && spaceOverrideKey === selectionSignature();
+                    downloadBtnRef.textContent = !selected.length
+                        ? "Download"
+                        : overridden ? `Download ${selected.length} anyway` : `Download ${selected.length} selected`;
+                    downloadBtnRef.disabled = !selected.length;
+                    downloadBtnRef.style.opacity = selected.length ? "1" : "0.5";
+                }
+            };
+
+            const renderRepoList = () => {
+                repoPickers.forEach((picker) => picker.destroy());
+                repoPickers = [];
+                repoRowRefs = new Map();
+                repoList.innerHTML = "";
+
+                const files = visibleRepoFiles();
+                const allCount = repoListing?.files?.length || 0;
+                const modelCount = (repoListing?.files || []).filter((f) => f.is_model).length;
+                repoTitle.textContent = `${repoListing.repo}${repoListing.subfolder ? `/${repoListing.subfolder}` : ""} · ${modelCount} model file${modelCount === 1 ? "" : "s"}${allCount !== modelCount ? ` (${allCount} total)` : ""}`;
+                repoTitle.title = repoTitle.textContent;
+
+                if (!files.length) {
+                    const empty = document.createElement("div");
+                    empty.textContent = allCount
+                        ? "No model weight files found. Turn on “Show all files” to see everything in this repo."
+                        : "This repo has no files.";
+                    Object.assign(empty.style, { padding: "14px 12px", fontSize: "13px", color: "var(--descrip-text, #9aa1ad)" });
+                    repoList.appendChild(empty);
+                    updateRepoSelectionUi();
+                    return;
+                }
+
+                const groups = new Map();
+                for (const f of files) {
+                    if (!groups.has(f.dir)) groups.set(f.dir, []);
+                    groups.get(f.dir).push(f);
+                }
+
+                for (const [dir, groupFiles] of groups) {
+                    // Header uses the row grid so its destination picker lines up with the file pickers.
+                    const groupHeader = document.createElement("div");
+                    Object.assign(groupHeader.style, {
+                        display: "grid",
+                        gridTemplateColumns: REPO_ROW_GRID,
+                        alignItems: "center",
+                        gap: "10px",
+                        padding: "8px 12px 4px",
+                        fontSize: "12px",
+                        fontWeight: "600",
+                        letterSpacing: "0.03em",
+                        color: "var(--descrip-text, #9aa1ad)",
+                        userSelect: "none",
+                    });
+                    const groupCheckbox = document.createElement("input");
+                    groupCheckbox.type = "checkbox";
+                    Object.assign(groupCheckbox.style, { margin: "0", cursor: "pointer" });
+                    const groupText = document.createElement("span");
+                    groupText.textContent = `${dir || "(repo root)"}  ·  ${groupFiles.length}`;
+                    groupText.title = dir || "(repo root)";
+                    Object.assign(groupText.style, {
+                        cursor: "pointer",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        minWidth: "0",
+                    });
+                    groupText.addEventListener("click", () => groupCheckbox.click());
+                    const groupTextCell = document.createElement("div");
+                    Object.assign(groupTextCell.style, {
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        minWidth: "0",
+                    });
+                    groupTextCell.appendChild(groupText);
+                    // Fills each empty destination in the group with its own filename-based guess.
+                    const groupHintsBtn = createLinkButton("", () => {
+                        groupFiles.forEach((f) => {
+                            if (!repoDestinationFor(f) && f.hint_folder) setFileDestination(f, f.hint_folder);
+                        });
+                        syncGroupPicker();
+                        updateRepoSelectionUi();
+                    });
+                    Object.assign(groupHintsBtn.style, {
+                        fontSize: "12px",
+                        fontWeight: "600",
+                        letterSpacing: "0",
+                        whiteSpace: "nowrap",
+                        flexShrink: "0",
+                    });
+                    groupHintsBtn.title = "Use the folder guessed from each file's name for every file in this group that has no destination yet";
+                    groupTextCell.appendChild(groupHintsBtn);
+                    const syncGroupHints = () => {
+                        const n = groupFiles.filter((f) => !repoDestinationFor(f) && f.hint_folder).length;
+                        groupHintsBtn.textContent = `Apply ${n} suggestion${n === 1 ? "" : "s"}`;
+                        groupHintsBtn.style.display = n > 1 ? "" : "none";
+                    };
+                    const groupSize = document.createElement("span");
+                    groupSize.textContent = formatRepoFileSize(groupFiles.reduce((sum, f) => sum + (Number(f.size) || 0), 0));
+                    Object.assign(groupSize.style, {
+                        fontWeight: "500",
+                        textAlign: "right",
+                        fontVariantNumeric: "tabular-nums",
+                    });
+                    groupHeader.appendChild(groupCheckbox);
+                    groupHeader.appendChild(groupTextCell);
+                    groupHeader.appendChild(groupSize);
+                    repoList.appendChild(groupHeader);
+
+                    // Group destination: shows the folder shared by every file in the group (or
+                    // "Mixed"), and picking a folder applies it to all of them.
+                    let groupPicker = null;
+                    const syncGroupPicker = () => {
+                        syncGroupHints();
+                        if (!groupPicker || document.activeElement === groupPicker.input) return;
+                        const destinations = new Set(groupFiles.map(repoDestinationFor));
+                        const common = destinations.size === 1 ? [...destinations][0] : null;
+                        groupPicker.input.value = common ?? "";
+                        groupPicker.input.placeholder = common === null ? "Mixed: set all…" : "Set folder for all…";
+                        if (common === null) {
+                            groupPicker.input.style.borderColor = "var(--border-default)";
+                            groupPicker.input.style.background = "var(--comfy-input-bg)";
+                            groupPicker.input.title = "Files in this group go to different folders. Pick one to apply it to all.";
+                        } else {
+                            styleDestinationInput(groupPicker.input);
+                        }
+                    };
+                    if (groupFiles.length > 1) {
+                        groupPicker = createFolderPicker("", "Set folder for all…", { autoFlip: true });
+                        repoPickers.push(groupPicker);
+                        Object.assign(groupPicker.input.style, {
+                            minHeight: "30px",
+                            padding: "3px 10px",
+                            fontSize: "13px",
+                            letterSpacing: "0",
+                        });
+                        groupPicker.input.addEventListener("change", (event) => {
+                            // Apply only explicit picks (dropdown click, Enter, Tab). The browser's own
+                            // change-on-blur after partial typing is ignored and the display restored.
+                            if (event.isTrusted) return;
+                            const dest = normalizeFolderPathInput(groupPicker.input.value);
+                            if (!dest) return;
+                            groupFiles.forEach((f) => setFileDestination(f, dest));
+                            styleDestinationInput(groupPicker.input);
+                            syncGroupHints();
+                            updateRepoSelectionUi();
+                        });
+                        groupPicker.input.addEventListener("blur", () => setTimeout(syncGroupPicker, 160));
+                        groupHeader.appendChild(groupPicker.wrapper);
+                    }
+
+                    const rowCheckboxes = [];
+                    const syncGroupCheckbox = () => {
+                        const n = groupFiles.filter((f) => repoSelected.has(f.path)).length;
+                        groupCheckbox.checked = n === groupFiles.length;
+                        groupCheckbox.indeterminate = n > 0 && n < groupFiles.length;
+                    };
+                    groupCheckbox.addEventListener("change", () => {
+                        const check = groupCheckbox.checked;
+                        groupFiles.forEach((f, i) => {
+                            if (check) repoSelected.add(f.path);
+                            else repoSelected.delete(f.path);
+                            rowCheckboxes[i].checked = check;
+                        });
+                        syncGroupCheckbox();
+                        updateRepoSelectionUi();
+                    });
+
+                    for (const file of groupFiles) {
+                        const row = document.createElement("div");
+                        Object.assign(row.style, {
+                            display: "grid",
+                            gridTemplateColumns: REPO_ROW_GRID,
+                            alignItems: "center",
+                            gap: "10px",
+                            padding: "3px 12px 3px 32px",
+                            cursor: "pointer",
+                        });
+                        row.addEventListener("mouseenter", () => {
+                            row.style.background = "var(--secondary-background-hover)";
+                        });
+                        row.addEventListener("mouseleave", () => {
+                            row.style.background = "transparent";
+                        });
+
+                        const checkbox = document.createElement("input");
+                        checkbox.type = "checkbox";
+                        checkbox.checked = repoSelected.has(file.path);
+                        checkbox.style.margin = "0";
+                        checkbox.addEventListener("change", () => {
+                            if (checkbox.checked) repoSelected.add(file.path);
+                            else repoSelected.delete(file.path);
+                            syncGroupCheckbox();
+                            updateRepoSelectionUi();
+                        });
+                        rowCheckboxes.push(checkbox);
+
+                        // Name and status badge share one grid cell so hiding the badge
+                        // doesn't shift the remaining cells into the wrong columns.
+                        const nameCell = document.createElement("div");
+                        Object.assign(nameCell.style, {
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            minWidth: "0",
+                        });
+
+                        const nameEl = document.createElement("div");
+                        nameEl.textContent = file.name;
+                        nameEl.title = file.path;
+                        Object.assign(nameEl.style, {
+                            fontSize: "13px",
+                            color: file.is_model ? "var(--input-text)" : "var(--descrip-text, #9aa1ad)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            minWidth: "0",
+                        });
+
+                        const badge = document.createElement("span");
+                        Object.assign(badge.style, {
+                            fontSize: "11px",
+                            fontWeight: "600",
+                            whiteSpace: "nowrap",
+                            flexShrink: "0",
+                            display: "none",
+                        });
+                        nameCell.appendChild(nameEl);
+                        nameCell.appendChild(badge);
+
+                        let hintChip = null;
+                        if (file.hint_folder) {
+                            hintChip = document.createElement("button");
+                            hintChip.type = "button";
+                            hintChip.textContent = `Use ${file.hint_folder}`;
+                            hintChip.title = `Suggested from the filename: models/${file.hint_folder}. Check it before downloading.`;
+                            Object.assign(hintChip.style, {
+                                marginLeft: "auto",
+                                flexShrink: "0",
+                                padding: "1px 8px",
+                                borderRadius: "999px",
+                                border: "1px dashed var(--p-primary-color, #6aa9ff)",
+                                background: "transparent",
+                                color: "var(--p-primary-color, #6aa9ff)",
+                                fontSize: "11px",
+                                fontWeight: "600",
+                                whiteSpace: "nowrap",
+                                cursor: "pointer",
+                            });
+                            hintChip.addEventListener("click", (event) => {
+                                event.stopPropagation(); // don't toggle the row's checkbox
+                                setFileDestination(file, file.hint_folder);
+                                syncGroupPicker();
+                                updateRepoSelectionUi();
+                            });
+                            nameCell.appendChild(hintChip);
+                        }
+
+                        const sizeEl = document.createElement("div");
+                        sizeEl.textContent = formatRepoFileSize(file.size);
+                        Object.assign(sizeEl.style, {
+                            fontSize: "12px",
+                            color: "var(--descrip-text, #9aa1ad)",
+                            textAlign: "right",
+                            fontVariantNumeric: "tabular-nums",
+                        });
+
+                        const picker = createFolderPicker(repoDestinations.get(file.path) || "", "Choose folder…", { autoFlip: true });
+                        repoPickers.push(picker);
+                        Object.assign(picker.input.style, { minHeight: "30px", padding: "3px 10px", fontSize: "13px" });
+                        styleDestinationInput(picker.input);
+                        const onDestinationChange = () => {
+                            repoDestinations.set(file.path, picker.input.value);
+                            styleDestinationInput(picker.input);
+                            updateRepoRowBadge(file);
+                            updateRowHintChip(file);
+                            syncGroupPicker();
+                            updateRepoSelectionUi();
+                        };
+                        picker.input.addEventListener("input", onDestinationChange);
+                        picker.input.addEventListener("change", onDestinationChange);
+
+                        row.addEventListener("click", (event) => {
+                            if (event.target === checkbox || picker.wrapper.contains(event.target)) return;
+                            checkbox.checked = !checkbox.checked;
+                            checkbox.dispatchEvent(new Event("change"));
+                        });
+
+                        row.appendChild(checkbox);
+                        row.appendChild(nameCell);
+                        row.appendChild(sizeEl);
+                        row.appendChild(picker.wrapper);
+                        repoList.appendChild(row);
+
+                        repoRowRefs.set(file.path, { input: picker.input, badge, hintChip });
+                        updateRepoRowBadge(file);
+                        updateRowHintChip(file);
+                    }
+                    syncGroupCheckbox();
+                    syncGroupPicker();
+                }
+                updateRepoSelectionUi();
+            };
+
+            const setRepoBrowsingLayout = (browsing) => {
+                repoSection.style.display = browsing ? "flex" : "none";
+                folderLabel.style.display = browsing ? "none" : "";
+                folderPicker.wrapper.style.display = browsing ? "none" : "";
+                panel.style.width = browsing ? DIALOG_WIDTH_BROWSING : DIALOG_WIDTH_DEFAULT;
+            };
+
+            const resetBrowseButton = () => {
+                browseBtn.disabled = false;
+                browseBtn.textContent = "Browse";
+            };
+
+            const clearRepoListing = () => {
+                repoBrowseRequestId += 1;
+                repoListing = null;
+                repoSelected.clear();
+                repoDestinations.clear();
+                repoRowStatus.clear();
+                repoPendingBytes.clear();
+                spaceOverrideKey = null;
+                repoPickers.forEach((picker) => picker.destroy());
+                repoPickers = [];
+                repoRowRefs = new Map();
+                repoList.innerHTML = "";
+                setRepoBrowsingLayout(false);
+                resetBrowseButton();
+                if (downloadBtnRef) {
+                    downloadBtnRef.textContent = "Download";
+                    downloadBtnRef.disabled = false;
+                    downloadBtnRef.style.opacity = "1";
+                }
+            };
+
+            const browseRepo = async () => {
+                const link = urlInput.value.trim();
+                if (fullRepoSwitch.checked || !isRepoBrowseLink(link)) return;
+                const requestId = ++repoBrowseRequestId;
+                browseBtn.disabled = true;
+                browseBtn.textContent = "Loading…";
+                setStatus("Fetching repository file list...", "#9ad6ff");
+                try {
+                    const resp = await fetch(`/hf_repo_files?link=${encodeURIComponent(link)}`);
+                    const data = await resp.json().catch(() => ({}));
+                    if (requestId !== repoBrowseRequestId) return;
+                    if (!resp.ok || data.error) {
+                        throw new Error(data.error || `Server returned ${resp.status}`);
+                    }
+                    const files = Array.isArray(data.files) ? data.files : [];
+                    repoListing = { ...data, files, link };
+                    repoSelected.clear();
+                    repoDestinations.clear();
+                    repoRowStatus.clear();
+                    repoPendingBytes.clear();
+                    spaceOverrideKey = null;
+                    files.forEach((f) => repoDestinations.set(f.path, f.suggested_folder || ""));
+                    showAllRepoFiles = files.length > 0 && !files.some((f) => f.is_model);
+                    showAllSwitch.set(showAllRepoFiles);
+                    if (data.is_diffusers) {
+                        repoNotice.textContent = "This looks like a diffusers-format repo (model_index.json). Its component folders are usually not loadable by ComfyUI's standard loaders, so they get no destination; single-file models in the repo root may still have suggestions.";
+                        repoNotice.style.display = "block";
+                    } else {
+                        repoNotice.style.display = "none";
+                    }
+                    setRepoBrowsingLayout(true);
+                    destinationPreviewLine.style.display = "none";
+                    renderRepoList();
+                    setStatus("");
+                } catch (e) {
+                    if (requestId !== repoBrowseRequestId) return;
+                    setStatus(`Could not list repo: ${e?.message || e}`, "#ff6b6b");
+                } finally {
+                    if (requestId === repoBrowseRequestId) resetBrowseButton();
+                }
+            };
+
+            const queueRepoSelection = async () => {
+                const files = visibleRepoFiles().filter((f) => repoSelected.has(f.path));
+                if (!files.length) {
+                    showToast({ severity: "warn", summary: "Nothing selected", detail: "Select the files you want to download." });
+                    return;
+                }
+                const missing = files.find((f) => !repoDestinationFor(f));
+                if (missing) {
+                    const refs = repoRowRefs.get(missing.path);
+                    showToast({
+                        severity: "warn",
+                        summary: "Destination required",
+                        detail: `Choose a destination folder for ${missing.name}.`
+                    });
+                    if (refs?.input) {
+                        refs.input.scrollIntoView({ block: "nearest" });
+                        refs.input.focus();
+                    }
+                    return;
+                }
+
+                // Check free space against fresh numbers. The first click on a selection that doesn't
+                // fit is blocked with a warning; clicking "Download anyway" queues it regardless.
+                await fetchDiskInfo();
+                const plan = computeSpacePlan();
+                const signature = selectionSignature();
+                if (plan?.insufficient.length && spaceOverrideKey !== signature) {
+                    spaceOverrideKey = signature;
+                    updateRepoSelectionUi();
+                    showToast({
+                        severity: "error",
+                        summary: "Not enough disk space",
+                        detail: plan.insufficient.map((v) => `${v.mount}: ${describeVolumeNeed(v)}.`).join("\n")
+                            + "\nFree up space, change destinations, or click “Download anyway” to queue regardless."
+                    });
+                    return;
+                }
+                spaceOverrideKey = null;
+
+                const models = files.map((f) => ({
+                    url: buildRepoFileUrl(f),
+                    filename: f.name,
+                    target_filename: f.name,
+                    folder: repoDestinationFor(f),
+                    display_name: f.name,
+                }));
+                const idToFile = new Map();
+                const listingAtSubmit = repoListing;
+                downloadBtnRef.disabled = true;
+                setStatus(`Queuing ${models.length} download(s)...`, "#9ad6ff");
+
+                const isCurrentListing = () => repoListing === listingAtSubmit;
+                try {
+                    const { queued, rejected } = await submitQueue(models, {
+                        onQueued: (queuedItems, rejectedItems) => {
+                            // queue_download preserves order; fall back to filename matching if anything was rejected.
+                            const aligned = !rejectedItems.length && queuedItems.length === files.length;
+                            queuedItems.forEach((q, i) => {
+                                const file = aligned ? files[i] : files.find((f) => f.name === q.filename);
+                                if (q?.download_id && file) {
+                                    idToFile.set(q.download_id, file);
+                                    if (!isAlreadyInstalled(file)) {
+                                        repoPendingBytes.set(file.path, { folder: repoDestinationFor(file), remaining: Number(file.size) || 0 });
+                                    }
+                                }
+                            });
+                        },
+                        onStatus: (id, info) => {
+                            const file = idToFile.get(id);
+                            if (!file || !isCurrentListing()) return;
+                            if (repoRowStatus.get(file.path) !== info.status) {
+                                repoRowStatus.set(file.path, info.status);
+                                updateRepoRowBadge(file);
+                            }
+                            const pending = repoPendingBytes.get(file.path);
+                            if (pending) {
+                                if (TERMINAL_DOWNLOAD_STATUSES.has(info.status)) {
+                                    repoPendingBytes.delete(file.path);
+                                } else {
+                                    const written = Number(info.downloaded_bytes) || 0;
+                                    pending.remaining = Math.max((Number(file.size) || 0) - written, 0);
+                                }
+                                updateRepoSelectionUi();
+                            }
+                        },
+                        onFinished: (failures, total) => {
+                            if (failures) {
+                                setStatus(`${total - failures} of ${total} download(s) finished; ${failures} failed or cancelled.`, "#ff6b6b");
+                            } else {
+                                setStatus(`${total} download(s) completed.`, "#5bd98c");
+                            }
+                        },
+                    });
+
+                    if (rejected.length) {
+                        const detail = rejected.map((r) => `${r.filename || "file"}: ${r.error || "rejected"}`).join("\n");
+                        showToast({ severity: "warn", summary: `${rejected.length} rejected`, detail });
+                    }
+                    if (isCurrentListing()) {
+                        for (const file of idToFile.values()) {
+                            repoSelected.delete(file.path);
+                            repoRowStatus.set(file.path, "queued");
+                        }
+                        renderRepoList();
+                    }
+                    if (queued.length) {
+                        setStatus(`Queued ${queued.length} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
+                    } else {
+                        setStatus("No downloads were queued.", "#f5b14c");
+                    }
+                } catch (e) {
+                    showToast({ severity: "error", summary: "Queue error", detail: String(e) });
+                    setStatus(`Queue error: ${String(e)}`, "#ff6b6b");
+                } finally {
+                    if (isCurrentListing()) updateRepoSelectionUi();
+                }
+            };
+
+            browseBtn.addEventListener("click", () => browseRepo());
+            urlInput.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" && !fullRepoSwitch.checked && isRepoBrowseLink(urlInput.value)) {
+                    event.preventDefault();
+                    browseRepo();
+                }
+            });
+            urlInput.addEventListener("paste", () => {
+                setTimeout(() => {
+                    if (!fullRepoSwitch.checked && isRepoBrowseLink(urlInput.value)) {
+                        browseRepo();
+                    }
+                }, 0);
+            });
 
             let folderValueForNormalMode = "loras";
             let folderValueForRepoMode = "";
@@ -4392,6 +5636,13 @@ app.registerExtension({
                     folderValueForNormalMode = currentFolderValue || "loras";
                 }
 
+                const urlValue = urlInput.value.trim();
+                if (repoListing && (fullRepoMode || urlValue !== repoListing.link)) {
+                    clearRepoListing();
+                }
+                const canBrowseRepo = !fullRepoMode && isRepoBrowseLink(urlValue);
+                browseBtn.style.display = canBrowseRepo ? "" : "none";
+
                 if (fullRepoMode) {
                     urlLabel.textContent = "Hugging Face URL / Repo / Folder";
                     urlInput.placeholder = "https://huggingface.co/owner/repo[/tree/main/subfolder]";
@@ -4410,11 +5661,16 @@ app.registerExtension({
                     return;
                 }
 
-                urlLabel.textContent = "Model URL";
-                urlInput.placeholder = "https://example.com/path/model.safetensors";
+                urlLabel.textContent = "Model URL or Hugging Face repo";
+                urlInput.placeholder = "https://huggingface.co/owner/repo  ·  owner/repo  ·  https://example.com/model.safetensors";
                 folderLabel.textContent = "Folder";
                 folderPicker.input.placeholder = "Folder";
-                destinationPreviewLine.style.display = "none";
+                if (canBrowseRepo && !repoListing) {
+                    destinationPreviewLine.textContent = "Repo link detected. Press Browse (or Enter) to pick files from it.";
+                    destinationPreviewLine.style.display = "block";
+                } else {
+                    destinationPreviewLine.style.display = "none";
+                }
             };
 
             fullRepoSwitch.addEventListener("change", () => {
@@ -4423,6 +5679,7 @@ app.registerExtension({
             });
             urlInput.addEventListener("input", () => updateManualDownloadModeUi("input"));
             folderPicker.input.addEventListener("input", () => updateManualDownloadModeUi("input"));
+            folderPicker.input.addEventListener("change", () => updateManualDownloadModeUi("input"));
             setFullRepoSwitchVisualState();
             updateManualDownloadModeUi();
 
@@ -4439,8 +5696,17 @@ app.registerExtension({
                         summary: "Missing URL",
                         detail: fullRepoMode
                             ? "Enter a Hugging Face repo or folder link."
-                            : "Enter a direct model file URL."
+                            : "Enter a model file URL or a Hugging Face repo."
                     });
+                    return;
+                }
+
+                if (!fullRepoMode && repoListing) {
+                    await queueRepoSelection();
+                    return;
+                }
+                if (!fullRepoMode && isRepoBrowseLink(url)) {
+                    await browseRepo();
                     return;
                 }
 
@@ -4478,21 +5744,19 @@ app.registerExtension({
                 );
 
                 try {
-                    const resp = await fetch("/queue_download", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            models: [queueModel]
-                        })
+                    const { queued, rejected } = await submitQueue([queueModel], {
+                        onFinished: (failures) => {
+                            downloadBtn.disabled = false;
+                            downloadBtn.textContent = "Download";
+                            if (failures) {
+                                setStatus(`Finished with ${failures} error(s).`, "#ff6b6b");
+                            } else {
+                                setStatus("Download completed.", "#5bd98c");
+                            }
+                        },
                     });
-                    if (resp.status !== 200) {
-                        throw new Error("Server returned " + resp.status + " " + resp.statusText);
-                    }
-                    const res = await resp.json();
-                    const queued = res.queued || [];
-                    const rejected = Array.isArray(res.rejected) ? res.rejected : [];
-                    const downloadIds = queued.map(q => q.download_id);
-                    if (!downloadIds.length) {
+                    const queuedCount = queued.filter((q) => q?.download_id).length;
+                    if (!queuedCount) {
                         const rejection = rejected.length ? String(rejected[0]?.error || "").trim() : "";
                         const detail = rejection || "No download was queued.";
                         showToast({ severity: "warn", summary: "Queue rejected", detail });
@@ -4502,57 +5766,7 @@ app.registerExtension({
                         return;
                     }
 
-                    setStatus(`Queued ${downloadIds.length} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
-                    const statusMap = {};
-                    const pending = new Set(downloadIds);
-                    let statusErrorToastShown = false;
-
-                    const poll = async () => {
-                        try {
-                            const statusResp = await fetch(`/download_status?ids=${encodeURIComponent(downloadIds.join(","))}`);
-                            if (statusResp.status !== 200) return;
-                            const statusData = await statusResp.json();
-                            const downloads = statusData.downloads || {};
-                            statusErrorToastShown = false;
-
-                            for (const id of downloadIds) {
-                                const info = downloads[id];
-                                if (!info) continue;
-                                const last = statusMap[id];
-                                if (last !== info.status) {
-                                    statusMap[id] = info.status;
-                                }
-                                if (info.status === "downloaded" || info.status === "completed" || info.status === "failed" || info.status === "cancelled") {
-                                    pending.delete(id);
-                                }
-                            }
-
-                            if (pending.size === 0) {
-                                stopPolling();
-                                const failures = downloadIds.filter((id) => downloads[id]?.status === "failed" || downloads[id]?.status === "cancelled").length;
-                                downloadBtn.disabled = false;
-                                downloadBtn.textContent = "Download";
-                                if (failures) {
-                                    setStatus(`Finished with ${failures} error(s).`, "#ff6b6b");
-                                } else {
-                                    setStatus("Download completed.", "#5bd98c");
-                                }
-                            }
-                        } catch (e) {
-                            if (!statusErrorToastShown) {
-                                showToast({
-                                    severity: "error",
-                                    summary: "Status error",
-                                    detail: "Status polling failed. Retrying in background."
-                                });
-                                statusErrorToastShown = true;
-                            }
-                            setStatus("Status polling error.", "#ff6b6b");
-                        }
-                    };
-
-                    pollTimer = setInterval(poll, 1000);
-                    poll();
+                    setStatus(`Queued ${queuedCount} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
                 } catch (e) {
                     showToast({ severity: "error", summary: "Queue error", detail: String(e) });
                     downloadBtn.disabled = false;
@@ -4561,6 +5775,7 @@ app.registerExtension({
                 }
             });
             applyNativeButtonStyle(downloadBtn, "primary");
+            downloadBtnRef = downloadBtn;
 
             footer.appendChild(downloadBtn);
             panel.appendChild(footer);

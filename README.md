@@ -30,6 +30,7 @@ ComfyUI node pack and UI tools for:
 - Output `model name` / `folder name` for downstream node wiring.
 - Choose standard model folders or custom paths.
 - Manual `Download new model` also supports direct non-HF HTTP(S) file URLs.
+- Paste a repo (`owner/repo`, a repo URL, or a `/tree/<rev>/<subfolder>` link) into `Download new model` to browse its files grouped by folder, pick the variants you want, and queue them all at once. Files under a ComfyUI model folder (e.g. `diffusion_models/`, `split_files/text_encoders/`) get their destination filled in automatically; root-level files need one chosen.
 
 ### 2) Workflow Auto-Discovery + Missing Model Resolution
 
@@ -65,6 +66,7 @@ ComfyUI node pack and UI tools for:
 ## Web API Endpoints
 
 - `GET /folder_structure`
+- `GET /hf_repo_files?link=<repo or URL>`
 - `POST /check_missing_models`
 - `POST /install_models`
 - `POST /queue_download`

@@ -125,6 +125,68 @@ def clear_cache_for_repo(repo_id: str):
         print(f"[DEBUG] Repo cache directory cleanup failed: {e}")
 
 
+def _move_file_into_place(src: str, dst: str, cancel_check: Optional[Callable[[], bool]] = None) -> bool:
+    """
+    Move src to dst (dst may already exist and is replaced). A rename when both are on the
+    same filesystem, so no data is copied and no extra space is used. Otherwise (another
+    drive, or the rename is refused, e.g. a file locked on Windows) falls back to a
+    cancellable chunked copy followed by deleting src. Returns True if it was a rename.
+    """
+    try:
+        os.replace(src, dst)
+        return True
+    except OSError as e:
+        print(f"[DEBUG] Rename into place not possible ({e}); copying instead.")
+
+    with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
+        while True:
+            if cancel_check and cancel_check():
+                raise InterruptedError("Download cancelled")
+            chunk = fsrc.read(8 * 1024 * 1024)
+            if not chunk:
+                break
+            fdst.write(chunk)
+    _safe_remove(src)
+    return False
+
+
+def _remove_cache_entry(cache_path: str):
+    """
+    Clean up after a file has been moved out of the HF cache: remove its snapshot entry
+    (a symlink to the moved blob, or nothing on Windows where the file itself was moved),
+    then any snapshot folders left empty. The repo's cache folder is removed only once no
+    snapshot files remain, so other cached files of the same repo are left alone.
+    """
+    try:
+        cache_root = os.path.realpath(_get_hf_cache_dir())
+        # Resolve the folders but not the file itself (it is a symlink into blobs/).
+        path = os.path.join(os.path.realpath(os.path.dirname(os.path.abspath(cache_path))), os.path.basename(cache_path))
+        try:
+            rel_parts = os.path.relpath(path, cache_root).split(os.sep)
+        except ValueError:
+            return  # Different drive than the cache (Windows); not a cache path.
+        # Expected layout: <cache_root>/<repo folder>/snapshots/<revision>/<path in repo>
+        if len(rel_parts) < 4 or rel_parts[0] == ".." or rel_parts[1] != "snapshots":
+            return  # Not a cache path (e.g. the direct-download fallback); nothing to clean.
+        repo_cache_dir = os.path.join(cache_root, rel_parts[0])
+        snapshots_dir = os.path.join(repo_cache_dir, "snapshots")
+
+        if os.path.islink(path) or os.path.isfile(path):
+            os.remove(path)
+
+        current = os.path.dirname(path)
+        while os.path.normpath(current) != os.path.normpath(snapshots_dir) and os.path.isdir(current) and not os.listdir(current):
+            os.rmdir(current)
+            current = os.path.dirname(current)
+
+        has_files = any(files for _, _, files in os.walk(snapshots_dir)) if os.path.isdir(snapshots_dir) else False
+        if not has_files:
+            shutil.rmtree(repo_cache_dir, ignore_errors=True)
+        print("[DEBUG] Cache entry cleaned:", cache_path)
+    except Exception as e:
+        print(f"[DEBUG] Cache entry cleanup failed for {cache_path}: {e}")
+
+
 def _get_candidate_settings_paths() -> list[str]:
     candidates = []
     try:
@@ -438,8 +500,9 @@ def run_download(parsed_data: dict,
                  status_cb: Optional[Callable[[str], None]] = None,
                  cancel_check: Optional[Callable[[], bool]] = None) -> tuple:
     """
-    Downloads a single file from Hugging Face Hub and copies it to models/<final_folder>.
-    Cleans up the cached copy to save disk space.
+    Downloads a single file from Hugging Face Hub and moves it to models/<final_folder>
+    (a rename when the HF cache is on the same drive, otherwise a copy), then removes its
+    cache entry.
     """
     token = get_token()
     print("[DEBUG] run_download (single-file) started")
@@ -674,19 +737,19 @@ def run_download(parsed_data: dict,
             dir=target_dir,
         )
         os.close(copy_tmp_fd)
-        with open(file_path_in_cache, "rb") as src, open(copy_tmp_path, "wb") as dst:
-            while True:
-                if cancel_check and cancel_check():
-                    raise InterruptedError("Download cancelled")
-                chunk = src.read(8 * 1024 * 1024)
-                if not chunk:
-                    break
-                dst.write(chunk)
+        # The returned cache path is usually a relative symlink into the cache's blobs/, so
+        # move the file it resolves to; moving the link itself would leave a broken symlink.
+        source_file = os.path.realpath(file_path_in_cache)
+        moved = _move_file_into_place(source_file, copy_tmp_path, cancel_check)
         os.replace(copy_tmp_path, dest_path)
         copy_tmp_path = ""
         if cancel_check and cancel_check():
             raise InterruptedError("Download cancelled")
-        print("[DEBUG] File copied to:", dest_path)
+        print(f"[DEBUG] File {'moved' if moved else 'copied'} to:", dest_path)
+
+        if status_cb:
+            status_cb("cleaning_cache")
+        _remove_cache_entry(file_path_in_cache)
 
         if not defer_verify:
             try:
@@ -700,12 +763,6 @@ def run_download(parsed_data: dict,
             except Exception as e:
                 _safe_remove(dest_path)
                 raise RuntimeError(f"Download verification failed: {e}") from e
-
-        if status_cb:
-            status_cb("cleaning_cache")
-        if cancel_check and cancel_check():
-            raise InterruptedError("Download cancelled")
-        clear_cache_for_path(file_path_in_cache)
 
         size_gb = os.path.getsize(dest_path) / (1024 ** 3)
         source_name = os.path.basename(remote_filename)

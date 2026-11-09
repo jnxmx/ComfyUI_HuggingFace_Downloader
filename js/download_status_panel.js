@@ -1075,9 +1075,74 @@ app.registerExtension({
 
 
 
+        // Run native refresh to re-scan models, clear native error log and update subgraphs
+        const runNativeRefreshMissingModels = async () => {
+            try {
+                const appEl = document.querySelector('#app') || document.querySelector('#root') || document.body;
+                if (appEl) {
+                    const vueApp = appEl.__vue_app__;
+                    if (vueApp && vueApp._context?.provides) {
+                        let pinia = null;
+                        const symbols = Object.getOwnPropertySymbols(vueApp._context.provides);
+                        for (const sym of symbols) {
+                            if (sym.toString().includes("pinia") || sym.description === "pinia") {
+                                pinia = vueApp._context.provides[sym];
+                                break;
+                            }
+                        }
+                        if (pinia) {
+                            const storeMap = pinia._s || pinia.stores;
+                            if (storeMap && typeof storeMap.get === "function" && storeMap.has("missingModel")) {
+                                const missingModelStore = storeMap.get("missingModel");
+                                if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
+                                    await missingModelStore.refreshMissingModels();
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                if (app && typeof app.refreshMissingModels === "function") {
+                    await app.refreshMissingModels({ silent: true });
+                }
+            } catch (_) {}
+        };
+
+        // After downloads finish, ComfyUI re-scans models and reloads node definitions so new
+        // files appear in loaders. Each reload fetches /object_info, which is heavy with many
+        // custom nodes, so finished downloads only mark a refresh as pending and it runs once
+        // the queue has no running downloads, instead of once per file.
+        let autoRefreshPending = false;
+        let autoRefreshRunning = false;
+
+        const runAutoRefreshIfIdle = async (downloads) => {
+            if (!autoRefreshPending || autoRefreshRunning || refreshBusy) return;
+            const anyRunning = Object.values(downloads || {}).some((info) => RUNNING_STATUSES.has(info?.status));
+            if (anyRunning) return;
+            autoRefreshPending = false;
+            autoRefreshRunning = true;
+            try {
+                await runNativeRefreshMissingModels();
+                if (typeof app?.refreshComboInNodes === "function") {
+                    await app.refreshComboInNodes();
+                }
+                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                    app.graph.setDirtyCanvas(true, true);
+                }
+            } catch (e) {
+                console.warn("[HF Downloader] Failed to refresh models after downloads:", e);
+            } finally {
+                autoRefreshRunning = false;
+            }
+        };
+
         const handleRefresh = async () => {
             if (refreshBusy || !refreshBtn) return;
             refreshBusy = true;
+            autoRefreshPending = false; // this manual refresh covers it
             refreshBtn.disabled = true;
             refreshBtn.textContent = "Refreshing...";
 
@@ -1126,42 +1191,6 @@ app.registerExtension({
                         console.warn("[HF Downloader] Failed to clear validation errors:", e);
                     }
                 }
-
-                // Run native refresh to re-scan models, clear native error log and update subgraphs
-                const runNativeRefreshMissingModels = async () => {
-                    try {
-                        const appEl = document.querySelector('#app') || document.querySelector('#root') || document.body;
-                        if (appEl) {
-                            const vueApp = appEl.__vue_app__;
-                            if (vueApp && vueApp._context?.provides) {
-                                let pinia = null;
-                                const symbols = Object.getOwnPropertySymbols(vueApp._context.provides);
-                                for (const sym of symbols) {
-                                    if (sym.toString().includes("pinia") || sym.description === "pinia") {
-                                        pinia = vueApp._context.provides[sym];
-                                        break;
-                                    }
-                                }
-                                if (pinia) {
-                                    const storeMap = pinia._s || pinia.stores;
-                                    if (storeMap && typeof storeMap.get === "function" && storeMap.has("missingModel")) {
-                                        const missingModelStore = storeMap.get("missingModel");
-                                        if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
-                                            await missingModelStore.refreshMissingModels();
-                                            return;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } catch (_) {}
-
-                    try {
-                        if (app && typeof app.refreshMissingModels === "function") {
-                            await app.refreshMissingModels({ silent: true });
-                        }
-                    } catch (_) {}
-                };
 
                 await runNativeRefreshMissingModels();
 
@@ -1374,6 +1403,8 @@ app.registerExtension({
                 }
                 
                 if (completedPaths.length > 0) {
+                    // Clearing finished files from the missing-model state is local and cheap, so do
+                    // it right away; the heavy model re-scan waits until the queue is idle.
                     try {
                         if (window.hfDownloader && typeof window.hfDownloader.clearCompletedModelsFromStore === "function") {
                             await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
@@ -1381,59 +1412,12 @@ app.registerExtension({
                         if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
                             await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
                         }
-                        
-                        // Run native refresh to re-scan models, clear native error log and update subgraphs
-                        const runNativeRefreshMissingModels = async () => {
-                            try {
-                                const appEl = document.querySelector('#app') || document.querySelector('#root') || document.body;
-                                if (appEl) {
-                                    const vueApp = appEl.__vue_app__;
-                                    if (vueApp && vueApp._context?.provides) {
-                                        let pinia = null;
-                                        const symbols = Object.getOwnPropertySymbols(vueApp._context.provides);
-                                        for (const sym of symbols) {
-                                            if (sym.toString().includes("pinia") || sym.description === "pinia") {
-                                                pinia = vueApp._context.provides[sym];
-                                                break;
-                                            }
-                                        }
-                                        if (pinia) {
-                                            const storeMap = pinia._s || pinia.stores;
-                                            if (storeMap && typeof storeMap.get === "function" && storeMap.has("missingModel")) {
-                                                const missingModelStore = storeMap.get("missingModel");
-                                                if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
-                                                    await missingModelStore.refreshMissingModels();
-                                                    return;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (_) {}
-
-                            try {
-                                if (app && typeof app.refreshMissingModels === "function") {
-                                    await app.refreshMissingModels({ silent: true });
-                                }
-                            } catch (_) {}
-                        };
-
-                        await runNativeRefreshMissingModels();
-
-                        if (typeof app?.refreshComboInNodes === "function") {
-                            await app.refreshComboInNodes();
-                        }
-                        if (window.hfDownloader && typeof window.hfDownloader.refreshComboInNodesRecursive === "function") {
-                            // Removed: no longer using custom recursive combo refresh
-                        }
-                        
-                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                            app.graph.setDirtyCanvas(true, true);
-                        }
                     } catch (e) {
                         console.warn("[HF Downloader] Failed to auto-clear completed models during status poll:", e);
                     }
+                    autoRefreshPending = true;
                 }
+                void runAutoRefreshIfIdle(downloads);
 
                 renderList(downloads);
             } catch (err) {
