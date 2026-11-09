@@ -4,7 +4,7 @@ import yaml
 import tempfile
 import shutil
 import time
-import subprocess
+import configparser
 import copy
 import re
 import sys
@@ -625,141 +625,174 @@ def find_comfy_root() -> str:
     """
     return get_comfy_root()
 
+def _read_git_dir(repo_path: str) -> str | None:
+    dot_git = os.path.join(repo_path, ".git")
+    if os.path.isdir(dot_git):
+        return dot_git
+    if os.path.isfile(dot_git):
+        try:
+            with open(dot_git, "r", encoding="utf-8", errors="ignore") as f:
+                first_line = f.readline().strip()
+            if first_line.lower().startswith("gitdir:"):
+                rel_dir = first_line.split(":", 1)[1].strip()
+                resolved = os.path.normpath(os.path.join(repo_path, rel_dir))
+                if os.path.isdir(resolved):
+                    return resolved
+        except Exception:
+            pass
+    return None
+
+
+def _read_git_commit_hash(repo_path: str) -> str:
+    git_dir = _read_git_dir(repo_path)
+    if not git_dir:
+        return ""
+    head_file = os.path.join(git_dir, "HEAD")
+    if not os.path.isfile(head_file):
+        return ""
+    try:
+        with open(head_file, "r", encoding="utf-8", errors="ignore") as f:
+            head_val = f.read().strip()
+        if not head_val.startswith("ref:"):
+            return head_val
+        ref_rel = head_val.split(":", 1)[1].strip().lstrip("/")
+        ref_path = os.path.join(git_dir, *ref_rel.split("/"))
+        if os.path.isfile(ref_path):
+            with open(ref_path, "r", encoding="utf-8", errors="ignore") as rf:
+                return rf.read().strip()
+        packed_refs = os.path.join(git_dir, "packed-refs")
+        if os.path.isfile(packed_refs):
+            with open(packed_refs, "r", encoding="utf-8", errors="ignore") as pf:
+                for line in pf:
+                    line = line.strip()
+                    if not line or line.startswith("#") or line.startswith("^"):
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1] == ref_rel:
+                        return parts[0]
+    except Exception:
+        pass
+    return ""
+
+
+def _read_git_remote_url(repo_path: str) -> str:
+    git_dir = _read_git_dir(repo_path)
+    if not git_dir:
+        return ""
+    config_file = os.path.join(git_dir, "config")
+    if not os.path.isfile(config_file):
+        return ""
+    try:
+        parser = configparser.ConfigParser(strict=False)
+        parser.read(config_file, encoding="utf-8")
+        for section in ('remote "origin"',):
+            if parser.has_section(section) and parser.has_option(section, "url"):
+                return parser.get(section, "url").strip()
+        for section in parser.sections():
+            if section.startswith("remote ") and parser.has_option(section, "url"):
+                return parser.get(section, "url").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _read_pyproject_cnr_info(node_dir: str) -> tuple[str, str] | None:
+    pyproject_path = os.path.join(node_dir, "pyproject.toml")
+    if not os.path.isfile(pyproject_path):
+        return None
+    try:
+        with open(pyproject_path, "r", encoding="utf-8", errors="ignore") as f:
+            text = f.read()
+        name_match = re.search(r'(?m)^\s*name\s*=\s*["\']([^"\']+)["\']', text)
+        ver_match = re.search(r'(?m)^\s*version\s*=\s*["\']([^"\']+)["\']', text)
+        if name_match and ver_match:
+            return name_match.group(1).strip(), ver_match.group(1).strip()
+    except Exception:
+        pass
+    return None
+
+
 def _backup_custom_nodes(target_dir: str):
     """
-    Use ComfyUI-Manager's cm-cli.py to save a snapshot of custom nodes.
+    Create a snapshot of installed custom nodes in pure Python without spawning subprocesses.
     Returns the path to the snapshot file and temp dir.
     """
     temp_dir = tempfile.mkdtemp(prefix="comfyui_nodes_snapshot_")
-    
+
     try:
         comfy_dir = get_comfy_root()
-        if not os.path.isdir(os.path.join(comfy_dir, "custom_nodes")):
+        custom_nodes_dir = os.path.join(comfy_dir, "custom_nodes")
+        if not os.path.isdir(custom_nodes_dir):
             raise RuntimeError(f"Could not locate custom_nodes folder in ComfyUI root directory '{comfy_dir}'")
 
-        manager_cli_script = _find_manager_cli_script(comfy_dir)
+        comfyui_hash = _read_git_commit_hash(comfy_dir)
+        git_custom_nodes = {}
+        cnr_custom_nodes = {}
+        file_custom_nodes = []
 
-        # Save snapshot using ComfyUI-Manager's own cm-cli.py in the current
-        # Python environment instead of relying on comfy-cli's wrapper command.
-        print("[DEBUG] Current working directory:", os.getcwd())
-        print("[DEBUG] Using ComfyUI root directory:", comfy_dir)
-        print("[DEBUG] Using ComfyUI-Manager CLI script:", manager_cli_script)
-
-        stdout = ""
-        stderr = ""
-        for attempt in range(1, CUSTOM_NODES_SNAPSHOT_MAX_ATTEMPTS + 1):
-            env = os.environ.copy()
-            env["COMFYUI_PATH"] = comfy_dir
-
-            process = subprocess.run(
-                [sys.executable, manager_cli_script, "save-snapshot"],
-                capture_output=True,
-                text=True,
-                cwd=comfy_dir,
-                env=env
-            )
-            stdout = process.stdout
-            stderr = process.stderr
-
-            if process.returncode == 0:
-                break
-
-            error_parts = []
-            if stderr and stderr.strip():
-                error_parts.append(stderr.strip())
-            if stdout and stdout.strip():
-                error_parts.append(stdout.strip())
-            error_message = " | ".join(error_parts) or "Unknown error"
-            print("[ERROR] ComfyUI-Manager cm-cli save-snapshot failed:")
-            print(f"stderr: {stderr}")
-            print(f"stdout: {stdout}")
-
-            should_retry = (
-                attempt < CUSTOM_NODES_SNAPSHOT_MAX_ATTEMPTS
-                and _is_transient_custom_nodes_snapshot_error(error_message)
-            )
-            if should_retry:
-                print(
-                    "[WARNING] Custom nodes snapshot export is not ready yet. "
-                    f"Retrying in {CUSTOM_NODES_SNAPSHOT_RETRY_DELAY_SECONDS} seconds "
-                    f"({attempt}/{CUSTOM_NODES_SNAPSHOT_MAX_ATTEMPTS})..."
-                )
-                time.sleep(CUSTOM_NODES_SNAPSHOT_RETRY_DELAY_SECONDS)
+        entries = []
+        for name in sorted(os.listdir(custom_nodes_dir)):
+            if name in (".disabled", "__pycache__", ".DS_Store"):
                 continue
+            entries.append((os.path.join(custom_nodes_dir, name), name.endswith(".disabled")))
 
-            raise RuntimeError(f"Failed to create nodes snapshot: {error_message}")
+        disabled_dir = os.path.join(custom_nodes_dir, ".disabled")
+        if os.path.isdir(disabled_dir):
+            for name in sorted(os.listdir(disabled_dir)):
+                if name in ("__pycache__", ".DS_Store"):
+                    continue
+                entries.append((os.path.join(disabled_dir, name), True))
 
-        print(f"[DEBUG] ComfyUI-Manager cm-cli save-snapshot output:\n{stdout}")
-        if stderr:
-            print(f"[DEBUG] ComfyUI-Manager cm-cli save-snapshot stderr:\n{stderr}")
+        for fullpath, is_disabled in entries:
+            name = os.path.basename(fullpath)
+            if os.path.isdir(fullpath):
+                remote_url = _read_git_remote_url(fullpath)
+                if remote_url:
+                    if remote_url.endswith("/"):
+                        remote_url = remote_url[:-1]
+                    commit_hash = _read_git_commit_hash(fullpath)
+                    git_custom_nodes[remote_url] = {
+                        "hash": commit_hash,
+                        "disabled": bool(is_disabled),
+                    }
+                    continue
 
-        # Extract snapshot file name and copy to temp dir
-        snapshot_file = None
-        original_snapshot = None
-        for line in stdout.splitlines():
-            if "Current snapshot is saved as" in line:
-                snapshot_file_name = line.split("`", 1)[-1].rsplit("`", 1)[0]
-                # Check new path first (v3.38+)
-                original_snapshot = os.path.join(comfy_dir, "user", "__manager", "snapshots", snapshot_file_name)
-                if not os.path.exists(original_snapshot):
-                    # Check legacy path
-                    original_snapshot = os.path.join(comfy_dir, "user", "default", "ComfyUI-Manager", "snapshots", snapshot_file_name)
+                cnr_info = _read_pyproject_cnr_info(fullpath)
+                if cnr_info and not is_disabled:
+                    node_id, node_ver = cnr_info
+                    cnr_custom_nodes[node_id] = node_ver
+            elif name.endswith(".py") or name.endswith(".py.disabled"):
+                file_custom_nodes.append({
+                    "filename": name,
+                    "disabled": bool(is_disabled or name.endswith(".py.disabled")),
+                })
 
-                if os.path.exists(original_snapshot):
-                    # Copy to temp dir for modification
-                    snapshot_file = os.path.join(temp_dir, "original_snapshot.json")
-                    shutil.copy2(original_snapshot, snapshot_file)
-                break
-
-        print(f"[DEBUG] Original snapshot file: {original_snapshot}")
-        print(f"[DEBUG] Working copy in temp dir: {snapshot_file}")
-
-        if not snapshot_file or not os.path.exists(snapshot_file):
-            raise RuntimeError("Could not find or copy generated snapshot file")
-
-        # Read and modify the snapshot
-        with open(snapshot_file, 'r') as f:
-            snapshot_data = json.load(f)
-        
-        # Explicitly create new data structure with empty pips
         cleaned_data = {
-            "comfyui": snapshot_data.get("comfyui", ""),
-            "git_custom_nodes": snapshot_data.get("git_custom_nodes", {}),
-            "cnr_custom_nodes": snapshot_data.get("cnr_custom_nodes", {}),
-            "file_custom_nodes": snapshot_data.get("file_custom_nodes", []),
-            "pips": {}  # Explicitly empty dictionary
+            "comfyui": comfyui_hash,
+            "git_custom_nodes": git_custom_nodes,
+            "cnr_custom_nodes": cnr_custom_nodes,
+            "file_custom_nodes": file_custom_nodes,
+            "pips": {},  # Explicitly empty dictionary
         }
-        
-        # Save cleaned snapshot in YAML format
+
         snapshot_dest = os.path.join(temp_dir, "custom_nodes_snapshot.yaml")
-        with open(snapshot_dest, 'w') as f:
+        with open(snapshot_dest, "w", encoding="utf-8") as f:
             yaml.safe_dump(cleaned_data, f, sort_keys=False, allow_unicode=True, default_flow_style=False)
-        
-        # Verify the saved file
-        with open(snapshot_dest, 'r') as f:
+
+        with open(snapshot_dest, "r", encoding="utf-8") as f:
             verify_data = yaml.safe_load(f)
-            if verify_data.get('pips', None) != {}:
+            if verify_data.get("pips", None) != {}:
                 raise RuntimeError("Failed to clean pips section in the snapshot file")
-        
+
         print(f"[INFO] Created and verified cleaned nodes snapshot at '{snapshot_dest}'")
-        print(f"[DEBUG] Snapshot structure:")
+        print("[DEBUG] Snapshot structure:")
         print(f"- git_custom_nodes: {len(cleaned_data['git_custom_nodes'])} entries")
         print(f"- cnr_custom_nodes: {len(cleaned_data['cnr_custom_nodes'])} entries")
         print(f"- file_custom_nodes: {len(cleaned_data['file_custom_nodes'])} entries")
         print("- pips: verified empty dictionary")
-        
+
         return snapshot_dest, temp_dir
 
-    except subprocess.CalledProcessError as e:
-        print(f"[WARNING] Failed to create nodes snapshot: {e.stderr if hasattr(e, 'stderr') else str(e)}")
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        if isinstance(e.stderr, bytes):
-            stderr = e.stderr.decode('utf-8', errors='replace')
-        else:
-            stderr = str(e.stderr)
-        if "not found" in stderr:
-            raise RuntimeError("ComfyUI-Manager cm-cli failed. Please ensure ComfyUI-Manager is properly installed.")
-        raise
     except Exception as e:
         print(f"[WARNING] Failed to create nodes snapshot: {str(e)}")
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1846,17 +1879,40 @@ def restore_selected_from_huggingface(repo_name_or_link: str, selections: list, 
                     shutil.rmtree(temp_dir, ignore_errors=True)
 
     files_to_restore.discard(CUSTOM_NODES_SNAPSHOT_PATH)
+    sorted_files = sorted(files_to_restore)
+    total_files = len(sorted_files)
     restored_files = 0
-    for repo_file in sorted(files_to_restore):
-        cached_file = hf_hub_download(
-            repo_id=repo_name,
-            filename=repo_file,
-            token=token
-        )
-        _copy_repo_file_to_target(cached_file, repo_file, target_dir, token)
-        restored_files += 1
-        if repo_file.startswith("ComfyUI/custom_nodes/"):
-            restart_required = True
+
+    if total_files > 0:
+        print(f"[restore] Downloading {total_files} file(s) from backup '{repo_name}' in parallel...")
+        import concurrent.futures
+        import threading
+
+        lock = threading.Lock()
+        completed_count = 0
+
+        def _download_worker(repo_file):
+            nonlocal completed_count, restored_files, restart_required
+            try:
+                cached_file = hf_hub_download(
+                    repo_id=repo_name,
+                    filename=repo_file,
+                    token=token
+                )
+                _copy_repo_file_to_target(cached_file, repo_file, target_dir, token)
+                with lock:
+                    restored_files += 1
+                    completed_count += 1
+                    cur = completed_count
+                    if repo_file.startswith("ComfyUI/custom_nodes/"):
+                        restart_required = True
+                print(f"[restore] [{cur}/{total_files}] {repo_file}")
+            except Exception as e:
+                print(f"[restore][error] Failed to restore {repo_file}: {e}")
+
+        max_workers = min(16, max(4, os.cpu_count() or 4))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            list(executor.map(_download_worker, sorted_files))
 
     return {
         "restored_files": restored_files,

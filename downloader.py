@@ -9,7 +9,7 @@ import hashlib
 import re
 import socket
 import yaml
-import subprocess
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -512,7 +512,7 @@ def run_download(parsed_data: dict,
             ensure_remote_metadata()
 
         def run_file_download_with_cancel(download_kwargs: dict) -> str:
-            # We try to run the download subprocess in two configurations:
+            # We try to run the download in two configurations:
             # 1. First with Xet enabled (xet_flag="1"). This is required for Xet-backed repos (e.g. black-forest-labs/FLUX.2-klein-9b-fp8)
             #    because cas-bridge.xethub.hf.co blocks standard HTTP downloads without the Xet client authentication flow.
             # 2. If that fails, we retry with Xet disabled (xet_flag="0") as a fallback to handle normal repos and fine-grained token issues.
@@ -520,154 +520,137 @@ def run_download(parsed_data: dict,
             comfy_temp = os.path.join(os.getcwd(), "temp")
             os.makedirs(comfy_temp, exist_ok=True)
 
-            script = (
-                "import json, sys, os, urllib.request, shutil\n"
-                "use_xet = sys.argv[3] == '1'\n"
-                "if use_xet:\n"
-                "    os.environ['HF_HUB_DISABLE_XET'] = '0'\n"
-                "    os.environ['HF_HUB_ENABLE_HF_XET'] = '1'\n"
-                "else:\n"
-                "    os.environ['HF_HUB_DISABLE_XET'] = '1'\n"
-                "    os.environ['HF_HUB_ENABLE_HF_XET'] = '0'\n"
-                "    # Block hf_xet entirely - env vars are ignored by wild imports\n"
-                "    for _m in list(sys.modules):\n"
-                "        if 'xet' in _m:\n"
-                "            del sys.modules[_m]\n"
-                "    import importlib\n"
-                "    class _XetBlocker:\n"
-                "        def find_module(self, name, path=None):\n"
-                "            return self if 'xet' in name else None\n"
-                "        def load_module(self, name):\n"
-                "            raise ImportError(name)\n"
-                "    sys.meta_path.insert(0, _XetBlocker())\n"
-                "payload_path = sys.argv[1]\n"
-                "result_path = sys.argv[2]\n"
-                "with open(payload_path, 'r', encoding='utf-8') as f:\n"
-                "    kwargs = json.load(f)\n"
-                "from huggingface_hub import hf_hub_download\n"
-                "result = {}\n"
-                "try:\n"
-                "    # Stage 1: huggingface_hub download with token\n"
-                "    path = hf_hub_download(**kwargs)\n"
-                "    result = {'ok': True, 'path': path}\n"
-                "except Exception as e1:\n"
-                "    err1_low = str(e1).lower()\n"
-                "    is_gated1 = any(m in err1_low for m in ['gated', 'restricted', 'authorized list', 'ask for access', 'request access', 'agreement', 'terms', 'conditions', '403'])\n"
-                "    if is_gated1:\n"
-                "        result = {'ok': False, 'error': str(e1)}\n"
-                "    else:\n"
-                "        try:\n"
-                "            # Stage 2: huggingface_hub download without token (handles restricted fine-grained tokens on public repos)\n"
-                "            no_tok_kwargs = kwargs.copy()\n"
-                "            no_tok_kwargs['token'] = False\n"
-                "            orig_hf_token = os.environ.pop('HF_TOKEN', None)\n"
-                "            try:\n"
-                "                path = hf_hub_download(**no_tok_kwargs)\n"
-                "                result = {'ok': True, 'path': path}\n"
-                "            finally:\n"
-                "                if orig_hf_token is not None:\n"
-                "                    os.environ['HF_TOKEN'] = orig_hf_token\n"
-                "        except Exception as e2:\n"
-                "            repo_id = kwargs.get('repo_id')\n"
-                "            filename = kwargs.get('filename')\n"
-                "            revision = kwargs.get('revision') or 'main'\n"
-                "            token = kwargs.get('token')\n"
-                "            url = f'https://huggingface.co/{repo_id}/resolve/{revision}/{filename}'\n"
-                "            class NoAuthRedirectHandler(urllib.request.HTTPRedirectHandler):\n"
-                "                def redirect_request(self, req, fp, code, msg, headers, newurl):\n"
-                "                    new_req = urllib.request.Request(newurl)\n"
-                "                    new_req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')\n"
-                "                    return new_req\n"
-                "            opener = urllib.request.build_opener(NoAuthRedirectHandler)\n"
-                "            comfy_temp = os.path.join(os.getcwd(), 'temp')\n"
-                "            os.makedirs(comfy_temp, exist_ok=True)\n"
-                "            dest_file = os.path.join(comfy_temp, os.path.basename(filename))\n"
-                "            try:\n"
-                "                # Stage 3: manual redirect download with token\n"
-                "                req = urllib.request.Request(url)\n"
-                "                req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')\n"
-                "                if token:\n"
-                "                    req.add_header('Authorization', f'Bearer {token}')\n"
-                "                with opener.open(req) as response:\n"
-                "                    with open(dest_file, 'wb') as f:\n"
-                "                        shutil.copyfileobj(response, f)\n"
-                "                result = {'ok': True, 'path': dest_file}\n"
-                "            except Exception as e3:\n"
-                "                try:\n"
-                "                    # Stage 4: manual redirect download without token\n"
-                "                    req = urllib.request.Request(url)\n"
-                "                    req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')\n"
-                "                    with opener.open(req) as response:\n"
-                "                        with open(dest_file, 'wb') as f:\n"
-                "                            shutil.copyfileobj(response, f)\n"
-                "                    result = {'ok': True, 'path': dest_file}\n"
-                "                except Exception as e4:\n"
-                "                    result = {'ok': False, 'error': f'All download stages failed. Stage 1: {e1}. Stage 2: {e2}. Stage 3: {e3}. Stage 4: {e4}'}\n"
-                "with open(result_path, 'w', encoding='utf-8') as f:\n"
-                "    json.dump(result, f)\n"
-                "sys.exit(0 if result.get('ok') else 1)\n"
-            )
+            def _stream_response_to_file(response, dest_file: str) -> None:
+                with open(dest_file, "wb") as f:
+                    while True:
+                        if cancel_check and cancel_check():
+                            raise InterruptedError("Download cancelled")
+                        chunk = response.read(8 * 1024 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+
+            def _run_download_attempt(kwargs: dict, use_xet: bool) -> dict:
+                if use_xet:
+                    os.environ["HF_HUB_DISABLE_XET"] = "0"
+                    os.environ["HF_HUB_ENABLE_HF_XET"] = "1"
+                else:
+                    os.environ["HF_HUB_DISABLE_XET"] = "1"
+                    os.environ["HF_HUB_ENABLE_HF_XET"] = "0"
+
+                try:
+                    # Stage 1: huggingface_hub download with token
+                    path = hf_hub_download(**kwargs)
+                    return {"ok": True, "path": path}
+                except Exception as e1:
+                    err1_low = str(e1).lower()
+                    is_gated1 = any(
+                        m in err1_low
+                        for m in [
+                            "gated",
+                            "restricted",
+                            "authorized list",
+                            "ask for access",
+                            "request access",
+                            "agreement",
+                            "terms",
+                            "conditions",
+                            "403",
+                        ]
+                    )
+                    if is_gated1:
+                        return {"ok": False, "error": str(e1)}
+
+                    try:
+                        # Stage 2: huggingface_hub download without token (handles restricted fine-grained tokens on public repos)
+                        no_tok_kwargs = kwargs.copy()
+                        no_tok_kwargs["token"] = False
+                        orig_hf_token = os.environ.pop("HF_TOKEN", None)
+                        try:
+                            path = hf_hub_download(**no_tok_kwargs)
+                            return {"ok": True, "path": path}
+                        finally:
+                            if orig_hf_token is not None:
+                                os.environ["HF_TOKEN"] = orig_hf_token
+                    except Exception as e2:
+                        repo_id = kwargs.get("repo_id")
+                        filename = kwargs.get("filename")
+                        revision = kwargs.get("revision") or "main"
+                        tok = kwargs.get("token")
+                        url = f"https://huggingface.co/{repo_id}/resolve/{revision}/{filename}"
+                        ua = (
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        )
+
+                        class NoAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
+                            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                                new_req = urllib.request.Request(newurl)
+                                new_req.add_header("User-Agent", ua)
+                                return new_req
+
+                        opener = urllib.request.build_opener(NoAuthRedirectHandler)
+                        dest_file = os.path.join(comfy_temp, os.path.basename(str(filename or "download.bin")))
+                        try:
+                            # Stage 3: manual redirect download with token
+                            req = urllib.request.Request(url)
+                            req.add_header("User-Agent", ua)
+                            if tok:
+                                req.add_header("Authorization", f"Bearer {tok}")
+                            with opener.open(req, timeout=60) as response:
+                                _stream_response_to_file(response, dest_file)
+                            return {"ok": True, "path": dest_file}
+                        except InterruptedError:
+                            _safe_remove(dest_file)
+                            raise
+                        except Exception as e3:
+                            try:
+                                # Stage 4: manual redirect download without token
+                                req = urllib.request.Request(url)
+                                req.add_header("User-Agent", ua)
+                                with opener.open(req, timeout=60) as response:
+                                    _stream_response_to_file(response, dest_file)
+                                return {"ok": True, "path": dest_file}
+                            except InterruptedError:
+                                _safe_remove(dest_file)
+                                raise
+                            except Exception as e4:
+                                _safe_remove(dest_file)
+                                return {
+                                    "ok": False,
+                                    "error": f"All download stages failed. Stage 1: {e1}. Stage 2: {e2}. Stage 3: {e3}. Stage 4: {e4}",
+                                }
 
             last_error = "Unknown error"
             for xet_flag in ["1", "0"]:
-                payload_fd, payload_path = tempfile.mkstemp(prefix="hf_file_payload_", suffix=".json", dir=comfy_temp)
-                result_fd, result_path = tempfile.mkstemp(prefix="hf_file_result_", suffix=".json", dir=comfy_temp)
-                os.close(payload_fd)
-                os.close(result_fd)
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Download cancelled")
 
-                try:
-                    with open(payload_path, "w", encoding="utf-8") as f:
-                        json.dump(download_kwargs, f)
+                attempt_result = {}
 
-                    proc = subprocess.Popen(
-                        [sys.executable, "-u", "-c", script, payload_path, result_path, xet_flag],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                    )
+                def _worker(flag=xet_flag):
+                    try:
+                        attempt_result.update(_run_download_attempt(download_kwargs, flag == "1"))
+                    except InterruptedError as ie:
+                        attempt_result.update({"ok": False, "cancelled": True, "error": str(ie)})
+                    except Exception as exc:
+                        attempt_result.update({"ok": False, "error": str(exc)})
 
-                    import threading
-                    def log_output(pipe):
-                        try:
-                            for line in iter(pipe.readline, ""):
-                                # Only print real errors if the subprocess output starts with Traceback or error
-                                val = line.strip()
-                                if val and ("Traceback" in val or "Error:" in val or "Exception" in val):
-                                    print(f"[DEBUG] Subprocess Error: {val}")
-                        except Exception:
-                            pass
+                worker_thread = threading.Thread(target=_worker, daemon=True)
+                worker_thread.start()
 
-                    log_thread = threading.Thread(target=log_output, args=(proc.stdout,), daemon=True)
-                    log_thread.start()
+                while worker_thread.is_alive():
+                    if cancel_check and cancel_check():
+                        raise InterruptedError("Download cancelled")
+                    time.sleep(0.1)
 
-                    while True:
-                        if proc.poll() is not None:
-                            break
-                        if cancel_check and cancel_check():
-                            proc.terminate()
-                            try:
-                                proc.wait(timeout=2)
-                            except subprocess.TimeoutExpired:
-                                proc.kill()
-                                proc.wait(timeout=5)
-                            raise InterruptedError("Download cancelled")
-                        time.sleep(0.1)
+                if attempt_result.get("cancelled"):
+                    raise InterruptedError("Download cancelled")
 
-                    result = {}
-                    if os.path.exists(result_path):
-                        try:
-                            with open(result_path, "r", encoding="utf-8") as f:
-                                result = json.load(f)
-                        except Exception:
-                            result = {}
+                if attempt_result.get("ok"):
+                    return str(attempt_result.get("path") or "")
 
-                    if result.get("ok"):
-                        return str(result.get("path") or "")
-
-                    last_error = result.get("error") or "Unknown subprocess error"
-                finally:
-                    _safe_remove(payload_path)
-                    _safe_remove(result_path)
+                last_error = attempt_result.get("error") or "Unknown download error"
 
             raise RuntimeError(last_error)
 
@@ -1018,94 +1001,30 @@ def run_download_folder(parsed_data: dict,
         kwargs["allow_patterns"] = allow_patterns
 
     def run_snapshot_with_cancel(download_kwargs: dict) -> str:
-        payload_fd, payload_path = tempfile.mkstemp(prefix="hf_snapshot_payload_", suffix=".json", dir=comfy_temp)
-        result_fd, result_path = tempfile.mkstemp(prefix="hf_snapshot_result_", suffix=".json", dir=comfy_temp)
-        os.close(payload_fd)
-        os.close(result_fd)
-        script = (
-            "import json, sys, os\n"
-            "os.environ['HF_HUB_DISABLE_XET'] = '1'\n"
-            "os.environ['HF_HUB_ENABLE_HF_XET'] = '0'\n"
-            "# Block hf_xet entirely - env vars are ignored by newer versions\n"
-            "for _m in list(sys.modules):\n"
-            "    if 'xet' in _m:\n"
-            "        del sys.modules[_m]\n"
-            "import importlib\n"
-            "class _XetBlocker:\n"
-            "    def find_module(self, name, path=None):\n"
-            "        return self if 'xet' in name else None\n"
-            "    def load_module(self, name):\n"
-            "        raise ImportError(name)\n"
-            "sys.meta_path.insert(0, _XetBlocker())\n"
-            "from huggingface_hub import snapshot_download\n"
-            "payload_path = sys.argv[1]\n"
-            "result_path = sys.argv[2]\n"
-            "with open(payload_path, 'r', encoding='utf-8') as f:\n"
-            "    kwargs = json.load(f)\n"
-            "result = {}\n"
-            "try:\n"
-            "    path = snapshot_download(**kwargs)\n"
-            "    result = {'ok': True, 'path': path}\n"
-            "except Exception as e:\n"
-            "    result = {'ok': False, 'error': str(e)}\n"
-            "with open(result_path, 'w', encoding='utf-8') as f:\n"
-            "    json.dump(result, f)\n"
-            "sys.exit(0 if result.get('ok') else 1)\n"
-        )
+        os.environ["HF_HUB_DISABLE_XET"] = "1"
+        os.environ["HF_HUB_ENABLE_HF_XET"] = "0"
+        attempt_result = {}
 
-        try:
-            with open(payload_path, "w", encoding="utf-8") as f:
-                json.dump(download_kwargs, f)
+        def _worker():
+            try:
+                path = snapshot_download(**download_kwargs)
+                attempt_result.update({"ok": True, "path": path})
+            except Exception as e:
+                attempt_result.update({"ok": False, "error": str(e)})
 
-            proc = subprocess.Popen(
-                [sys.executable, "-u", "-c", script, payload_path, result_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
+        worker_thread = threading.Thread(target=_worker, daemon=True)
+        worker_thread.start()
 
-            import threading
-            def log_output(pipe):
-                try:
-                    for line in iter(pipe.readline, ""):
-                        val = line.strip()
-                        if val:
-                            print(f"[DEBUG] Subprocess: {val}")
-                except Exception:
-                    pass
+        while worker_thread.is_alive():
+            if cancel_check and cancel_check():
+                raise InterruptedError("Folder download cancelled")
+            time.sleep(0.1)
 
-            log_thread = threading.Thread(target=log_output, args=(proc.stdout,), daemon=True)
-            log_thread.start()
+        if attempt_result.get("ok"):
+            return str(attempt_result.get("path") or temp_dir)
 
-            while True:
-                if proc.poll() is not None:
-                    break
-                if cancel_check and cancel_check():
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait(timeout=5)
-                    raise InterruptedError("Folder download cancelled")
-                time.sleep(0.1)
-
-            result = {}
-            if os.path.exists(result_path):
-                try:
-                    with open(result_path, "r", encoding="utf-8") as f:
-                        result = json.load(f)
-                except Exception:
-                    result = {}
-
-            if result.get("ok"):
-                return str(result.get("path") or temp_dir)
-
-            error = result.get("error") or "snapshot_download failed."
-            raise RuntimeError(error)
-        finally:
-            _safe_remove(payload_path)
-            _safe_remove(result_path)
+        error = attempt_result.get("error") or "snapshot_download failed."
+        raise RuntimeError(error)
 
     start_time = time.time()
     stage_dir = tempfile.mkdtemp(prefix="hf_stage_", dir=base_dir)
