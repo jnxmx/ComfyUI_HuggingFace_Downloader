@@ -49,6 +49,12 @@ WEB_DIRECTORY = "./js"
 
 __all__ = ["NODE_CLASS_MAPPINGS", "WEB_DIRECTORY"]
 
+try:
+    from .model_discovery import patch_lora_stack_nodes
+    patch_lora_stack_nodes()
+except Exception:
+    pass
+
 # Register web API
 try:
     from . import web_api
@@ -62,6 +68,11 @@ try:
         with _web_api_register_lock:
             if _web_api_registered:
                 return True
+            try:
+                from .model_discovery import patch_lora_stack_nodes
+                patch_lora_stack_nodes()
+            except Exception:
+                pass
             prompt_instance = getattr(server.PromptServer, "instance", None)
             if prompt_instance is None:
                 return False
@@ -80,6 +91,11 @@ try:
     def _register_web_api_with_retry():
         # PromptServer.instance can be unavailable at extension import time.
         for _ in range(120):  # up to ~60s
+            try:
+                from .model_discovery import patch_lora_stack_nodes
+                patch_lora_stack_nodes()
+            except Exception:
+                pass
             if _try_register_web_api_once():
                 return
             time.sleep(0.5)

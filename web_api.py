@@ -2388,6 +2388,11 @@ async def check_missing_models(request):
     Returns: { "missing": [...], "found": [...] }
     """
     try:
+        try:
+            from .model_discovery import patch_lora_stack_nodes
+            patch_lora_stack_nodes()
+        except Exception:
+            pass
         print("[DEBUG] check_missing_models called")
         data = await request.json()
         request_id = data.get("request_id") or uuid.uuid4().hex
@@ -3038,6 +3043,11 @@ def _load_interrupted_downloads():
 
 
 def setup(app_or_server):
+    try:
+        from .model_discovery import patch_lora_stack_nodes
+        patch_lora_stack_nodes()
+    except Exception:
+        pass
     # --- Download crash protection: startup recovery ---
     _cleanup_orphaned_download_files()
     _load_interrupted_downloads()

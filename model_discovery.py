@@ -1801,6 +1801,98 @@ def collect_proxy_widget_models(
         })
     return results
 
+def patch_lora_stack_nodes():
+    """
+    Patches LoadLoraModel and LoadLoraTextEncoder (from ComfyUI core comfy_extras)
+    to define validate_inputs(cls, **kwargs).
+    
+    By default in ComfyUI core, these nodes inherit io.ComfyNode without overriding
+    validate_inputs. As a result, ComfyUI's execution.py performs a generic combo
+    check (value_not_in_list) against every dynamic row, even when enabled=False or
+    strength=0, which blocks prompt execution and workflow runs when uninstalled LoRAs
+    are present but disabled.
+    
+    Overriding validate_inputs delegates input validation to this method, allowing
+    disabled rows (enabled=False or strength=0) to be skipped safely while still
+    validating enabled, non-zero strength rows against folder_paths.
+    """
+    try:
+        classes_to_patch = []
+        try:
+            import comfy_extras.nodes_lora_stack as nls
+            if hasattr(nls, "LoadLoraModel"):
+                classes_to_patch.append(nls.LoadLoraModel)
+            if hasattr(nls, "LoadLoraTextEncoder"):
+                classes_to_patch.append(nls.LoadLoraTextEncoder)
+        except Exception:
+            pass
+
+        try:
+            import nodes
+            mappings = getattr(nodes, "NODE_CLASS_MAPPINGS", {})
+            for name in ("LoadLoraModel", "LoadLoraTextEncoder", "Load LoRA (Model)", "Load LoRA (Text Encoder)"):
+                cls = mappings.get(name)
+                if cls and cls not in classes_to_patch:
+                    classes_to_patch.append(cls)
+        except Exception:
+            pass
+
+        if not classes_to_patch:
+            return
+
+        @classmethod
+        def _validate_dynamic_loras(cls, *args, **kwargs):
+            loras = kwargs.get("loras")
+            if loras is None and args:
+                for arg in args:
+                    if isinstance(arg, list) and (not arg or isinstance(arg[0], dict)):
+                        loras = arg
+                        break
+            if isinstance(loras, list):
+                try:
+                    import folder_paths
+                except Exception:
+                    folder_paths = None
+
+                for row in loras:
+                    if not isinstance(row, dict):
+                        continue
+                    enabled = row.get("enabled", True)
+                    if enabled is False or enabled == "false" or enabled == 0:
+                        continue
+                    strength = row.get("strength", 1.0)
+                    try:
+                        if float(strength) == 0.0:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+
+                    lora_name = row.get("lora_name")
+                    if not lora_name:
+                        continue
+
+                    if folder_paths:
+                        try:
+                            full_path = folder_paths.get_full_path("loras", lora_name)
+                        except Exception:
+                            full_path = None
+                        if not full_path:
+                            try:
+                                filename_list = folder_paths.get_filename_list("loras")
+                            except Exception:
+                                filename_list = []
+                            if lora_name not in filename_list:
+                                return f"LoRA '{lora_name}' not found"
+            return True
+
+        for cls in classes_to_patch:
+            if not getattr(cls, "_hfd_lora_stack_patched", False):
+                cls.validate_inputs = _validate_dynamic_loras
+                cls._hfd_lora_stack_patched = True
+    except Exception as e:
+        print(f"[ComfyUI_HuggingFace_Downloader] Note: could not patch LoRA stack validation: {e}")
+
+
 def _collect_models_from_nodes(
     nodes: list[dict],
     links_map: dict,
@@ -1894,9 +1986,27 @@ def _collect_models_from_nodes(
         # Detect disabled dynamic LoRA stack rows in LoadLoraModel / LoadLoraTextEncoder
         disabled_widget_indices = set()
         disabled_widget_names = set()
+        disabled_model_keys = set()
         named_widgets = node.get("widgets_values_named")
         if not isinstance(named_widgets, dict) and isinstance(node.get("widgets_values"), dict):
             named_widgets = node.get("widgets_values")
+        if not isinstance(named_widgets, dict) and isinstance(node.get("inputs"), dict):
+            named_widgets = node.get("inputs")
+
+        def _is_disabled_flag(val):
+            if val is False:
+                return True
+            if isinstance(val, (int, float)) and val == 0:
+                return True
+            if isinstance(val, str) and val.strip().lower() in ("false", "0", "0.0", "off", "disable", "disabled"):
+                return True
+            return False
+
+        def _is_zero_strength(val):
+            try:
+                return float(val) == 0.0
+            except (ValueError, TypeError):
+                return False
 
         if isinstance(named_widgets, dict):
             for k, v in named_widgets.items():
@@ -1905,9 +2015,13 @@ def _collect_models_from_nodes(
                 if k.endswith(".lora_name"):
                     prefix = k[:-len(".lora_name")]
                     enabled_val = named_widgets.get(f"{prefix}.enabled", True)
-                    strength_val = named_widgets.get(f"{prefix}.strength", 1.0)
-                    if enabled_val is False or strength_val == 0:
+                    strength_val = named_widgets.get(f"{prefix}.strength", named_widgets.get(f"{prefix}.strength_model", 1.0))
+                    if _is_disabled_flag(enabled_val) or _is_zero_strength(strength_val):
                         disabled_widget_names.add(k)
+                        if isinstance(v, str) and v.strip():
+                            fname, _ = split_model_identifier(v.strip())
+                            if fname:
+                                disabled_model_keys.add(normalize_filename_key(fname))
 
         if node_type in {"LoadLoraModel", "LoadLoraTextEncoder", "Load LoRA (Model)", "Load LoRA (Text Encoder)"}:
             raw_wv = node.get("widgets_values")
@@ -1917,10 +2031,15 @@ def _collect_models_from_nodes(
                 # - [lora_name_0, strength_0, enabled_0, ...] (live serialized graph without count)
                 row_idx = 1 if (not isinstance(raw_wv[0], bool) and isinstance(raw_wv[0], int)) else 0
                 while row_idx + 2 < len(raw_wv):
+                    lora_val = raw_wv[row_idx]
                     strength_val = raw_wv[row_idx + 1]
                     enabled_val = raw_wv[row_idx + 2]
-                    if enabled_val is False or strength_val == 0:
+                    if _is_disabled_flag(enabled_val) or _is_zero_strength(strength_val):
                         disabled_widget_indices.add(row_idx)
+                        if isinstance(lora_val, str) and lora_val.strip():
+                            fname, _ = split_model_identifier(lora_val.strip())
+                            if fname:
+                                disabled_model_keys.add(normalize_filename_key(fname))
                     row_idx += 3
 
         # Gather currently selected model-like widget values for this node.
@@ -2079,6 +2198,11 @@ def _collect_models_from_nodes(
                 if not filename:
                     continue
                 filename_key = normalize_filename_key(filename)
+                if filename_key in disabled_model_keys:
+                    continue
+                if node_type in {"LoadLoraModel", "LoadLoraTextEncoder", "Load LoRA (Model)", "Load LoRA (Text Encoder)"}:
+                    if filename_key not in widget_model_keys:
+                        continue
                 
                 # If any linked widget's ORIGINAL value (which we can't always know, 
                 # but we know it's being overridden) matched this filename, we skip.
@@ -2250,6 +2374,7 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
         "suggested_path": "checkpoints" (optional category)
     }
     """
+    patch_lora_stack_nodes()
     found_models = []
 
     # Track Note links separately - they should NOT create download entries

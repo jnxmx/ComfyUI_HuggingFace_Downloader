@@ -1626,24 +1626,136 @@ app.registerExtension({
         };
 
         const isDynamicGroupWidgetDisabledInNode = (node, widgetName) => {
+            if (!node || typeof node !== "object") return false;
             const wName = String(widgetName || "").trim();
             if (!wName.endsWith(".lora_name")) {
                 return false;
             }
             const prefix = wName.slice(0, -".lora_name".length);
+
+            const isFlagDisabled = (val) => {
+                if (val === false || val === 0 || val === "false" || val === "0") return true;
+                return false;
+            };
+            const isZeroStrength = (val) => {
+                if (val === undefined || val === null) return false;
+                const num = Number(val);
+                return !Number.isNaN(num) && num === 0;
+            };
+
+            // 1. Live node widgets array
             const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
-            const enabledWidget = widgets.find(w => String(w?.name || "").trim() === `${prefix}.enabled`);
-            if (enabledWidget && enabledWidget.value === false) {
-                return true;
+            if (widgets.length) {
+                const enabledWidget = widgets.find(w => String(w?.name || "").trim() === `${prefix}.enabled`);
+                if (enabledWidget && isFlagDisabled(enabledWidget.value)) {
+                    return true;
+                }
+                const strengthWidget = widgets.find(w => {
+                    const n = String(w?.name || "").trim();
+                    return n === `${prefix}.strength` || n === `${prefix}.strength_model` || n === `${prefix}.strength_clip`;
+                });
+                if (strengthWidget && isZeroStrength(strengthWidget.value)) {
+                    return true;
+                }
             }
-            const strengthWidget = widgets.find(w => {
-                const n = String(w?.name || "").trim();
-                return n === `${prefix}.strength` || n === `${prefix}.strength_model`;
-            });
-            if (strengthWidget && Number(strengthWidget.value) === 0) {
-                return true;
+
+            // 2. Named widgets dictionary
+            const named = node?.widgets_values_named || (typeof node?.widgets_values === "object" && !Array.isArray(node?.widgets_values) ? node.widgets_values : null);
+            if (named && typeof named === "object") {
+                const en = named[`${prefix}.enabled`];
+                if (isFlagDisabled(en)) return true;
+                const st = named[`${prefix}.strength`] ?? named[`${prefix}.strength_model`] ?? named[`${prefix}.strength_clip`];
+                if (isZeroStrength(st)) return true;
             }
+
+            // 3. Array widgets_values for dynamic LoRA stack
+            if (Array.isArray(node?.widgets_values)) {
+                const match = prefix.match(/^loras\.(\d+)$/);
+                if (match) {
+                    const idx = parseInt(match[1], 10);
+                    const wv = node.widgets_values;
+                    const offset = (wv.length > 0 && typeof wv[0] === "number" && !Number.isNaN(wv[0])) ? 1 : 0;
+                    const rowStart = offset + idx * 3;
+                    if (rowStart + 2 < wv.length) {
+                        const st = wv[rowStart + 1];
+                        const en = wv[rowStart + 2];
+                        if (isFlagDisabled(en) || isZeroStrength(st)) return true;
+                    }
+                }
+            }
+
+            // 4. Check counterpart live node if available
+            if (node.id != null) {
+                const liveNode = (app?.rootGraph?._nodes_by_id?.[node.id]) || findNodeByIdRecursive(app?.rootGraph, node.id);
+                if (liveNode && liveNode !== node) {
+                    return isDynamicGroupWidgetDisabledInNode(liveNode, widgetName);
+                }
+            }
+
             return false;
+        };
+
+        const getDisabledWidgetValuesForNode = (node) => {
+            const disabledValues = new Set();
+            if (!node || typeof node !== "object") return disabledValues;
+
+            const checkAndAdd = (val) => {
+                if (typeof val === "string") {
+                    const s = val.trim();
+                    if (s) {
+                        disabledValues.add(s);
+                        const base = s.split(/[/\\]/).pop().trim();
+                        if (base) disabledValues.add(base);
+                    }
+                }
+            };
+
+            const widgets = Array.isArray(node.widgets) ? node.widgets : [];
+            for (const w of widgets) {
+                const wName = String(w?.name || "").trim();
+                if (isDynamicGroupWidgetDisabledInNode(node, wName)) {
+                    checkAndAdd(w?.value);
+                }
+            }
+
+            const named = node.widgets_values_named || (typeof node.widgets_values === "object" && !Array.isArray(node.widgets_values) ? node.widgets_values : null);
+            if (named && typeof named === "object") {
+                for (const [k, v] of Object.entries(named)) {
+                    if (isDynamicGroupWidgetDisabledInNode(node, k)) {
+                        checkAndAdd(v);
+                    }
+                }
+            }
+
+            const nodeType = String(node.type || "");
+            if ((nodeType === "LoadLoraModel" || nodeType === "LoadLoraTextEncoder" || nodeType === "Load LoRA (Model)" || nodeType === "Load LoRA (Text Encoder)") && Array.isArray(node.widgets_values)) {
+                const wv = node.widgets_values;
+                const offset = (wv.length > 0 && typeof wv[0] === "number") ? 1 : 0;
+                let rIdx = offset;
+                while (rIdx + 2 < wv.length) {
+                    const loraVal = wv[rIdx];
+                    const st = wv[rIdx + 1];
+                    const en = wv[rIdx + 2];
+                    const isFlagDisabled = en === false || en === 0 || en === "false" || en === "0";
+                    const isZeroStrength = st !== undefined && st !== null && !Number.isNaN(Number(st)) && Number(st) === 0;
+                    if (isFlagDisabled || isZeroStrength) {
+                        checkAndAdd(loraVal);
+                    }
+                    rIdx += 3;
+                }
+            }
+
+            if (node.id != null) {
+                const liveNode = (app?.rootGraph?._nodes_by_id?.[node.id]) || findNodeByIdRecursive(app?.rootGraph, node.id);
+                if (liveNode && liveNode !== node) {
+                    const liveDisabled = getDisabledWidgetValuesForNode(liveNode);
+                    for (const v of liveDisabled) {
+                        disabledValues.add(v);
+                    }
+                }
+            }
+
+            return disabledValues;
         };
 
         const isValuePresentInComboOptions = (options, value) => {
@@ -2625,6 +2737,41 @@ app.registerExtension({
                                 for (const wName of namesToNull) {
                                     if (wName in node.widgets_values_named) {
                                         node.widgets_values_named[wName] = null;
+                                    }
+                                }
+                            }
+
+                            const disabledValues = getDisabledWidgetValuesForNode(liveNode || node);
+                            if (disabledValues.size > 0) {
+                                if (Array.isArray(node.properties?.models)) {
+                                    node.properties.models = node.properties.models.filter(m => {
+                                        const mName = String(m?.name || "").trim();
+                                        if (!mName) return false;
+                                        const base = mName.split(/[/\\]/).pop().trim();
+                                        return !disabledValues.has(mName) && !disabledValues.has(base);
+                                    });
+                                }
+                                if (node.widgets_values_named && typeof node.widgets_values_named === "object") {
+                                    for (const [k, v] of Object.entries(node.widgets_values_named)) {
+                                        if (isDynamicGroupWidgetDisabledInNode(liveNode || node, k)) {
+                                            node.widgets_values_named[k] = null;
+                                        }
+                                    }
+                                }
+                                const nodeType = String(node.type || liveNode?.type || "");
+                                if ((nodeType === "LoadLoraModel" || nodeType === "LoadLoraTextEncoder" || nodeType === "Load LoRA (Model)" || nodeType === "Load LoRA (Text Encoder)") && Array.isArray(node.widgets_values)) {
+                                    const wv = node.widgets_values;
+                                    const offset = (wv.length > 0 && typeof wv[0] === "number") ? 1 : 0;
+                                    let rIdx = offset;
+                                    while (rIdx + 2 < wv.length) {
+                                        const st = wv[rIdx + 1];
+                                        const en = wv[rIdx + 2];
+                                        const isFlagDisabled = en === false || en === 0 || en === "false" || en === "0";
+                                        const isZeroStrength = st !== undefined && st !== null && !Number.isNaN(Number(st)) && Number(st) === 0;
+                                        if (isFlagDisabled || isZeroStrength) {
+                                            node.widgets_values[rIdx] = null;
+                                        }
+                                        rIdx += 3;
                                     }
                                 }
                             }
@@ -5733,10 +5880,16 @@ app.registerExtension({
                 ];
                 if (!widgetValues.length) return [];
 
+                const disabledModelValues = getDisabledWidgetValuesForNode(node);
                 const stringWidgetValues = new Set();
                 for (const value of widgetValues) {
                     if (typeof value === "string" && value.trim()) {
-                        stringWidgetValues.add(value);
+                        const trimmed = value.trim();
+                        const base = trimmed.split(/[/\\]/).pop().trim();
+                        if (disabledModelValues.has(trimmed) || disabledModelValues.has(base)) {
+                            continue;
+                        }
+                        stringWidgetValues.add(trimmed);
                     }
                 }
                 if (!stringWidgetValues.size) return [];
@@ -5744,7 +5897,11 @@ app.registerExtension({
                 return models.filter((model) => {
                     const modelName = String(model?.name || "").trim();
                     if (!modelName) return false;
-                    return stringWidgetValues.has(modelName);
+                    const base = modelName.split(/[/\\]/).pop().trim();
+                    if (disabledModelValues.has(modelName) || disabledModelValues.has(base)) {
+                        return false;
+                    }
+                    return stringWidgetValues.has(modelName) || stringWidgetValues.has(base);
                 });
             } catch (_) {
                 return [];
@@ -5807,17 +5964,26 @@ app.registerExtension({
                 const gatherWidgetValues = (nodes) => {
                     if (!Array.isArray(nodes)) return;
                     for (const node of nodes) {
+                        const disabledValues = getDisabledWidgetValuesForNode(node);
                         const wvRaw = node?.widgets_values;
                         const wv = Array.isArray(wvRaw) ? wvRaw : Object.values(wvRaw || {});
                         for (const v of wv) {
                             if (typeof v === "string" && v.trim()) {
-                                allSerializedWidgetValues.add(v.trim());
+                                const trimmed = v.trim();
+                                const base = trimmed.split(/[/\\]/).pop().trim();
+                                if (!disabledValues.has(trimmed) && !disabledValues.has(base)) {
+                                    allSerializedWidgetValues.add(trimmed);
+                                }
                             }
                         }
                         if (node?.widgets_values_named && typeof node.widgets_values_named === "object") {
                             for (const v of Object.values(node.widgets_values_named)) {
                                 if (typeof v === "string" && v.trim()) {
-                                    allSerializedWidgetValues.add(v.trim());
+                                    const trimmed = v.trim();
+                                    const base = trimmed.split(/[/\\]/).pop().trim();
+                                    if (!disabledValues.has(trimmed) && !disabledValues.has(base)) {
+                                        allSerializedWidgetValues.add(trimmed);
+                                    }
                                 }
                             }
                         }
@@ -6302,6 +6468,10 @@ app.registerExtension({
                     const inputName =
                         String(reason?.extra_info?.input_name || "").trim() ||
                         parseInputNameFromDetails(details);
+
+                    if (node && isDynamicGroupWidgetDisabledInNode(node, inputName)) {
+                        continue;
+                    }
 
                     failures.push({
                         classType,
