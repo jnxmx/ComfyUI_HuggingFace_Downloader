@@ -29,6 +29,7 @@ PRIORITY_AUTHORS = [
     "black-forest-labs",
     "Winnougan",
     "LBH-123-AI",
+    "lodestones",
 ]
 
 POPULAR_MODELS_FILE = os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json")

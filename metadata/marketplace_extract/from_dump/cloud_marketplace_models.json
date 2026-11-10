@@ -1,9 +1,209 @@
 {
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Models extracted from live Comfy Cloud marketplace API scan",
   "source": "cloud_marketplace_export",
-  "scraped_at": "2026-11-04",
+  "scraped_at": "2026-11-10",
   "models": {
+    "qwen3vl_8b_joyimage_edit_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/JoyAI-Image-Edit/blob/main/text_encoders/qwen3vl_8b_joyimage_edit_int8_convrot.safetensors",
+      "type": "text_encoders",
+      "directory": "text_encoders",
+      "source": "cloud_marketplace_export",
+      "asset_id": "cf584def-2a09-4cc9-9534-905711da938c",
+      "provider": "huggingface.co",
+      "content_length": 10064089100,
+      "repo_id": "Comfy-Org/JoyAI-Image-Edit"
+    },
+    "p_q_image_2.1_6_steps_v0.2_comfyui_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/blob/main/loras/p_q_image_2.1_6_steps_v0.2_comfyui_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "6858bd67-2cc2-4f8f-a765-a9cc1976186f",
+      "provider": "huggingface.co",
+      "content_length": 344061256,
+      "repo_id": "Comfy-Org/Qwen-Image-2.1"
+    },
+    "p_q_image_2.1_8_steps_v0.1_comfyui_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/blob/main/loras/p_q_image_2.1_8_steps_v0.1_comfyui_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "60efa540-9932-48a3-8f4d-c4663a98b3cb",
+      "provider": "huggingface.co",
+      "content_length": 335621112,
+      "repo_id": "Comfy-Org/Qwen-Image-2.1"
+    },
+    "p_q_image_2.1_6_steps_upsampled_v0.2_comfyui_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/blob/main/loras/p_q_image_2.1_6_steps_upsampled_v0.2_comfyui_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "19505d08-a91c-4d63-ab3a-ded474b83a0b",
+      "provider": "huggingface.co",
+      "content_length": 344061264,
+      "repo_id": "Comfy-Org/Qwen-Image-2.1"
+    },
+    "p_q_image_2.1_5_steps_v0.1_comfyui_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/blob/main/loras/p_q_image_2.1_5_steps_v0.1_comfyui_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "b8661259-15da-42e4-9c3c-331e4ae9fcf5",
+      "provider": "huggingface.co",
+      "content_length": 335621080,
+      "repo_id": "Comfy-Org/Qwen-Image-2.1"
+    },
+    "p-h3-image_vae_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/p-h3-image-comfy/resolve/main/vae/p-h3-image_vae_int8_convrot.safetensors",
+      "type": "vae",
+      "directory": "vae",
+      "source": "cloud_marketplace_export",
+      "asset_id": "23f71a42-29e4-484e-89bf-9b14560bedec",
+      "provider": "huggingface.co",
+      "content_length": 3146996440,
+      "repo_id": "PrunaAI/p-h3-image-comfy"
+    },
+    "p-h3-image_lora_bf16.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/p-h3-image-comfy/resolve/main/loras/p-h3-image_lora_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "6a9be1f1-4d8f-4356-b463-5da199fb024f",
+      "provider": "huggingface.co",
+      "content_length": 1956195360,
+      "repo_id": "PrunaAI/p-h3-image-comfy"
+    },
+    "p-h3-image_text_encoder_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/p-h3-image-comfy/resolve/main/text_encoders/p-h3-image_text_encoder_int8_convrot.safetensors",
+      "type": "text_encoders",
+      "directory": "text_encoders",
+      "source": "cloud_marketplace_export",
+      "asset_id": "23a7390c-5fe9-4bf9-8483-fe84928bd90d",
+      "provider": "huggingface.co",
+      "content_length": 5120870504,
+      "repo_id": "PrunaAI/p-h3-image-comfy"
+    },
+    "idol_decoder_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Idol/resolve/main/vae/idol_decoder_fp16.safetensors",
+      "type": "vae",
+      "directory": "vae",
+      "source": "cloud_marketplace_export",
+      "asset_id": "e078330f-014a-4be6-ba3e-03089f8cb4b4",
+      "provider": "huggingface.co",
+      "content_length": 576148442,
+      "repo_id": "Comfy-Org/Idol"
+    },
+    "idol_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Idol/resolve/main/diffusion_models/idol_fp16.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "049d877e-2bce-481d-856c-ec1ade822bc4",
+      "provider": "huggingface.co",
+      "content_length": 741106994,
+      "repo_id": "Comfy-Org/Idol"
+    },
+    "p-h3-image_prompt_upsampler_w4a8.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/p-h3-image-comfy/resolve/main/text_encoders/p-h3-image_prompt_upsampler_w4a8.safetensors",
+      "type": "text_encoders",
+      "directory": "text_encoders",
+      "source": "cloud_marketplace_export",
+      "asset_id": "caf873d7-3ae8-4cb4-8b4f-30da07fed303",
+      "provider": "huggingface.co",
+      "content_length": 6724096116,
+      "repo_id": "PrunaAI/p-h3-image-comfy"
+    },
+    "dino_v3_vit_h_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Idol/resolve/main/clip_vision/dino_v3_vit_h_bf16.safetensors",
+      "type": "clip_vision",
+      "directory": "clip_vision",
+      "source": "cloud_marketplace_export",
+      "asset_id": "93f22989-a824-4922-bef0-fdec2658e5e8",
+      "provider": "huggingface.co",
+      "content_length": 1681247696,
+      "repo_id": "Comfy-Org/Idol"
+    },
+    "p-h3-image_w4a8.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/diffusion_models/p-h3-image_w4a8.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "9e690417-405a-46a2-9771-9a5409177478",
+      "provider": "huggingface.co",
+      "content_length": 13362068864,
+      "repo_id": "PrunaAI/P-H3-Image-Comfy"
+    },
+    "p-h3-image_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/diffusion_models/p-h3-image_int8_convrot.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "cd1f7bc8-84f9-4626-bc0d-dd0ebb5ce309",
+      "provider": "huggingface.co",
+      "content_length": 21213068840,
+      "repo_id": "PrunaAI/P-H3-Image-Comfy"
+    },
+    "p-h3-image_prompt_upsampler_bf16.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/text_encoders/p-h3-image_prompt_upsampler_bf16.safetensors",
+      "type": "text_encoders",
+      "directory": "text_encoders",
+      "source": "cloud_marketplace_export",
+      "asset_id": "ffae5fdc-515e-41d7-8c48-59010685439d",
+      "provider": "huggingface.co",
+      "content_length": 19306305552,
+      "repo_id": "PrunaAI/P-H3-Image-Comfy"
+    },
+    "p-h3-image_prompt_upsampler_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/text_encoders/p-h3-image_prompt_upsampler_int8_convrot.safetensors",
+      "type": "text_encoders",
+      "directory": "text_encoders",
+      "source": "cloud_marketplace_export",
+      "asset_id": "d39bfdb8-a0ab-40ae-a63c-a6eee2ae2753",
+      "provider": "huggingface.co",
+      "content_length": 9748117724,
+      "repo_id": "PrunaAI/P-H3-Image-Comfy"
+    },
+    "p-h3-image_text_encoder_w4a8.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/text_encoders/p-h3-image_text_encoder_w4a8.safetensors",
+      "type": "text_encoders",
+      "directory": "text_encoders",
+      "source": "cloud_marketplace_export",
+      "asset_id": "331d1953-b2df-4165-8946-7ea087b98a36",
+      "provider": "huggingface.co",
+      "content_length": 3575536021,
+      "repo_id": "PrunaAI/P-H3-Image-Comfy"
+    },
+    "p-h3-image_text_encoder_bf16.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/text_encoders/p-h3-image_text_encoder_bf16.safetensors",
+      "type": "text_encoders",
+      "directory": "text_encoders",
+      "source": "cloud_marketplace_export",
+      "asset_id": "aaf4629f-fe75-4e06-ae3b-96c7d43bf9af",
+      "provider": "huggingface.co",
+      "content_length": 9138027824,
+      "repo_id": "PrunaAI/P-H3-Image-Comfy"
+    },
+    "p-h3-image_vae_bf16.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/vae/p-h3-image_vae_bf16.safetensors",
+      "type": "vae",
+      "directory": "vae",
+      "source": "cloud_marketplace_export",
+      "asset_id": "043e8868-096d-497f-8499-43b15ad9a551",
+      "provider": "huggingface.co",
+      "content_length": 5559036680,
+      "repo_id": "PrunaAI/P-H3-Image-Comfy"
+    },
+    "p-h3-image_bf16.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/P-H3-Image-Comfy/resolve/main/diffusion_models/p-h3-image_bf16.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "99d80f2a-e0a0-466d-8f06-96592ffa4864",
+      "provider": "huggingface.co",
+      "content_length": 40468411160,
+      "repo_id": "PrunaAI/P-H3-Image-Comfy"
+    },
     "pika_h3_flex_fl2va_v1_bf16.safetensors": {
       "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/pika_h3_flex_fl2va_v1_bf16.safetensors",
       "type": "loras",

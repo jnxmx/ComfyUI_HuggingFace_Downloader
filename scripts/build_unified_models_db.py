@@ -642,7 +642,7 @@ def main() -> int:
             (category, stem_key) in curated_family_keys
         )
         is_priority_author_model = (
-            row_owner in {"winnougan", "comfy-org", "lbh-123-ai"}
+            row_owner in {"winnougan", "comfy-org", "lbh-123-ai", "lodestones"}
             or "convrot" in row_filename.lower()
             or "krea" in row_filename.lower()
         )
