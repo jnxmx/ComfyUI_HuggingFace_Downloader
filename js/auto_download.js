@@ -36,6 +36,43 @@ app.registerExtension({
         const MISSING_MODEL_STORE_IMPORT_CANDIDATES = [];
         let runHookBypassRemaining = 0;
 
+        const EMPTY_DEFAULT_WORKFLOW_GRAPH = Object.freeze({
+            last_node_id: 0,
+            last_link_id: 0,
+            nodes: [],
+            links: [],
+            groups: [],
+            config: {},
+            extra: {},
+            version: 0.4,
+        });
+        const createEmptyDefaultWorkflowGraph = () => ({
+            last_node_id: 0,
+            last_link_id: 0,
+            nodes: [],
+            links: [],
+            groups: [],
+            config: {},
+            extra: {},
+            version: 0.4,
+        });
+        const ensureEmptyDefaultGraphObjects = () => {
+            try {
+                const dgNamespace = window?.comfyAPI?.defaultGraph;
+                const dgObj = dgNamespace?.defaultGraph;
+                if (dgObj && typeof dgObj === "object") {
+                    for (const key of Object.keys(dgObj)) {
+                        delete dgObj[key];
+                    }
+                    Object.assign(dgObj, createEmptyDefaultWorkflowGraph());
+                }
+                if (dgNamespace && typeof dgNamespace === "object") {
+                    dgNamespace.defaultGraphJSON = JSON.stringify(EMPTY_DEFAULT_WORKFLOW_GRAPH);
+                }
+            } catch (_) {}
+        };
+        ensureEmptyDefaultGraphObjects();
+
         /* ──────────────── Helper Functions ──────────────── */
         const createButton = (text, className, onClick) => {
             const btn = document.createElement("button");
@@ -7331,6 +7368,10 @@ app.registerExtension({
 
             const originalLoadGraphData = comfyApp.loadGraphData.bind(comfyApp);
             comfyApp.loadGraphData = async (...args) => {
+                ensureEmptyDefaultGraphObjects();
+                if (args.length === 0 || args[0] === undefined || args[0] === null) {
+                    args = [createEmptyDefaultWorkflowGraph(), ...args.slice(1)];
+                }
                 const loadedGraphData = normalizeWorkflowOpenGraphDataArg(args?.[0]);
                 workflowOpenLastTriggeredAt = 0;
                 workflowOpenLastHandledSignature = "";
