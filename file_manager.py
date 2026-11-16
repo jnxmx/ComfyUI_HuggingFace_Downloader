@@ -1,4 +1,5 @@
 import os
+import re
 
 def _find_subdirs_recursive(base_path: str, max_depth: int = 3) -> list:
     subdirs = []
@@ -81,6 +82,98 @@ def get_models_root() -> str:
     return os.path.join(get_comfy_root(), "models")
 
 
+FALLBACK_MODEL_FOLDER_TYPES = [
+    "checkpoints", "clip", "diffusion_models", "vae", "loras", "controlnet",
+    "upscale_models", "text_encoders", "style_models", "embeddings",
+]
+
+# Legacy folder names ComfyUI still maps onto their modern equivalents (see folder_paths.map_legacy).
+LEGACY_MODEL_FOLDER_ALIASES = {"unet": "diffusion_models", "clip": "text_encoders"}
+
+# Registered folder_paths keys that are not model destinations.
+_NON_MODEL_FOLDER_TYPES = {"custom_nodes", "user", "input", "output", "temp", "datasets", "configs"}
+
+
+def get_model_folder_types() -> list:
+    """Return canonical ComfyUI model folder type names (checkpoints, loras, vae, ...)."""
+    try:
+        import folder_paths
+    except ImportError:
+        folder_paths = None
+
+    names = []
+    if folder_paths and isinstance(getattr(folder_paths, "folder_names_and_paths", None), dict):
+        names = [k for k in folder_paths.folder_names_and_paths.keys() if k not in _NON_MODEL_FOLDER_TYPES]
+    if not names:
+        names = list(FALLBACK_MODEL_FOLDER_TYPES)
+    return names
+
+
+def suggest_model_folder(repo_path: str, folder_types: list = None) -> str:
+    """
+    Suggest a ComfyUI destination folder for a file inside a Hugging Face repo.
+
+    Scans the file's directory segments from shallowest to deepest and stops at the
+    first one naming a model folder type; deeper segments are kept as a sub-path.
+      split_files/diffusion_models/a.safetensors -> diffusion_models
+      loras/wan/x.safetensors                    -> loras/wan
+      a.safetensors                              -> "" (no suggestion)
+    """
+    if folder_types is None:
+        folder_types = get_model_folder_types()
+    canonical = {name.lower(): LEGACY_MODEL_FOLDER_ALIASES.get(name, name) for name in folder_types}
+    for legacy, modern in LEGACY_MODEL_FOLDER_ALIASES.items():
+        canonical.setdefault(legacy, modern)
+
+    dir_segments = str(repo_path or "").replace("\\", "/").strip("/").split("/")[:-1]
+    for idx, segment in enumerate(dir_segments):
+        match = canonical.get(segment.strip().lower())
+        if match:
+            return sanitize_rel_folder("/".join([match] + dir_segments[idx + 1:]))
+    return ""
+
+
+# Filename keyword rules for guessing a destination when a file's path has no model folder.
+# Ordered most-specific first: e.g. a "flux_..._lora" is a LoRA and a "wan2_1_vae" a VAE, even
+# though their names also mention a diffusion model family. Matched against the lowercased path;
+# _B/_E mark a non-letter boundary so short tokens don't match inside longer words.
+_B = r"(?:^|[^a-z])"
+_E = r"(?:[^a-z]|$)"
+_NAME_FOLDER_RULES = [
+    ("latent_upscale_models", rf"latent[_\-]?upscal"),
+    # LoRAs are often named by rank alone (e.g. "..._distill_rank32_bf16").
+    ("loras", rf"{_B}(?:lora|loha|lokr|locon|lycoris){_E}|{_B}rank[_\-]?\d+{_E}"),
+    ("vae_approx", rf"{_B}tae(?:sd|f1|w|hv|[^a-z])"),
+    ("vae", rf"{_B}vae{_E}|(?:^|/)ae\.(?:safetensors|sft|pt|pth|bin)$"),
+    ("clip_vision", rf"clip[_\-]?vision|siglip|image[_\-]?encoder|{_B}visual{_E}"),
+    ("text_encoders", rf"{_B}(?:t5xxl|t5|umt5|mt5|byt5|clip[_\-]?[lg]|text[_\-]?encoders?|gemma|llava|llama|mistral)"
+                      rf"|qwen[\d.]*[_\-]?(?:\d+(?:\.\d+)?b|vl){_E}"),
+    ("upscale_models", rf"esrgan|swinir|ultrasharp|upscal|{_B}(?:\d+x|x\d+){_E}"),
+    ("controlnet", rf"control[_\-]?net|t2i[_\-]?adapter|{_B}union{_E}"),
+    ("audio_encoders", rf"whisper|wav2vec|hubert"),
+    ("diffusion_models", rf"{_B}(?:wan|flux|hunyuan|ltxv?|hidream|cosmos|mochi|chroma|lumina|omnigen|skyreels|kontext)"
+                         rf"|qwen[_\-]?image"),
+    ("checkpoints", rf"sd[_\-]?xl|{_B}sd[_\-]?1[._\-]?5{_E}|v1-5-pruned|{_B}sd-v1|sd[_\-]?turbo"),
+]
+_NAME_FOLDER_PATTERNS = [(folder, re.compile(pattern)) for folder, pattern in _NAME_FOLDER_RULES]
+
+
+def guess_model_folder_from_name(repo_path: str, folder_types: list = None) -> str:
+    """
+    Guess a ComfyUI folder for a model file from keywords in its path (e.g. "lora", "vae",
+    "t5xxl"). Only a hint for files whose path has no model folder segment; returns "" when
+    nothing matches or the guessed folder isn't registered in this ComfyUI.
+    """
+    if folder_types is None:
+        folder_types = get_model_folder_types()
+    available = {LEGACY_MODEL_FOLDER_ALIASES.get(name, name) for name in folder_types}
+    text = str(repo_path or "").replace("\\", "/").strip("/").lower()
+    for folder, pattern in _NAME_FOLDER_PATTERNS:
+        if pattern.search(text):
+            return folder if folder in available else ""
+    return ""
+
+
 def get_model_subfolders(models_dir: str = None) -> list:
     try:
         import folder_paths
@@ -98,7 +191,7 @@ def get_model_subfolders(models_dir: str = None) -> list:
                 base_types.append(k)
     else:
         # Fallback list if folder_paths is not available
-        base_types = ["checkpoints", "clip", "diffusion_models", "vae", "loras", "controlnet", "upscale_models", "text_encoders", "style_models", "embeddings"]
+        base_types = list(FALLBACK_MODEL_FOLDER_TYPES)
 
     # Also include any actual top-level folders inside models_dir
     if os.path.exists(models_dir):
