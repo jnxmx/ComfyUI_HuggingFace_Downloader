@@ -81,12 +81,50 @@ def clear_cache_for_path(downloaded_path: str):
         print(f"[DEBUG] Cache cleaning failed: {e}")
 
 
+def abort_hf_transfer():
+    """Abort any in-flight huggingface_hub network transfers by closing global sessions."""
+    try:
+        from huggingface_hub.utils._http import close_session
+        close_session()
+    except Exception:
+        pass
+    try:
+        from huggingface_hub.utils._http import get_session
+        sess = get_session()
+        if sess and hasattr(sess, "close"):
+            sess.close()
+    except Exception:
+        pass
+
+
+def cleanup_repo_locks(repo_id: str):
+    """Remove any stale .lock files for a given repository."""
+    normalized_repo = str(repo_id or "").strip()
+    if not normalized_repo:
+        return
+    try:
+        repo_folder = f"models--{normalized_repo.replace('/', '--')}"
+        locks_repo_dir = os.path.join(_get_hf_cache_dir(), ".locks", repo_folder)
+        if os.path.isdir(locks_repo_dir):
+            for name in os.listdir(locks_repo_dir):
+                if name.endswith(".lock"):
+                    _safe_remove(os.path.join(locks_repo_dir, name))
+            shutil.rmtree(locks_repo_dir, ignore_errors=True)
+            print(f"[DEBUG] Cleaned locks for {normalized_repo}")
+    except Exception as e:
+        print(f"[DEBUG] Failed to clean locks for {normalized_repo}: {e}")
+
+
 def clear_cache_for_repo(repo_id: str):
     """Remove cached snapshots/blobs for a specific HF model repo."""
     normalized_repo = str(repo_id or "").strip()
     if not normalized_repo:
         return
     print(f"[DEBUG] Attempting to clean cache for repo {normalized_repo}")
+
+    # Ensure any active connections and locks for this repo are terminated
+    abort_hf_transfer()
+    cleanup_repo_locks(normalized_repo)
 
     try:
         cache_info = scan_cache_dir()
@@ -519,6 +557,9 @@ def run_download(parsed_data: dict,
 
             comfy_temp = os.path.join(os.getcwd(), "temp")
             os.makedirs(comfy_temp, exist_ok=True)
+            repo_id = str(download_kwargs.get("repo_id") or "").strip()
+            if repo_id:
+                cleanup_repo_locks(repo_id)
 
             def _stream_response_to_file(response, dest_file: str) -> None:
                 with open(dest_file, "wb") as f:
@@ -531,6 +572,9 @@ def run_download(parsed_data: dict,
                         f.write(chunk)
 
             def _run_download_attempt(kwargs: dict, use_xet: bool) -> dict:
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Download cancelled")
+
                 if use_xet:
                     os.environ["HF_HUB_DISABLE_XET"] = "0"
                     os.environ["HF_HUB_ENABLE_HF_XET"] = "1"
@@ -543,6 +587,8 @@ def run_download(parsed_data: dict,
                     path = hf_hub_download(**kwargs)
                     return {"ok": True, "path": path}
                 except Exception as e1:
+                    if cancel_check and cancel_check():
+                        raise InterruptedError("Download cancelled")
                     err1_low = str(e1).lower()
                     is_gated1 = any(
                         m in err1_low
@@ -562,6 +608,8 @@ def run_download(parsed_data: dict,
                         return {"ok": False, "error": str(e1)}
 
                     try:
+                        if cancel_check and cancel_check():
+                            raise InterruptedError("Download cancelled")
                         # Stage 2: huggingface_hub download without token (handles restricted fine-grained tokens on public repos)
                         no_tok_kwargs = kwargs.copy()
                         no_tok_kwargs["token"] = False
@@ -573,11 +621,13 @@ def run_download(parsed_data: dict,
                             if orig_hf_token is not None:
                                 os.environ["HF_TOKEN"] = orig_hf_token
                     except Exception as e2:
-                        repo_id = kwargs.get("repo_id")
+                        if cancel_check and cancel_check():
+                            raise InterruptedError("Download cancelled")
+                        repo_id_kw = kwargs.get("repo_id")
                         filename = kwargs.get("filename")
                         revision = kwargs.get("revision") or "main"
                         tok = kwargs.get("token")
-                        url = f"https://huggingface.co/{repo_id}/resolve/{revision}/{filename}"
+                        url = f"https://huggingface.co/{repo_id_kw}/resolve/{revision}/{filename}"
                         ua = (
                             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -592,6 +642,8 @@ def run_download(parsed_data: dict,
                         opener = urllib.request.build_opener(NoAuthRedirectHandler)
                         dest_file = os.path.join(comfy_temp, os.path.basename(str(filename or "download.bin")))
                         try:
+                            if cancel_check and cancel_check():
+                                raise InterruptedError("Download cancelled")
                             # Stage 3: manual redirect download with token
                             req = urllib.request.Request(url)
                             req.add_header("User-Agent", ua)
@@ -604,6 +656,9 @@ def run_download(parsed_data: dict,
                             _safe_remove(dest_file)
                             raise
                         except Exception as e3:
+                            if cancel_check and cancel_check():
+                                _safe_remove(dest_file)
+                                raise InterruptedError("Download cancelled")
                             try:
                                 # Stage 4: manual redirect download without token
                                 req = urllib.request.Request(url)
@@ -624,6 +679,9 @@ def run_download(parsed_data: dict,
             last_error = "Unknown error"
             for xet_flag in ["1", "0"]:
                 if cancel_check and cancel_check():
+                    abort_hf_transfer()
+                    if repo_id:
+                        cleanup_repo_locks(repo_id)
                     raise InterruptedError("Download cancelled")
 
                 attempt_result = {}
@@ -634,17 +692,27 @@ def run_download(parsed_data: dict,
                     except InterruptedError as ie:
                         attempt_result.update({"ok": False, "cancelled": True, "error": str(ie)})
                     except Exception as exc:
-                        attempt_result.update({"ok": False, "error": str(exc)})
+                        if cancel_check and cancel_check():
+                            attempt_result.update({"ok": False, "cancelled": True, "error": "Download cancelled"})
+                        else:
+                            attempt_result.update({"ok": False, "error": str(exc)})
 
                 worker_thread = threading.Thread(target=_worker, daemon=True)
                 worker_thread.start()
 
                 while worker_thread.is_alive():
                     if cancel_check and cancel_check():
+                        abort_hf_transfer()
+                        worker_thread.join(timeout=3.0)
+                        if repo_id:
+                            cleanup_repo_locks(repo_id)
                         raise InterruptedError("Download cancelled")
                     time.sleep(0.1)
 
-                if attempt_result.get("cancelled"):
+                if attempt_result.get("cancelled") or (cancel_check and cancel_check()):
+                    abort_hf_transfer()
+                    if repo_id:
+                        cleanup_repo_locks(repo_id)
                     raise InterruptedError("Download cancelled")
 
                 if attempt_result.get("ok"):
@@ -718,6 +786,7 @@ def run_download(parsed_data: dict,
             return (final_message, dest_path, {"expected_size": expected_size, "expected_sha": expected_sha})
         return (final_message, dest_path) if sync else ("", "")
     except InterruptedError:
+        abort_hf_transfer()
         if copy_tmp_path:
             _safe_remove(copy_tmp_path)
         if dest_path and os.path.exists(dest_path):
@@ -1000,6 +1069,10 @@ def run_download_folder(parsed_data: dict,
     if allow_patterns:
         kwargs["allow_patterns"] = allow_patterns
 
+    repo_id_snapshot = str(parsed_data.get("repo") or "").strip()
+    if repo_id_snapshot:
+        cleanup_repo_locks(repo_id_snapshot)
+
     def run_snapshot_with_cancel(download_kwargs: dict) -> str:
         os.environ["HF_HUB_DISABLE_XET"] = "1"
         os.environ["HF_HUB_ENABLE_HF_XET"] = "0"
@@ -1009,16 +1082,31 @@ def run_download_folder(parsed_data: dict,
             try:
                 path = snapshot_download(**download_kwargs)
                 attempt_result.update({"ok": True, "path": path})
+            except InterruptedError as ie:
+                attempt_result.update({"ok": False, "cancelled": True, "error": str(ie)})
             except Exception as e:
-                attempt_result.update({"ok": False, "error": str(e)})
+                if cancel_check and cancel_check():
+                    attempt_result.update({"ok": False, "cancelled": True, "error": "Folder download cancelled"})
+                else:
+                    attempt_result.update({"ok": False, "error": str(e)})
 
         worker_thread = threading.Thread(target=_worker, daemon=True)
         worker_thread.start()
 
         while worker_thread.is_alive():
             if cancel_check and cancel_check():
+                abort_hf_transfer()
+                worker_thread.join(timeout=3.0)
+                if repo_id_snapshot:
+                    cleanup_repo_locks(repo_id_snapshot)
                 raise InterruptedError("Folder download cancelled")
             time.sleep(0.1)
+
+        if attempt_result.get("cancelled") or (cancel_check and cancel_check()):
+            abort_hf_transfer()
+            if repo_id_snapshot:
+                cleanup_repo_locks(repo_id_snapshot)
+            raise InterruptedError("Folder download cancelled")
 
         if attempt_result.get("ok"):
             return str(attempt_result.get("path") or temp_dir)
@@ -1059,6 +1147,7 @@ def run_download_folder(parsed_data: dict,
         os.replace(stage_dir, dest_path)
         stage_dir = ""
     except InterruptedError:
+        abort_hf_transfer()
         clear_cache_for_repo(parsed_data.get("repo", ""))
         cancel_msg = "Folder download cancelled"
         print("[DEBUG]", cancel_msg)

@@ -3222,6 +3222,11 @@ def setup(app_or_server):
             return web.json_response({"error": "download_id is required"}, status=400)
 
         _request_cancel(download_id)
+        try:
+            from .downloader import abort_hf_transfer
+            abort_hf_transfer()
+        except Exception:
+            pass
 
         removed_from_queue = False
         with download_queue_lock:
