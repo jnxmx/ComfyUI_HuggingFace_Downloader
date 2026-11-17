@@ -1,4 +1,5 @@
 
 huggingface_hub>=0.32.0
+hf-xet>=1.8.0,<2
 comfy-cli
 PyYAML
