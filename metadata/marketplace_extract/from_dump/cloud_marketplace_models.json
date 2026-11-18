@@ -1,9 +1,239 @@
 {
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Models extracted from live Comfy Cloud marketplace API scan",
   "source": "cloud_marketplace_export",
-  "scraped_at": "2026-11-10",
+  "scraped_at": "2026-11-18",
   "models": {
+    "LTX2.3-22B_IC-LoRA-CrossView-Warp_v0.9_18000.safetensors": {
+      "url": "https://huggingface.co/Cseti/LTX2.3-22B_IC-LoRA-CrossView-Warp/resolve/main/LTX2.3-22B_IC-LoRA-CrossView-Warp_v0.9_18000.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "ff7c6d72-2dd8-5b5c-9794-10a97f3e5af4",
+      "provider": "huggingface.co",
+      "content_length": 201431592,
+      "repo_id": "Cseti/LTX2.3-22B_IC-LoRA-CrossView-Warp"
+    },
+    "LTX2.3-22B_IC-LoRA-CrossView-Warp_v2_6000.safetensors": {
+      "url": "https://huggingface.co/Cseti/LTX2.3-22B_IC-LoRA-CrossView-Warp_v2/resolve/main/LTX2.3-22B_IC-LoRA-CrossView-Warp_v2_6000.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "ec10654d-aa24-585b-b85c-f801a31bce1f",
+      "provider": "huggingface.co",
+      "content_length": 327287384,
+      "repo_id": "Cseti/LTX2.3-22B_IC-LoRA-CrossView-Warp_v2"
+    },
+    "wevisone_vl_4b_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/WeVisOne-VL/resolve/main/text_encoders/wevisone_vl_4b_int8_convrot.safetensors?download=true",
+      "type": "text_encoders",
+      "directory": "text_encoders",
+      "source": "cloud_marketplace_export",
+      "asset_id": "9afb6bbe-f85b-4ec1-b99a-eb55f7ee2f76",
+      "provider": "huggingface.co",
+      "content_length": 5290417304,
+      "repo_id": "Comfy-Org/WeVisOne-VL"
+    },
+    "wevisone_vl_2b_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/WeVisOne-VL/resolve/main/text_encoders/wevisone_vl_2b_bf16.safetensors?download=true",
+      "type": "text_encoders",
+      "directory": "text_encoders",
+      "source": "cloud_marketplace_export",
+      "asset_id": "0e58e502-57ce-47a9-88b1-fc0bb9714c95",
+      "provider": "huggingface.co",
+      "content_length": 4921649608,
+      "repo_id": "Comfy-Org/WeVisOne-VL"
+    },
+    "wevisone_vl_4b_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/WeVisOne-VL/resolve/main/text_encoders/wevisone_vl_4b_bf16.safetensors?download=true",
+      "type": "text_encoders",
+      "directory": "text_encoders",
+      "source": "cloud_marketplace_export",
+      "asset_id": "e0053e4d-8a8b-4488-8fb9-83c2c7d3fb6b",
+      "provider": "huggingface.co",
+      "content_length": 9699729600,
+      "repo_id": "Comfy-Org/WeVisOne-VL"
+    },
+    "relayvsr_flash_vae_x4_fp32.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/RelayVSR/resolve/main/vae/relayvsr_flash_vae_x4_fp32.safetensors",
+      "type": "vae",
+      "directory": "vae",
+      "source": "cloud_marketplace_export",
+      "asset_id": "b5af050a-def9-4c13-b01d-bf9cb4575f18",
+      "provider": "huggingface.co",
+      "content_length": 127759784,
+      "repo_id": "Comfy-Org/RelayVSR"
+    },
+    "wevisone_vl_2b_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/WeVisOne-VL/resolve/main/text_encoders/wevisone_vl_2b_int8_convrot.safetensors",
+      "type": "text_encoders",
+      "directory": "text_encoders",
+      "source": "cloud_marketplace_export",
+      "asset_id": "04cac67b-36ac-4ef3-b572-0294d029231d",
+      "provider": "huggingface.co",
+      "content_length": 2890564784,
+      "repo_id": "Comfy-Org/WeVisOne-VL"
+    },
+    "relayvsr_x4_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/RelayVSR/resolve/main/diffusion_models/relayvsr_x4_int8_convrot.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "07377c05-b6a5-46f2-b45a-e41479a0c36c",
+      "provider": "huggingface.co",
+      "content_length": 5164179952,
+      "repo_id": "Comfy-Org/RelayVSR"
+    },
+    "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors": {
+      "url": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR/blob/main/ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors",
+      "type": "embeddings",
+      "directory": "embeddings",
+      "source": "cloud_marketplace_export",
+      "asset_id": "d075f5bb-a2fe-4e23-8e2f-59ccc647f63c",
+      "provider": "huggingface.co",
+      "content_length": 12614165,
+      "repo_id": "Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR"
+    },
+    "p_q_image_2.1_remove_object_6_steps_v0.1_comfyui_bf16.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/P-Q-Image-2.1-Remove-Object-Comfy/blob/main/p_q_image_2.1_remove_object_6_steps_v0.1_comfyui_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "33b5c56d-23da-4ee7-ad3f-2eb2129eadd5",
+      "provider": "huggingface.co",
+      "content_length": 167848736,
+      "repo_id": "PrunaAI/P-Q-Image-2.1-Remove-Object-Comfy"
+    },
+    "p_q_image_2.1_remove_object_8_steps_v0.1_comfyui_bf16.safetensors": {
+      "url": "https://huggingface.co/PrunaAI/P-Q-Image-2.1-Remove-Object-Comfy/blob/main/p_q_image_2.1_remove_object_8_steps_v0.1_comfyui_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "d610f80e-ff7a-454c-89ff-e6d15e2888fe",
+      "provider": "huggingface.co",
+      "content_length": 167848752,
+      "repo_id": "PrunaAI/P-Q-Image-2.1-Remove-Object-Comfy"
+    },
+    "qwen-image-2.1-fg-extract-v4.safetensors": {
+      "url": "https://huggingface.co/trmz/qwen-image-2.1-fg-extract-lora/blob/main/qwen-image-2.1-fg-extract-v4.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "1973c8f1-e8d3-4376-80b3-4708431d4bac",
+      "provider": "huggingface.co",
+      "content_length": 167831856,
+      "repo_id": "trmz/qwen-image-2.1-fg-extract-lora"
+    },
+    "fibo2_dev_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_dev_int8_convrot.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "985553b3-4dda-4f5d-9c5b-2aa5b2ae1cac",
+      "provider": "huggingface.co",
+      "content_length": 8408562474,
+      "repo_id": "Comfy-Org/Fibo-2.0"
+    },
+    "fibo_2.0_turbo_lora_avg_rank_270_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/loras/fibo_2.0_turbo_lora_avg_rank_270_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "457d1481-e1ae-4785-ba63-28ec4f89e4ab",
+      "provider": "huggingface.co",
+      "content_length": 1989177460,
+      "repo_id": "Comfy-Org/Fibo-2.0"
+    },
+    "fibo2_edit_turbo_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_edit_turbo_int8_convrot.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "08995470-c1e7-40bc-b10a-783b5c259cac",
+      "provider": "huggingface.co",
+      "content_length": 8408562474,
+      "repo_id": "Comfy-Org/Fibo-2.0"
+    },
+    "fibo2_edit_turbo_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_edit_turbo_bf16.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "4d3fba9a-8d10-4fdf-a637-d4ac1a21cc18",
+      "provider": "huggingface.co",
+      "content_length": 16452934194,
+      "repo_id": "Comfy-Org/Fibo-2.0"
+    },
+    "fibo2_dev_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Fibo-2.0/resolve/main/diffusion_models/fibo2_dev_bf16.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "ec1ad37a-8995-4a7a-9b96-847336efff0e",
+      "provider": "huggingface.co",
+      "content_length": 16452934194,
+      "repo_id": "Comfy-Org/Fibo-2.0"
+    },
+    "qwen-image-2.1-outpaint-v2.safetensors": {
+      "url": "https://huggingface.co/ausboss/Qwen-Image-2.1-Outpaint-LoRA/blob/main/qwen-image-2.1-outpaint-v2.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "ea37e41c-35e8-49a5-9a84-08876fabf69b",
+      "provider": "huggingface.co",
+      "content_length": 159436576,
+      "repo_id": "ausboss/Qwen-Image-2.1-Outpaint-LoRA"
+    },
+    "joyai_image_edit_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/JoyAI-Image-Edit/blob/main/diffusion_models/joyai_image_edit_int8_convrot.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "c0b88c05-466c-4db4-a56a-c8311eeedbec",
+      "provider": "huggingface.co",
+      "content_length": 16433221208,
+      "repo_id": "Comfy-Org/JoyAI-Image-Edit"
+    },
+    "relayvsr_flash_vae_x2_fp32.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/RelayVSR/resolve/main/vae/relayvsr_flash_vae_x2_fp32.safetensors",
+      "type": "vae",
+      "directory": "vae",
+      "source": "cloud_marketplace_export",
+      "asset_id": "c581c266-de68-44e8-9987-3298ceea1368",
+      "provider": "huggingface.co",
+      "content_length": 127759464,
+      "repo_id": "Comfy-Org/RelayVSR"
+    },
+    "relayvsr_x2_lightx2v_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/RelayVSR/resolve/main/diffusion_models/relayvsr_x2_lightx2v_int8_convrot.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "e6fd3623-d8c7-43a1-9ba8-f059b8b11b9e",
+      "provider": "huggingface.co",
+      "content_length": 5163295248,
+      "repo_id": "Comfy-Org/RelayVSR"
+    },
+    "minimax_h3_image_vae_fp16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3-Image/blob/main/vae/minimax_h3_image_vae_fp16.safetensors",
+      "type": "vae",
+      "directory": "vae",
+      "source": "cloud_marketplace_export",
+      "asset_id": "01283c72-b59b-441f-826f-8238dfd3e409",
+      "provider": "huggingface.co",
+      "content_length": 1168505312,
+      "repo_id": "Comfy-Org/MiniMax-H3-Image"
+    },
+    "minimax_h3_image_pruned_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/MiniMax-H3-Image/blob/main/diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "ad0c5c9e-a064-4c47-862f-d2c7cf66bbb2",
+      "provider": "huggingface.co",
+      "content_length": 20979314802,
+      "repo_id": "Comfy-Org/MiniMax-H3-Image"
+    },
     "qwen3vl_8b_joyimage_edit_int8_convrot.safetensors": {
       "url": "https://huggingface.co/Comfy-Org/JoyAI-Image-Edit/blob/main/text_encoders/qwen3vl_8b_joyimage_edit_int8_convrot.safetensors",
       "type": "text_encoders",
@@ -305,64 +535,64 @@
       "repo_id": "FastVideo/FastH3-Omni-Comfy"
     },
     "flux3_image_klein_nvfp4.safetensors": {
-      "url": "https://huggingface.co/Comfy-Org/Flux-3-Image/blob/main/diffusion_models/flux3_image_klein_nvfp4.safetensors",
+      "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/diffusion_models/flux3-image-klein-base-nvfp4.safetensors",
       "type": "diffusion_models",
       "directory": "diffusion_models",
       "source": "cloud_marketplace_export",
       "asset_id": "9d87055c-0ee3-4f3f-a1cf-2706c2b67c84",
       "provider": "huggingface.co",
       "content_length": 5257238192,
-      "repo_id": "Comfy-Org/Flux-3-Image"
+      "repo_id": "black-forest-labs/flux-3-image-klein-comfy"
     },
     "flux3-image-klein-base-int8-convrot.safetensors": {
-      "url": "https://huggingface.co/Comfy-Org/Flux-3-Image/blob/main/diffusion_models/flux3_image_klein_int8_convrot.safetensors",
+      "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/diffusion_models/flux3-image-klein-base-int8-convrot.safetensors",
       "type": "diffusion_models",
       "directory": "diffusion_models",
       "source": "cloud_marketplace_export",
       "asset_id": "d460ed28-bba8-486e-b162-fd6cf78a5ce4",
       "provider": "huggingface.co",
       "content_length": 5807427339,
-      "repo_id": "Comfy-Org/Flux-3-Image"
+      "repo_id": "black-forest-labs/flux-3-image-klein-comfy"
     },
     "flux3_image_klein_sd_nvfp4.safetensors": {
-      "url": "https://huggingface.co/Comfy-Org/Flux-3-Image/blob/main/diffusion_models/flux3_image_klein_sd_nvfp4.safetensors",
+      "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/diffusion_models/flux3-image-klein-nvfp4.safetensors",
       "type": "diffusion_models",
       "directory": "diffusion_models",
       "source": "cloud_marketplace_export",
       "asset_id": "002cc6ef-05f2-4cf2-9526-5ba2edc3a676",
       "provider": "huggingface.co",
       "content_length": 5277685632,
-      "repo_id": "Comfy-Org/Flux-3-Image"
+      "repo_id": "black-forest-labs/flux-3-image-klein-comfy"
     },
     "flux3_image_klein_bf16.safetensors": {
-      "url": "https://huggingface.co/Comfy-Org/Flux-3-Image/blob/main/diffusion_models/flux3_image_klein_bf16.safetensors",
+      "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/diffusion_models/flux3-image-klein-base-bf16.safetensors",
       "type": "diffusion_models",
       "directory": "diffusion_models",
       "source": "cloud_marketplace_export",
       "asset_id": "3d53075b-0d7c-4f99-a485-7b9e17df3b4f",
       "provider": "huggingface.co",
       "content_length": 11076957072,
-      "repo_id": "Comfy-Org/Flux-3-Image"
+      "repo_id": "black-forest-labs/flux-3-image-klein-comfy"
     },
     "flux3_image_klein_sd_bf16.safetensors": {
-      "url": "https://huggingface.co/Comfy-Org/Flux-3-Image/blob/main/diffusion_models/flux3_image_klein_sd_bf16.safetensors",
+      "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/diffusion_models/flux3-image-klein-bf16.safetensors",
       "type": "diffusion_models",
       "directory": "diffusion_models",
       "source": "cloud_marketplace_export",
       "asset_id": "bc6fff5b-dcfb-4041-9f4b-0c201f27aa32",
       "provider": "huggingface.co",
       "content_length": 11097404512,
-      "repo_id": "Comfy-Org/Flux-3-Image"
+      "repo_id": "black-forest-labs/flux-3-image-klein-comfy"
     },
     "flux3-image-klein-int8-convrot.safetensors": {
-      "url": "https://huggingface.co/Comfy-Org/Flux-3-Image/blob/main/diffusion_models/flux3_image_klein_sd_int8_convrot.safetensors",
+      "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/diffusion_models/flux3-image-klein-int8-convrot.safetensors",
       "type": "diffusion_models",
       "directory": "diffusion_models",
       "source": "cloud_marketplace_export",
       "asset_id": "59c1c518-5be3-4c6e-8356-105b11656956",
       "provider": "huggingface.co",
       "content_length": 5827874779,
-      "repo_id": "Comfy-Org/Flux-3-Image"
+      "repo_id": "black-forest-labs/flux-3-image-klein-comfy"
     },
     "moss_image_sft_int8_convrot.safetensors": {
       "url": "https://huggingface.co/Comfy-Org/MOSS-Image/resolve/main/diffusion_models/moss_image_sft_int8_convrot.safetensors",
@@ -465,34 +695,34 @@
       "repo_id": "Comfy-Org/MOSS-Image"
     },
     "qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors": {
-      "url": "https://huggingface.co/Comfy-Org/Flux-3-Image/resolve/main/text_encoders/qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors",
+      "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/text_encoders/qwen3.5_9b_flux3_prompt_upsampler_w4a8.safetensors",
       "type": "text_encoders",
       "directory": "text_encoders",
       "source": "cloud_marketplace_export",
       "asset_id": "3620c75e-1d31-483a-9d29-6cd4c43d2ca4",
       "provider": "huggingface.co",
       "content_length": 6724090780,
-      "repo_id": "Comfy-Org/Flux-3-Image"
+      "repo_id": "black-forest-labs/flux-3-image-klein-comfy"
     },
     "qwen3vl_4b_int8_convrot.safetensors": {
-      "url": "https://huggingface.co/Comfy-Org/Flux-3-Image/blob/main/text_encoders/qwen3vl_4b_int8_convrot.safetensors",
+      "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/text_encoders/qwen3vl_4b_int8_convrot.safetensors",
       "type": "text_encoders",
       "directory": "text_encoders",
       "source": "cloud_marketplace_export",
       "asset_id": "76dd7cfa-268c-493a-81be-19b68b3a3176",
       "provider": "huggingface.co",
       "content_length": 4858559240,
-      "repo_id": "Comfy-Org/Flux-3-Image"
+      "repo_id": "black-forest-labs/flux-3-image-klein-comfy"
     },
     "qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors": {
-      "url": "https://huggingface.co/Comfy-Org/Flux-3-Image/blob/main/text_encoders/qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors",
+      "url": "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy/resolve/main/text_encoders/qwen3.5_9b_flux3_prompt_upsampler_int8_convrot.safetensors",
       "type": "text_encoders",
       "directory": "text_encoders",
       "source": "cloud_marketplace_export",
       "asset_id": "d6222890-fee4-431c-91ca-2fbbcfcf380c",
       "provider": "huggingface.co",
       "content_length": 9748113996,
-      "repo_id": "Comfy-Org/Flux-3-Image"
+      "repo_id": "black-forest-labs/flux-3-image-klein-comfy"
     },
     "qwen_image_2.1_turbo_int8_convrot.safetensors": {
       "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors",
@@ -563,16 +793,6 @@
       "provider": "huggingface.co",
       "content_length": 690592672,
       "repo_id": "LBH-123-AI/Minimax_h3_latent_Upscaler"
-    },
-    "ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors": {
-      "url": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR/blob/main/ltx-2.5-22b-ic-lora-sdr-to-hdr-scene-emb.safetensors",
-      "type": "loras",
-      "directory": "loras",
-      "source": "cloud_marketplace_export",
-      "asset_id": "abe9335d-4a2b-4a39-9224-1e8be3f100c3",
-      "provider": "huggingface.co",
-      "content_length": 12614165,
-      "repo_id": "Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR"
     },
     "ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors": {
       "url": "https://huggingface.co/Lightricks/LTX-2.5-22b-IC-LoRA-SDR-To-HDR/blob/main/ltx-2.5-22b-ic-lora-sdr-to-hdr-1.0.safetensors",
