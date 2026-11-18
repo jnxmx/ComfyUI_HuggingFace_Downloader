@@ -42,90 +42,89 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 VERIFY_EXISTING_DOWNLOADS = _env_flag("HF_DOWNLOADER_VERIFY_EXISTING", default=False)
 
+_XET_PROGRESS_LOCK = threading.Lock()
+_XET_ACTIVE_REPORTERS: dict[int, dict] = {}
+_XET_HOOK_INSTALLED = False
 
-def _get_system_ram_gb() -> float:
-    """Best-effort detection of total system RAM in gigabytes."""
-    # 1. psutil (if installed)
+
+def _install_xet_progress_hook() -> None:
+    global _XET_HOOK_INSTALLED
+    if _XET_HOOK_INSTALLED:
+        return
     try:
-        import psutil
-        return psutil.virtual_memory().total / (1024 ** 3)
+        import huggingface_hub.utils._xet_progress_reporting as _xet_pr
+        cls = getattr(_xet_pr, "XetDownloadProgressReporter", None)
+        if cls is None or getattr(cls, "_hfd_hooked", False):
+            _XET_HOOK_INSTALLED = True
+            return
+
+        orig_update = cls.update_progress
+        orig_close = cls.close
+
+        def _hooked_update(self, group_report, _item_reports=None):
+            try:
+                now = time.time()
+                entry = {
+                    "reconstructed_bytes": int(getattr(group_report, "total_bytes_completed", 0) or 0),
+                    "transfer_bytes": int(getattr(group_report, "total_transfer_bytes_completed", 0) or 0),
+                    "reconstructed_rate": float(getattr(group_report, "total_bytes_completion_rate", 0.0) or 0.0),
+                    "transfer_rate": float(getattr(group_report, "total_transfer_bytes_completion_rate", 0.0) or 0.0),
+                    "total_bytes": int(getattr(group_report, "total_bytes", 0) or getattr(self, "total", 0) or 0),
+                    "updated_at": now,
+                }
+                with _XET_PROGRESS_LOCK:
+                    _XET_ACTIVE_REPORTERS[id(self)] = entry
+            except Exception:
+                pass
+            return orig_update(self, group_report, _item_reports)
+
+        def _hooked_close(self):
+            try:
+                with _XET_PROGRESS_LOCK:
+                    _XET_ACTIVE_REPORTERS.pop(id(self), None)
+            except Exception:
+                pass
+            return orig_close(self)
+
+        cls.update_progress = _hooked_update
+        cls.close = _hooked_close
+        cls._hfd_hooked = True
+        _XET_HOOK_INSTALLED = True
     except Exception:
         pass
 
-    # 2. os.sysconf (Linux, macOS, Unix)
-    try:
-        if hasattr(os, "sysconf"):
-            pages = os.sysconf("SC_PHYS_PAGES")
-            page_size = os.sysconf("SC_PAGE_SIZE")
-            if pages > 0 and page_size > 0:
-                return (pages * page_size) / (1024 ** 3)
-    except Exception:
-        pass
 
-    # 3. /proc/meminfo (Linux fallback)
-    try:
-        if os.path.exists("/proc/meminfo"):
-            with open("/proc/meminfo", "r") as f:
-                for line in f:
-                    if line.startswith("MemTotal:"):
-                        parts = line.split()
-                        return int(parts[1]) / (1024 * 1024)
-    except Exception:
-        pass
-
-    # 4. ctypes GlobalMemoryStatusEx (Windows fallback)
-    try:
-        if sys.platform == "win32":
-            import ctypes
-
-            class MEMORYSTATUSEX(ctypes.Structure):
-                _fields_ = [
-                    ("dwLength", ctypes.c_ulong),
-                    ("dwMemoryLoad", ctypes.c_ulong),
-                    ("ullTotalPhys", ctypes.c_ulonglong),
-                    ("ullAvailPhys", ctypes.c_ulonglong),
-                    ("ullTotalPageFile", ctypes.c_ulonglong),
-                    ("ullAvailPageFile", ctypes.c_ulonglong),
-                    ("ullTotalVirtual", ctypes.c_ulonglong),
-                    ("ullAvailVirtual", ctypes.c_ulonglong),
-                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
-                ]
-
-            stat = MEMORYSTATUSEX()
-            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
-                return stat.ullTotalPhys / (1024 ** 3)
-    except Exception:
-        pass
-
-    return 16.0
+def get_xet_live_progress(expected_size: Optional[int] = None) -> Optional[dict]:
+    """Return the latest in-memory Xet download progress dictionary, if active."""
+    _install_xet_progress_hook()
+    now = time.time()
+    with _XET_PROGRESS_LOCK:
+        if not _XET_ACTIVE_REPORTERS:
+            return None
+        stale_ids = [k for k, v in _XET_ACTIVE_REPORTERS.items() if now - v.get("updated_at", 0) > 120]
+        for k in stale_ids:
+            _XET_ACTIVE_REPORTERS.pop(k, None)
+        if not _XET_ACTIVE_REPORTERS:
+            return None
+        if expected_size:
+            matching = [v for v in _XET_ACTIVE_REPORTERS.values() if v.get("total_bytes") == expected_size]
+            if matching:
+                return dict(max(matching, key=lambda v: v.get("updated_at", 0)))
+        return dict(max(_XET_ACTIVE_REPORTERS.values(), key=lambda v: v.get("updated_at", 0)))
 
 
 def _configure_xet_concurrency() -> None:
     """
-    Configure HF_XET_FIXED_DOWNLOAD_CONCURRENCY.
-    - If user already set it in env: respect it.
-    - RunPod environments or systems with >= 32GB RAM: 64 streams.
-    - Non-RunPod systems with < 32GB RAM: 16 streams (prevents socket/buffer exhaustion).
+    Configure HF_XET_FIXED_DOWNLOAD_CONCURRENCY to 8 streams by default.
+    - 8 streams fit within xet-core's default max_idle_connections (16), preventing DNS storms.
+    - Prevents xet-core's adaptive controller from ramping to 64 streams (which causes
+      head-of-line blocking on 61MB xorbs and subsequent collapse to 1 stream).
     """
-    if "HF_XET_FIXED_DOWNLOAD_CONCURRENCY" in os.environ:
-        return
-
-    is_runpod = bool(os.environ.get("RUNPOD_POD_ID"))
-    ram_gb = _get_system_ram_gb()
-
-    # If not on RunPod and RAM is less than 32GB, use 16 streams; otherwise 64 streams.
-    # round(ram_gb) handles hardware-reserved memory offsets (e.g. 31.8GB physical).
-    if not is_runpod and round(ram_gb) < 32:
-        concurrency = "16"
-    else:
-        concurrency = "64"
-
-    os.environ["HF_XET_FIXED_DOWNLOAD_CONCURRENCY"] = concurrency
-    print(f"[DEBUG] HF_XET_FIXED_DOWNLOAD_CONCURRENCY set to {concurrency} (is_runpod={is_runpod}, ram_gb={ram_gb:.1f})")
+    if "HF_XET_FIXED_DOWNLOAD_CONCURRENCY" not in os.environ:
+        os.environ["HF_XET_FIXED_DOWNLOAD_CONCURRENCY"] = "8"
+    _install_xet_progress_hook()
 
 
-# Automatically initialize Xet concurrency configuration
 _configure_xet_concurrency()
 
 def folder_size(directory: str) -> int:
