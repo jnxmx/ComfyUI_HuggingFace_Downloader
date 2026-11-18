@@ -3083,21 +3083,25 @@ def setup(app_or_server):
     _safe_add_route("GET", "/hf_downloader_model_explorer_v2/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/hf_downloader_model_explorer_v2/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/hf_downloader_model_explorer_v2/groups", model_explorer_list_groups)
+    _safe_add_route("GET", "/hf_downloader_model_explorer_v2/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/hf_downloader_model_explorer_v2/use", model_explorer_use)
     _safe_add_route("POST", "/hf_downloader_model_explorer_v2/delete", model_explorer_delete)
     _safe_add_route("GET", "/hf_model_explorer/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/hf_model_explorer/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/hf_model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("GET", "/hf_model_explorer/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/hf_model_explorer/use", model_explorer_use)
     _safe_add_route("POST", "/hf_model_explorer/delete", model_explorer_delete)
     _safe_add_route("GET", "/api/hf_downloader/model_explorer/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/api/hf_downloader/model_explorer/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/api/hf_downloader/model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("GET", "/api/hf_downloader/model_explorer/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/api/hf_downloader/model_explorer/use", model_explorer_use)
     _safe_add_route("POST", "/api/hf_downloader/model_explorer/delete", model_explorer_delete)
     _safe_add_route("GET", "/api/model_explorer/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/api/model_explorer/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/api/model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("GET", "/api/model_explorer/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/api/model_explorer/use", model_explorer_use)
     _safe_add_route("POST", "/api/model_explorer/delete", model_explorer_delete)
 
@@ -3975,6 +3979,7 @@ def setup(app_or_server):
     _safe_add_route("GET", "/hf_downloader_model_explorer_v2/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/hf_downloader_model_explorer_v2/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/hf_downloader_model_explorer_v2/groups", model_explorer_list_groups)
+    _safe_add_route("GET", "/hf_downloader_model_explorer_v2/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/hf_downloader_model_explorer_v2/use", model_explorer_use)
     _safe_add_route("POST", "/hf_downloader_model_explorer_v2/delete", model_explorer_delete)
     _safe_add_route("POST", "/hf_downloader_model_explorer_v2/download", model_explorer_download_proxy)
@@ -3982,6 +3987,7 @@ def setup(app_or_server):
     _safe_add_route("GET", "/hf_model_explorer/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/hf_model_explorer/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/hf_model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("GET", "/hf_model_explorer/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/hf_model_explorer/use", model_explorer_use)
     _safe_add_route("POST", "/hf_model_explorer/delete", model_explorer_delete)
     _safe_add_route("POST", "/hf_model_explorer/download", model_explorer_download_proxy)
@@ -3989,11 +3995,13 @@ def setup(app_or_server):
     _safe_add_route("GET", "/api/model_explorer/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/api/model_explorer/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/api/model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("GET", "/api/model_explorer/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/api/model_explorer/use", model_explorer_use)
     _safe_add_route("POST", "/api/model_explorer/delete", model_explorer_delete)
     _safe_add_route("GET", "/api/hf_downloader/model_explorer/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/api/hf_downloader/model_explorer/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/api/hf_downloader/model_explorer/groups", model_explorer_list_groups)
+    _safe_add_route("GET", "/api/hf_downloader/model_explorer/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/api/hf_downloader/model_explorer/use", model_explorer_use)
     _safe_add_route("POST", "/api/hf_downloader/model_explorer/delete", model_explorer_delete)
 
@@ -4609,3 +4617,31 @@ async def model_explorer_delete(request):
         "rel_path": rel_path,
         "model_path": widget_path,
     })
+
+
+async def model_explorer_hf_search(request):
+    query = str(request.query.get("q") or "").strip()
+    category = str(request.query.get("category") or "").strip() or None
+    try:
+        limit = int(request.query.get("limit") or 15)
+    except (TypeError, ValueError):
+        limit = 15
+    limit = max(1, min(limit, 30))
+
+    if len(query) < 2:
+        return web.json_response({"ok": False, "error": "Query must be at least 2 characters.", "results": []}, status=400)
+
+    try:
+        results = await asyncio.to_thread(
+            model_discovery.search_huggingface_variants,
+            query,
+            category=category,
+            limit=limit,
+        )
+        return web.json_response({
+            "ok": True,
+            "query": query,
+            "results": results or [],
+        })
+    except Exception as e:
+        return web.json_response({"ok": False, "error": str(e), "results": []}, status=500)

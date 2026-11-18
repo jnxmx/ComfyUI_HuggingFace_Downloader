@@ -5,6 +5,7 @@ import time
 import ast
 import concurrent.futures
 import urllib.request
+import urllib.parse
 import urllib.error
 from typing import List, Dict, Any, Tuple
 from types import SimpleNamespace
@@ -2761,6 +2762,114 @@ def _reset_hf_search_budget() -> None:
     _hf_search_deadline = time.time() + HF_SEARCH_MAX_SECONDS if HF_SEARCH_MAX_SECONDS > 0 else 0.0
     _hf_search_time_exhausted = False
 
+
+HF_FULLTEXT_URL = "https://huggingface.co/api/search/full-text"
+_GENERIC_STEMS = {
+    "model", "weights", "checkpoint", "ckpt", "lora", "vae", "unet",
+    "clip", "text_encoder", "encoder", "diffusion_pytorch_model",
+    "pytorch_model", "adapter_model", "consolidated", "ema",
+    "fp16", "bf16", "fp8", "fp32", "config", "tokenizer",
+}
+
+
+def _is_generic_hf_filename(filename: str) -> bool:
+    base = os.path.basename(str(filename or "")).strip().lower()
+    if not base:
+        return True
+    if base in AMBIGUOUS_REGISTRY_FILENAMES:
+        return True
+    stem = os.path.splitext(base)[0]
+    return stem in _GENERIC_STEMS or len(stem) < 4
+
+
+def _hf_fulltext_candidate_repos(
+    query_text: str,
+    token: str | None = None,
+    context_terms: list[str] | None = None,
+    limit: int = 20,
+    allow_generic: bool = False,
+) -> list[dict[str, Any]]:
+    """
+    Query Hugging Face /api/search/full-text for repositories whose README/model card
+    mentions the exact filename or query string.
+    """
+    clean_query = os.path.basename(str(query_text or "").strip()) or str(query_text or "").strip()
+    if not clean_query or len(clean_query) < 3:
+        return []
+
+    is_generic = _is_generic_hf_filename(clean_query)
+    usable_context = [
+        str(t).strip()
+        for t in (context_terms or [])
+        if isinstance(t, str) and len(str(t).strip()) >= 3 and str(t).strip().lower() not in _GENERIC_STEMS
+    ]
+
+    if is_generic and not allow_generic:
+        if not usable_context:
+            return []
+        search_q = f'"{clean_query}" "{usable_context[0]}"'
+    elif "." in clean_query or "_" in clean_query or "-" in clean_query:
+        search_q = f'"{clean_query}"'
+    else:
+        search_q = clean_query
+
+    if not _hf_search_allowed():
+        return []
+
+    url = (
+        f"{HF_FULLTEXT_URL}?q={urllib.parse.quote(search_q)}"
+        f"&type=model&limit={max(1, min(int(limit or 20), 50))}"
+    )
+    headers = {"User-Agent": "ComfyUI_HuggingFace_Downloader/1.0"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=HF_SEARCH_CALL_TIMEOUT) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            data = json.loads(raw)
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            _set_hf_rate_limited()
+        return []
+    except Exception as e:
+        if is_rate_limited_error(e):
+            _set_hf_rate_limited()
+        return []
+
+    hits = data.get("hits") if isinstance(data, dict) else None
+    if not isinstance(hits, list):
+        return []
+
+    needle = clean_query.lower()
+    seen_repos: set[str] = set()
+    candidates: list[dict[str, Any]] = []
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        owner_raw = hit.get("repoOwner")
+        owner = owner_raw.get("name") if isinstance(owner_raw, dict) else owner_raw
+        repo_name = hit.get("repoName")
+        if not isinstance(owner, str) or not isinstance(repo_name, str) or not owner or not repo_name:
+            continue
+        repo_id = f"{owner}/{repo_name}"
+        if repo_id in seen_repos:
+            continue
+
+        if "." in needle and not allow_generic:
+            formatted = json.dumps(hit.get("formatted") or "", ensure_ascii=False).lower()
+            formatted = formatted.replace("<em>", "").replace("</em>", "")
+            if needle not in formatted:
+                continue
+
+        seen_repos.add(repo_id)
+        candidates.append({
+            "repo_id": repo_id,
+            "likes": int(hit.get("likes") or 0),
+        })
+    return candidates
+
 def search_huggingface_model(
     filename: str,
     token: str = None,
@@ -2794,10 +2903,18 @@ def search_huggingface_model(
             print(f"[DEBUG] HF cache miss for {filename} (basic), skipping")
             return None
 
-    if key in HF_SEARCH_SKIP_FILENAMES:
-        print(f"[DEBUG] Skipping HF search for generic filename: {filename}")
-        _hf_search_cache[key] = None
-        return None
+    skip_regular_search = False
+    if key in HF_SEARCH_SKIP_FILENAMES or _is_generic_hf_filename(filename):
+        usable_kw = [
+            str(k).strip()
+            for k in (workflow_keywords or [])
+            if isinstance(k, str) and len(str(k).strip()) >= 3 and str(k).strip().lower() not in _GENERIC_STEMS
+        ]
+        if not usable_kw:
+            print(f"[DEBUG] Skipping HF search for generic filename without context: {filename}")
+            _hf_search_cache[key] = None
+            return None
+        skip_regular_search = True
 
     if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
         print(f"[DEBUG] HF search paused due to rate limit; skipping {filename}")
@@ -2897,7 +3014,7 @@ def search_huggingface_model(
                 "filename": filename
             })
 
-        if mode in ("basic", "full"):
+        if not skip_regular_search and mode in ("basic", "full"):
             for term in search_terms:
                 if not _hf_search_allowed():
                     print(f"[DEBUG] HF search budget/rate limit hit before term search for {filename}")
@@ -2941,7 +3058,7 @@ def search_huggingface_model(
 
         # Deep Search Fallback: Check priority authors if still nothing
         # This helps when the file is inside a repo like "flux-fp8" but we search for "flux-vae-bf16"
-        if mode in ("priority", "full") and not models and not priority_author_repos:
+        if not skip_regular_search and mode in ("priority", "full") and not models and not priority_author_repos:
             print(f"[DEBUG] Still no results, checking priority authors directly...")
             if status_cb:
                 status_cb({
@@ -3271,7 +3388,7 @@ def search_huggingface_model(
                 continue
 
         # Final fallback: scan priority authors more broadly if nothing matched
-        if mode in ("priority", "full") and not priority_author_repos:
+        if not skip_regular_search and mode in ("priority", "full") and not priority_author_repos:
             for author in PRIORITY_AUTHORS:
                 try:
                     if not _hf_search_allowed():
@@ -3389,9 +3506,216 @@ def search_huggingface_model(
     if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
         return None
 
+    # Full-text README fallback: HF has no global file-name index, so search repos
+    # whose README mentions this exact filename, then verify via list_repo_files.
+    try:
+        if status_cb:
+            status_cb({
+                "message": "Searching Hugging Face by file name",
+                "source": "huggingface_fulltext",
+                "filename": filename,
+            })
+        ft_candidates = _hf_fulltext_candidate_repos(
+            filename,
+            token=token,
+            context_terms=workflow_hints,
+            limit=20,
+        )
+        if ft_candidates:
+            priority_lower = {a.lower() for a in PRIORITY_AUTHORS}
+
+            def _ft_rank(cand: dict[str, Any]) -> tuple[int, int, int, int]:
+                rid = cand["repo_id"]
+                owner = rid.split("/", 1)[0].lower() if "/" in rid else ""
+                is_prio = 1 if owner in priority_lower else 0
+                wf_match = 1 if _workflow_match(rid) else 0
+                return (is_prio, wf_match, _repo_score(rid), int(cand.get("likes") or 0))
+
+            ft_candidates.sort(key=_ft_rank, reverse=True)
+            filename_lower = filename.lower()
+            for cand in ft_candidates[:5]:
+                if request_id and is_search_cancelled(request_id):
+                    raise SearchCancelledException("Search cancelled by user")
+                rid = cand["repo_id"]
+                try:
+                    files = _get_repo_files(api, rid, token)
+                except HFSearchBudgetError:
+                    return None
+                except Exception:
+                    continue
+                match_path = next(
+                    (f for f in files if os.path.basename(f).lower() == filename_lower),
+                    None,
+                )
+                if match_path:
+                    result = {
+                        "url": f"https://huggingface.co/{rid}/resolve/main/{match_path}",
+                        "hf_repo": rid,
+                        "hf_path": match_path,
+                    }
+                    _hf_search_cache[key] = result
+                    print(f"[DEBUG] Found {filename} in repo {rid} via HF full-text fallback")
+                    if status_cb:
+                        status_cb({
+                            "message": "Found on Hugging Face",
+                            "source": "huggingface_fulltext",
+                            "filename": filename,
+                            "detail": rid,
+                        })
+                    return result
+    except SearchCancelledException:
+        raise
+    except Exception as e:
+        print(f"[DEBUG] HF full-text fallback failed for {filename}: {e}")
+
+    if _hf_rate_limited_until and time.time() < _hf_rate_limited_until:
+        return None
+
     if mode != "basic":
         _hf_search_cache[key] = None
     return None
+
+
+def search_huggingface_variants(
+    query: str,
+    category: str | None = None,
+    limit: int = 15,
+    token: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Search Hugging Face globally for downloadable model files matching a query
+    (used by Model Explorer 'Search on Hugging Face').
+    Combines full-text README search and repository search, verifies actual files
+    in top candidate repositories, and ranks originals/priority authors first.
+    """
+    clean_query = str(query or "").strip()
+    if len(clean_query) < 2:
+        return []
+
+    _reset_hf_search_budget()
+    token = token or get_token()
+    api = HfApi(token=token)
+    priority_lower = {a.lower() for a in PRIORITY_AUTHORS}
+
+    candidate_map: dict[str, dict[str, Any]] = {}
+
+    def _add_candidate(repo_id: str, likes: int = 0, downloads: int = 0, from_fulltext: bool = False):
+        rid = str(repo_id or "").strip()
+        if not rid or "/" not in rid:
+            return
+        existing = candidate_map.get(rid)
+        if existing is None:
+            candidate_map[rid] = {
+                "repo_id": rid,
+                "likes": int(likes or 0),
+                "downloads": int(downloads or 0),
+                "from_fulltext": from_fulltext,
+            }
+        else:
+            existing["likes"] = max(existing["likes"], int(likes or 0))
+            existing["downloads"] = max(existing["downloads"], int(downloads or 0))
+            existing["from_fulltext"] = existing["from_fulltext"] or from_fulltext
+
+    # Direct owner/repo query support
+    if "/" in clean_query and " " not in clean_query and clean_query.count("/") == 1:
+        _add_candidate(clean_query, likes=1000, from_fulltext=True)
+
+    # 1. Full-text search (finds exact filenames inside READMEs)
+    ft_hits = _hf_fulltext_candidate_repos(clean_query, token=token, limit=15, allow_generic=True)
+    for hit in ft_hits:
+        _add_candidate(hit["repo_id"], likes=hit.get("likes", 0), from_fulltext=True)
+
+    # 2. Standard Hugging Face repository search
+    if _hf_search_allowed():
+        try:
+            repo_query = os.path.splitext(clean_query)[0] if "." in clean_query else clean_query
+            models = list(call_with_timeout(api.list_models, search=repo_query, limit=12, sort="downloads"))
+            for m in models:
+                rid = getattr(m, "modelId", None) or getattr(m, "id", None)
+                if rid:
+                    _add_candidate(
+                        rid,
+                        likes=int(getattr(m, "likes", 0) or 0),
+                        downloads=int(getattr(m, "downloads", 0) or 0),
+                    )
+        except Exception:
+            pass
+
+    if not candidate_map:
+        return []
+
+    q_lower = clean_query.lower()
+    q_stem = os.path.splitext(q_lower)[0]
+    q_tokens = [t for t in re.split(r"[-_.\s/]+", q_stem) if len(t) >= 2]
+
+    def _repo_rank(cand: dict[str, Any]) -> tuple[int, int, int, int, int]:
+        rid = cand["repo_id"]
+        rid_lower = rid.lower()
+        owner = rid_lower.split("/", 1)[0]
+        is_prio = 1 if owner in priority_lower else 0
+        exact_repo = 1 if (q_lower in rid_lower or (q_stem and q_stem in rid_lower)) else 0
+        ft_bonus = 1 if cand.get("from_fulltext") else 0
+        return (is_prio, exact_repo, ft_bonus, cand.get("likes", 0), cand.get("downloads", 0))
+
+    sorted_candidates = sorted(candidate_map.values(), key=_repo_rank, reverse=True)
+
+    results: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    target_category = str(category or "").strip()
+    if target_category in {"", "all", "other"}:
+        target_category = ""
+
+    for cand in sorted_candidates[:8]:
+        if len(results) >= limit:
+            break
+        rid = cand["repo_id"]
+        try:
+            files = _get_repo_files(api, rid, token)
+        except Exception:
+            continue
+
+        model_files = [
+            f for f in files
+            if os.path.splitext(f)[1].lower() in MODEL_EXTENSIONS
+        ]
+        if not model_files:
+            continue
+
+        # Prefer files matching the query string or its tokens
+        exact_matches = [f for f in model_files if q_lower in f.lower()]
+        token_matches = [
+            f for f in model_files
+            if q_tokens and all(tok in f.lower() for tok in q_tokens)
+        ] if not exact_matches else []
+        repo_matches = model_files[:6] if (not exact_matches and not token_matches and q_stem in rid.lower()) else []
+
+        picked = exact_matches or token_matches or repo_matches
+        if not picked:
+            continue
+
+        owner = rid.split("/", 1)[0].lower()
+        is_prio = owner in priority_lower
+        for hf_path in picked[:6]:
+            if len(results) >= limit:
+                break
+            fn = os.path.basename(hf_path)
+            url = f"https://huggingface.co/{rid}/resolve/main/{hf_path}"
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            folder = target_category or _guess_folder_from_filename(fn) or "checkpoints"
+            results.append({
+                "filename": fn,
+                "hf_path": hf_path,
+                "repo_id": rid,
+                "url": url,
+                "directory": folder,
+                "likes": cand.get("likes", 0),
+                "downloads": cand.get("downloads", 0),
+                "is_priority_author": is_prio,
+            })
+
+    return results
 
 def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb=None) -> Dict[str, Any]:
     """

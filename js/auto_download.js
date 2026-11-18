@@ -428,6 +428,18 @@ app.registerExtension({
             return String(activeWorkflow?.path || activeWorkflow?.key || "").trim();
         };
 
+        const getActiveWorkflowStableKey = () => {
+            const activeWorkflow = getActiveWorkflowEntry();
+            if (!activeWorkflow) return "";
+            return String(
+                activeWorkflow?.key ||
+                activeWorkflow?.path ||
+                activeWorkflow?.fullFilename ||
+                activeWorkflow?.filename ||
+                ""
+            ).trim();
+        };
+
         const isMissingModelCandidate = (candidate) => {
             if (!candidate || typeof candidate !== "object") {
                 return false;
@@ -2562,6 +2574,195 @@ app.registerExtension({
             return filterRunHookEligibleMissingModels(collected);
         };
 
+        const resolvedCatalogModelsByName = new Map();
+        const catalogEnrichedWorkflowSignatures = new Set();
+        let catalogEnrichInFlight = false;
+
+        const recordCatalogResolvedEntries = (entries = []) => {
+            if (!Array.isArray(entries)) return;
+            for (const entry of entries) {
+                if (!entry || typeof entry !== "object") continue;
+                const url = String(entry.url || "").trim();
+                if (!url) continue;
+                const folder = String(
+                    entry.locked_folder || entry.suggested_folder || entry.directory || ""
+                ).trim();
+                const filename = String(entry.filename || entry.name || "").trim();
+                const requestedPath = String(entry.requested_path || filename).trim();
+                const sizeBytes = Number(entry.size_bytes ?? entry.size ?? 0) || 0;
+                const payload = {
+                    url,
+                    folder,
+                    filename: filename || requestedPath,
+                    requestedPath,
+                    sizeBytes,
+                };
+                for (const rawKey of [
+                    filename,
+                    requestedPath,
+                    getPathBasename(filename),
+                    getPathBasename(requestedPath),
+                ]) {
+                    const key = String(rawKey || "").trim().toLowerCase();
+                    if (key) {
+                        resolvedCatalogModelsByName.set(key, payload);
+                    }
+                }
+            }
+        };
+
+        const lookupResolvedCatalogModel = (nameOrPath) => {
+            const raw = String(nameOrPath || "").trim().toLowerCase();
+            if (!raw) return null;
+            return (
+                resolvedCatalogModelsByName.get(raw) ||
+                resolvedCatalogModelsByName.get(getPathBasename(raw).toLowerCase()) ||
+                null
+            );
+        };
+
+        const prefetchNativeStoreFileSize = async (url, missingModelStore) => {
+            if (!url || !missingModelStore || typeof missingModelStore.setFileSize !== "function") {
+                return;
+            }
+            const existingSizes = unwrapStoreValue(missingModelStore.fileSizes);
+            if (existingSizes && existingSizes[url] !== undefined) {
+                return;
+            }
+            try {
+                const resp = await fetch(url, { method: "HEAD" });
+                if (!resp.ok) return;
+                const cl = resp.headers.get("content-length");
+                const parsed = cl ? parseInt(cl, 10) : NaN;
+                if (Number.isFinite(parsed) && parsed > 0) {
+                    missingModelStore.setFileSize(url, parsed);
+                }
+            } catch (_) {}
+        };
+
+        const syncResolvedUrlsIntoNativeMissingModelStore = async (entries = []) => {
+            recordCatalogResolvedEntries(entries);
+            try {
+                const missingModelStore = await resolveMissingModelStore();
+                if (!missingModelStore) return false;
+                const current = unwrapStoreValue(missingModelStore.missingModelCandidates);
+                if (!Array.isArray(current) || !current.length) return false;
+
+                let changed = false;
+                const newlyLinkedUrls = [];
+                const nextCandidates = current.map((candidate) => {
+                    if (!candidate || typeof candidate !== "object") return candidate;
+                    const match = lookupResolvedCatalogModel(candidate.name || candidate.filename);
+                    if (!match) return candidate;
+                    const curUrl = String(candidate.url || "").trim();
+                    const curDir = String(candidate.directory || "").trim();
+                    const nextUrl = curUrl || match.url;
+                    const nextDir = curDir || match.folder;
+                    if (nextUrl === curUrl && nextDir === curDir) {
+                        return candidate;
+                    }
+                    changed = true;
+                    if (!curUrl && nextUrl) {
+                        newlyLinkedUrls.push({ url: nextUrl, sizeBytes: match.sizeBytes });
+                    }
+                    return {
+                        ...candidate,
+                        url: nextUrl,
+                        directory: nextDir,
+                    };
+                });
+
+                if (changed) {
+                    if (typeof missingModelStore.setMissingModels === "function") {
+                        missingModelStore.setMissingModels(nextCandidates);
+                    } else if ("value" in missingModelStore.missingModelCandidates) {
+                        missingModelStore.missingModelCandidates.value = nextCandidates;
+                    } else {
+                        missingModelStore.missingModelCandidates = nextCandidates;
+                    }
+                    try {
+                        const activeWf = getActiveWorkflowEntry();
+                        const pw = unwrapStoreValue(activeWf?.pendingWarnings);
+                        if (pw && "missingModelCandidates" in pw) {
+                            if (
+                                pw.missingModelCandidates &&
+                                typeof pw.missingModelCandidates === "object" &&
+                                "value" in pw.missingModelCandidates
+                            ) {
+                                pw.missingModelCandidates.value = nextCandidates;
+                            } else {
+                                pw.missingModelCandidates = nextCandidates;
+                            }
+                        }
+                    } catch (_) {}
+                    for (const item of newlyLinkedUrls) {
+                        if (item.sizeBytes > 0 && typeof missingModelStore.setFileSize === "function") {
+                            try {
+                                missingModelStore.setFileSize(item.url, item.sizeBytes);
+                            } catch (_) {}
+                        } else {
+                            void prefetchNativeStoreFileSize(item.url, missingModelStore);
+                        }
+                    }
+                    setTimeout(() => injectButtonsIntoMissingModelsDialogs(document), 60);
+                }
+                return changed;
+            } catch (err) {
+                console.warn("[AutoDownload] Failed syncing catalog URLs into missingModelStore:", err);
+                return false;
+            }
+        };
+
+        const enrichNativeMissingModelStoreFromCatalog = async () => {
+            if (catalogEnrichInFlight) return;
+            try {
+                const missingModelStore = await resolveMissingModelStore();
+                if (!missingModelStore) return;
+                const candidates = unwrapStoreValue(missingModelStore.missingModelCandidates);
+                if (!Array.isArray(candidates) || !candidates.length) return;
+
+                const unlinked = candidates.filter((c) => c && !String(c.url || "").trim());
+                if (!unlinked.length) return;
+
+                const appliedFromCache = await syncResolvedUrlsIntoNativeMissingModelStore([]);
+                const stillUnlinked = (
+                    unwrapStoreValue(missingModelStore.missingModelCandidates) || []
+                ).filter((c) => c && !String(c.url || "").trim());
+                if (!stillUnlinked.length) {
+                    if (appliedFromCache) {
+                        setTimeout(() => injectButtonsIntoMissingModelsDialogs(document), 60);
+                    }
+                    return;
+                }
+
+                const sig = buildMissingModelCandidatesSignature(stillUnlinked);
+                if (!sig || catalogEnrichedWorkflowSignatures.has(sig)) return;
+                catalogEnrichedWorkflowSignatures.add(sig);
+
+                const workflow = serializeWorkflowForModelScan();
+                if (!workflow || typeof workflow !== "object") return;
+
+                const prefill = stillUnlinked
+                    .map((c) => createFrontendMissingModelEntryFromCandidate(c))
+                    .filter(Boolean);
+                if (!prefill.length) return;
+
+                catalogEnrichInFlight = true;
+                const res = await enrichMissingEntriesViaBackend(prefill, {
+                    workflow,
+                    requestId: `native_sidebar_catalog_${Date.now()}`,
+                    skipHfSearch: true,
+                    skipStoreSync: true,
+                });
+                if (res && Array.isArray(res.missing) && res.missing.length) {
+                    await syncResolvedUrlsIntoNativeMissingModelStore(res.missing);
+                }
+            } catch (_) {
+            } finally {
+                catalogEnrichInFlight = false;
+            }
+        };
+
         const enrichMissingEntriesViaBackend = async (entries = [], options = {}) => {
             const missingEntries = Array.isArray(entries) ? entries.filter(Boolean) : [];
             if (!missingEntries.length) {
@@ -2600,11 +2801,15 @@ app.registerExtension({
                     return null;
                 }
                 const data = await resp.json();
+                const enrichedMissing = filterRunHookEligibleMissingModels(
+                    Array.isArray(data?.missing) ? data.missing : []
+                );
+                if (!options?.skipStoreSync && enrichedMissing.length) {
+                    void syncResolvedUrlsIntoNativeMissingModelStore(enrichedMissing);
+                }
                 return {
                     request_id: data?.request_id || payload.request_id,
-                    missing: filterRunHookEligibleMissingModels(
-                        Array.isArray(data?.missing) ? data.missing : []
-                    ),
+                    missing: enrichedMissing,
                     found: Array.isArray(data?.found) ? data.found : [],
                     mismatches: Array.isArray(data?.mismatches)
                         ? data.mismatches
@@ -3130,6 +3335,107 @@ app.registerExtension({
             return targets;
         };
 
+        const resolveNodeByExecutionOrGraphId = (rootGraph, rawId) => {
+            const idStr = String(rawId ?? "").trim();
+            if (!rootGraph || !idStr) return null;
+            if (idStr.includes(":")) {
+                const parts = idStr.split(":").filter(Boolean);
+                let currentGraph = rootGraph;
+                let currentNode = null;
+                for (let i = 0; i < parts.length; i += 1) {
+                    const part = parts[i];
+                    const numeric = Number(part);
+                    currentNode =
+                        currentGraph?.getNodeById?.(part) ||
+                        (Number.isFinite(numeric) ? currentGraph?.getNodeById?.(numeric) : null) ||
+                        null;
+                    if (!currentNode) break;
+                    if (i < parts.length - 1) {
+                        currentGraph = currentNode.subgraph || currentNode.getInnerGraph?.() || null;
+                        if (!currentGraph) {
+                            currentNode = null;
+                            break;
+                        }
+                    }
+                }
+                if (currentNode) return currentNode;
+                const leafId = parts[parts.length - 1];
+                if (leafId) {
+                    const leafMatch = findNodeByIdRecursive(rootGraph, leafId);
+                    if (leafMatch) return leafMatch;
+                }
+            }
+            return findNodeByIdRecursive(rootGraph, idStr);
+        };
+
+        const locateModelNodeOnCanvas = (entry) => {
+            if (!entry || typeof entry !== "object") {
+                return false;
+            }
+            const rootGraph = app?.rootGraph || app?.graph;
+            const rawNodeId = String(entry?.node_id ?? entry?.nodeId ?? "").trim();
+            let targetNode = rawNodeId ? resolveNodeByExecutionOrGraphId(rootGraph, rawNodeId) : null;
+            if (!targetNode) {
+                const targets = collectModelWidgetTargets(entry);
+                if (targets.length && targets[0]?.node) {
+                    targetNode = targets[0].node;
+                }
+            }
+            if (!targetNode) {
+                showToast({
+                    severity: "warn",
+                    summary: "Node not found",
+                    detail: `Could not locate node for "${entry.filename || entry.display_name || "model"}".`,
+                    life: 2400,
+                });
+                return false;
+            }
+
+            const canvas = app?.canvas;
+            if (!canvas) {
+                return false;
+            }
+            try {
+                if (targetNode.graph && canvas.graph !== targetNode.graph) {
+                    if (typeof canvas.openSubgraph === "function") {
+                        canvas.openSubgraph(targetNode.graph);
+                    } else if (typeof canvas.setGraph === "function") {
+                        canvas.setGraph(targetNode.graph);
+                    }
+                }
+            } catch (_) {}
+
+            try {
+                if (typeof canvas.deselectAll === "function") {
+                    canvas.deselectAll();
+                }
+                if (typeof canvas.selectNode === "function") {
+                    canvas.selectNode(targetNode);
+                } else if (typeof canvas.selectNodes === "function") {
+                    canvas.selectNodes([targetNode]);
+                }
+            } catch (_) {}
+
+            try {
+                if (typeof canvas.animateToBounds === "function" && targetNode.boundingRect) {
+                    canvas.animateToBounds(targetNode.boundingRect);
+                } else if (typeof canvas.centerOnNode === "function") {
+                    canvas.centerOnNode(targetNode);
+                }
+            } catch (_) {
+                try {
+                    if (typeof canvas.centerOnNode === "function") {
+                        canvas.centerOnNode(targetNode);
+                    }
+                } catch (_) {}
+            }
+
+            try {
+                canvas.setDirty?.(true, true);
+            } catch (_) {}
+            return true;
+        };
+
         const applyWorkflowPathForModelEntry = (entry, nextValue) => {
             const targetValue = normalizeWorkflowPath(nextValue);
             if (!targetValue) return 0;
@@ -3281,148 +3587,224 @@ app.registerExtension({
             return updatedRefs;
         };
 
+        const NATIVE_OVERLAY_WRAPPER_CLASS =
+            "pointer-events-none flex w-full justify-end transition-all duration-300 ease-out";
+        const NATIVE_OVERLAY_PANEL_CLASS =
+            "pointer-events-auto relative flex w-fit max-w-120 min-w-80 flex-col gap-2 overflow-hidden rounded-lg border border-l-4 bg-background p-3 shadow-md transition-colors duration-200 ease-in-out border-l-warning";
+        const NATIVE_OVERLAY_CLOSE_BTN_CLASS =
+            "inline-flex cursor-pointer touch-manipulation appearance-none items-center justify-center gap-2 border-none font-inter text-sm font-medium whitespace-nowrap transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 bg-transparent text-muted-foreground hover:bg-accent p-0 absolute top-2 right-2 size-6 rounded-sm";
+        const NATIVE_SECONDARY_BTN_CLASS =
+            "relative inline-flex cursor-pointer touch-manipulation appearance-none items-center justify-center gap-2 border-none font-inter whitespace-nowrap transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 bg-secondary text-foreground hover:bg-accent min-h-8 rounded-lg px-3 py-2 text-xs font-normal";
+        const NATIVE_PRIMARY_BTN_CLASS =
+            "relative inline-flex cursor-pointer touch-manipulation appearance-none items-center justify-center gap-2 border-none font-inter whitespace-nowrap transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 bg-primary text-foreground hover:bg-primary/90 min-h-8 rounded-lg px-3 py-2 text-xs font-medium";
+
+        const createNativeOverlayCloseButton = (testId, onClose) => {
+            const closeBtn = document.createElement("button");
+            closeBtn.type = "button";
+            closeBtn.setAttribute("aria-label", "Close");
+            if (testId) {
+                closeBtn.setAttribute("data-testid", testId);
+            }
+            closeBtn.className = NATIVE_OVERLAY_CLOSE_BTN_CLASS;
+            const closeIcon = document.createElement("i");
+            closeIcon.className = "icon-[lucide--x] block size-4 leading-none";
+            closeIcon.setAttribute("aria-hidden", "true");
+            closeBtn.appendChild(closeIcon);
+            closeBtn.onclick = () => {
+                if (typeof onClose === "function") {
+                    onClose();
+                }
+            };
+            return closeBtn;
+        };
+
+        const removeExistingAutoDownloadDialog = () => {
+            const existing = document.getElementById("auto-download-dialog");
+            if (!existing) return;
+            try {
+                if (typeof existing.__hfOverlayCleanup === "function") {
+                    existing.__hfOverlayCleanup();
+                }
+            } catch (_) {}
+            existing.remove();
+        };
+
+        const mountOverlayInNativeStack = (dlg) => {
+            let stackObserver = null;
+            const cleanupObserver = () => {
+                if (stackObserver) {
+                    stackObserver.disconnect();
+                    stackObserver = null;
+                }
+            };
+
+            const findStackRefs = () => {
+                const errorOverlayEl = document.querySelector('[data-testid="error-overlay"]');
+                const errorOverlayWrapper = errorOverlayEl?.parentElement || null;
+                const downloadsOverlayEl = document.getElementById("hf-downloader-panel-wrapper");
+                const actionbarsEl = document.querySelector('[data-testid="top-menu-actionbars"]');
+                const stackContainer =
+                    errorOverlayWrapper?.parentElement ||
+                    downloadsOverlayEl?.parentElement ||
+                    actionbarsEl?.parentElement ||
+                    null;
+                return { errorOverlayWrapper, downloadsOverlayEl, actionbarsEl, stackContainer };
+            };
+
+            const placeInStack = () => {
+                const { errorOverlayWrapper, downloadsOverlayEl, actionbarsEl, stackContainer } = findStackRefs();
+                if (!stackContainer) {
+                    return false;
+                }
+                if (downloadsOverlayEl && downloadsOverlayEl.parentElement === stackContainer) {
+                    if (downloadsOverlayEl.nextElementSibling !== dlg) {
+                        downloadsOverlayEl.insertAdjacentElement("afterend", dlg);
+                    }
+                    return true;
+                }
+                if (errorOverlayWrapper && errorOverlayWrapper.parentElement === stackContainer) {
+                    if (errorOverlayWrapper.nextElementSibling !== dlg) {
+                        errorOverlayWrapper.insertAdjacentElement("afterend", dlg);
+                    }
+                    return true;
+                }
+                if (actionbarsEl && actionbarsEl.parentElement === stackContainer) {
+                    if (dlg.parentElement !== stackContainer || actionbarsEl.nextElementSibling !== dlg) {
+                        actionbarsEl.insertAdjacentElement("afterend", dlg);
+                    }
+                    return true;
+                }
+                if (dlg.parentElement !== stackContainer) {
+                    stackContainer.appendChild(dlg);
+                }
+                return true;
+            };
+
+            if (placeInStack()) {
+                const { stackContainer } = findStackRefs();
+                if (stackContainer && typeof MutationObserver !== "undefined") {
+                    stackObserver = new MutationObserver(() => {
+                        if (!dlg.isConnected) return;
+                        placeInStack();
+                    });
+                    stackObserver.observe(stackContainer, { childList: true });
+                }
+            } else {
+                Object.assign(dlg.style, {
+                    position: "fixed",
+                    top: "56px",
+                    right: "16px",
+                    zIndex: "9000",
+                    width: "auto",
+                });
+                document.body.appendChild(dlg);
+            }
+
+            dlg.__hfOverlayCleanup = cleanupObserver;
+            return cleanupObserver;
+        };
+
         /* Show loading dialog immediately */
         const showLoadingDialog = (onSkip, options = {}) => {
             const skipModeActive = Boolean(options.skipModeActive);
-            const existing = document.getElementById("auto-download-dialog");
-            if (existing) existing.remove();
+            removeExistingAutoDownloadDialog();
 
             const dlg = document.createElement("div");
             dlg.id = "auto-download-dialog";
-            applyTemplateDialogOverlayStyle(dlg, 9000);
+            dlg.setAttribute("data-testid", "hf-model-search-overlay");
+            dlg.className = NATIVE_OVERLAY_WRAPPER_CLASS;
 
             const panel = document.createElement("div");
-            applyTemplateDialogPanelStyle(panel, {
-                padding: "20px 22px",
-                textAlign: "left",
-                width: "480px",
-                maxWidth: "92vw",
-            });
+            panel.setAttribute("role", "status");
+            panel.className = NATIVE_OVERLAY_PANEL_CLASS;
 
-            // Close button (X) in upper right corner of the panel to instantly close/abort
-            const closeBtn = document.createElement("button");
-            closeBtn.type = "button";
-            closeBtn.innerHTML = "×";
-            Object.assign(closeBtn.style, {
-                position: "absolute",
-                top: "10px",
-                right: "10px",
-                width: "28px",
-                height: "28px",
-                borderRadius: "50%",
-                border: "none",
-                background: "transparent",
-                color: "var(--descrip-text, #999)",
-                fontSize: "20px",
-                lineHeight: "1",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: "0",
-                transition: "background-color 120ms ease, color 120ms ease",
-                zIndex: "10",
-            });
-            closeBtn.onmouseenter = () => {
-                closeBtn.style.background = "var(--secondary-background-hover, rgba(255, 255, 255, 0.1))";
-                closeBtn.style.color = "var(--input-text, #fff)";
-            };
-            closeBtn.onmouseleave = () => {
-                closeBtn.style.background = "transparent";
-                closeBtn.style.color = "var(--descrip-text, #999)";
-            };
-            closeBtn.onclick = () => {
+            let cleanupOverlay = () => {};
+            const closeBtn = createNativeOverlayCloseButton("hf-model-search-dismiss", () => {
                 if (typeof options.onClose === "function") {
                     options.onClose();
                 } else {
+                    cleanupOverlay();
                     if (dlg.parentElement) dlg.remove();
                 }
-            };
-            panel.appendChild(closeBtn);
+            });
 
-            const statusEl = document.createElement("div");
+            const headerRow = document.createElement("div");
+            headerRow.className = "flex w-full items-start gap-2 pr-8";
+
+            const spinnerIcon = document.createElement("i");
+            spinnerIcon.className = "mt-0.5 size-4 shrink-0 icon-[lucide--loader-circle] animate-spin text-warning";
+            spinnerIcon.setAttribute("aria-hidden", "true");
+
+            const statusEl = document.createElement("span");
+            statusEl.className = "min-w-0 flex-1 truncate text-sm text-foreground";
             statusEl.textContent = "Preparing scan...";
-            Object.assign(statusEl.style, {
-                fontSize: "16px",
-                lineHeight: "1.25",
-                fontWeight: "600",
-                letterSpacing: "-0.005em",
-                paddingRight: "20px" // ensure no overlap with closeBtn
-            });
 
-            const detailEl = document.createElement("div");
+            headerRow.appendChild(spinnerIcon);
+            headerRow.appendChild(statusEl);
+
+            const detailRow = document.createElement("div");
+            detailRow.className = "flex w-full items-start gap-2 pr-8";
+
+            const detailSpacer = document.createElement("span");
+            detailSpacer.className = "size-4 shrink-0";
+            detailSpacer.setAttribute("aria-hidden", "true");
+
+            const detailEl = document.createElement("p");
+            detailEl.className = "m-0 line-clamp-3 min-w-0 flex-1 text-sm/snug wrap-break-word whitespace-pre-wrap text-muted-foreground";
             detailEl.textContent = "Preparing workflow scan...";
-            Object.assign(detailEl.style, {
-                fontSize: "13px",
-                color: "var(--descrip-text, #999)",
-                marginTop: "8px",
-                minHeight: "18px",
-                paddingRight: "20px" // ensure no overlap with closeBtn
-            });
+
+            detailRow.appendChild(detailSpacer);
+            detailRow.appendChild(detailEl);
 
             const actionsEl = document.createElement("div");
-            Object.assign(actionsEl.style, {
-                display: "flex",
-                gap: "8px",
-                marginTop: "14px",
-                justifyContent: "flex-end"
-            });
-
-            const buttonBaseStyle = {
-                padding: "8px 16px",
-                borderRadius: "8px",
-                cursor: "pointer",
-                fontSize: "14px",
-                fontWeight: "600",
-                fontFamily: "var(--font-inter, Inter, sans-serif)",
-            };
+            actionsEl.className = "flex w-full items-center justify-end gap-2 pt-2";
 
             const skipBtn = document.createElement("button");
+            skipBtn.type = "button";
+            skipBtn.className = NATIVE_SECONDARY_BTN_CLASS;
             skipBtn.textContent = "Skip Model";
-            applyNativeButtonStyle(skipBtn, "secondary");
-            Object.assign(skipBtn.style, {
-                ...buttonBaseStyle,
-                opacity: skipModeActive ? "0.65" : "1",
-            });
             skipBtn.disabled = skipModeActive;
-
             skipBtn.onclick = () => {
                 if (skipBtn.disabled) return;
                 if (onSkip) onSkip();
             };
 
             const cancelBtn = document.createElement("button");
+            cancelBtn.type = "button";
+            cancelBtn.className = NATIVE_SECONDARY_BTN_CLASS;
             cancelBtn.textContent = "Cancel";
-            applyNativeButtonStyle(cancelBtn, "secondary");
-            Object.assign(cancelBtn.style, {
-                ...buttonBaseStyle,
-            });
             cancelBtn.onclick = () => {
                 if (typeof options.onClose === "function") {
                     options.onClose();
                 } else {
+                    cleanupOverlay();
                     if (dlg.parentElement) dlg.remove();
                 }
             };
 
-            panel.appendChild(statusEl);
-            panel.appendChild(detailEl);
             actionsEl.appendChild(skipBtn);
             actionsEl.appendChild(cancelBtn);
-            panel.appendChild(actionsEl);
 
+            panel.appendChild(headerRow);
+            panel.appendChild(detailRow);
+            panel.appendChild(actionsEl);
+            panel.appendChild(closeBtn);
             dlg.appendChild(panel);
-            document.body.appendChild(dlg);
+
+            cleanupOverlay = mountOverlayInNativeStack(dlg);
+
             return {
                 dlg,
                 setStatus: (text) => { statusEl.textContent = text; },
                 setDetail: (text) => { detailEl.textContent = text; },
                 setSkipMode: (active) => {
                     skipBtn.disabled = Boolean(active);
-                    skipBtn.style.opacity = active ? "0.65" : "1";
                 },
-                cleanup: () => {},
-                remove: () => { if (dlg.parentElement) dlg.remove(); }
+                cleanup: cleanupOverlay,
+                remove: () => {
+                    cleanupOverlay();
+                    if (dlg.parentElement) dlg.remove();
+                }
             };
         };
 
@@ -3478,15 +3860,18 @@ app.registerExtension({
                 }
             };
 
-            const existing = document.getElementById("auto-download-dialog");
-            if (existing) existing.remove();
+            removeExistingAutoDownloadDialog();
 
             const dlg = document.createElement("div");
             dlg.id = "auto-download-dialog";
-            applyTemplateDialogOverlayStyle(dlg, 9000);
+            dlg.setAttribute("data-testid", "hf-model-results-overlay");
+            dlg.className = NATIVE_OVERLAY_WRAPPER_CLASS;
 
             let content = null;
-            const cleanupUi = () => {};
+            let cleanupOverlayMount = () => {};
+            const cleanupUi = () => {
+                cleanupOverlayMount();
+            };
 
             const closeDialog = () => {
                 stopPolling();
@@ -3496,48 +3881,32 @@ app.registerExtension({
                 }
             };
 
-            bindBackdropClose(dlg, closeDialog);
-
             const panel = document.createElement("div");
-            applyTemplateDialogPanelStyle(panel, {
-                width: "min(1220px, 100%)",
-                maxHeight: "92vh",
-                padding: "0",
-            });
+            panel.setAttribute("role", "status");
+            panel.className = NATIVE_OVERLAY_PANEL_CLASS
+                .replace("gap-2", "gap-1.5")
+                .replace("p-3", "p-2.5");
+            panel.style.width = "min(480px, calc(100vw - 32px))";
 
             const headerWrap = document.createElement("div");
-            Object.assign(headerWrap.style, {
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "10px",
-                height: "88px",
-                padding: "0 24px",
-                flexShrink: "0",
-            });
+            headerWrap.className = "flex w-full items-center gap-2 pr-8";
 
-            const titleWrap = document.createElement("div");
-            Object.assign(titleWrap.style, {
-                display: "flex",
-                flexDirection: "column",
-                gap: "0",
-            });
+            const headerIcon = document.createElement("i");
+            headerIcon.className = "size-4 shrink-0 icon-[lucide--download] text-warning";
+            headerIcon.setAttribute("aria-hidden", "true");
 
-            const titleEl = document.createElement("div");
+            const titleEl = document.createElement("span");
+            titleEl.className = "shrink-0 text-sm font-medium text-foreground";
             titleEl.textContent = "Auto-Download Models";
-            Object.assign(titleEl.style, {
-                letterSpacing: "0",
-                color: "var(--input-text)",
-            });
-            titleEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
-            titleEl.style.setProperty("font-size", "24px", "important");
-            titleEl.style.setProperty("font-weight", "600", "important");
-            titleEl.style.setProperty("line-height", "32px", "important");
 
-            titleWrap.appendChild(titleEl);
-            headerWrap.appendChild(titleWrap);
-            headerWrap.appendChild(createDialogCloseIconButton(closeDialog));
+            const summaryInline = document.createElement("span");
+            summaryInline.className = "min-w-0 flex-1 truncate text-xs text-muted-foreground";
+
+            headerWrap.appendChild(headerIcon);
+            headerWrap.appendChild(titleEl);
+            headerWrap.appendChild(summaryInline);
             panel.appendChild(headerWrap);
+            panel.appendChild(createNativeOverlayCloseButton("hf-model-results-dismiss", closeDialog));
 
             const rawMissingModels = coalesceMissingEntriesByDestination(
                 Array.isArray(data.missing) ? [...data.missing] : []
@@ -3589,15 +3958,6 @@ app.registerExtension({
                 });
             }
 
-            const summaryRow = document.createElement("div");
-            Object.assign(summaryRow.style, {
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "8px",
-                fontSize: "13px",
-                color: "var(--descrip-text, #999)",
-                padding: "10px 24px 0",
-            });
             const totalMissingCount =
                 repoFolderMissingModels.length +
                 curatedMissingModels.length +
@@ -3640,127 +4000,94 @@ app.registerExtension({
                 return;
             }
 
-            summaryRow.textContent = `Missing: ${totalMissingCount} • Found: ${foundModels.length} • Mismatches: ${mismatchModels.length}`;
-            panel.appendChild(summaryRow);
+            const summaryParts = [`Missing: ${totalMissingCount}`];
+            if (foundModels.length > 0) {
+                summaryParts.push(`Found: ${foundModels.length}`);
+            }
+            if (mismatchModels.length > 0) {
+                summaryParts.push(`Mismatches: ${mismatchModels.length}`);
+            }
+            summaryInline.textContent = summaryParts.join(" • ");
 
             const listFrame = document.createElement("div");
-            Object.assign(listFrame.style, {
-                border: "none",
-                borderRadius: "0",
-                background: TEMPLATE_DIALOG_TOKENS.surface,
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-                minHeight: "280px",
-                maxHeight: "56vh",
-            });
+            listFrame.className = "flex flex-col overflow-hidden";
 
             content = document.createElement("div");
-            Object.assign(content.style, {
-                overflowY: "auto",
-                display: "flex",
-                flexDirection: "column",
-                gap: "6px",
-                padding: "8px 24px 12px",
-            });
+            content.className = "flex flex-col gap-1.5 overflow-y-auto pr-0.5";
+            content.style.maxHeight = "min(65vh, 500px)";
             applyNativeScrollbarClasses(content);
             loadFolderList();
 
-            const makeSectionTitle = (text, color = "#9aa4b6") => {
+            const makeSectionTitle = (text, color = "") => {
                 const sectionTitle = document.createElement("div");
                 sectionTitle.textContent = text;
-                Object.assign(sectionTitle.style, {
-                    color,
-                    fontSize: "11px",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    padding: "4px 0 0",
-                    fontWeight: "600",
-                });
+                sectionTitle.className = "text-2xs font-semibold uppercase tracking-wider text-muted-foreground pt-0.5";
+                if (color) {
+                    sectionTitle.style.color = color;
+                }
                 return sectionTitle;
             };
 
-            const makeBaseRow = () => {
+            const makeBaseCard = () => {
                 const row = document.createElement("div");
-                Object.assign(row.style, {
-                    display: "grid",
-                    gridTemplateColumns: "24px minmax(190px, 1.1fr) minmax(260px, 1.2fr) minmax(160px, 0.8fr)",
-                    alignItems: "center",
-                    gap: "12px",
-                    background: "color-mix(in srgb, var(--comfy-menu-bg) 82%, var(--base-foreground) 18%)",
-                    borderRadius: "10px",
-                    padding: "10px 12px",
-                });
+                row.className = "rounded-md border border-solid border-border/60 bg-secondary/40 px-2 py-1.5 flex flex-col gap-1";
                 return row;
+            };
+
+            const applyCompactInputStyle = (inp, horizontalPadding = 8) => {
+                Object.assign(inp.style, {
+                    width: "100%",
+                    minWidth: "0",
+                    minHeight: "24px",
+                    height: "24px",
+                    fontSize: "11px",
+                    lineHeight: "1.2",
+                    padding: `2px ${horizontalPadding}px`,
+                    borderRadius: "5px",
+                });
             };
 
             const rowInputs = [];
 
-            const renderMissingRows = (models, options = {}) => {
-                const isFolderRepoSection = Boolean(options.isFolderRepoSection);
+            const renderMissingRows = (models, renderOptions = {}) => {
+                const isFolderRepoSection = Boolean(renderOptions.isFolderRepoSection);
                 models.forEach((m) => {
                     const downloadMode = isFolderRepoSection || isFolderRepoDownloadModel(m) ? "folder" : "file";
                     const displayName = String(m.display_name || m.requested_path || m.filename || "").trim() || "Unknown model";
                     const rowWrapper = document.createElement("div");
-                    Object.assign(rowWrapper.style, {
+                    rowWrapper.className = "flex flex-col gap-1";
+
+                    const row = makeBaseCard();
+
+                    const topLine = document.createElement("div");
+                    Object.assign(topLine.style, {
                         display: "flex",
-                        flexDirection: "column",
+                        alignItems: "center",
                         gap: "6px",
                     });
-
-                    const row = makeBaseRow();
 
                     const cb = document.createElement("input");
                     cb.type = "checkbox";
                     cb.checked = Boolean(m.url);
-                    cb.style.margin = "0";
-
-                    const infoDiv = document.createElement("div");
-                    Object.assign(infoDiv.style, {
-                        minWidth: "0",
+                    Object.assign(cb.style, {
+                        margin: "0",
+                        flexShrink: "0",
+                        cursor: "pointer",
                     });
+
                     const nameEl = document.createElement("div");
-                    Object.assign(nameEl.style, {
-                        fontWeight: "600",
-                        fontSize: "13px",
-                        lineHeight: "1.2",
-                        wordBreak: "break-word",
-                        color: "var(--input-text)",
-                    });
+                    nameEl.className = "min-w-0 flex-1 truncate text-xs font-medium text-foreground leading-tight";
                     nameEl.textContent = displayName;
-
-                    const metaEl = document.createElement("div");
-                    Object.assign(metaEl.style, {
-                        fontSize: "11px",
-                        color: "var(--descrip-text, #999)",
-                        marginTop: "3px",
-                    });
-                    const modeMeta = downloadMode === "folder" ? " • full repo/folder" : "";
-                    metaEl.textContent = `${m.node_title || "Unknown Node"}${m.source ? " • " + m.source : ""}${modeMeta}`;
-                    infoDiv.appendChild(nameEl);
-                    infoDiv.appendChild(metaEl);
-
-                    const urlPlaceholder = downloadMode === "folder"
-                        ? "HuggingFace repo/folder URL..."
-                        : "HuggingFace URL...";
-                    const urlInput = createInput(m.url, urlPlaceholder);
-                    Object.assign(urlInput.style, {
-                        width: "100%",
-                        minWidth: "0",
-                        fontSize: "14px",
-                        minHeight: "40px",
-                    });
+                    nameEl.title = m.node_title ? `${displayName} (${m.node_title})` : displayName;
 
                     const defaultFolder = String(m.locked_folder || m.suggested_folder || "").trim();
                     const folderPicker = createFolderPicker(defaultFolder, "Folder");
                     Object.assign(folderPicker.wrapper.style, {
-                        width: "100%",
+                        width: "116px",
                         minWidth: "0",
+                        flexShrink: "0",
                     });
-                    Object.assign(folderPicker.input.style, {
-                        fontSize: "14px",
-                        minHeight: "40px",
-                    });
+                    applyCompactInputStyle(folderPicker.input, 6);
                     if (downloadMode === "folder") {
                         folderPicker.input.placeholder = "Root";
                     }
@@ -3773,10 +4100,40 @@ app.registerExtension({
                         folderPicker.wrapper.style.opacity = "0.9";
                     }
 
-                    row.appendChild(cb);
-                    row.appendChild(infoDiv);
-                    row.appendChild(urlInput);
-                    row.appendChild(folderPicker.wrapper);
+                    const locateBtn = document.createElement("button");
+                    locateBtn.type = "button";
+                    locateBtn.setAttribute("data-testid", "hf-model-locate-node");
+                    locateBtn.setAttribute("aria-label", `Locate node${m.node_title ? `: ${m.node_title}` : ""}`);
+                    locateBtn.title = m.node_title ? `Locate node: ${m.node_title}` : "Locate node on canvas";
+                    locateBtn.className =
+                        "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-sm border-none bg-transparent p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+                    const locateIcon = document.createElement("i");
+                    locateIcon.className = "icon-[lucide--locate] size-3.5";
+                    locateIcon.setAttribute("aria-hidden", "true");
+                    locateBtn.appendChild(locateIcon);
+                    locateBtn.onclick = (event) => {
+                        event.stopPropagation();
+                        locateModelNodeOnCanvas(m);
+                    };
+
+                    topLine.appendChild(cb);
+                    topLine.appendChild(nameEl);
+                    topLine.appendChild(folderPicker.wrapper);
+                    topLine.appendChild(locateBtn);
+
+                    const controlsLine = document.createElement("div");
+                    controlsLine.style.paddingLeft = "20px";
+
+                    const urlPlaceholder = downloadMode === "folder"
+                        ? "HuggingFace repo/folder URL..."
+                        : "HuggingFace URL...";
+                    const urlInput = createInput(m.url, urlPlaceholder);
+                    applyCompactInputStyle(urlInput, 8);
+
+                    controlsLine.appendChild(urlInput);
+
+                    row.appendChild(topLine);
+                    row.appendChild(controlsLine);
                     rowWrapper.appendChild(row);
 
                     const rowData = {
@@ -3790,7 +4147,6 @@ app.registerExtension({
                         urlInput: urlInput,
                         folderInput: folderPicker.input,
                         nameEl: nameEl,
-                        metaEl: metaEl,
                         nodeTitle: m.node_title || "Unknown Node",
                         nodeId: m.node_id,
                         downloadMode,
@@ -3804,15 +4160,17 @@ app.registerExtension({
 
                     if (downloadMode !== "folder" && Array.isArray(m.alternatives) && m.alternatives.length > 0) {
                         const altToggle = document.createElement("button");
+                        altToggle.type = "button";
                         altToggle.textContent = `Alternatives (${m.alternatives.length})`;
                         Object.assign(altToggle.style, {
                             alignSelf: "flex-start",
-                            fontSize: "12px",
-                            padding: "6px 9px",
+                            marginLeft: "20px",
+                            fontSize: "11px",
+                            padding: "2px 8px",
                             background: "var(--comfy-input-bg)",
                             color: "var(--input-text)",
                             border: "1px solid var(--border-default)",
-                            borderRadius: "7px",
+                            borderRadius: "5px",
                             cursor: "pointer",
                             fontWeight: "600",
                         });
@@ -3820,10 +4178,11 @@ app.registerExtension({
                         const altList = document.createElement("div");
                         Object.assign(altList.style, {
                             display: "none",
+                            marginLeft: "20px",
                             background: "var(--comfy-input-bg)",
                             border: "1px solid var(--border-default)",
-                            padding: "8px",
-                            borderRadius: "8px",
+                            padding: "6px",
+                            borderRadius: "6px",
                         });
 
                         m.alternatives.forEach((alt) => {
@@ -3832,27 +4191,28 @@ app.registerExtension({
                                 display: "flex",
                                 justifyContent: "space-between",
                                 alignItems: "center",
-                                gap: "10px",
-                                padding: "7px 0",
+                                gap: "8px",
+                                padding: "4px 0",
                                 borderBottom: "1px solid var(--border-default)",
                             });
 
                             const altLabel = document.createElement("div");
-                            altLabel.style.fontSize = "12px";
-                            altLabel.style.color = "var(--descrip-text, #999)";
+                            altLabel.className = "min-w-0 flex-1 text-2xs text-muted-foreground break-all";
                             altLabel.textContent = `${alt.filename}${alt.source ? " • " + alt.source : ""}`;
 
                             const useBtn = document.createElement("button");
+                            useBtn.type = "button";
                             useBtn.textContent = "Use";
                             Object.assign(useBtn.style, {
-                                padding: "5px 10px",
+                                padding: "2px 8px",
                                 background: "var(--comfy-input-bg)",
                                 color: "var(--input-text)",
                                 border: "1px solid var(--border-default)",
-                                borderRadius: "6px",
+                                borderRadius: "5px",
                                 cursor: "pointer",
-                                fontSize: "12px",
+                                fontSize: "11px",
                                 fontWeight: "600",
+                                flexShrink: "0",
                             });
 
                             useBtn.onclick = () => {
@@ -3866,7 +4226,9 @@ app.registerExtension({
                                     rowData.folderInput.value = alt.suggested_folder;
                                 }
                                 rowData.nameEl.textContent = rowData.filename;
-                                rowData.metaEl.textContent = `${rowData.nodeTitle}${alt.source ? " • alt:" + alt.source : ""}`;
+                                rowData.nameEl.title = rowData.nodeTitle
+                                    ? `${rowData.filename} (${rowData.nodeTitle})`
+                                    : rowData.filename;
                             };
 
                             altRow.appendChild(altLabel);
@@ -3896,125 +4258,121 @@ app.registerExtension({
                 renderMissingRows(curatedMissingModels);
             }
 
-            content.appendChild(makeSectionTitle("Missing Models"));
             if (!missingModels.length) {
-                const noMissing = document.createElement("div");
-                noMissing.textContent = curatedMissingModels.length
-                    ? "No additional missing model file links detected."
-                    : "No missing model file links detected.";
-                Object.assign(noMissing.style, {
-                    padding: "12px 10px 16px",
-                    color: "#58d58c",
-                    fontSize: "14px",
-                    lineHeight: "1.15",
-                });
-                content.appendChild(noMissing);
+                if (totalMissingCount === 0) {
+                    const noMissing = document.createElement("div");
+                    noMissing.textContent = "No missing model file links detected.";
+                    Object.assign(noMissing.style, {
+                        padding: "4px 2px",
+                        color: "#58d58c",
+                        fontSize: "12px",
+                        lineHeight: "1.3",
+                    });
+                    content.appendChild(noMissing);
+                }
             } else {
                 renderMissingRows(missingModels);
             }
 
-            content.appendChild(makeSectionTitle("Found Local Models"));
-            if (!foundModels.length) {
-                const noneFound = document.createElement("div");
-                noneFound.textContent = "No already-installed models matched this workflow.";
-                Object.assign(noneFound.style, {
-                    padding: "10px 8px 14px",
-                    color: "#99a3b8",
-                    fontSize: "14px",
-                });
-                content.appendChild(noneFound);
-            } else {
-                foundModels.forEach((m) => {
-                    const row = makeBaseRow();
+            if (foundModels.length > 0 || totalMissingCount === 0) {
+                const foundTargetContainer = totalMissingCount > 0 ? document.createElement("details") : content;
+                if (totalMissingCount > 0) {
+                    const foundSummary = document.createElement("summary");
+                    foundSummary.className = "cursor-pointer text-2xs font-semibold uppercase tracking-wider text-muted-foreground pt-0.5 select-none";
+                    foundSummary.textContent = `Found Local Models (${foundModels.length})`;
+                    foundTargetContainer.className = "flex flex-col gap-1.5 pt-0.5";
+                    foundTargetContainer.appendChild(foundSummary);
+                } else {
+                    foundTargetContainer.appendChild(makeSectionTitle("Found Local Models"));
+                }
 
-                    const marker = document.createElement("div");
-                    marker.textContent = "●";
-                    Object.assign(marker.style, {
-                        color: "#56d78f",
-                        fontSize: "10px",
-                        fontWeight: "700",
-                        width: "24px",
-                        textAlign: "center",
+                if (!foundModels.length) {
+                    const noneFound = document.createElement("div");
+                    noneFound.textContent = "No already-installed models matched this workflow.";
+                    noneFound.className = "text-xs text-muted-foreground py-1";
+                    foundTargetContainer.appendChild(noneFound);
+                } else {
+                    const foundListWrap = document.createElement("div");
+                    foundListWrap.className = "flex flex-col gap-1 pt-1";
+                    foundModels.forEach((m) => {
+                        const row = document.createElement("div");
+                        row.className = "rounded-md border border-solid border-border/60 bg-secondary/40 px-2 py-1.5 flex items-center justify-between gap-2";
+
+                        const leftWrap = document.createElement("div");
+                        leftWrap.className = "flex items-center gap-2 min-w-0 flex-1";
+
+                        const marker = document.createElement("span");
+                        marker.textContent = "●";
+                        Object.assign(marker.style, {
+                            color: "#56d78f",
+                            fontSize: "9px",
+                            flexShrink: "0",
+                        });
+
+                        const nameEl = document.createElement("div");
+                        nameEl.className = "min-w-0 flex-1 truncate text-xs font-medium text-foreground leading-tight";
+                        nameEl.textContent = m.filename || "Unknown model";
+                        const foundPathLabel = formatFoundModelPath(m.found_path || m.clean_path || "");
+                        nameEl.title = foundPathLabel || nameEl.textContent;
+
+                        leftWrap.appendChild(marker);
+                        leftWrap.appendChild(nameEl);
+
+                        const installedEl = document.createElement("span");
+                        installedEl.textContent = "Installed";
+                        Object.assign(installedEl.style, {
+                            fontSize: "11px",
+                            fontWeight: "600",
+                            color: "#56d78f",
+                            flexShrink: "0",
+                        });
+
+                        row.appendChild(leftWrap);
+                        row.appendChild(installedEl);
+                        foundListWrap.appendChild(row);
                     });
+                    foundTargetContainer.appendChild(foundListWrap);
+                }
 
-                    const infoDiv = document.createElement("div");
-                    Object.assign(infoDiv.style, {
-                        minWidth: "0",
-                    });
-
-                    const nameEl = document.createElement("div");
-                    nameEl.textContent = m.filename || "Unknown model";
-                    Object.assign(nameEl.style, {
-                        fontWeight: "600",
-                        fontSize: "13px",
-                        lineHeight: "1.2",
-                        wordBreak: "break-word",
-                        color: "var(--input-text)",
-                    });
-
-                    const metaEl = document.createElement("div");
-                    metaEl.textContent = `${m.source || "exact_match"} • already installed`;
-                    Object.assign(metaEl.style, {
-                        fontSize: "11px",
-                        color: "var(--descrip-text, #999)",
-                        marginTop: "3px",
-                    });
-
-                    infoDiv.appendChild(nameEl);
-                    infoDiv.appendChild(metaEl);
-
-                    const pathEl = document.createElement("div");
-                    pathEl.textContent = formatFoundModelPath(m.found_path || m.clean_path || "");
-                    Object.assign(pathEl.style, {
-                        minWidth: "0",
-                        fontSize: "13px",
-                        color: "var(--input-text)",
-                        wordBreak: "break-word",
-                    });
-
-                    const installedEl = document.createElement("div");
-                    installedEl.textContent = "Installed";
-                    Object.assign(installedEl.style, {
-                        justifySelf: "end",
-                        fontSize: "12px",
-                        fontWeight: "600",
-                        color: "#56d78f",
-                    });
-
-                    row.appendChild(marker);
-                    row.appendChild(infoDiv);
-                    row.appendChild(pathEl);
-                    row.appendChild(installedEl);
-                    content.appendChild(row);
-                });
+                if (totalMissingCount > 0) {
+                    content.appendChild(foundTargetContainer);
+                }
             }
 
             if (mismatchModels.length > 0) {
                 content.appendChild(makeSectionTitle("Path Mismatches", "#f7b96a"));
                 mismatchModels.forEach((m) => {
-                    const row = makeBaseRow();
-                    Object.assign(row.style, {
-                        gridTemplateColumns: "1fr auto auto",
-                    });
+                    const row = makeBaseCard();
+
                     const left = document.createElement("div");
-                    Object.assign(left.style, {
-                        minWidth: "220px",
-                    });
+                    left.className = "min-w-0 flex flex-col gap-0.5";
                     const currentLabel = m.requested_path || m.filename || "";
                     const foundLabel = m.clean_path || "";
-                    left.innerHTML = `<div style="color:#aaa; font-size:11px">Current: ${currentLabel}</div><div style="color:#4caf50; font-weight:600; font-size:12px; margin-top:2px;">Found: ${foundLabel}</div>`;
+                    const currEl = document.createElement("div");
+                    currEl.className = "text-2xs text-muted-foreground break-all";
+                    currEl.textContent = `Current: ${currentLabel}`;
+                    const foundEl = document.createElement("div");
+                    foundEl.className = "text-xs font-medium break-all";
+                    foundEl.style.color = "#4caf50";
+                    foundEl.textContent = `Found: ${foundLabel}`;
+                    left.appendChild(currEl);
+                    left.appendChild(foundEl);
+
+                    const btnRow = document.createElement("div");
+                    btnRow.className = "flex items-center justify-end gap-1.5";
 
                     const fixBtn = document.createElement("button");
+                    fixBtn.type = "button";
                     fixBtn.textContent = "Use Found Path";
                     Object.assign(fixBtn.style, {
-                        padding: "7px 10px",
+                        padding: "4px 8px",
                         background: "#2f84da",
                         color: "white",
                         border: "none",
-                        borderRadius: "8px",
+                        borderRadius: "6px",
                         cursor: "pointer",
                         fontWeight: "600",
-                        fontSize: "13px",
+                        fontSize: "11px",
                     });
 
                     fixBtn.onclick = () => {
@@ -4031,16 +4389,17 @@ app.registerExtension({
                     };
 
                     const moveBtn = document.createElement("button");
+                    moveBtn.type = "button";
                     moveBtn.textContent = "Move File";
                     Object.assign(moveBtn.style, {
-                        padding: "7px 10px",
+                        padding: "4px 8px",
                         background: "#f2ae42",
                         color: "#111",
                         border: "none",
-                        borderRadius: "8px",
+                        borderRadius: "6px",
                         cursor: "pointer",
                         fontWeight: "700",
-                        fontSize: "13px",
+                        fontSize: "11px",
                     });
 
                     moveBtn.onclick = async () => {
@@ -4076,7 +4435,8 @@ app.registerExtension({
                             fixBtn.style.opacity = "0.7";
 
                             if (payload?.to) {
-                                left.innerHTML = `<div style="color:#aaa; font-size:11px">Current: ${m.requested_path || m.filename || ""}</div><div style="color:#4caf50; font-weight:600; font-size:12px; margin-top:2px;">Found: ${nextPath}</div>`;
+                                currEl.textContent = `Current: ${m.requested_path || m.filename || ""}`;
+                                foundEl.textContent = `Found: ${nextPath}`;
                             }
                         } catch (err) {
                             moveBtn.disabled = false;
@@ -4086,9 +4446,10 @@ app.registerExtension({
                         }
                     };
 
+                    btnRow.appendChild(fixBtn);
+                    btnRow.appendChild(moveBtn);
                     row.appendChild(left);
-                    row.appendChild(fixBtn);
-                    row.appendChild(moveBtn);
+                    row.appendChild(btnRow);
                     content.appendChild(row);
                 });
             }
@@ -4097,29 +4458,25 @@ app.registerExtension({
             panel.appendChild(listFrame);
 
             const statusLine = document.createElement("div");
-            Object.assign(statusLine.style, {
-                fontSize: "13px",
-                color: "var(--descrip-text, #999)",
-                minHeight: "20px",
-                padding: "0 24px",
-            });
+            statusLine.className = "text-xs text-muted-foreground pt-0.5";
+            statusLine.style.display = "none";
             panel.appendChild(statusLine);
 
-            const setStatus = (msg, color = "#9aa4b6") => {
-                statusLine.textContent = msg || "";
-                statusLine.style.color = color;
+            const setStatus = (msg, color = "") => {
+                const text = String(msg || "").trim();
+                statusLine.textContent = text;
+                statusLine.style.display = text ? "block" : "none";
+                statusLine.style.color = color || "";
             };
 
             const footer = document.createElement("div");
-            Object.assign(footer.style, {
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: "12px",
-                marginTop: "2px",
-                padding: "0 24px 16px",
-            });
+            footer.className = "flex w-full items-center justify-end gap-2 pt-1";
 
-            const downloadBtn = createButton("Download Selected", "p-button p-component p-button-success", async () => {
+            const downloadBtn = document.createElement("button");
+            downloadBtn.type = "button";
+            downloadBtn.textContent = "Download Selected";
+            downloadBtn.className = NATIVE_PRIMARY_BTN_CLASS;
+            downloadBtn.onclick = async () => {
                 const selectedRows = rowInputs.filter((r) => r.checkbox.checked);
                 let missingFolderCount = 0;
                 for (const r of selectedRows) {
@@ -4217,6 +4574,10 @@ app.registerExtension({
                     }
 
                     setStatus(`Queued ${queued.length} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
+                    try {
+                        window?.hfDownloader?.restoreDownloadPanel?.();
+                        window?.hfDownloader?.pollDownloadStatusNow?.();
+                    } catch (_) {}
                     cleanupUi();
                     if (dlg.parentElement) {
                         dlg.remove();
@@ -4285,27 +4646,28 @@ app.registerExtension({
                     downloadBtn.disabled = false;
                     downloadBtn.textContent = "Download Selected";
                 }
-            });
+            };
 
             if (rowInputs.length === 0) {
                 downloadBtn.disabled = true;
             }
-            applyNativeButtonStyle(downloadBtn, "primary");
 
             footer.appendChild(downloadBtn);
             panel.appendChild(footer);
 
             dlg.appendChild(panel);
-            document.body.appendChild(dlg);
-            setTimeout(() => {
-                const firstUrlInput = dlg.querySelector(
-                    "input[placeholder='HuggingFace URL...'], input[placeholder='HuggingFace repo/folder URL...']"
-                );
-                if (firstUrlInput) {
-                    firstUrlInput.focus();
-                    firstUrlInput.select();
-                }
-            }, 0);
+            cleanupOverlayMount = mountOverlayInNativeStack(dlg);
+            if (!options?.triggeredByWorkflowOpen) {
+                setTimeout(() => {
+                    const firstUrlInput = dlg.querySelector(
+                        "input[placeholder='HuggingFace URL...'], input[placeholder='HuggingFace repo/folder URL...']"
+                    );
+                    if (firstUrlInput) {
+                        firstUrlInput.focus();
+                        firstUrlInput.select();
+                    }
+                }, 0);
+            }
         };
 
         const showManualDownloadDialog = () => {
@@ -4733,13 +5095,60 @@ app.registerExtension({
             }, 0);
         };
 
+        let currentWorkflowLoadGeneration = 0;
+        let activeAutoDownloadCancel = null;
+        let lastObservedActiveWorkflowKey = "";
+        let activeWorkflowTabWatcherTimer = null;
+
+        const abortActiveAutoDownloadForTabSwitch = () => {
+            if (typeof activeAutoDownloadCancel === "function") {
+                try {
+                    activeAutoDownloadCancel();
+                } catch (_) {}
+                activeAutoDownloadCancel = null;
+            }
+            removeExistingAutoDownloadDialog();
+        };
+
         const runAutoDownload = async (skippedFilenames = new Set(), skipAllUnresolved = false, options = {}) => {
+            if (typeof activeAutoDownloadCancel === "function") {
+                try {
+                    activeAutoDownloadCancel();
+                } catch (_) {}
+                activeAutoDownloadCancel = null;
+            }
+            const myLoadGeneration = currentWorkflowLoadGeneration;
             let loadingDlg = null;
             let aborted = false;
             let skipRequested = false;
             let statusTimer = null;
             let currentSearchingFilename = "";
             const requestId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+            const resolveBaseUrl = () => {
+                const path = window.location.pathname || "/";
+                const basePath = path.endsWith("/") ? path : path.replace(/\/[^/]*$/, "/");
+                return window.location.origin + basePath;
+            };
+
+            const doFetch = async (path, fetchOptions = {}) => {
+                const method = String(fetchOptions.method || "GET").toUpperCase();
+                if (method === "GET" && api && typeof api.fetchApi === "function") {
+                    let apiPath = String(path || "");
+                    if (!apiPath.startsWith("/")) apiPath = "/" + apiPath;
+                    return api.fetchApi(apiPath, fetchOptions);
+                }
+                const baseUrl = resolveBaseUrl();
+                const relPath = String(path || "").replace(/^\/+/, "");
+                const url = new URL(relPath, baseUrl).toString();
+                return fetch(url, {
+                    ...fetchOptions,
+                    headers: {
+                        "Content-Type": "application/json",
+                        ...(fetchOptions.headers || {})
+                    }
+                });
+            };
 
             const resumeRunIfPossible = async () => {
                 const resume = options?.resumeRun;
@@ -4757,9 +5166,35 @@ app.registerExtension({
                     console.error("[AutoDownload] Failed to resume run after scan:", resumeErr);
                 }
             };
+
+            const controller = new AbortController();
+            const cancelCurrentScan = () => {
+                if (aborted) return;
+                aborted = true;
+                skipRequested = false;
+                if (statusTimer) {
+                    clearInterval(statusTimer);
+                    statusTimer = null;
+                }
+                try {
+                    controller.abort();
+                } catch (_) {}
+                doFetch(`/cancel_search`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ request_id: requestId })
+                }).catch(err => console.error("[AutoDownload] Cancel search request failed:", err));
+                if (loadingDlg) {
+                    try {
+                        loadingDlg.cleanup();
+                        loadingDlg.remove();
+                    } catch (_) {}
+                }
+            };
+            activeAutoDownloadCancel = cancelCurrentScan;
+
             try {
                 // Show loading dialog immediately
-                const controller = new AbortController();
                 loadingDlg = showLoadingDialog(() => {
                     if (currentSearchingFilename) {
                         doFetch(`/skip_search_model`, {
@@ -4770,21 +5205,7 @@ app.registerExtension({
                     }
                 }, {
                     skipModeActive: skipAllUnresolved,
-                    onClose: () => {
-                        aborted = true;
-                        skipRequested = false;
-                        if (statusTimer) {
-                            clearInterval(statusTimer);
-                            statusTimer = null;
-                        }
-                        controller.abort();
-                        doFetch(`/cancel_search`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ request_id: requestId })
-                        }).catch(err => console.error("[AutoDownload] Cancel search request failed:", err));
-                        loadingDlg.remove();
-                    }
+                    onClose: cancelCurrentScan
                 });
 
                 if (skipAllUnresolved) {
@@ -4795,38 +5216,17 @@ app.registerExtension({
                     loadingDlg.setDetail("Preparing workflow scan...");
                 }
 
-                const resolveBaseUrl = () => {
-                    const path = window.location.pathname || "/";
-                    const basePath = path.endsWith("/") ? path : path.replace(/\/[^/]*$/, "/");
-                    return window.location.origin + basePath;
-                };
-
-                const doFetch = async (path, options = {}) => {
-                    const method = String(options.method || "GET").toUpperCase();
-                    if (method === "GET" && api && typeof api.fetchApi === "function") {
-                        let apiPath = String(path || "");
-                        if (!apiPath.startsWith("/")) apiPath = "/" + apiPath;
-                        return api.fetchApi(apiPath, options);
-                    }
-                    const baseUrl = resolveBaseUrl();
-                    const relPath = String(path || "").replace(/^\/+/, "");
-                    const url = new URL(relPath, baseUrl).toString();
-                    return fetch(url, {
-                        ...options,
-                        headers: {
-                            "Content-Type": "application/json",
-                            ...(options.headers || {})
-                        }
-                    });
-                };
-
                 const pollStatus = async () => {
+                    if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration) return;
                     try {
                         const statusResp = await doFetch(`/search_status?request_id=${encodeURIComponent(requestId)}&_t=${Date.now()}`, {
-                            cache: "no-store"
+                            cache: "no-store",
+                            signal: controller.signal
                         });
+                        if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration) return;
                         if (statusResp.status !== 200) return;
                         const statusData = await statusResp.json();
+                        if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration) return;
                         const status = statusData.status || {};
                         const source = String(status.source || "").trim();
                         const filename = String(status.filename || "").trim();
@@ -4853,6 +5253,7 @@ app.registerExtension({
                                 popular_models: "Checking curated model list",
                                 manager_cache: "Checking manager cache",
                                 huggingface_search: "Searching Hugging Face",
+                                huggingface_fulltext: "Searching by file name",
                                 huggingface_priority_authors: "Searching priority authors",
                                 huggingface_priority_repos: "Searching priority repos",
                                 huggingface_skip: "Skipping unresolved Hugging Face lookups",
@@ -4903,6 +5304,10 @@ app.registerExtension({
                             ? options.frontendMissingModelCandidates
                             : null
                     );
+                if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration) {
+                    cancelCurrentScan();
+                    return;
+                }
                 if (frontendStoreFallbackMissing.length) {
                     loadingDlg.setStatus("Resolving links...");
                     loadingDlg.setDetail("Checking curated model registry for native missing-model candidates.");
@@ -4923,24 +5328,28 @@ app.registerExtension({
                         loadingDlg.cleanup();
                         loadingDlg.remove();
                     }
-                    if (aborted || enrichedFastPathResults?.cancelled || enrichedFastPathResults?.status === "cancelled") {
+                    if (
+                        aborted ||
+                        myLoadGeneration !== currentWorkflowLoadGeneration ||
+                        enrichedFastPathResults?.cancelled ||
+                        enrichedFastPathResults?.status === "cancelled"
+                    ) {
                         return;
                     }
                     console.info(
                         "[AutoDownload] Using frontend missing-model store fast path:",
                         frontendStoreFallbackMissing
                     );
-                    showResultsDialog(
-                        enrichedFastPathResults && typeof enrichedFastPathResults === "object"
-                            ? enrichedFastPathResults
-                            : {
-                                request_id: requestId,
-                                missing: frontendStoreFallbackMissing,
-                                found: [],
-                                mismatches: []
-                            },
-                        options || {}
-                    );
+                    const fastPathPayload = enrichedFastPathResults && typeof enrichedFastPathResults === "object"
+                        ? enrichedFastPathResults
+                        : {
+                            request_id: requestId,
+                            missing: frontendStoreFallbackMissing,
+                            found: [],
+                            mismatches: []
+                        };
+                    void syncResolvedUrlsIntoNativeMissingModelStore(fastPathPayload.missing || []);
+                    showResultsDialog(fastPathPayload, options || {});
                     return;
                 }
 
@@ -4957,7 +5366,8 @@ app.registerExtension({
                     signal: controller.signal
                 });
 
-                if (aborted) {
+                if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration) {
+                    cancelCurrentScan();
                     return;
                 }
 
@@ -4982,7 +5392,12 @@ app.registerExtension({
                     throw new Error("Failed to scan models: " + detail + " (" + resp.status + ")");
                 }
                 const data = await resp.json();
-                if (aborted || data?.cancelled || data?.status === "cancelled") {
+                if (
+                    aborted ||
+                    myLoadGeneration !== currentWorkflowLoadGeneration ||
+                    data?.cancelled ||
+                    data?.status === "cancelled"
+                ) {
                     return;
                 }
                 data.missing = coalesceMissingEntriesByDestination(
@@ -5029,12 +5444,16 @@ app.registerExtension({
                 };
 
                 if (!countActionableScanResults(data)) {
+                    const fallbackFromStoreRaw = await createRunHookFallbackMissingModelsFromFrontendStore(
+                        Array.isArray(options?.frontendMissingModelCandidates)
+                            ? options.frontendMissingModelCandidates
+                            : null
+                    );
+                    if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration) {
+                        return;
+                    }
                     const fallbackMissingFromFrontendStore = filterOutBackendFoundAndMismatchedModels(
-                        await createRunHookFallbackMissingModelsFromFrontendStore(
-                            Array.isArray(options?.frontendMissingModelCandidates)
-                                ? options.frontendMissingModelCandidates
-                                : null
-                        ),
+                        fallbackFromStoreRaw,
                         data
                     );
                     if (fallbackMissingFromFrontendStore.length) {
@@ -5052,12 +5471,16 @@ app.registerExtension({
                         createRunHookFallbackMissingModels(options?.runHookFailures || [], workflow),
                         data
                     );
+                    const fallbackStoreRaw2 = await createRunHookFallbackMissingModelsFromFrontendStore(
+                        Array.isArray(options?.frontendMissingModelCandidates)
+                            ? options.frontendMissingModelCandidates
+                            : null
+                    );
+                    if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration) {
+                        return;
+                    }
                     const fallbackMissingFromFrontendStore = filterOutBackendFoundAndMismatchedModels(
-                        await createRunHookFallbackMissingModelsFromFrontendStore(
-                            Array.isArray(options?.frontendMissingModelCandidates)
-                                ? options.frontendMissingModelCandidates
-                                : null
-                        ),
+                        fallbackStoreRaw2,
                         data
                     );
                     if (fallbackMissingFromFailures.length) {
@@ -5132,6 +5555,17 @@ app.registerExtension({
                 data.missing = coalesceMissingEntriesByDestination(
                     Array.isArray(data?.missing) ? data.missing : []
                 );
+                if (
+                    aborted ||
+                    myLoadGeneration !== currentWorkflowLoadGeneration ||
+                    data?.cancelled ||
+                    data?.status === "cancelled"
+                ) {
+                    return;
+                }
+                void syncResolvedUrlsIntoNativeMissingModelStore(
+                    Array.isArray(data?.missing) ? data.missing : []
+                );
                 if (Boolean(options?.suppressEmptyResults) && countDownloadRequiredScanResults(data) <= 0) {
                     if (Array.isArray(options?.frontendMissingModelCandidates) && options.frontendMissingModelCandidates.length) {
                         void applyResolvedFrontendMissingModelState(
@@ -5143,9 +5577,6 @@ app.registerExtension({
                         );
                     }
                     resumeRunIfPossible();
-                    return;
-                }
-                if (aborted || data?.cancelled || data?.status === "cancelled") {
                     return;
                 }
                 showResultsDialog(data, options || {});
@@ -5174,8 +5605,19 @@ app.registerExtension({
                     }
                     loadingDlg.remove();
                 }
+                if (
+                    aborted ||
+                    myLoadGeneration !== currentWorkflowLoadGeneration ||
+                    (e && e.name === "AbortError")
+                ) {
+                    return;
+                }
                 console.error("[AutoDownload] Error:", e);
                 alert("Error: " + e);
+            } finally {
+                if (activeAutoDownloadCancel === cancelCurrentScan) {
+                    activeAutoDownloadCancel = null;
+                }
             }
         };
 
@@ -5247,6 +5689,467 @@ app.registerExtension({
             parent.insertBefore(buttonWrap, listbox);
         };
 
+        const NATIVE_DOWNLOAD_TO_COMFY_ATTR = "data-hf-download-to-comfy";
+        let cachedNativeMissingCandidates = [];
+        let nativeSidebarInjectTimer = null;
+
+        const ensureNativeSidebarStyles = () => {
+            if (document.getElementById("hf-native-sidebar-styles")) return;
+            const style = document.createElement("style");
+            style.id = "hf-native-sidebar-styles";
+            style.textContent = `
+                .hf-native-comfy-btn {
+                    background: #3b82f6;
+                    color: #ffffff;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 12px;
+                    font-weight: 500;
+                    line-height: 1;
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 4px;
+                    white-space: nowrap;
+                    flex-shrink: 0;
+                    transition: background-color 150ms ease, opacity 150ms ease;
+                }
+                .hf-native-comfy-btn:hover:not(:disabled) {
+                    background: #2563eb;
+                }
+                .hf-native-comfy-btn:disabled {
+                    opacity: 0.65;
+                    cursor: default;
+                }
+                .hf-native-comfy-btn-row {
+                    height: 24px;
+                    padding: 0 7px;
+                    font-size: 11px;
+                }
+                .hf-native-comfy-btn-all {
+                    width: 100%;
+                    height: 32px;
+                    padding: 0 12px;
+                }
+                .hf-native-download-all-wrap {
+                    width: 100%;
+                    display: flex;
+                    align-items: center;
+                    padding-top: 8px;
+                }
+                .hf-native-missing-row {
+                    display: flex !important;
+                    flex-wrap: wrap !important;
+                    align-items: center !important;
+                    column-gap: 6px !important;
+                    row-gap: 6px !important;
+                }
+                .hf-native-missing-row-info {
+                    flex: 1 1 180px !important;
+                    min-width: 180px !important;
+                }
+                .hf-native-missing-row-actions {
+                    margin-left: auto !important;
+                    display: inline-flex !important;
+                    align-items: center !important;
+                    flex-wrap: wrap !important;
+                    justify-content: flex-end !important;
+                    gap: 4px !important;
+                    flex-shrink: 0 !important;
+                    max-width: 100% !important;
+                }
+            `;
+            (document.head || document.documentElement).appendChild(style);
+        };
+
+        const queueModelsToComfyBackend = async (modelsToQueue, btnEl, defaultLabel) => {
+            const validItems = (Array.isArray(modelsToQueue) ? modelsToQueue : []).filter(
+                (item) => item && String(item.url || "").trim()
+            );
+            if (!validItems.length) {
+                showToast({
+                    severity: "warn",
+                    summary: "No download URL",
+                    detail: "No resolved link found in catalog for this model yet.",
+                    life: 3500
+                });
+                return;
+            }
+            if (btnEl) {
+                btnEl.disabled = true;
+                btnEl.textContent = "Queuing...";
+            }
+            try {
+                const resp = await fetch("/queue_download", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ models: validItems }),
+                });
+                if (resp.status !== 200) {
+                    let detail = resp.statusText;
+                    try {
+                        const errText = await resp.text();
+                        if (errText) detail = errText;
+                    } catch (_) {}
+                    throw new Error(`Server returned ${resp.status}: ${detail}`);
+                }
+                const res = await resp.json();
+                const queuedCount = Array.isArray(res?.queued) ? res.queued.length : validItems.length;
+                try {
+                    window?.hfDownloader?.restoreDownloadPanel?.();
+                    window?.hfDownloader?.pollDownloadStatusNow?.();
+                } catch (_) {}
+                if (btnEl) {
+                    btnEl.textContent = validItems.length > 1 ? `Queued (${queuedCount})` : "Queued";
+                    setTimeout(() => {
+                        if (!btnEl.isConnected) return;
+                        btnEl.disabled = false;
+                        btnEl.textContent = defaultLabel;
+                    }, 1800);
+                }
+            } catch (err) {
+                console.error("[AutoDownload] Queue to Comfy failed:", err);
+                showToast({
+                    severity: "error",
+                    summary: "Queue failed",
+                    detail: String(err?.message || err),
+                    life: 4500
+                });
+                if (btnEl) {
+                    btnEl.disabled = false;
+                    btnEl.textContent = defaultLabel;
+                }
+            }
+        };
+
+        const buildQueueItemForNativeRow = (candidate, rowNameHint = "", rowFolderHint = "") => {
+            const entry = candidate ? createFrontendMissingModelEntryFromCandidate(candidate) : null;
+            const rawName = String(
+                entry?.requested_path || entry?.filename || candidate?.name || rowNameHint || ""
+            ).trim();
+            if (!rawName) return null;
+            const catalogMatch = lookupResolvedCatalogModel(rawName) || lookupResolvedCatalogModel(rowNameHint);
+            const url = String(candidate?.url || entry?.url || catalogMatch?.url || "").trim();
+            if (!url) return null;
+            const filename = getPathBasename(entry?.filename || catalogMatch?.filename || rawName) || rawName;
+            const folder = String(
+                candidate?.directory ||
+                catalogMatch?.folder ||
+                entry?.directory ||
+                rowFolderHint ||
+                inferSuggestedFolderFromRunHookSignals({
+                    filename: rawName,
+                    requested_path: rawName,
+                    requestedPath: rawName,
+                }) ||
+                "checkpoints"
+            ).trim();
+            return {
+                filename,
+                target_filename: filename,
+                display_name: rawName,
+                requested_path: rawName,
+                url,
+                folder,
+                folder_locked: Boolean(catalogMatch?.folder && candidate?.directory),
+                locked_folder: String(candidate?.directory || catalogMatch?.folder || "").trim(),
+            };
+        };
+
+        const getDirectNativeMissingModelRows = (rowsContainer) => {
+            if (!rowsContainer || !(rowsContainer instanceof Element)) return [];
+            const anchors = Array.from(
+                rowsContainer.querySelectorAll('[data-testid="missing-model-download"], [data-testid="missing-model-locate"]')
+            );
+            const seen = new Set();
+            const rows = [];
+            for (const anchor of anchors) {
+                let cur = anchor.parentElement;
+                while (cur && cur.parentElement && cur.parentElement !== rowsContainer) {
+                    const locateCount = cur.parentElement.querySelectorAll('[data-testid="missing-model-locate"]').length;
+                    const dlCount = cur.parentElement.querySelectorAll('[data-testid="missing-model-download"]').length;
+                    if (locateCount > 1 || dlCount > 1) {
+                        break;
+                    }
+                    cur = cur.parentElement;
+                }
+                if (cur && cur !== rowsContainer && !seen.has(cur)) {
+                    seen.add(cur);
+                    rows.push(cur);
+                }
+            }
+            return rows;
+        };
+
+        const extractNativeRowModelLabel = (rowEl) => {
+            if (!rowEl || !(rowEl instanceof Element)) return "";
+            const titled = rowEl.querySelectorAll("[title]");
+            for (const el of titled) {
+                const t = String(el.getAttribute("title") || "").trim();
+                if (!t) continue;
+                const lower = t.toLowerCase();
+                if (
+                    lower === "download" ||
+                    lower === "locate" ||
+                    lower === "copy url" ||
+                    lower === "copy link" ||
+                    lower === "download to comfy" ||
+                    lower.startsWith("http://") ||
+                    lower.startsWith("https://")
+                ) {
+                    continue;
+                }
+                if (t.includes(".") || t.includes("/")) {
+                    return t;
+                }
+            }
+            const clone = rowEl.cloneNode(true);
+            if (clone instanceof Element) {
+                clone.querySelectorAll(
+                    '[data-testid="missing-model-download"], [data-testid="missing-model-locate"], [data-testid="hf-download-to-comfy"], button'
+                ).forEach((el) => el.remove());
+                const lines = String(clone.textContent || "")
+                    .split(/\r?\n/)
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                for (const line of lines) {
+                    if (line.includes(".") && !/\b(?:KB|MB|GB|TB|bytes)\b/i.test(line)) {
+                        return line;
+                    }
+                }
+                return lines[0] || "";
+            }
+            return "";
+        };
+
+        const extractNativeRowFolderHint = (rowEl) => {
+            if (!rowEl || !(rowEl instanceof Element)) return "";
+            const clone = rowEl.cloneNode(true);
+            if (!(clone instanceof Element)) return "";
+            clone.querySelectorAll(
+                '[data-testid="missing-model-download"], [data-testid="missing-model-locate"], [data-testid="hf-download-to-comfy"], button'
+            ).forEach((el) => el.remove());
+            const lines = String(clone.textContent || "")
+                .split(/\r?\n/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+            for (const line of lines) {
+                const head = line.split("·")[0].trim();
+                if (
+                    head &&
+                    !/\s/.test(head) &&
+                    !head.includes(".") &&
+                    /^[a-zA-Z0-9_/-]+$/.test(head)
+                ) {
+                    return head;
+                }
+            }
+            return "";
+        };
+
+        const matchCandidateForNativeRow = (rowEl, rowIndex, totalRows, candidates = []) => {
+            const list = Array.isArray(candidates) ? candidates : [];
+            const rowLabel = extractNativeRowModelLabel(rowEl);
+            const rowFolderHint = extractNativeRowFolderHint(rowEl);
+            const rowBase = getPathBasename(rowLabel).toLowerCase();
+            const rowLabelLower = rowLabel.toLowerCase();
+            if (rowLabelLower) {
+                for (const c of list) {
+                    const cName = String(c?.name || "").trim();
+                    const cBase = getPathBasename(cName).toLowerCase();
+                    if (
+                        cName.toLowerCase() === rowLabelLower ||
+                        (cBase && (cBase === rowLabelLower || cBase === rowBase))
+                    ) {
+                        return { candidate: c, rowLabel, rowFolderHint };
+                    }
+                }
+                const rowTextLower = String(rowEl.textContent || "").toLowerCase();
+                const sorted = [...list].sort(
+                    (a, b) => getPathBasename(b?.name || "").length - getPathBasename(a?.name || "").length
+                );
+                for (const c of sorted) {
+                    const cBase = getPathBasename(c?.name || "").toLowerCase();
+                    if (cBase && rowTextLower.includes(cBase)) {
+                        return { candidate: c, rowLabel, rowFolderHint };
+                    }
+                }
+            }
+            if (list.length === totalRows && list[rowIndex]) {
+                return { candidate: list[rowIndex], rowLabel, rowFolderHint };
+            }
+            return { candidate: null, rowLabel, rowFolderHint };
+        };
+
+        const injectNativeSidebarMissingModelButtonsSync = (candidates = []) => {
+            const rowsContainers = Array.from(
+                document.querySelectorAll('[data-testid="missing-model-importable-rows"]')
+            );
+            const actionsContainers = Array.from(
+                document.querySelectorAll('[data-testid="missing-model-actions"]')
+            );
+            if (!rowsContainers.length && !actionsContainers.length) return;
+
+            ensureNativeSidebarStyles();
+            const activeCandidates = Array.isArray(candidates) && candidates.length
+                ? candidates
+                : cachedNativeMissingCandidates;
+
+            for (const rowsContainer of rowsContainers) {
+                const containerQueueItems = [];
+                const seenQueueKeys = new Set();
+                const rows = getDirectNativeMissingModelRows(rowsContainer);
+                rows.forEach((rowEl, idx) => {
+                    const { candidate, rowLabel, rowFolderHint } = matchCandidateForNativeRow(
+                        rowEl,
+                        idx,
+                        rows.length,
+                        activeCandidates
+                    );
+                    const queueItem = buildQueueItemForNativeRow(candidate, rowLabel, rowFolderHint);
+                    if (queueItem) {
+                        const dedupeKey = `${queueItem.folder}::${queueItem.filename}`.toLowerCase();
+                        if (!seenQueueKeys.has(dedupeKey)) {
+                            seenQueueKeys.add(dedupeKey);
+                            containerQueueItems.push(queueItem);
+                        }
+                    }
+
+                    const nativeDownloadBtn = rowEl.querySelector('[data-testid="missing-model-download"]');
+                    const nativeLocateBtn = rowEl.querySelector('[data-testid="missing-model-locate"]');
+                    const anchorBtn = nativeDownloadBtn || (queueItem ? nativeLocateBtn : null);
+                    let comfyBtn = rowEl.querySelector('[data-testid="hf-download-to-comfy"]');
+
+                    if (!anchorBtn || !queueItem) {
+                        if (comfyBtn && !queueItem) {
+                            comfyBtn.remove();
+                        }
+                        return;
+                    }
+
+                    if (!comfyBtn) {
+                        comfyBtn = document.createElement("button");
+                        comfyBtn.type = "button";
+                        comfyBtn.setAttribute("data-testid", "hf-download-to-comfy");
+                        comfyBtn.setAttribute(NATIVE_DOWNLOAD_TO_COMFY_ATTR, "true");
+                        comfyBtn.className = "hf-native-comfy-btn hf-native-comfy-btn-row";
+                        comfyBtn.textContent = "Download to Comfy";
+                        comfyBtn.title = `Download ${queueItem.filename} into ComfyUI models/${queueItem.folder}`;
+                        anchorBtn.insertAdjacentElement("beforebegin", comfyBtn);
+                    } else if (comfyBtn.nextElementSibling !== anchorBtn) {
+                        anchorBtn.insertAdjacentElement("beforebegin", comfyBtn);
+                    }
+
+                    const anchorParent = anchorBtn.parentElement;
+                    const parentOnlyButtons =
+                        anchorParent &&
+                        anchorParent !== rowsContainer &&
+                        Array.from(anchorParent.children).every(
+                            (child) => child.tagName === "BUTTON" || child.hasAttribute?.(NATIVE_DOWNLOAD_TO_COMFY_ATTR)
+                        );
+                    const actionContainer = parentOnlyButtons ? anchorParent : null;
+                    const flexRowEl = (actionContainer ? actionContainer.parentElement : anchorParent) || rowEl;
+                    if (flexRowEl && flexRowEl !== rowsContainer) {
+                        flexRowEl.classList.add("hf-native-missing-row");
+                        const infoChild = Array.from(flexRowEl.children).find(
+                            (child) =>
+                                child !== actionContainer &&
+                                child !== comfyBtn &&
+                                child !== nativeDownloadBtn &&
+                                child !== nativeLocateBtn
+                        );
+                        if (infoChild) {
+                            infoChild.classList.add("hf-native-missing-row-info");
+                        }
+                        if (actionContainer) {
+                            actionContainer.classList.add("hf-native-missing-row-actions");
+                            comfyBtn.style.marginLeft = "";
+                        } else {
+                            comfyBtn.style.marginLeft = "auto";
+                        }
+                    }
+
+                    comfyBtn._hfQueueItem = queueItem;
+                    if (!comfyBtn._hfBoundClick) {
+                        comfyBtn._hfBoundClick = true;
+                        comfyBtn.addEventListener("click", (event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const itemToQueue = comfyBtn._hfQueueItem;
+                            if (!itemToQueue) return;
+                            void queueModelsToComfyBackend([itemToQueue], comfyBtn, "Download to Comfy");
+                        });
+                    }
+                });
+
+                const cardScope = rowsContainer.parentElement || document;
+                const actionsEl =
+                    cardScope.querySelector('[data-testid="missing-model-actions"]') ||
+                    document.querySelector('[data-testid="missing-model-actions"]');
+                let allWrap = cardScope.querySelector('[data-testid="hf-native-download-all-wrap"]');
+
+                if (!containerQueueItems.length) {
+                    if (allWrap) {
+                        allWrap.remove();
+                    }
+                    continue;
+                }
+
+                if (!allWrap) {
+                    allWrap = document.createElement("div");
+                    allWrap.setAttribute("data-testid", "hf-native-download-all-wrap");
+                    allWrap.className = "hf-native-download-all-wrap";
+
+                    const allBtn = document.createElement("button");
+                    allBtn.type = "button";
+                    allBtn.setAttribute("data-testid", "hf-download-all-to-comfy");
+                    allBtn.className = "hf-native-comfy-btn hf-native-comfy-btn-all";
+                    allBtn.textContent = "Download all to Comfy";
+                    allBtn.addEventListener("click", (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const items = Array.isArray(allWrap._hfQueueItems) ? allWrap._hfQueueItems : [];
+                        void queueModelsToComfyBackend(items, allBtn, "Download all to Comfy");
+                    });
+                    allWrap.appendChild(allBtn);
+                }
+                allWrap._hfQueueItems = containerQueueItems;
+
+                if (actionsEl) {
+                    if (actionsEl.previousElementSibling !== allWrap) {
+                        actionsEl.insertAdjacentElement("beforebegin", allWrap);
+                    }
+                } else if (rowsContainer.nextElementSibling !== allWrap) {
+                    rowsContainer.insertAdjacentElement("afterend", allWrap);
+                }
+            }
+        };
+
+        const injectNativeSidebarMissingModelButtons = () => {
+            const hasSidebar = Boolean(
+                document.querySelector(
+                    '[data-testid="missing-model-importable-rows"], [data-testid="missing-model-actions"]'
+                )
+            );
+            const hasErrorOverlay = Boolean(document.querySelector('[data-testid="error-overlay"]'));
+            if (hasSidebar || hasErrorOverlay) {
+                void enrichNativeMissingModelStoreFromCatalog();
+            }
+            if (!hasSidebar) return;
+
+            injectNativeSidebarMissingModelButtonsSync(cachedNativeMissingCandidates);
+            void resolveMissingModelStore()
+                .then((store) => {
+                    const candidates = unwrapStoreValue(store?.missingModelCandidates);
+                    if (Array.isArray(candidates)) {
+                        cachedNativeMissingCandidates = candidates;
+                        injectNativeSidebarMissingModelButtonsSync(candidates);
+                    }
+                })
+                .catch(() => {});
+        };
+
         const injectButtonsIntoMissingModelsDialogs = (root = document) => {
             if (!root) return;
 
@@ -5263,17 +6166,50 @@ app.registerExtension({
             for (const listbox of listboxes) {
                 injectMissingModelsActionButton(listbox);
             }
+
+            injectNativeSidebarMissingModelButtons();
+        };
+
+        const scheduleNativeMissingModelsInjection = () => {
+            if (nativeSidebarInjectTimer) return;
+            nativeSidebarInjectTimer = setTimeout(() => {
+                nativeSidebarInjectTimer = null;
+                injectButtonsIntoMissingModelsDialogs(document);
+            }, 40);
         };
 
         const setupMissingModelsDialogObserver = () => {
             if (missingModelsObserver || typeof MutationObserver === "undefined") return;
+            const relevantSelector =
+                `${MISSING_MODELS_LIST_SELECTOR}, [data-testid="missing-model-importable-rows"], ` +
+                `[data-testid="missing-model-actions"], [data-testid="missing-model-download"], ` +
+                `[data-testid="missing-model-locate"], [data-testid="error-overlay"]`;
             missingModelsObserver = new MutationObserver((mutations) => {
+                let shouldScheduleNative = false;
                 for (const mutation of mutations) {
+                    const targetEl = mutation.target instanceof Element ? mutation.target : null;
+                    if (
+                        targetEl &&
+                        targetEl.closest?.('[data-testid="missing-model-importable-rows"], [data-testid="missing-model-actions"], [data-testid="error-overlay"]')
+                    ) {
+                        shouldScheduleNative = true;
+                    }
                     if (!mutation.addedNodes?.length) continue;
                     for (const node of mutation.addedNodes) {
                         if (node.nodeType !== Node.ELEMENT_NODE) continue;
-                        injectButtonsIntoMissingModelsDialogs(node);
+                        if (node.matches?.(MISSING_MODELS_LIST_SELECTOR) || node.querySelector?.(MISSING_MODELS_LIST_SELECTOR)) {
+                            injectButtonsIntoMissingModelsDialogs(node);
+                        }
+                        if (
+                            !shouldScheduleNative &&
+                            (node.matches?.(relevantSelector) || node.querySelector?.(relevantSelector))
+                        ) {
+                            shouldScheduleNative = true;
+                        }
                     }
+                }
+                if (shouldScheduleNative) {
+                    scheduleNativeMissingModelsInjection();
                 }
             });
 
@@ -6812,10 +7748,13 @@ app.registerExtension({
             const executionErrorStore = await resolveExecutionErrorStore();
             if (executionErrorStore) {
                 try {
-                    if (typeof executionErrorStore.dismissErrorOverlay === "function") {
-                        executionErrorStore.dismissErrorOverlay();
-                    } else if ("isErrorOverlayOpen" in executionErrorStore) {
-                        executionErrorStore.isErrorOverlayOpen = false;
+                    const hasErrors = unwrapStoreValue(executionErrorStore.hasAnyError);
+                    if (!hasErrors) {
+                        if (typeof executionErrorStore.dismissErrorOverlay === "function") {
+                            executionErrorStore.dismissErrorOverlay();
+                        } else if ("isErrorOverlayOpen" in executionErrorStore) {
+                            executionErrorStore.isErrorOverlayOpen = false;
+                        }
                     }
                 } catch (_) {
                     // Ignore overlay clear failures.
@@ -7182,6 +8121,7 @@ app.registerExtension({
         };
 
         const triggerAutoDownloadFromWorkflowOpen = async (candidates = [], workflowGraphData = null) => {
+            const myGen = currentWorkflowLoadGeneration;
             if (workflowOpenTriggeredForCurrentLoad) {
                 return false;
             }
@@ -7223,23 +8163,15 @@ app.registerExtension({
                 void clearModelValidationErrorsFromFrontendState();
                 return false;
             }
-            const now = Date.now();
-            if (now - workflowOpenLastTriggeredAt < WORKFLOW_OPEN_TRIGGER_COOLDOWN_MS) {
-                clearMissingModelNodeHighlights(activeWorkflowOpenCandidates);
-                void clearModelValidationErrorsFromFrontendState();
-                return false;
-            }
-            if (document.getElementById("auto-download-dialog")) {
-                clearMissingModelNodeHighlights(activeWorkflowOpenCandidates);
-                void clearModelValidationErrorsFromFrontendState();
-                return false;
-            }
 
             clearMissingModelNodeHighlights(activeWorkflowOpenCandidates);
             void clearModelValidationErrorsFromFrontendState();
 
             const frontendMissingEntries =
                 await createRunHookFallbackMissingModelsFromFrontendStore(activeWorkflowOpenCandidates);
+            if (myGen !== currentWorkflowLoadGeneration) {
+                return false;
+            }
             console.log(
                 "[AutoDownload] Workflow-open actionable entries:",
                 frontendMissingEntries.map((entry) => ({
@@ -7261,6 +8193,9 @@ app.registerExtension({
                 requestId: `workflow_open_${Date.now()}`,
                 skipHfSearch: true,
             });
+            if (myGen !== currentWorkflowLoadGeneration) {
+                return false;
+            }
             if (enrichedResults && typeof enrichedResults === "object") {
                 const rawMismatches = Array.isArray(enrichedResults?.mismatches)
                     ? [...enrichedResults.mismatches]
@@ -7286,6 +8221,10 @@ app.registerExtension({
                 }
             }
 
+            if (myGen !== currentWorkflowLoadGeneration) {
+                return false;
+            }
+            removeExistingAutoDownloadDialog();
             workflowOpenLastTriggeredAt = Date.now();
             workflowOpenTriggeredForCurrentLoad = true;
             const runAction = window?.hfDownloader?.runAutoDownload;
@@ -7295,12 +8234,6 @@ app.registerExtension({
                     triggeredByWorkflowOpen: true,
                     frontendMissingModelCandidates: activeWorkflowOpenCandidates,
                     reason: "workflow-open-missing-models",
-                });
-                showToast({
-                    severity: "info",
-                    summary: "Missing models detected",
-                    detail: "Opened Auto-download from ComfyUI's workflow-open missing-model scan.",
-                    life: 3200,
                 });
                 return true;
             }
@@ -7322,16 +8255,13 @@ app.registerExtension({
                     reason: "workflow-open-missing-models",
                 }
             );
-            showToast({
-                severity: "info",
-                summary: "Missing models detected",
-                detail: "Opened Auto-download from ComfyUI's workflow-open missing-model scan.",
-                life: 3200,
-            });
             return true;
         };
 
-        const getWorkflowOpenBackendResults = async (graphData = null) => {
+        const getWorkflowOpenBackendResults = async (graphData = null, expectedGeneration = currentWorkflowLoadGeneration) => {
+            if (expectedGeneration !== currentWorkflowLoadGeneration) {
+                return null;
+            }
             if (!graphData || typeof graphData !== "object") {
                 return null;
             }
@@ -7364,10 +8294,16 @@ app.registerExtension({
                         body: JSON.stringify(requestPayload),
                         signal: controller?.signal,
                     });
+                if (expectedGeneration !== currentWorkflowLoadGeneration) {
+                    return null;
+                }
                 if (resp.status !== 200) {
                     return null;
                 }
                 const data = await resp.json();
+                if (expectedGeneration !== currentWorkflowLoadGeneration) {
+                    return null;
+                }
                 const rawMismatches = Array.isArray(data?.mismatches)
                     ? data.mismatches
                     : (Array.isArray(data?.path_mismatches) ? data.path_mismatches : []);
@@ -7380,11 +8316,13 @@ app.registerExtension({
                         life: 3200,
                     });
                 }
+                const filteredMissing = filterRunHookEligibleMissingModels(
+                    Array.isArray(data?.missing) ? data.missing : []
+                );
+                void syncResolvedUrlsIntoNativeMissingModelStore(filteredMissing);
                 return {
                     request_id: data?.request_id || `workflow_open_backend_${Date.now()}`,
-                    missing: filterRunHookEligibleMissingModels(
-                        Array.isArray(data?.missing) ? data.missing : []
-                    ),
+                    missing: filteredMissing,
                     found: Array.isArray(data?.found) ? data.found : [],
                     mismatches: autoFix.remaining,
                 };
@@ -7395,6 +8333,96 @@ app.registerExtension({
                     clearTimeout(timeoutId);
                 }
             }
+        };
+
+        const runWorkflowOpenScanForActiveTab = async (
+            expectedGeneration,
+            graphDataHint = null,
+            activePathHint = ""
+        ) => {
+            if (expectedGeneration !== currentWorkflowLoadGeneration) {
+                return;
+            }
+            if (!getWorkflowOpenAutoEnabled()) {
+                return;
+            }
+            if (!isWorkflowReadyForModelScan()) {
+                return;
+            }
+            const currentGraph = graphDataHint || serializeWorkflowForModelScan();
+            if (isComfyDefaultWorkflow(currentGraph)) {
+                console.log("[AutoDownload] Skipping workflow-open missing-model prompt for default ComfyUI workflow.");
+                return;
+            }
+            const activePath = String(
+                activePathHint || getActiveWorkflowStableKey() || getActiveWorkflowPathKey() || ""
+            ).trim();
+            const candidates = await getFrontendMissingModelCandidates(graphDataHint);
+            if (expectedGeneration !== currentWorkflowLoadGeneration) {
+                return;
+            }
+            let signature = buildMissingModelCandidatesSignature(candidates);
+            console.log(
+                "[AutoDownload] Workflow-open active-tab candidates:",
+                Array.isArray(candidates) ? candidates.length : 0,
+                activePath || "(no active path)"
+            );
+            if (!signature) {
+                const backendResults = await getWorkflowOpenBackendResults(
+                    serializeWorkflowForModelScan() || graphDataHint,
+                    expectedGeneration
+                );
+                if (expectedGeneration !== currentWorkflowLoadGeneration) {
+                    return;
+                }
+                const backendTargetCount = countDownloadRequiredScanResults(backendResults || {});
+                const backendSignature =
+                    backendTargetCount > 0
+                        ? buildScanResultsSignature(backendResults)
+                        : "";
+                console.log(
+                    "[AutoDownload] Workflow-open backend fallback results:",
+                    backendTargetCount
+                );
+                if (backendSignature) {
+                    if (workflowOpenTriggeredForCurrentLoad) {
+                        return;
+                    }
+                    if (
+                        backendSignature === workflowOpenLastHandledSignature &&
+                        (!activePath || activePath === workflowOpenLastHandledPath)
+                    ) {
+                        return;
+                    }
+                    workflowOpenLastHandledSignature = backendSignature;
+                    workflowOpenLastHandledPath = activePath;
+                    workflowOpenTriggeredForCurrentLoad = true;
+                    removeExistingAutoDownloadDialog();
+                    showResultsDialog(
+                        backendResults,
+                        {
+                            suppressEmptyResults: true,
+                            triggeredByWorkflowOpen: true,
+                            reason: "workflow-open-missing-models",
+                        }
+                    );
+                    return;
+                }
+                if (activePath) {
+                    workflowOpenLastHandledPath = activePath;
+                }
+                workflowOpenLastHandledSignature = "";
+                return;
+            }
+            if (
+                signature === workflowOpenLastHandledSignature &&
+                (!activePath || activePath === workflowOpenLastHandledPath)
+            ) {
+                return;
+            }
+            workflowOpenLastHandledSignature = signature;
+            workflowOpenLastHandledPath = activePath;
+            await triggerAutoDownloadFromWorkflowOpen(candidates, graphDataHint);
         };
 
         const normalizeWorkflowOpenGraphDataArg = (value) => {
@@ -7428,11 +8456,25 @@ app.registerExtension({
             const originalLoadGraphData = (...args) => origLoadGraphDataFn.apply(comfyApp, args);
             comfyApp.loadGraphData = async (...args) => {
                 const loadedGraphData = normalizeWorkflowOpenGraphDataArg(args?.[0]);
+                currentWorkflowLoadGeneration += 1;
+                const loadGeneration = currentWorkflowLoadGeneration;
+                abortActiveAutoDownloadForTabSwitch();
+                const preKey = getActiveWorkflowStableKey();
+                if (preKey) {
+                    lastObservedActiveWorkflowKey = preKey;
+                }
                 workflowOpenLastTriggeredAt = 0;
                 workflowOpenLastHandledSignature = "";
                 workflowOpenLastHandledPath = "";
                 workflowOpenTriggeredForCurrentLoad = false;
                 const result = await originalLoadGraphData(...args);
+                const postKey = getActiveWorkflowStableKey();
+                if (postKey) {
+                    lastObservedActiveWorkflowKey = postKey;
+                }
+                if (loadGeneration !== currentWorkflowLoadGeneration) {
+                    return result;
+                }
                 try {
                     alignGraphWidgetSlashes(app?.rootGraph);
                 } catch (e) {
@@ -7441,6 +8483,11 @@ app.registerExtension({
                 try {
                     syncDownloaderLinkedWidgetNames(app?.rootGraph);
                 } catch (e) {}
+                setTimeout(() => {
+                    if (loadGeneration === currentWorkflowLoadGeneration) {
+                        void enrichNativeMissingModelStoreFromCatalog();
+                    }
+                }, 250);
                 try {
                     if (!getWorkflowOpenAutoEnabled()) {
                         return result;
@@ -7448,79 +8495,11 @@ app.registerExtension({
 
                     setTimeout(async () => {
                         try {
-                            if (!isWorkflowReadyForModelScan()) {
-                                return;
-                            }
-                            if (isComfyDefaultWorkflow(loadedGraphData || serializeWorkflowForModelScan())) {
-                                console.log("[AutoDownload] Skipping workflow-open missing-model prompt for default ComfyUI workflow.");
-                                return;
-                            }
-                            const activeWorkflow = getActiveWorkflowEntry();
-                            const activePath = String(activeWorkflow?.path || activeWorkflow?.key || "").trim();
-                            const candidates = await getFrontendMissingModelCandidates(loadedGraphData);
-                            let signature = buildMissingModelCandidatesSignature(candidates);
-                            console.log(
-                                "[AutoDownload] Workflow-open loadGraph hook candidates:",
-                                Array.isArray(candidates) ? candidates.length : 0,
-                                activePath || "(no active path)"
+                            await runWorkflowOpenScanForActiveTab(
+                                loadGeneration,
+                                loadedGraphData,
+                                postKey || getActiveWorkflowPathKey()
                             );
-                            if (!signature) {
-                                const backendResults = await getWorkflowOpenBackendResults(
-                                    serializeWorkflowForModelScan() || loadedGraphData
-                                );
-                                const backendTargetCount = countDownloadRequiredScanResults(backendResults || {});
-                                const backendSignature =
-                                    backendTargetCount > 0
-                                        ? buildScanResultsSignature(backendResults)
-                                        : "";
-                                console.log(
-                                    "[AutoDownload] Workflow-open backend fallback results:",
-                                    backendTargetCount
-                                );
-                                if (backendSignature) {
-                                    if (workflowOpenTriggeredForCurrentLoad) {
-                                        return;
-                                    }
-                                    if (
-                                        backendSignature === workflowOpenLastHandledSignature &&
-                                        (!activePath || activePath === workflowOpenLastHandledPath)
-                                    ) {
-                                        return;
-                                    }
-                                    workflowOpenLastHandledSignature = backendSignature;
-                                    workflowOpenLastHandledPath = activePath;
-                                    workflowOpenTriggeredForCurrentLoad = true;
-                                    showResultsDialog(
-                                        backendResults,
-                                        {
-                                            suppressEmptyResults: true,
-                                            triggeredByWorkflowOpen: true,
-                                            reason: "workflow-open-missing-models",
-                                        }
-                                    );
-                                    showToast({
-                                        severity: "info",
-                                        summary: "Missing models detected",
-                                        detail: "Opened Auto-download from workflow-open backend preflight.",
-                                        life: 3200,
-                                    });
-                                    return;
-                                }
-                                if (activePath) {
-                                    workflowOpenLastHandledPath = activePath;
-                                }
-                                workflowOpenLastHandledSignature = "";
-                                return;
-                            }
-                            if (
-                                signature === workflowOpenLastHandledSignature &&
-                                (!activePath || activePath === workflowOpenLastHandledPath)
-                            ) {
-                                return;
-                            }
-                            workflowOpenLastHandledSignature = signature;
-                            workflowOpenLastHandledPath = activePath;
-                            await triggerAutoDownloadFromWorkflowOpen(candidates, loadedGraphData);
                         } catch (hookErr) {
                             console.warn("[AutoDownload] Workflow-open loadGraph hook failed:", hookErr);
                         }
@@ -7532,6 +8511,40 @@ app.registerExtension({
             };
 
             comfyApp.__hfAutoDownloadLoadGraphHookInstalled = true;
+            return true;
+        };
+
+        const installActiveWorkflowTabWatcher = () => {
+            if (activeWorkflowTabWatcherTimer) {
+                return true;
+            }
+            lastObservedActiveWorkflowKey = getActiveWorkflowStableKey();
+            activeWorkflowTabWatcherTimer = setInterval(() => {
+                const nextKey = getActiveWorkflowStableKey();
+                if (!nextKey || nextKey === lastObservedActiveWorkflowKey) {
+                    return;
+                }
+                lastObservedActiveWorkflowKey = nextKey;
+                currentWorkflowLoadGeneration += 1;
+                const tabGeneration = currentWorkflowLoadGeneration;
+                abortActiveAutoDownloadForTabSwitch();
+                workflowOpenLastTriggeredAt = 0;
+                workflowOpenLastHandledSignature = "";
+                workflowOpenLastHandledPath = "";
+                workflowOpenTriggeredForCurrentLoad = false;
+
+                setTimeout(async () => {
+                    if (tabGeneration !== currentWorkflowLoadGeneration) {
+                        return;
+                    }
+                    void enrichNativeMissingModelStoreFromCatalog();
+                    try {
+                        await runWorkflowOpenScanForActiveTab(tabGeneration, null, nextKey);
+                    } catch (err) {
+                        console.warn("[AutoDownload] Tab-switch workflow scan failed:", err);
+                    }
+                }, 120);
+            }, 250);
             return true;
         };
 
@@ -8209,6 +9222,7 @@ app.registerExtension({
         setupMissingModelsDialogObserver();
         // void installNativeMissingModelsSurfaceHook();
         installWorkflowOpenLoadGraphHook();
+        installActiveWorkflowTabWatcher();
         // installWorkflowOpenMissingModelsWatcher();
         installRunQueueCommandHooksNativeAware();
         installDisableMissingModelsRedFramesObserver();

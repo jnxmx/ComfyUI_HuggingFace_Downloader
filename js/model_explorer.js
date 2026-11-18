@@ -681,8 +681,110 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-search-wrap {
                 display: flex;
                 flex: 1 1 auto;
+                align-items: center;
+                gap: 0.5rem;
                 min-width: 0;
                 max-width: 100%;
+            }
+            #hf-model-explorer-dialog .hf-me-hfsearch-btn {
+                height: 40px;
+                padding: 0 0.85rem;
+                border-radius: 0.5rem;
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                background: rgba(59, 130, 246, 0.18);
+                color: var(--input-text, #eef2ff);
+                font-size: 0.85rem;
+                font-weight: 600;
+                cursor: pointer;
+                white-space: nowrap;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.4rem;
+                flex: 0 0 auto;
+                transition: background 120ms ease, border-color 120ms ease;
+            }
+            #hf-model-explorer-dialog .hf-me-hfsearch-btn:hover {
+                background: rgba(59, 130, 246, 0.32);
+                border-color: rgba(96, 165, 250, 0.55);
+            }
+            #hf-model-explorer-dialog .hf-me-hfsearch-btn[hidden] {
+                display: none;
+            }
+            .hf-me-hfsearch-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 100020;
+                background: rgba(8, 10, 15, 0.72);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 1.5rem;
+            }
+            .hf-me-hfsearch-modal {
+                width: min(760px, 95vw);
+                max-height: 82vh;
+                background: var(--comfy-menu-bg, #1c202a);
+                color: var(--input-text, #f0f2f7);
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                border-radius: 0.75rem;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                box-shadow: 0 22px 60px rgba(0, 0, 0, 0.65);
+            }
+            .hf-me-hfsearch-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 0.75rem;
+                padding: 0.9rem 1.15rem;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                font-weight: 700;
+                font-size: 0.98rem;
+            }
+            .hf-me-hfsearch-body {
+                padding: 0.75rem 1.15rem 1.1rem;
+                overflow-y: auto;
+                display: flex;
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+            .hf-me-hfsearch-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 0.85rem;
+                padding: 0.65rem 0.8rem;
+                border-radius: 0.5rem;
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+            .hf-me-hfsearch-meta {
+                min-width: 0;
+                flex: 1 1 auto;
+                display: flex;
+                flex-direction: column;
+                gap: 0.2rem;
+            }
+            .hf-me-hfsearch-fn {
+                font-weight: 600;
+                font-size: 0.9rem;
+                word-break: break-all;
+            }
+            .hf-me-hfsearch-sub {
+                font-size: 0.78rem;
+                color: var(--descrip-text, #9aa4b6);
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.6rem;
+                align-items: center;
+            }
+            .hf-me-hfsearch-sub a {
+                color: #7eb6ff;
+                text-decoration: none;
+            }
+            .hf-me-hfsearch-sub a:hover {
+                text-decoration: underline;
             }
             #hf-model-explorer-dialog .hf-me-searchbox {
                 position: relative;
@@ -1745,6 +1847,10 @@ class ModelExplorerDialog {
                     <i class="hf-me-search-icon pi pi-search" aria-hidden="true"></i>
                     <input id="hf-me-search" class="hf-me-search-input" type="text" placeholder="Search..." />
                 </div>
+                <button id="hf-me-hfsearch-btn" type="button" class="hf-me-hfsearch-btn" hidden>
+                    <i class="pi pi-globe" aria-hidden="true"></i>
+                    <span>Search on Hugging Face</span>
+                </button>
             </div>
         `;
 
@@ -1851,7 +1957,20 @@ class ModelExplorerDialog {
             toggleInput.addEventListener("change", () => updateSliderState());
             updateSliderState();
         }
+        this.hfSearchBtn = panel.querySelector("#hf-me-hfsearch-btn");
+        if (this.hfSearchBtn) {
+            this.hfSearchBtn.onclick = () => {
+                const q = (this.searchInput?.value || this.filters.search || "").trim();
+                if (q.length >= 2) {
+                    void this.searchOnHuggingFace(q);
+                }
+            };
+        }
         this.searchInput.oninput = () => {
+            const rawVal = this.searchInput.value.trim();
+            if (this.hfSearchBtn) {
+                this.hfSearchBtn.hidden = rawVal.length < 2;
+            }
             clearTimeout(this.searchTimer);
             this.searchTimer = setTimeout(() => {
                 this.filters.search = this.searchInput.value.trim();
@@ -2459,9 +2578,30 @@ class ModelExplorerDialog {
         `;
     }
 
+    renderEmptyState() {
+        const q = (this.filters.search || "").trim();
+        if (q.length >= 2) {
+            this.body.innerHTML = `
+                <div class="hf-me-empty" style="display:flex;flex-direction:column;align-items:center;gap:0.75rem;">
+                    <div>No models found for "${escapeHtml(q)}" in local database.</div>
+                    <button type="button" class="hf-me-hfsearch-btn" data-hf-empty-search="1">
+                        <i class="pi pi-globe" aria-hidden="true"></i>
+                        <span>Search "${escapeHtml(q)}" on Hugging Face</span>
+                    </button>
+                </div>
+            `;
+            const btn = this.body.querySelector("[data-hf-empty-search]");
+            if (btn) {
+                btn.onclick = () => void this.searchOnHuggingFace(q);
+            }
+            return;
+        }
+        this.body.innerHTML = `<div class="hf-me-empty">No models found for current filters.</div>`;
+    }
+
     renderGroups() {
         if (!this.groups.length) {
-            this.body.innerHTML = `<div class="hf-me-empty">No models found for current filters.</div>`;
+            this.renderEmptyState();
             return;
         }
 
@@ -2497,7 +2637,7 @@ class ModelExplorerDialog {
         }
         const htmlRows = [...installedRows, ...groupedRows];
         if (!htmlRows.length) {
-            this.body.innerHTML = `<div class="hf-me-empty">No models found for current filters.</div>`;
+            this.renderEmptyState();
         } else {
             this.body.innerHTML = htmlRows.join("");
         }
@@ -2564,6 +2704,111 @@ class ModelExplorerDialog {
         showToast({ severity: "info", summary: "Queued", detail: `${variant.filename} queued for download.` });
         await wait(300);
         await this.refreshGroups();
+    }
+
+    openHfSearchResultsModal(query) {
+        const existing = document.querySelector(".hf-me-hfsearch-overlay");
+        if (existing) existing.remove();
+
+        const overlay = document.createElement("div");
+        overlay.className = "hf-me-hfsearch-overlay";
+        overlay.innerHTML = `
+            <div class="hf-me-hfsearch-modal" role="dialog" aria-modal="true">
+                <div class="hf-me-hfsearch-header">
+                    <span>Hugging Face Search: "${escapeHtml(query)}"</span>
+                    <button type="button" class="p-button p-component p-button-text" data-hfsearch-close="1" style="padding:0.25rem 0.5rem;">✕</button>
+                </div>
+                <div class="hf-me-hfsearch-body">
+                    <div class="hf-me-empty">Searching Hugging Face for "${escapeHtml(query)}"...</div>
+                </div>
+            </div>
+        `;
+        const closeModal = () => overlay.remove();
+        overlay.addEventListener("click", (e) => {
+            if (e.target === overlay || e.target.closest("[data-hfsearch-close]")) {
+                closeModal();
+            }
+        });
+        document.body.appendChild(overlay);
+        return overlay;
+    }
+
+    async searchOnHuggingFace(query) {
+        const overlay = this.openHfSearchResultsModal(query);
+        const body = overlay.querySelector(".hf-me-hfsearch-body");
+        try {
+            const params = new URLSearchParams({ q: query, limit: "15" });
+            if (this.filters.category) {
+                params.set("category", this.filters.category);
+            }
+            const resp = await this.fetchExplorer(`/hf_search?${params.toString()}`);
+            const data = await resp.json().catch(() => ({}));
+            if (!overlay.isConnected) return;
+            if (!resp.ok || data.ok === false) {
+                body.innerHTML = `<div class="hf-me-empty">Search failed: ${escapeHtml(data.error || `HTTP ${resp.status}`)}</div>`;
+                return;
+            }
+            const results = Array.isArray(data.results) ? data.results : [];
+            if (!results.length) {
+                body.innerHTML = `<div class="hf-me-empty">No matching model files found on Hugging Face for "${escapeHtml(query)}".</div>`;
+                return;
+            }
+            body.innerHTML = results.map((item, idx) => {
+                const repoUrl = `https://huggingface.co/${escapeHtml(item.repo_id)}`;
+                const badge = item.is_priority_author
+                    ? `<span style="background:rgba(34,197,94,0.18);color:#86efac;padding:0.08rem 0.35rem;border-radius:0.25rem;">priority</span>`
+                    : "";
+                const folder = escapeHtml(item.directory || this.filters.category || "checkpoints");
+                return `
+                    <div class="hf-me-hfsearch-row">
+                        <div class="hf-me-hfsearch-meta">
+                            <div class="hf-me-hfsearch-fn">${escapeHtml(item.filename)}</div>
+                            <div class="hf-me-hfsearch-sub">
+                                <a href="${repoUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.repo_id)}</a>
+                                ${badge}
+                                <span>→ ${folder}/</span>
+                                <span>♥ ${Number(item.likes || 0)}</span>
+                            </div>
+                        </div>
+                        <button type="button" class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-hf-dl-idx="${idx}">
+                            <i class="icon-[lucide--download]" aria-hidden="true"></i>
+                            <span>Download</span>
+                        </button>
+                    </div>
+                `;
+            }).join("");
+
+            body.querySelectorAll("button[data-hf-dl-idx]").forEach((btn) => {
+                btn.onclick = async () => {
+                    const item = results[Number(btn.getAttribute("data-hf-dl-idx"))];
+                    if (!item?.url) return;
+                    btn.disabled = true;
+                    btn.textContent = "Queued";
+                    const dlResp = await this.fetchExplorer("/download", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            models: [{
+                                filename: item.filename,
+                                url: item.url,
+                                folder: item.directory || this.filters.category || "checkpoints",
+                            }],
+                        }),
+                    });
+                    if (!dlResp.ok) {
+                        btn.disabled = false;
+                        btn.textContent = "Download";
+                        showToast({ severity: "error", summary: "Queue failed", detail: `HTTP ${dlResp.status}` });
+                        return;
+                    }
+                    showToast({ severity: "info", summary: "Queued", detail: `${item.filename} queued for download.` });
+                };
+            });
+        } catch (err) {
+            if (overlay.isConnected) {
+                body.innerHTML = `<div class="hf-me-empty">Search error: ${escapeHtml(err?.message || String(err))}</div>`;
+            }
+        }
     }
 
     async useVariant(group, variant, button) {
