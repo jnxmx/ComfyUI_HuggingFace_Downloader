@@ -42,6 +42,92 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 VERIFY_EXISTING_DOWNLOADS = _env_flag("HF_DOWNLOADER_VERIFY_EXISTING", default=False)
 
+
+def _get_system_ram_gb() -> float:
+    """Best-effort detection of total system RAM in gigabytes."""
+    # 1. psutil (if installed)
+    try:
+        import psutil
+        return psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        pass
+
+    # 2. os.sysconf (Linux, macOS, Unix)
+    try:
+        if hasattr(os, "sysconf"):
+            pages = os.sysconf("SC_PHYS_PAGES")
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            if pages > 0 and page_size > 0:
+                return (pages * page_size) / (1024 ** 3)
+    except Exception:
+        pass
+
+    # 3. /proc/meminfo (Linux fallback)
+    try:
+        if os.path.exists("/proc/meminfo"):
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        parts = line.split()
+                        return int(parts[1]) / (1024 * 1024)
+    except Exception:
+        pass
+
+    # 4. ctypes GlobalMemoryStatusEx (Windows fallback)
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                return stat.ullTotalPhys / (1024 ** 3)
+    except Exception:
+        pass
+
+    return 16.0
+
+
+def _configure_xet_concurrency() -> None:
+    """
+    Configure HF_XET_FIXED_DOWNLOAD_CONCURRENCY.
+    - If user already set it in env: respect it.
+    - RunPod environments or systems with >= 32GB RAM: 64 streams.
+    - Non-RunPod systems with < 32GB RAM: 16 streams (prevents socket/buffer exhaustion).
+    """
+    if "HF_XET_FIXED_DOWNLOAD_CONCURRENCY" in os.environ:
+        return
+
+    is_runpod = bool(os.environ.get("RUNPOD_POD_ID"))
+    ram_gb = _get_system_ram_gb()
+
+    # If not on RunPod and RAM is less than 32GB, use 16 streams; otherwise 64 streams.
+    # round(ram_gb) handles hardware-reserved memory offsets (e.g. 31.8GB physical).
+    if not is_runpod and round(ram_gb) < 32:
+        concurrency = "16"
+    else:
+        concurrency = "64"
+
+    os.environ["HF_XET_FIXED_DOWNLOAD_CONCURRENCY"] = concurrency
+    print(f"[DEBUG] HF_XET_FIXED_DOWNLOAD_CONCURRENCY set to {concurrency} (is_runpod={is_runpod}, ram_gb={ram_gb:.1f})")
+
+
+# Automatically initialize Xet concurrency configuration
+_configure_xet_concurrency()
+
 def folder_size(directory: str) -> int:
     total = 0
     for dirpath, _, filenames in os.walk(directory):
@@ -576,6 +662,7 @@ def run_download(parsed_data: dict,
                     raise InterruptedError("Download cancelled")
 
                 if use_xet:
+                    _configure_xet_concurrency()
                     os.environ["HF_HUB_DISABLE_XET"] = "0"
                     os.environ["HF_HUB_ENABLE_HF_XET"] = "1"
                 else:
