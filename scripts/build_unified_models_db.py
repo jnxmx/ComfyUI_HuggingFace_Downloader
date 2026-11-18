@@ -641,13 +641,46 @@ def main() -> int:
         priority_family_supported = bool(category) and bool(stem_key) and (
             (category, stem_key) in curated_family_keys
         )
+        LODESTONES_CURATED_REPOS = {
+            "lodestones/chroma1-hd",
+            "lodestones/chroma1-base",
+            "lodestones/chroma1-flash",
+            "lodestones/chroma1-radiance",
+            "lodestones/chroma2-kaleidoscope",
+            "lodestones/chroma-h3",
+            "lodestones/chroma-8.9b",
+            "lodestones/kroma",
+            "lodestones/kromoss",
+            "lodestones/zeta-chroma",
+            "lodestones/moss-image-sft-8-steps-dmd",
+            "lodestones/moss-image-base-8-steps-dmd",
+        }
+        is_training_junk = bool(
+            re.search(r"(?:^\d{5,}_|_optim(?:izer)?\.(?:pth|pt|safetensors|bin)$)", row_filename, re.IGNORECASE)
+        )
+        is_lodestones_curated = (
+            repo_lower in LODESTONES_CURATED_REPOS
+            and not is_training_junk
+            and not row_filename.lower().endswith(".pth")
+            and "deprecated" not in row_filename.lower()
+        )
+        if is_lodestones_curated and category in {"checkpoints", "", "unknown"}:
+            if "lora" in row_filename.lower():
+                category = "loras"
+            else:
+                category = "diffusion_models"
+            entry["directory"] = category
+            category_verified = True
+
         is_priority_author_model = (
-            row_owner in {"winnougan", "comfy-org", "lbh-123-ai", "lodestones"}
+            row_owner in {"winnougan", "comfy-org", "lbh-123-ai"}
+            or is_lodestones_curated
             or "convrot" in row_filename.lower()
             or "krea" in row_filename.lower()
         )
         explorer_enabled_priority = (
             source == "priority_repo_scrape"
+            and not is_training_junk
             and bool(category)
             and (not base_applicable or bool(base_value))
             and (is_priority_author_model or (allow_priority_gguf and priority_family_supported))

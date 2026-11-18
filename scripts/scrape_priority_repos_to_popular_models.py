@@ -71,7 +71,25 @@ EXCLUDED_REPO_IDS = {
     "Phips/q-FrozenLake-v1-4x4-noSlippery",
     "Phips/ppo-Huggy",
     "Phips/ppo-LunarLander-v2",
+    "lodestones/chroma-debug-development-only",
+    "lodestones/debug-flow",
+    "lodestones/debug-model",
+    "lodestones/radiance-debug",
+    "lodestones/Furry-LUX",
+    "lodestones/furryrock-model-safetensors",
+    "lodestones/polyfur",
+    "lodestones/P.A.W.F.E.C.T-Alpha",
 }
+
+TRAINING_ARTIFACT_RE = re.compile(
+    r"(?:^\d{5,}_|_optim(?:izer)?\.(?:pth|pt|safetensors|bin)$|^(?:optim|optimizer)\.(?:pth|pt|safetensors|bin)$)",
+    re.IGNORECASE,
+)
+
+
+def is_training_artifact(path: str) -> bool:
+    basename = os.path.basename(str(path or "")).strip()
+    return bool(TRAINING_ARTIFACT_RE.search(basename))
 
 FORCE_UPSCALE_AUTHORS = {"kim2091", "phips"}
 LIGHTX2V_OWNER = "lightx2v"
@@ -218,6 +236,8 @@ def fetch_repo_tree_paths(
                 continue
             ext = os.path.splitext(path)[1].lower()
             if ext not in MODEL_EXTENSIONS:
+                continue
+            if is_training_artifact(path):
                 continue
             if path in seen:
                 continue
