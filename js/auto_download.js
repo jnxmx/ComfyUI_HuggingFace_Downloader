@@ -7329,7 +7329,8 @@ app.registerExtension({
                 return true;
             }
 
-            const originalLoadGraphData = comfyApp.loadGraphData.bind(comfyApp);
+            const origLoadGraphDataFn = comfyApp.loadGraphData;
+            const originalLoadGraphData = (...args) => origLoadGraphDataFn.apply(comfyApp, args);
             comfyApp.loadGraphData = async (...args) => {
                 const loadedGraphData = normalizeWorkflowOpenGraphDataArg(args?.[0]);
                 workflowOpenLastTriggeredAt = 0;
@@ -7447,8 +7448,9 @@ app.registerExtension({
                 return;
             }
 
-            const originalSurfaceMissingModels =
-                executionErrorStore.surfaceMissingModels.bind(executionErrorStore);
+            const origSurfaceMissingModelsFn = executionErrorStore.surfaceMissingModels;
+            const originalSurfaceMissingModels = (...args) =>
+                origSurfaceMissingModelsFn.apply(executionErrorStore, args);
 
             executionErrorStore.surfaceMissingModels = (models) => {
                 try {

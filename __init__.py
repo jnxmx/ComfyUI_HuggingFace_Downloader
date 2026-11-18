@@ -1,5 +1,4 @@
 
-import os
 import json
 
 # Monkeypatch huggingface_hub to automatically retry public downloads anonymously
@@ -18,14 +17,10 @@ try:
                 if token is not False:
                     kwargs_copy = kwargs.copy()
                     kwargs_copy["token"] = False
-                    orig_env_token = os.environ.pop("HF_TOKEN", None)
                     try:
                         return _orig_hf_hub_download(*args, **kwargs_copy)
                     except Exception:
                         pass
-                    finally:
-                        if orig_env_token is not None:
-                            os.environ["HF_TOKEN"] = orig_env_token
             raise e
 
     huggingface_hub.file_download.hf_hub_download = _patched_hf_hub_download

@@ -699,13 +699,8 @@ def run_download(parsed_data: dict,
                         # Stage 2: huggingface_hub download without token (handles restricted fine-grained tokens on public repos)
                         no_tok_kwargs = kwargs.copy()
                         no_tok_kwargs["token"] = False
-                        orig_hf_token = os.environ.pop("HF_TOKEN", None)
-                        try:
-                            path = hf_hub_download(**no_tok_kwargs)
-                            return {"ok": True, "path": path}
-                        finally:
-                            if orig_hf_token is not None:
-                                os.environ["HF_TOKEN"] = orig_hf_token
+                        path = hf_hub_download(**no_tok_kwargs)
+                        return {"ok": True, "path": path}
                     except Exception as e2:
                         if cancel_check and cancel_check():
                             raise InterruptedError("Download cancelled")
