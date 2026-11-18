@@ -2138,6 +2138,36 @@ def _download_worker():
                 "updated_at": time.time()
             })
 
+            def _read_xet_progress_bytes(pid):
+                """
+                Parse the latest xet log for 'observed bytes sent so far' for the given PID.
+                xet buffers shards in RAM before flushing to disk, so disk size lags behind.
+                Returns in-flight byte count or None.
+                """
+                import glob
+                import re as _re
+                for base in (
+                    os.path.expanduser("~/.cache/huggingface/xet/logs"),
+                    "/workspace/.cache/huggingface/xet/logs",
+                ):
+                    pattern = os.path.join(base, f"xet_*_{pid}.log")
+                    matches = glob.glob(pattern)
+                    if not matches:
+                        continue
+                    log_file = max(matches, key=os.path.getmtime)
+                    try:
+                        with open(log_file, "rb") as f:
+                            f.seek(0, 2)
+                            size = f.tell()
+                            f.seek(max(0, size - 16384))
+                            tail = f.read().decode("utf-8", errors="ignore")
+                        found = _re.findall(r"observed bytes sent so far = (\d+)", tail)
+                        if found:
+                            return int(found[-1])
+                    except Exception:
+                        pass
+                return None
+
             def monitor_progress(stop_event, download_id, expected_size, blob_path, incomplete_path, filename, defer_verify):
                 last_bytes = None
                 last_time = time.time()
@@ -2146,6 +2176,12 @@ def _download_worker():
                 last_change = time.time()
                 last_stall_log = time.time()
                 waiting_logged = False
+                _xet_pid = os.getpid()
+                # xet buffers ~60 MB shards in RAM at 64 streams before flushing to disk.
+                # Treat disk-size stall as real only after 300s with no xet log progress either.
+                _XET_STALL_THRESHOLD = int(os.environ.get("HF_DOWNLOADER_STALL_THRESHOLD", "300"))
+                _last_xet_bytes = None
+                _last_xet_change = time.time()
                 try:
                     while not stop_event.is_set():
                         if _is_cancel_requested(download_id):
@@ -2222,20 +2258,34 @@ def _download_worker():
                                 inst_speed = (delta / dt) if dt > 0 else 0
                             ema_speed = inst_speed if ema_speed is None else (0.2 * inst_speed + 0.8 * ema_speed)
                             stalled_for = now - last_change
+
+                            # Check xet in-flight progress (xet buffers shards in RAM before disk flush)
+                            xet_bytes = _read_xet_progress_bytes(_xet_pid)
+                            if xet_bytes is not None:
+                                if _last_xet_bytes is None or xet_bytes != _last_xet_bytes:
+                                    _last_xet_change = now
+                                _last_xet_bytes = xet_bytes
+                            xet_stalled_for = now - _last_xet_change
+
+                            # Real stall = both disk AND xet log show no progress for threshold seconds
+                            truly_stalled = stalled_for >= _XET_STALL_THRESHOLD and xet_stalled_for >= _XET_STALL_THRESHOLD
+
                             if stalled_for >= 30 and not waiting_logged:
-                                print(f"[DEBUG] monitor_progress {filename}: waiting for data (no size change for {stalled_for:.0f}s)")
+                                xet_note = f" (xet in-flight: {xet_bytes} bytes)" if xet_bytes else ""
+                                print(f"[DEBUG] monitor_progress {filename}: disk size unchanged for {stalled_for:.0f}s{xet_note}")
                                 waiting_logged = True
                             if bytes_now != last_bytes:
                                 waiting_logged = False
-                            if bytes_now == last_bytes and (now - last_change) >= 10 and (now - last_stall_log) >= 10:
+                            if bytes_now == last_bytes and stalled_for >= 30 and (now - last_stall_log) >= 30:
                                 stall_for = now - last_change
                                 total_label = expected_size if expected_size is not None else "unknown"
-                                print(f"[DEBUG] monitor_progress {filename}: stalled at {bytes_now}/{total_label} for {stall_for:.0f}s")
+                                xet_note = f", xet in-flight: {xet_bytes}" if xet_bytes else ""
+                                print(f"[DEBUG] monitor_progress {filename}: stalled at {bytes_now}/{total_label} for {stall_for:.0f}s{xet_note}")
                                 last_stall_log = now
                             eta_seconds = None
                             if expected_size and ema_speed and ema_speed > 0:
                                 eta_seconds = max(0, (expected_size - bytes_now) / ema_speed)
-                            if stalled_for >= 30:
+                            if truly_stalled:
                                 ema_speed = 0
                                 eta_seconds = None
                             _set_download_status(download_id, {
@@ -2244,7 +2294,7 @@ def _download_worker():
                                 "total_bytes": expected_size,
                                 "speed_bps": ema_speed,
                                 "eta_seconds": eta_seconds,
-                                "phase": "waiting_for_data" if stalled_for >= 30 else "downloading",
+                                "phase": "waiting_for_data" if truly_stalled else "downloading",
                                 "updated_at": now
                             })
                             last_bytes = bytes_now
