@@ -7089,8 +7089,103 @@ app.registerExtension({
             return clearedCount;
         };
 
+        const getDefaultGraphReference = () => {
+            try {
+                const dgNamespace = window?.comfyAPI?.defaultGraph;
+                if (dgNamespace?.defaultGraph && typeof dgNamespace.defaultGraph === "object") {
+                    return dgNamespace.defaultGraph;
+                }
+                if (typeof dgNamespace?.defaultGraphJSON === "string" && dgNamespace.defaultGraphJSON.trim()) {
+                    const parsed = JSON.parse(dgNamespace.defaultGraphJSON);
+                    if (parsed && typeof parsed === "object") {
+                        return parsed;
+                    }
+                }
+            } catch (_) {}
+            return null;
+        };
+
+        const normalizeDefaultWorkflowNodeSignature = (node) => {
+            if (!node || typeof node !== "object") {
+                return "";
+            }
+            const type = String(node.type || "").trim();
+            const widgets = node.widgets_values !== undefined ? node.widgets_values : null;
+            let widgetsJson = "null";
+            try {
+                widgetsJson = JSON.stringify(widgets);
+            } catch (_) {}
+            return `${type}::${widgetsJson}`;
+        };
+
+        const isComfyDefaultWorkflow = (graphData) => {
+            if (!graphData || typeof graphData !== "object" || !Array.isArray(graphData.nodes) || graphData.nodes.length === 0) {
+                return false;
+            }
+
+            const defaultRef = getDefaultGraphReference();
+            if (defaultRef && Array.isArray(defaultRef.nodes) && defaultRef.nodes.length === graphData.nodes.length) {
+                const refById = new Map();
+                for (const refNode of defaultRef.nodes) {
+                    if (refNode && refNode.id !== undefined && refNode.id !== null) {
+                        refById.set(String(refNode.id), normalizeDefaultWorkflowNodeSignature(refNode));
+                    }
+                }
+                if (refById.size === defaultRef.nodes.length) {
+                    let allMatchById = true;
+                    for (const node of graphData.nodes) {
+                        const key = node?.id !== undefined && node?.id !== null ? String(node.id) : "";
+                        if (!key || refById.get(key) !== normalizeDefaultWorkflowNodeSignature(node)) {
+                            allMatchById = false;
+                            break;
+                        }
+                    }
+                    if (allMatchById) {
+                        return true;
+                    }
+                }
+
+                const refSorted = defaultRef.nodes.map(normalizeDefaultWorkflowNodeSignature).sort();
+                const graphSorted = graphData.nodes.map(normalizeDefaultWorkflowNodeSignature).sort();
+                if (refSorted.every((sig, idx) => sig === graphSorted[idx])) {
+                    return true;
+                }
+            }
+
+            if (graphData.nodes.length === 7) {
+                const types = graphData.nodes.map((n) => String(n?.type || "").trim()).sort();
+                const expectedTypes = [
+                    "CLIPTextEncode",
+                    "CLIPTextEncode",
+                    "CheckpointLoaderSimple",
+                    "EmptyLatentImage",
+                    "KSampler",
+                    "SaveImage",
+                    "VAEDecode",
+                ];
+                if (types.every((t, idx) => t === expectedTypes[idx])) {
+                    const ckptNode = graphData.nodes.find((n) => n?.type === "CheckpointLoaderSimple");
+                    const ckptVal = Array.isArray(ckptNode?.widgets_values)
+                        ? String(ckptNode.widgets_values[0] || "").trim().toLowerCase()
+                        : "";
+                    if (
+                        ckptVal === "v1-5-pruned-emaonly-fp16.safetensors" ||
+                        ckptVal === "v1-5-pruned-emaonly.safetensors" ||
+                        ckptVal === "v1-5-pruned-emaonly.ckpt"
+                    ) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        };
+
         const triggerAutoDownloadFromWorkflowOpen = async (candidates = [], workflowGraphData = null) => {
             if (workflowOpenTriggeredForCurrentLoad) {
+                return false;
+            }
+            if (isComfyDefaultWorkflow(workflowGraphData || serializeWorkflowForModelScan())) {
                 return false;
             }
             try {
@@ -7354,6 +7449,10 @@ app.registerExtension({
                     setTimeout(async () => {
                         try {
                             if (!isWorkflowReadyForModelScan()) {
+                                return;
+                            }
+                            if (isComfyDefaultWorkflow(loadedGraphData || serializeWorkflowForModelScan())) {
+                                console.log("[AutoDownload] Skipping workflow-open missing-model prompt for default ComfyUI workflow.");
                                 return;
                             }
                             const activeWorkflow = getActiveWorkflowEntry();
