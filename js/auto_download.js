@@ -474,7 +474,7 @@ app.registerExtension({
                 .then(folders => {
                     if (Array.isArray(folders) && folders.length > 0) {
                         availableFolders = folders;
-                        folderPickers.forEach(picker => picker.refresh());
+                        Array.from(folderPickers).forEach(picker => picker.refresh());
                         console.log("[AutoDownload] Loaded folder list:", folders);
                     } else {
                         console.warn("[AutoDownload] No folders returned from /folder_structure");
@@ -494,85 +494,317 @@ app.registerExtension({
 
             const input = createInput(value, placeholder);
             input.autocomplete = "off";
+            input.style.paddingRight = "26px";
+
+            const toggleBtn = document.createElement("button");
+            toggleBtn.type = "button";
+            toggleBtn.tabIndex = -1;
+            toggleBtn.setAttribute("aria-label", "Choose destination folder");
+            Object.assign(toggleBtn.style, {
+                position: "absolute",
+                right: "2px",
+                top: "50%",
+                transform: "translateY(-50%)",
+                width: "18px",
+                height: "18px",
+                padding: "0",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--descrip-text, var(--muted-foreground, #9aa4b6))",
+                borderRadius: "4px",
+            });
+            toggleBtn.innerHTML = `<i class="icon-[lucide--chevron-down] size-3" aria-hidden="true"></i>`;
 
             const dropdown = document.createElement("div");
+            dropdown.className = "hf-folder-picker-dropdown";
+            dropdown.setAttribute("data-testid", "hf-folder-picker-dropdown");
             Object.assign(dropdown.style, {
-                position: "absolute",
-                top: "100%",
-                left: 0,
-                right: 0,
-                background: "var(--comfy-menu-bg)",
-                border: "1px solid var(--border-default)",
-                borderTop: "none",
-                maxHeight: "180px",
+                position: "fixed",
+                top: "0px",
+                left: "0px",
+                width: "190px",
+                background: "var(--comfy-menu-bg, var(--background, #1e1e1e))",
+                border: "1px solid var(--border-default, rgba(255, 255, 255, 0.14))",
+                borderRadius: "8px",
+                boxShadow: "0 10px 28px rgba(0, 0, 0, 0.45)",
+                maxHeight: "220px",
                 overflowY: "auto",
-                zIndex: 10,
+                padding: "4px",
+                zIndex: "10050",
                 display: "none",
-                borderRadius: "0 0 8px 8px"
+                boxSizing: "border-box",
+                pointerEvents: "auto",
             });
             applyNativeScrollbarClasses(dropdown);
 
-            const buildList = () => {
+            let isOpen = false;
+            let lastUseFilter = false;
+            let listenersAttached = false;
+            let suppressInputReopen = false;
+
+            const selectFolder = (folder) => {
+                input.value = folder;
+                input.style.border = "";
+                input.style.boxShadow = "";
+                hideList();
+                suppressInputReopen = true;
+                try {
+                    input.dispatchEvent(new Event("input", { bubbles: true }));
+                } finally {
+                    suppressInputReopen = false;
+                }
+                input.dispatchEvent(new Event("change", { bubbles: true }));
+            };
+
+            const positionDropdown = () => {
+                if (!isOpen || !wrapper.isConnected) {
+                    hideList();
+                    return;
+                }
+                const rect = input.getBoundingClientRect();
+                if (rect.width === 0 && rect.height === 0) {
+                    hideList();
+                    return;
+                }
+                const desiredWidth = Math.min(Math.max(rect.width, 190), window.innerWidth - 16);
+                let left = rect.left;
+                if (left + desiredWidth > window.innerWidth - 8) {
+                    left = Math.max(8, rect.right - desiredWidth);
+                }
+                dropdown.style.left = `${Math.round(left)}px`;
+                dropdown.style.width = `${Math.round(desiredWidth)}px`;
+
+                const spaceBelow = window.innerHeight - rect.bottom - 8;
+                const spaceAbove = rect.top - 8;
+                if (spaceBelow >= 140 || spaceBelow >= spaceAbove) {
+                    dropdown.style.top = `${Math.round(rect.bottom + 4)}px`;
+                    dropdown.style.bottom = "";
+                    dropdown.style.maxHeight = `${Math.max(96, Math.min(220, Math.floor(spaceBelow - 4)))}px`;
+                } else {
+                    dropdown.style.top = "";
+                    dropdown.style.bottom = `${Math.round(window.innerHeight - rect.top + 4)}px`;
+                    dropdown.style.maxHeight = `${Math.max(96, Math.min(220, Math.floor(spaceAbove - 4)))}px`;
+                }
+            };
+
+            const onDocMouseDown = (event) => {
+                const target = event?.target;
+                if (target instanceof Node && (wrapper.contains(target) || dropdown.contains(target))) {
+                    return;
+                }
+                hideList();
+            };
+
+            const onWindowScroll = (event) => {
+                const target = event?.target;
+                if (target === dropdown || (target instanceof Node && dropdown.contains(target))) {
+                    return;
+                }
+                positionDropdown();
+            };
+
+            const onWindowResize = () => {
+                positionDropdown();
+            };
+
+            const attachListeners = () => {
+                if (listenersAttached) return;
+                listenersAttached = true;
+                document.addEventListener("mousedown", onDocMouseDown, true);
+                window.addEventListener("scroll", onWindowScroll, true);
+                window.addEventListener("resize", onWindowResize);
+            };
+
+            const detachListeners = () => {
+                if (!listenersAttached) return;
+                listenersAttached = false;
+                document.removeEventListener("mousedown", onDocMouseDown, true);
+                window.removeEventListener("scroll", onWindowScroll, true);
+                window.removeEventListener("resize", onWindowResize);
+            };
+
+            const buildList = (useFilter = false) => {
+                lastUseFilter = Boolean(useFilter);
                 dropdown.innerHTML = "";
-                if (!availableFolders.length) {
+                const rawQuery = input.value.trim();
+                const queryLower = rawQuery.toLowerCase();
+                const filtered = useFilter && queryLower
+                    ? availableFolders.filter(folder => folder.toLowerCase().includes(queryLower))
+                    : availableFolders;
+
+                if (!filtered.length) {
+                    if (rawQuery) {
+                        const customItem = document.createElement("div");
+                        customItem.setAttribute("data-folder-option", rawQuery);
+                        customItem.textContent = `Use "${rawQuery}"`;
+                        Object.assign(customItem.style, {
+                            padding: "6px 10px",
+                            borderRadius: "5px",
+                            cursor: "pointer",
+                            color: "var(--input-text, var(--foreground, #e5e7eb))",
+                            fontSize: "12px",
+                            fontFamily: "var(--font-inter, Inter, sans-serif)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                        });
+                        customItem.addEventListener("mouseenter", () => {
+                            customItem.style.background = "var(--secondary-background-hover, var(--accent, rgba(255, 255, 255, 0.08)))";
+                        });
+                        customItem.addEventListener("mouseleave", () => {
+                            customItem.style.background = "transparent";
+                        });
+                        customItem.addEventListener("mousedown", (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            selectFolder(rawQuery);
+                        });
+                        dropdown.appendChild(customItem);
+                        return;
+                    }
                     const empty = document.createElement("div");
                     empty.textContent = "No folders available";
-                    empty.style.padding = "6px 8px";
+                    empty.style.padding = "6px 10px";
+                    empty.style.fontSize = "12px";
                     empty.style.color = "#888";
                     dropdown.appendChild(empty);
                     return;
                 }
-                availableFolders.forEach(folder => {
+
+                filtered.forEach(folder => {
+                    const isCurrent = queryLower && folder.toLowerCase() === queryLower;
                     const item = document.createElement("div");
+                    item.setAttribute("data-folder-option", folder);
                     item.textContent = folder;
                     Object.assign(item.style, {
-                        padding: "7px 10px",
+                        padding: "6px 10px",
+                        borderRadius: "5px",
                         cursor: "pointer",
-                        color: "var(--input-text)",
-                        fontSize: "13px",
+                        color: "var(--input-text, var(--foreground, #e5e7eb))",
+                        fontSize: "12px",
+                        fontWeight: isCurrent ? "600" : "400",
+                        background: isCurrent
+                            ? "var(--secondary-background-hover, var(--accent, rgba(255, 255, 255, 0.08)))"
+                            : "transparent",
                         fontFamily: "var(--font-inter, Inter, sans-serif)",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
                     });
                     item.addEventListener("mouseenter", () => {
-                        item.style.background = "var(--secondary-background-hover)";
+                        item.style.background = "var(--secondary-background-hover, var(--accent, rgba(255, 255, 255, 0.1)))";
                     });
                     item.addEventListener("mouseleave", () => {
-                        item.style.background = "transparent";
+                        item.style.background = isCurrent
+                            ? "var(--secondary-background-hover, var(--accent, rgba(255, 255, 255, 0.08)))"
+                            : "transparent";
                     });
                     item.addEventListener("mousedown", (e) => {
                         e.preventDefault();
-                        input.value = folder;
-                        dropdown.style.display = "none";
+                        e.stopPropagation();
+                        selectFolder(folder);
                     });
                     dropdown.appendChild(item);
                 });
             };
 
-            const showList = () => {
-                buildList();
+            function hideList() {
+                if (!isOpen && !dropdown.isConnected && dropdown.style.display === "none") {
+                    return;
+                }
+                isOpen = false;
+                dropdown.style.display = "none";
+                detachListeners();
+                if (dropdown.isConnected) {
+                    dropdown.remove();
+                }
+            }
+
+            const showList = (useFilter = false) => {
+                if (input.disabled) return;
+                buildList(useFilter);
+                if (!dropdown.isConnected) {
+                    (document.body || document.documentElement).appendChild(dropdown);
+                }
+                isOpen = true;
                 dropdown.style.display = "block";
+                positionDropdown();
+                attachListeners();
             };
 
-            input.addEventListener("focus", showList);
-            input.addEventListener("input", showList);
+            dropdown.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+            });
+
+            input.addEventListener("focus", () => showList(false));
+            input.addEventListener("click", (e) => {
+                e.stopPropagation();
+                if (!isOpen) showList(false);
+            });
+            input.addEventListener("input", () => {
+                input.style.border = "";
+                input.style.boxShadow = "";
+                if (suppressInputReopen) return;
+                showList(true);
+            });
+            input.addEventListener("keydown", (e) => {
+                if (e.key === "Escape") {
+                    e.stopPropagation();
+                    hideList();
+                } else if (e.key === "Enter" && isOpen) {
+                    hideList();
+                } else if (e.key === "ArrowDown" && !isOpen) {
+                    e.preventDefault();
+                    showList(false);
+                }
+            });
             input.addEventListener("blur", () => {
-                setTimeout(() => {
-                    dropdown.style.display = "none";
-                }, 150);
+                hideList();
+            });
+
+            toggleBtn.addEventListener("mousedown", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (input.disabled) return;
+                if (isOpen) {
+                    hideList();
+                } else {
+                    input.focus();
+                    showList(false);
+                }
             });
 
             wrapper.appendChild(input);
-            wrapper.appendChild(dropdown);
+            wrapper.appendChild(toggleBtn);
+
+            const destroy = () => {
+                hideList();
+                if (dropdown.isConnected) {
+                    dropdown.remove();
+                }
+                folderPickers.delete(picker);
+            };
 
             const picker = {
                 refresh: () => {
-                    if (dropdown.style.display === "block") {
-                        buildList();
+                    if (!wrapper.isConnected) {
+                        destroy();
+                        return;
                     }
-                }
+                    if (isOpen) {
+                        buildList(lastUseFilter);
+                        positionDropdown();
+                    }
+                },
+                destroy,
             };
             folderPickers.add(picker);
 
-            return { wrapper, input };
+            return { wrapper, input, dropdown, hide: hideList, destroy };
         };
 
         const parseFilenameFromUrl = (url) => {
@@ -3868,8 +4100,15 @@ app.registerExtension({
             dlg.className = NATIVE_OVERLAY_WRAPPER_CLASS;
 
             let content = null;
+            const rowFolderPickers = [];
             let cleanupOverlayMount = () => {};
             const cleanupUi = () => {
+                while (rowFolderPickers.length) {
+                    const picker = rowFolderPickers.pop();
+                    try {
+                        picker?.destroy?.();
+                    } catch (_) {}
+                }
                 cleanupOverlayMount();
             };
 
@@ -4082,23 +4321,26 @@ app.registerExtension({
 
                     const defaultFolder = String(m.locked_folder || m.suggested_folder || "").trim();
                     const folderPicker = createFolderPicker(defaultFolder, "Folder");
+                    rowFolderPickers.push(folderPicker);
                     Object.assign(folderPicker.wrapper.style, {
-                        width: "116px",
+                        width: "132px",
                         minWidth: "0",
                         flexShrink: "0",
                     });
                     applyCompactInputStyle(folderPicker.input, 6);
+                    folderPicker.input.style.paddingRight = "20px";
+                    folderPicker.input.setAttribute("data-testid", "hf-model-folder-input");
                     if (downloadMode === "folder") {
                         folderPicker.input.placeholder = "Root";
                     }
-                    const folderLocked = Boolean(m.folder_locked) && downloadMode !== "folder";
-                    if (folderLocked) {
-                        folderPicker.input.value = String(m.locked_folder || m.suggested_folder || defaultFolder || "").trim();
-                        folderPicker.input.readOnly = true;
-                        folderPicker.input.disabled = true;
-                        folderPicker.input.title = "Locked to the requesting node's model folder";
-                        folderPicker.wrapper.style.opacity = "0.9";
-                    }
+                    const preferAuthoritativeFolder = Boolean(m.folder_locked) && downloadMode !== "folder";
+                    const updateFolderTooltip = () => {
+                        const val = folderPicker.input.value.trim();
+                        folderPicker.input.title = val
+                            ? `Download folder: ${val} (click to change)`
+                            : "Click to choose download folder";
+                    };
+                    updateFolderTooltip();
 
                     const locateBtn = document.createElement("button");
                     locateBtn.type = "button";
@@ -4151,11 +4393,17 @@ app.registerExtension({
                         nodeId: m.node_id,
                         downloadMode,
                         skipWorkflowUpdate: downloadMode === "folder",
-                        folderLocked,
-                        lockedFolder: folderLocked
-                            ? String(m.locked_folder || m.suggested_folder || defaultFolder || "").trim()
-                            : "",
+                        preferAuthoritativeFolder,
+                        userEditedFolder: false,
+                        folderLocked: false,
+                        lockedFolder: "",
                     };
+                    const onFolderEdited = () => {
+                        rowData.userEditedFolder = true;
+                        updateFolderTooltip();
+                    };
+                    folderPicker.input.addEventListener("input", onFolderEdited);
+                    folderPicker.input.addEventListener("change", onFolderEdited);
                     rowInputs.push(rowData);
 
                     if (downloadMode !== "folder" && Array.isArray(m.alternatives) && m.alternatives.length > 0) {
@@ -4222,8 +4470,9 @@ app.registerExtension({
                                     rowData.resolvedUrl = alt.url;
                                     cb.checked = true;
                                 }
-                                if (alt.suggested_folder && !rowData.folderLocked) {
+                                if (alt.suggested_folder && !rowData.userEditedFolder && !rowData.preferAuthoritativeFolder) {
                                     rowData.folderInput.value = alt.suggested_folder;
+                                    updateFolderTooltip();
                                 }
                                 rowData.nameEl.textContent = rowData.filename;
                                 rowData.nameEl.title = rowData.nodeTitle
@@ -4495,9 +4744,7 @@ app.registerExtension({
                     return;
                 }
                 const toDownload = selectedRows.map((r) => {
-                    const effectiveFolder = r.folderLocked
-                        ? (r.lockedFolder || r.folderInput.value.trim())
-                        : r.folderInput.value.trim();
+                    const effectiveFolder = r.folderInput.value.trim();
                     const item = {
                         filename: r.filename,
                         target_filename: r.filename,
@@ -4505,8 +4752,8 @@ app.registerExtension({
                         requested_path: r.requestedPath || r.filename,
                         url: r.urlInput.value.trim(),
                         folder: effectiveFolder,
-                        folder_locked: Boolean(r.folderLocked),
-                        locked_folder: r.lockedFolder || "",
+                        folder_locked: false,
+                        locked_folder: "",
                     };
                     if (String(r.downloadMode || "").toLowerCase() === "folder") {
                         item.download_mode = "folder";
@@ -4657,6 +4904,7 @@ app.registerExtension({
 
             dlg.appendChild(panel);
             cleanupOverlayMount = mountOverlayInNativeStack(dlg);
+            dlg.__hfOverlayCleanup = cleanupUi;
             if (!options?.triggeredByWorkflowOpen) {
                 setTimeout(() => {
                     const firstUrlInput = dlg.querySelector(
@@ -4681,18 +4929,24 @@ app.registerExtension({
             };
 
             const existing = document.getElementById("manual-download-dialog");
-            if (existing) existing.remove();
+            if (existing) {
+                existing.__hfManualCleanup?.();
+                existing.remove();
+            }
 
+            let folderPicker = null;
             const dlg = document.createElement("div");
             dlg.id = "manual-download-dialog";
             applyTemplateDialogOverlayStyle(dlg, 9000);
 
             const closeDialog = () => {
                 stopPolling();
+                folderPicker?.destroy?.();
                 if (dlg.parentElement) {
                     dlg.remove();
                 }
             };
+            dlg.__hfManualCleanup = () => folderPicker?.destroy?.();
 
             bindBackdropClose(dlg, closeDialog);
 
@@ -4850,10 +5104,11 @@ app.registerExtension({
                 letterSpacing: "0.05em",
                 fontWeight: "600",
             });
-            const folderPicker = createFolderPicker("loras", "Folder");
+            folderPicker = createFolderPicker("loras", "Folder");
             Object.assign(folderPicker.input.style, {
                 fontSize: "14px",
                 minHeight: "40px",
+                paddingRight: "28px",
             });
 
             content.appendChild(urlLabel);
@@ -5724,8 +5979,12 @@ app.registerExtension({
                 }
                 .hf-native-comfy-btn-row {
                     height: 24px;
-                    padding: 0 7px;
+                    padding: 0 5px;
                     font-size: 11px;
+                    max-width: 100%;
+                    min-width: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 }
                 .hf-native-comfy-btn-all {
                     width: 100%;
@@ -5739,25 +5998,51 @@ app.registerExtension({
                     padding-top: 8px;
                 }
                 .hf-native-missing-row {
-                    display: flex !important;
-                    flex-wrap: wrap !important;
+                    display: grid !important;
+                    grid-template-columns: minmax(0, 1fr) auto auto !important;
                     align-items: center !important;
-                    column-gap: 6px !important;
+                    column-gap: 4px !important;
                     row-gap: 6px !important;
                 }
                 .hf-native-missing-row-info {
-                    flex: 1 1 180px !important;
-                    min-width: 180px !important;
+                    grid-column: 1 / -1 !important;
+                    min-width: 0 !important;
+                    width: 100% !important;
+                    max-width: 100% !important;
                 }
                 .hf-native-missing-row-actions {
+                    grid-column: 1 / -1 !important;
+                    justify-self: end !important;
                     margin-left: auto !important;
                     display: inline-flex !important;
                     align-items: center !important;
-                    flex-wrap: wrap !important;
+                    flex-wrap: nowrap !important;
                     justify-content: flex-end !important;
                     gap: 4px !important;
-                    flex-shrink: 0 !important;
                     max-width: 100% !important;
+                    min-width: 0 !important;
+                }
+                .hf-native-missing-row > [data-testid="hf-download-to-comfy"] {
+                    justify-self: end !important;
+                    margin-left: 0 !important;
+                }
+                .hf-native-missing-row [data-testid="missing-model-download"] {
+                    height: 24px !important;
+                    min-height: 24px !important;
+                    padding-left: 6px !important;
+                    padding-right: 6px !important;
+                    font-size: 11px !important;
+                    line-height: 1 !important;
+                    white-space: nowrap !important;
+                    flex-shrink: 0 !important;
+                }
+                .hf-native-missing-row [data-testid="missing-model-locate"] {
+                    width: 24px !important;
+                    min-width: 24px !important;
+                    height: 24px !important;
+                    min-height: 24px !important;
+                    padding: 0 !important;
+                    flex-shrink: 0 !important;
                 }
             `;
             (document.head || document.documentElement).appendChild(style);
@@ -6025,6 +6310,8 @@ app.registerExtension({
                         if (comfyBtn && !queueItem) {
                             comfyBtn.remove();
                         }
+                        if (nativeDownloadBtn) nativeDownloadBtn.style.gridColumn = "";
+                        if (nativeLocateBtn) nativeLocateBtn.style.gridColumn = "";
                         return;
                     }
 
@@ -6052,21 +6339,37 @@ app.registerExtension({
                     const flexRowEl = (actionContainer ? actionContainer.parentElement : anchorParent) || rowEl;
                     if (flexRowEl && flexRowEl !== rowsContainer) {
                         flexRowEl.classList.add("hf-native-missing-row");
-                        const infoChild = Array.from(flexRowEl.children).find(
-                            (child) =>
+                        Array.from(flexRowEl.children).forEach((child) => {
+                            if (
                                 child !== actionContainer &&
                                 child !== comfyBtn &&
                                 child !== nativeDownloadBtn &&
                                 child !== nativeLocateBtn
-                        );
-                        if (infoChild) {
-                            infoChild.classList.add("hf-native-missing-row-info");
-                        }
+                            ) {
+                                child.classList.add("hf-native-missing-row-info");
+                            }
+                        });
                         if (actionContainer) {
                             actionContainer.classList.add("hf-native-missing-row-actions");
                             comfyBtn.style.marginLeft = "";
+                            comfyBtn.style.gridColumn = "";
+                            if (nativeDownloadBtn) nativeDownloadBtn.style.gridColumn = "";
+                            if (nativeLocateBtn) nativeLocateBtn.style.gridColumn = "";
                         } else {
-                            comfyBtn.style.marginLeft = "auto";
+                            comfyBtn.style.marginLeft = "";
+                            if (nativeDownloadBtn && nativeLocateBtn) {
+                                comfyBtn.style.gridColumn = "1";
+                                nativeDownloadBtn.style.gridColumn = "2";
+                                nativeLocateBtn.style.gridColumn = "3";
+                            } else if (nativeDownloadBtn) {
+                                comfyBtn.style.gridColumn = "2";
+                                nativeDownloadBtn.style.gridColumn = "3";
+                            } else if (nativeLocateBtn) {
+                                comfyBtn.style.gridColumn = "2";
+                                nativeLocateBtn.style.gridColumn = "3";
+                            } else {
+                                comfyBtn.style.gridColumn = "3";
+                            }
                         }
                     }
 

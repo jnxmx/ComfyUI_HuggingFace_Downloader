@@ -2,12 +2,56 @@ import { app } from "../../../scripts/app.js";
 
 const MENU_ID = "hf-downloader-top-menu";
 const BUTTON_TOOLTIP = "Hugging Face Downloader";
-const BUTTON_SPINNER_STYLE_ID = "hf-downloader-top-menu-spinner-style";
 const BUTTON_STYLE_ID = "hf-downloader-top-menu-button-style";
 const BUTTON_SELECTOR = `button[aria-label="${BUTTON_TOOLTIP}"]`;
 const TOP_MENU_STYLE_SETTING_ID = "downloader.top_menu_button_style";
 const TOP_MENU_STYLE_DEFAULT = "default";
 const TOP_MENU_STYLE_CHANGE_EVENT = `${TOP_MENU_STYLE_SETTING_ID}.change`;
+const ACTIONBAR_STRIP_CLASSES = [
+    "bg-transparent",
+    "text-muted-foreground",
+    "h-6",
+    "h-7",
+    "rounded-sm",
+    "rounded-full",
+    "px-2",
+    "py-1"
+];
+const NATIVE_TRIGGER_CLASSES = [
+    "hf-downloader-button",
+    "relative",
+    "inline-flex",
+    "cursor-pointer",
+    "touch-manipulation",
+    "appearance-none",
+    "items-center",
+    "justify-center",
+    "border-none",
+    "font-inter",
+    "text-xs",
+    "font-medium",
+    "whitespace-nowrap",
+    "transition-colors",
+    "focus-visible:ring-1",
+    "focus-visible:ring-ring",
+    "focus-visible:outline-none",
+    "disabled:pointer-events-none",
+    "disabled:opacity-50",
+    "bg-secondary",
+    "text-foreground",
+    "hover:bg-accent",
+    "group",
+    "h-8",
+    "gap-1",
+    "rounded-lg",
+    "pr-1.5",
+    "pl-2",
+    "data-[state=open]:bg-accent"
+];
+const NATIVE_MENU_CONTAINER_CLASS =
+    "z-3000 min-w-52 overflow-y-auto rounded-lg border border-solid border-border bg-background p-1 text-foreground shadow-lg outline-none";
+const NATIVE_MENU_ITEM_CLASS =
+    "group flex min-h-8 w-full cursor-pointer appearance-none items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-1 text-left font-inter text-xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-50";
 const HUGGINGFACE_YELLOW_ICON =
     new URL("./assets/hf-logo.png", import.meta.url).toString();
 const DEFAULT_ICON_URLS = [
@@ -66,24 +110,7 @@ let decorateQueued = false;
 const buttonVisuals = new Map();
 
 const ensureSpinnerStyles = () => {
-    if (document.getElementById(BUTTON_SPINNER_STYLE_ID)) return;
-    const style = document.createElement("style");
-    style.id = BUTTON_SPINNER_STYLE_ID;
-    style.textContent = `
-        .hf-downloader-top-spinner {
-            width: 16px;
-            height: 16px;
-            border-radius: 999px;
-            border: 2px solid rgba(255, 255, 255, 0.25);
-            border-top-color: #fff;
-            animation: hf-downloader-top-spin 0.9s linear infinite;
-            display: none;
-        }
-        @keyframes hf-downloader-top-spin {
-            to { transform: rotate(360deg); }
-        }
-    `;
-    document.head.appendChild(style);
+    // Native icon-[lucide--loader-circle] animate-spin is provided by ComfyUI's built-in styles.
 };
 
 const ensureButtonStyles = () => {
@@ -91,30 +118,23 @@ const ensureButtonStyles = () => {
     const style = document.createElement("style");
     style.id = BUTTON_STYLE_ID;
     style.textContent = `
-        button[aria-label="${BUTTON_TOOLTIP}"].hf-downloader-button {
-            border-radius: 4px;
-            padding: 6px;
-            border: 1px solid transparent;
-            background-color: var(--primary-bg);
-            transition: all 0.2s ease;
-            margin-left: 10px;
-            margin-right: 6px;
-        }
-        button[aria-label="${BUTTON_TOOLTIP}"].hf-downloader-button:hover {
-            background-color: var(--primary-hover-bg) !important;
-        }
         .hf-downloader-top-icon-wrap {
-            display: flex;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 20px;
-            height: 20px;
+            width: 16px;
+            height: 16px;
             line-height: 1;
         }
         .hf-downloader-top-icon-wrap img {
             display: block;
-            width: 20px;
-            height: 20px;
+            width: 16px;
+            height: 16px;
+            object-fit: contain;
+        }
+        button[aria-label="${BUTTON_TOOLTIP}"][data-state="open"] .hf-downloader-chevron {
+            transform: none;
+            rotate: 180deg;
         }
     `;
     document.head.appendChild(style);
@@ -155,9 +175,18 @@ const getPanelState = () => {
     return window?.hfDownloader?.downloadPanelState || null;
 };
 
-const applyTopButtonState = (state = null) => {
-    const current = state || getPanelState() || {};
-    const showSpinner = Boolean(current.minimized && current.hasRunning);
+const getBackupPanelState = () => {
+    if (typeof window === "undefined") return null;
+    return window?.hfDownloader?.backupPanelState || null;
+};
+
+const applyTopButtonState = () => {
+    const dlState = getPanelState() || {};
+    const bkState = getBackupPanelState() || {};
+    const showSpinner = Boolean(
+        (dlState.minimized && dlState.hasRunning) ||
+        (bkState.minimized && bkState.hasRunning)
+    );
 
     for (const [button, visuals] of buttonVisuals.entries()) {
         if (!button?.isConnected || !visuals?.iconImg?.isConnected || !visuals?.iconSpinner?.isConnected) {
@@ -180,11 +209,26 @@ const getTopMenuButtonStyle = () => {
     return TOP_MENU_STYLE_DEFAULT;
 };
 
+const syncButtonOpenState = () => {
+    const stateVal = menuVisible ? "open" : "closed";
+    const expandedVal = String(Boolean(menuVisible));
+    document.querySelectorAll(BUTTON_SELECTOR).forEach((button) => {
+        if (button.getAttribute("data-state") !== stateVal) {
+            button.setAttribute("data-state", stateVal);
+        }
+        if (button.getAttribute("aria-expanded") !== expandedVal) {
+            button.setAttribute("aria-expanded", expandedVal);
+        }
+    });
+};
+
 const hideMenu = () => {
     if (menuElement) {
         menuElement.style.display = "none";
+        menuElement.setAttribute("data-state", "closed");
     }
     menuVisible = false;
+    syncButtonOpenState();
 };
 
 const runAction = (name) => {
@@ -201,31 +245,23 @@ const runAction = (name) => {
     });
 };
 
-const createMenuItem = (label, actionName) => {
+const createMenuItem = (label, actionName, iconClass = "") => {
     const item = document.createElement("button");
     item.type = "button";
-    item.textContent = label;
-    Object.assign(item.style, {
-        appearance: "none",
-        border: "none",
-        background: "transparent",
-        color: "#ddd",
-        padding: "8px 12px",
-        textAlign: "left",
-        cursor: "pointer",
-        width: "100%",
-        minWidth: "0",
-        boxSizing: "border-box",
-        whiteSpace: "nowrap",
-        fontSize: "12px"
-    });
+    item.setAttribute("role", "menuitem");
+    item.className = NATIVE_MENU_ITEM_CLASS;
 
-    item.addEventListener("mouseenter", () => {
-        item.style.background = "#2b2f3a";
-    });
-    item.addEventListener("mouseleave", () => {
-        item.style.background = "transparent";
-    });
+    if (iconClass) {
+        const icon = document.createElement("i");
+        icon.className = `${iconClass} size-3.5 shrink-0 text-muted-foreground`;
+        icon.setAttribute("aria-hidden", "true");
+        item.appendChild(icon);
+    }
+
+    const labelSpan = document.createElement("span");
+    labelSpan.className = "min-w-0 flex-1 truncate";
+    labelSpan.textContent = label;
+    item.appendChild(labelSpan);
 
     if (actionName) {
         item.addEventListener("click", (event) => {
@@ -238,6 +274,13 @@ const createMenuItem = (label, actionName) => {
     return item;
 };
 
+const createMenuSeparator = () => {
+    const sep = document.createElement("div");
+    sep.setAttribute("role", "separator");
+    sep.className = "my-1 h-px bg-border/50";
+    return sep;
+};
+
 const ensureMenu = () => {
     if (menuElement) {
         return menuElement;
@@ -245,35 +288,41 @@ const ensureMenu = () => {
 
     const menu = document.createElement("div");
     menu.id = MENU_ID;
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("data-state", "closed");
+    menu.className = NATIVE_MENU_CONTAINER_CLASS;
     Object.assign(menu.style, {
-        position: "absolute",
-        background: "#1f2128",
-        border: "1px solid #3c3c3c",
-        borderRadius: "8px",
-        boxShadow: "0 8px 20px rgba(0,0,0,0.5)",
-        padding: "6px 0",
-        display: "inline-flex",
+        position: "fixed",
+        display: "none",
         flexDirection: "column",
-        width: "max-content",
-        minWidth: "0",
-        maxWidth: "calc(100vw - 16px)",
-        zIndex: 10000,
-        overflowX: "auto",
-        overflowY: "hidden"
+        zIndex: "3000",
+        maxHeight: "calc(100vh - 16px)",
+        maxWidth: "calc(100vw - 16px)"
     });
-    menu.style.display = "none";
 
-    menu.appendChild(createMenuItem("Backup Manager", "showBackupDialog"));
-    menu.appendChild(createMenuItem("Auto-download models", "runAutoDownload"));
-    menu.appendChild(createMenuItem("Model Explorer", "showModelExplorer"));
-
-    menu.appendChild(createMenuItem("Download new model", "showManualDownloadDialog"));
+    menu.appendChild(createMenuItem("Backup Manager", "showBackupDialog", "icon-[lucide--cloud]"));
+    menu.appendChild(createMenuItem("Auto-download models", "runAutoDownload", "icon-[lucide--sparkles]"));
+    menu.appendChild(createMenuItem("Model Explorer", "showModelExplorer", "icon-[lucide--compass]"));
+    menu.appendChild(createMenuSeparator());
+    menu.appendChild(createMenuItem("Download new model", "showManualDownloadDialog", "icon-[lucide--plus]"));
 
     document.body.appendChild(menu);
     menuElement = menu;
 
     if (!closeHandlersAttached) {
-        document.addEventListener("click", hideMenu);
+        document.addEventListener("click", (event) => {
+            if (!menuVisible) return;
+            const target = event?.target;
+            if (target instanceof Element && (menuElement?.contains(target) || target.closest(BUTTON_SELECTOR))) {
+                return;
+            }
+            hideMenu();
+        }, true);
+        document.addEventListener("keydown", (event) => {
+            if (menuVisible && event.key === "Escape") {
+                hideMenu();
+            }
+        });
         window.addEventListener("resize", hideMenu);
         closeHandlersAttached = true;
     }
@@ -289,10 +338,17 @@ const toggleMenu = (buttonEl) => {
 
     const menu = ensureMenu();
     const rect = buttonEl.getBoundingClientRect();
-    menu.style.left = `${Math.round(rect.left)}px`;
-    menu.style.top = `${Math.round(rect.bottom + 6)}px`;
-    menu.style.display = "inline-flex";
+    menu.style.display = "flex";
+    const menuWidth = menu.offsetWidth || 208;
+    const clampedLeft = Math.max(
+        8,
+        Math.min(Math.round(rect.left), window.innerWidth - menuWidth - 8)
+    );
+    menu.style.left = `${clampedLeft}px`;
+    menu.style.top = `${Math.round(rect.bottom + 8)}px`;
+    menu.setAttribute("data-state", "open");
     menuVisible = true;
+    syncButtonOpenState();
 };
 
 const createButtonVisuals = (style) => {
@@ -302,6 +358,7 @@ const createButtonVisuals = (style) => {
             : [...DEFAULT_ICON_URLS];
     let iconUrlIndex = 0;
     const iconImg = document.createElement("img");
+    iconImg.className = "block size-4 object-contain";
     iconImg.src = iconUrls[iconUrlIndex];
     iconImg.onerror = () => {
         iconUrlIndex += 1;
@@ -313,17 +370,23 @@ const createButtonVisuals = (style) => {
     };
     iconImg.alt = "Hugging Face";
 
-    const iconSpinner = document.createElement("div");
-    iconSpinner.className = "hf-downloader-top-spinner";
+    const iconSpinner = document.createElement("i");
+    iconSpinner.className = "icon-[lucide--loader-circle] size-4 shrink-0 animate-spin text-foreground";
+    iconSpinner.style.display = "none";
     iconSpinner.setAttribute("aria-hidden", "true");
 
     const iconWrap = document.createElement("span");
-    iconWrap.className = "hf-downloader-top-icon-wrap";
+    iconWrap.className = "hf-downloader-top-icon-wrap relative flex size-4 shrink-0 items-center justify-center";
     iconWrap.setAttribute("aria-hidden", "true");
     iconWrap.appendChild(iconImg);
     iconWrap.appendChild(iconSpinner);
 
-    return { iconWrap, iconImg, iconSpinner, style };
+    const chevronIcon = document.createElement("i");
+    chevronIcon.className =
+        "hf-downloader-chevron icon-[lucide--chevron-down] size-3 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[state=open]:rotate-180";
+    chevronIcon.setAttribute("aria-hidden", "true");
+
+    return { iconWrap, iconImg, iconSpinner, chevronIcon, style };
 };
 
 const decorateLoraButton = () => {
@@ -339,6 +402,25 @@ const decorateLoraButton = () => {
     }
 };
 
+const applyNativeTriggerButtonStyling = (button) => {
+    for (const cls of ACTIONBAR_STRIP_CLASSES) {
+        if (button.classList.contains(cls)) {
+            button.classList.remove(cls);
+        }
+    }
+    for (const cls of NATIVE_TRIGGER_CLASSES) {
+        if (!button.classList.contains(cls)) {
+            button.classList.add(cls);
+        }
+    }
+    if (button.getAttribute("data-variant") !== "secondary") {
+        button.setAttribute("data-variant", "secondary");
+    }
+    if (button.getAttribute("aria-haspopup") !== "menu") {
+        button.setAttribute("aria-haspopup", "menu");
+    }
+};
+
 const decorateTopButtons = () => {
     const style = getTopMenuButtonStyle();
     for (const [button] of buttonVisuals.entries()) {
@@ -350,19 +432,20 @@ const decorateTopButtons = () => {
     const buttons = document.querySelectorAll(BUTTON_SELECTOR);
     buttons.forEach((button) => {
         button.style.display = style === "disabled" ? "none" : "";
+        applyNativeTriggerButtonStyling(button);
 
         const existing = buttonVisuals.get(button);
         const needsRebuild =
             !existing ||
             existing.style !== style ||
-            !button.contains(existing.iconWrap);
+            !button.contains(existing.iconWrap) ||
+            !button.contains(existing.chevronIcon);
 
         if (needsRebuild) {
             const visuals = createButtonVisuals(style);
-            button.classList.add("hf-downloader-button");
             button.title = BUTTON_TOOLTIP;
             button.setAttribute("aria-label", BUTTON_TOOLTIP);
-            button.replaceChildren(visuals.iconWrap);
+            button.replaceChildren(visuals.iconWrap, visuals.chevronIcon);
             buttonVisuals.set(button, visuals);
         } else {
             existing.style = style;
@@ -376,6 +459,7 @@ const decorateTopButtons = () => {
         }
     });
 
+    syncButtonOpenState();
     applyTopButtonState();
     decorateLoraButton();
 };
@@ -423,14 +507,26 @@ const handleTopButtonClick = (event) => {
     if (!buttonEl) return;
 
     const panelState = getPanelState();
+    const backupState = getBackupPanelState();
+    let restoredAny = false;
     if (panelState?.minimized && panelState?.hasEntries) {
         const restore = window?.hfDownloader?.restoreDownloadPanel;
         if (typeof restore === "function") {
-            hideMenu();
             restore();
-            applyTopButtonState();
-            return;
+            restoredAny = true;
         }
+    }
+    if (backupState?.minimized && backupState?.hasEntries) {
+        const restoreBackup = window?.hfDownloader?.restoreBackupOperationPanel;
+        if (typeof restoreBackup === "function") {
+            restoreBackup();
+            restoredAny = true;
+        }
+    }
+    if (restoredAny) {
+        hideMenu();
+        applyTopButtonState();
+        return;
     }
     toggleMenu(buttonEl);
 };

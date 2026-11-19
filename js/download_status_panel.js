@@ -36,6 +36,7 @@ app.registerExtension({
         let panel = null;
         let listBody = null;
         let countBadge = null;
+        let collapseBtn = null;
         let minimizeBtn = null;
         let footer = null;
         let clearFinishedBtn = null;
@@ -45,6 +46,7 @@ app.registerExtension({
         let refreshBusy = false;
         let bootstrapDone = false;
         let panelMinimized = false;
+        let panelCollapsed = false;
         let lastVisibleCount = 0;
         let lastHasRunning = false;
 
@@ -65,6 +67,7 @@ app.registerExtension({
 
         const getPanelState = () => ({
             minimized: panelMinimized,
+            collapsed: panelCollapsed,
             hasRunning: lastHasRunning,
             hasEntries: lastVisibleCount > 0
         });
@@ -87,12 +90,30 @@ app.registerExtension({
             } else {
                 panelWrapper.style.display = "flex";
                 panel.style.display = "flex";
+                panel.classList.toggle("hf-downloader-collapsed", panelCollapsed);
+                if (collapseBtn) {
+                    collapseBtn.innerHTML = panelCollapsed
+                        ? `<i class="icon-[lucide--chevron-down] size-4"></i>`
+                        : `<i class="icon-[lucide--chevron-up] size-4"></i>`;
+                    collapseBtn.title = panelCollapsed ? "Expand downloads" : "Collapse downloads";
+                    collapseBtn.setAttribute("aria-label", panelCollapsed ? "Expand downloads" : "Collapse downloads");
+                    collapseBtn.setAttribute("aria-expanded", String(!panelCollapsed));
+                }
                 updatePanelPosition();
             }
         };
 
+        const setPanelCollapsed = (value) => {
+            panelCollapsed = Boolean(value);
+            applyPanelVisibility();
+            publishPanelState();
+        };
+
         const setPanelMinimized = (value) => {
             panelMinimized = Boolean(value);
+            if (!panelMinimized) {
+                panelCollapsed = false;
+            }
             applyPanelVisibility();
             publishPanelState();
         };
@@ -407,6 +428,10 @@ app.registerExtension({
                     opacity: 0.6;
                     cursor: not-allowed;
                 }
+                #${PANEL_ID}.hf-downloader-collapsed .hf-downloader-body,
+                #${PANEL_ID}.hf-downloader-collapsed .hf-downloader-footer {
+                    display: none !important;
+                }
             `;
             document.head.appendChild(style);
         };
@@ -616,6 +641,18 @@ app.registerExtension({
             countBadge.className = "hf-downloader-count";
             countBadge.textContent = "Active: 0";
 
+            collapseBtn = document.createElement("button");
+            collapseBtn.type = "button";
+            collapseBtn.className = `${BUTTON_TEXONLY_ICON_CLASS} hf-downloader-collapse`;
+            collapseBtn.innerHTML = `<i class="icon-[lucide--chevron-up] size-4"></i>`;
+            collapseBtn.title = "Collapse downloads";
+            collapseBtn.setAttribute("aria-label", "Collapse downloads");
+            collapseBtn.setAttribute("aria-expanded", "true");
+            collapseBtn.addEventListener("click", (event) => {
+                event.stopPropagation();
+                setPanelCollapsed(!panelCollapsed);
+            });
+
             minimizeBtn = document.createElement("button");
             minimizeBtn.type = "button";
             minimizeBtn.className = `${BUTTON_TEXONLY_ICON_CLASS} hf-downloader-minimize`;
@@ -627,6 +664,7 @@ app.registerExtension({
             });
 
             controls.appendChild(countBadge);
+            controls.appendChild(collapseBtn);
             controls.appendChild(minimizeBtn);
             header.appendChild(title);
             header.appendChild(controls);

@@ -220,156 +220,177 @@ app.registerExtension({
     line-height: 24px;
 }
 #hf-backup-op-panel {
-    position: fixed;
-    right: 16px;
-    top: 16px;
-    width: 350px;
-    min-width: 310px;
-    max-width: calc(100vw - 32px);
-    max-height: 60vh;
-    background: var(--interface-panel-surface, var(--hf-queue-bg, var(--p-content-background, var(--comfy-menu-bg, #1f2128))));
-    border: 1px solid var(--interface-stroke, var(--hf-queue-border, var(--border-color, var(--p-content-border-color, #3c4452))));
-    border-radius: 8px;
-    color: var(--fg-color, var(--p-text-color, #ddd));
-    font-size: 12px;
-    z-index: 10002;
-    display: none;
-    flex-direction: column;
+    position: relative;
+    width: min(480px, calc(100vw - 32px));
+    max-width: min(480px, calc(100vw - 32px));
+    max-height: min(42vh, 360px);
+    box-sizing: border-box;
+    border-left-width: 4px;
+    border-left-color: #3b82f6;
     overflow: hidden;
+    pointer-events: auto;
 }
 #hf-backup-op-panel .hf-backup-op-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    min-height: 48px;
-    padding: 0 8px;
-    border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--p-content-border-color, #333)));
+    min-height: 24px;
+    padding: 0;
     background: transparent;
 }
 #hf-backup-op-panel .hf-backup-op-header-title {
-    padding: 0 8px;
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--text-color, var(--input-text, var(--p-text-color, #e5e7eb)));
+    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
 }
 #hf-backup-op-panel .hf-backup-op-header-controls {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
+    flex-shrink: 0;
 }
 #hf-backup-op-panel .hf-backup-op-count {
-    min-width: 24px;
-    height: 24px;
-    background: var(--secondary-background, var(--p-surface-800, #2f323a));
-    color: var(--text-color, var(--input-text, var(--p-text-color, #e5e7eb)));
-    padding: 0 8px;
-    border-radius: 999px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1;
-    font-weight: 700;
-    opacity: 0.9;
-}
-#hf-backup-op-panel .hf-backup-op-minimize {
-    width: 32px;
-    height: 32px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text-color, var(--input-text, #e5e7eb));
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 16px;
-}
-#hf-backup-op-panel .hf-backup-op-minimize:hover {
-    background: var(--secondary-background-hover, rgba(255, 255, 255, 0.08));
+    font-weight: 500;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(59, 130, 246, 0.16);
+    color: #93c5fd;
+    white-space: nowrap;
 }
 #hf-backup-op-panel .hf-backup-op-body {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
-    padding: 6px 10px;
     display: flex;
     flex-direction: column;
     gap: 6px;
 }
 #hf-backup-op-panel .hf-backup-op-item {
-    background: var(--secondary-background, var(--p-surface-800, #222));
-    border: 1px solid var(--secondary-background, var(--border-color, var(--border-default, #3c4452)));
-    border-radius: 8px;
-    padding: 8px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-height: 48px;
+    min-height: 44px;
     box-sizing: border-box;
 }
-#hf-backup-op-panel .hf-backup-op-main {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+#hf-backup-op-panel .hf-backup-op-item.has-detail {
+    height: auto;
+    min-height: 60px;
+    max-height: none;
+    align-items: flex-start;
 }
-#hf-backup-op-panel .hf-backup-op-spinner {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    border: 2px solid rgba(255, 255, 255, 0.22);
-    border-top-color: #4aa3ff;
-    animation: hf-backup-op-spin 0.9s linear infinite;
-    flex: 0 0 auto;
-}
-#hf-backup-op-panel .hf-backup-op-spinner.done {
-    animation: none;
-    border-color: #5bd98c;
-}
-#hf-backup-op-panel .hf-backup-op-spinner.error {
-    animation: none;
-    border-color: #ff6b6b;
-}
-@keyframes hf-backup-op-spin {
-    to { transform: rotate(360deg); }
+#hf-backup-op-panel .hf-backup-op-content {
+    min-width: 0;
+    flex: 1 1 auto;
+    padding-right: 76px;
 }
 #hf-backup-op-panel .hf-backup-op-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-color, var(--input-text, #e3e5ea));
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--input-text, #e3e5ea);
+}
+#hf-backup-op-panel .hf-backup-op-meta {
+    margin-top: 2px;
+    color: var(--muted-foreground, var(--descrip-text, #9ca3af));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.2;
+}
+#hf-backup-op-panel .hf-backup-op-detail {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-#hf-backup-op-panel .hf-backup-op-detail {
+#hf-backup-op-panel .hf-backup-op-error {
+    margin-top: 4px;
     font-size: 11px;
-    color: var(--descrip-text, var(--p-text-muted-color, #aab1bc));
-    min-height: 15px;
     line-height: 1.25;
+    color: #ffb4b4;
+    white-space: normal;
+    word-break: break-word;
+    display: none;
+}
+#hf-backup-op-panel .hf-backup-op-state-icon {
+    width: 16px;
+    height: 16px;
+    display: inline-block;
+}
+#hf-backup-op-panel .hf-backup-op-status-lower {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    position: absolute;
+    right: 8px;
+    bottom: 7px;
+    line-height: 1;
+    pointer-events: none;
+    z-index: 2;
+    text-transform: uppercase;
+}
+#hf-backup-op-panel .hf-backup-op-progress-container {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    pointer-events: none;
+    overflow: hidden;
+}
+#hf-backup-op-panel .hf-backup-op-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: #3b82f6;
+    transition: width 200ms ease-out, background-color 200ms ease-in-out;
+}
+#hf-backup-op-panel .hf-backup-op-progress-bar.indeterminate {
+    width: 42%;
+    animation: hf-backup-op-progress-slide 1.25s ease-in-out infinite;
+}
+@keyframes hf-backup-op-progress-slide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(260%); }
 }
 #hf-backup-op-panel .hf-backup-op-actions {
     display: none;
+    align-items: center;
     justify-content: flex-end;
-    padding: 8px 12px 10px;
-    border-top: 1px solid var(--interface-stroke, var(--border-color, var(--p-content-border-color, #333)));
+    gap: 6px;
+    padding-top: 4px;
     background: transparent;
 }
-#hf-backup-op-panel .hf-backup-op-refresh {
-    border-radius: 8px;
-    padding: 0.55rem 1.15rem;
-    font-size: 14px;
+#hf-backup-op-panel .hf-backup-op-actions.visible {
+    display: flex;
+}
+#hf-backup-op-panel .hf-backup-op-footer-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 8px;
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 500;
+    border-radius: 6px;
     cursor: pointer;
-    font-weight: 600;
-    min-height: 40px;
-    font-family: var(--font-inter, Inter, sans-serif);
 }
 #hf-backup-op-panel .hf-backup-op-refresh:disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }
-#hf-backup-op-panel.hf-backup-op-minimized .hf-backup-op-body,
-#hf-backup-op-panel.hf-backup-op-minimized .hf-backup-op-actions {
+#hf-backup-op-panel.hf-backup-op-collapsed .hf-backup-op-body,
+#hf-backup-op-panel.hf-backup-op-collapsed .hf-backup-op-actions {
     display: none !important;
 }
 `;
@@ -914,12 +935,46 @@ app.registerExtension({
             mount.appendChild(root);
         };
 
+        const OP_WRAPPER_ID = "hf-backup-op-panel-wrapper";
+        const OP_PANEL_ID = "hf-backup-op-panel";
+        const OP_WRAPPER_CLASS = "pointer-events-none flex w-full justify-end transition-all duration-300 ease-out";
+        const OP_PANEL_CLASS = "pointer-events-auto flex flex-col gap-1.5 rounded-lg border border-solid border-border border-l-4 bg-background p-2.5 text-foreground shadow-md";
+        const OP_ITEM_CLASS = "hf-backup-op-item relative flex items-center justify-between gap-2 overflow-hidden rounded-md border border-solid border-border/60 bg-secondary/40 px-2 py-1.5 text-xs text-foreground transition-colors duration-150 ease-in-out";
+        const OP_BUTTON_BASE_CLASS = "relative inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap appearance-none border border-solid border-border/60 rounded-md text-xs font-medium font-inter transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50";
+        const OP_BUTTON_ICON_CLASS = "flex size-6 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+        const OP_FAILED_TTL_MS = 120000;
+
         let currentDialog = null;
         let currentDialogCleanup = null;
         let opStatusRotateTimer = null;
         let opStatusHideTimer = null;
         let opStatusPanelMinimized = false;
+        let opStatusPanelCollapsed = false;
+        let opStatusHasEntries = false;
+        let opStatusHasRunning = false;
+        let opStatusMode = "upload";
         let opStatusPositionHandlersAttached = false;
+        let opStatusBodyObserver = null;
+        let opPanelWrapper = null;
+        let opPanel = null;
+        let opCollapseBtn = null;
+
+        const getBackupPanelState = () => ({
+            minimized: opStatusPanelMinimized,
+            collapsed: opStatusPanelCollapsed,
+            hasRunning: opStatusHasRunning,
+            hasEntries: opStatusHasEntries,
+        });
+
+        const publishBackupPanelState = () => {
+            if (typeof window === "undefined") return;
+            if (!window.hfDownloader) {
+                window.hfDownloader = {};
+            }
+            const state = getBackupPanelState();
+            window.hfDownloader.backupPanelState = state;
+            window.dispatchEvent(new CustomEvent("hfDownloader:panelState", { detail: state }));
+        };
 
         const clearOpStatusTimers = () => {
             if (opStatusRotateTimer) {
@@ -932,131 +987,291 @@ app.registerExtension({
             }
         };
 
-        const getOperationPanelTopAnchor = () => {
-            const appAnchor = app?.menu?.settingsGroup?.element?.parentElement;
-            if (appAnchor?.getBoundingClientRect) return appAnchor;
-
-            const selectors = [
-                ".comfyui-menu-bar",
-                ".comfyui-menu",
-                ".comfyui-header",
-                ".p-menubar",
-                "header",
-            ];
-            for (const selector of selectors) {
-                const element = document.querySelector(selector);
-                if (element?.getBoundingClientRect) return element;
+        const getOperationRightOffset = () => {
+            const overlayContainer = document.querySelector(".pointer-events-none.flex.w-full.justify-end");
+            if (overlayContainer && overlayContainer.offsetParent !== null) {
+                const rect = overlayContainer.getBoundingClientRect();
+                if (rect.width > 0 && rect.right < window.innerWidth) {
+                    const offset = window.innerWidth - rect.right + 12;
+                    if (offset > 12 && offset < window.innerWidth * 0.7) {
+                        return Math.round(offset);
+                    }
+                }
             }
-            return null;
+
+            const canvas = document.querySelector(".graph-canvas-container");
+            if (canvas) {
+                const rect = canvas.getBoundingClientRect();
+                const offset = window.innerWidth - rect.right + 12;
+                if (offset > 12 && offset < window.innerWidth * 0.7) {
+                    return Math.round(offset);
+                }
+            }
+
+            const sidebars = document.querySelectorAll(`
+                .comfyui-body-right,
+                [data-testid="sidebar-right"],
+                [class*="sidebar"][class*="right"],
+                [class*="side-bar"][class*="right"],
+                aside
+            `);
+            for (const sb of sidebars) {
+                if (!sb || sb.closest(`#${OP_PANEL_ID}`)) continue;
+                const style = window.getComputedStyle(sb);
+                if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
+                const rect = sb.getBoundingClientRect();
+                if (rect.width > 80 && rect.left < window.innerWidth) {
+                    const offset = window.innerWidth - rect.left + 12;
+                    if (offset > 12 && offset < window.innerWidth * 0.7) {
+                        return Math.round(offset);
+                    }
+                }
+            }
+            return 16;
         };
 
-        const syncOperationPanelThemeFromJobQueue = (panel) => {
-            if (!panel || typeof window === "undefined" || !window.getComputedStyle) return;
-            const textNodes = document.querySelectorAll("h1, h2, h3, h4, span, div");
-            let jobQueueTitle = null;
-            for (const node of textNodes) {
-                if ((node.textContent || "").trim() !== "Job Queue") continue;
-                if (node.closest("#hf-backup-op-panel")) continue;
-                jobQueueTitle = node;
-                break;
-            }
-
-            if (!jobQueueTitle) {
-                panel.style.removeProperty("--hf-queue-bg");
-                panel.style.removeProperty("--hf-queue-border");
-                return;
-            }
-
-            const candidates = [
-                jobQueueTitle.closest("[class*='panel']"),
-                jobQueueTitle.closest("[class*='queue']"),
-                jobQueueTitle.closest("[role='dialog']"),
-                jobQueueTitle.closest("section"),
-                jobQueueTitle.parentElement,
-            ];
-            const nativePanel = candidates.find((el) => el && el !== panel);
-            if (!nativePanel) return;
-
-            const styles = window.getComputedStyle(nativePanel);
-            const bg = styles.backgroundColor;
-            const border = styles.borderColor;
-            if (bg && bg !== "rgba(0, 0, 0, 0)") {
-                panel.style.setProperty("--hf-queue-bg", bg);
-            }
-            if (border && border !== "rgba(0, 0, 0, 0)") {
-                panel.style.setProperty("--hf-queue-border", border);
-            }
+        const findNativeStackRefs = () => {
+            const errorOverlayEl = document.querySelector('[data-testid="error-overlay"]');
+            const errorOverlayWrapper = errorOverlayEl?.parentElement || null;
+            const downloadsWrapper = document.getElementById("hf-downloader-panel-wrapper");
+            const autoDownloadEl = document.getElementById("auto-download-dialog");
+            const actionbarsEl = document.querySelector('[data-testid="top-menu-actionbars"]');
+            const autoDownloadParent =
+                autoDownloadEl?.parentElement &&
+                autoDownloadEl.parentElement !== document.body &&
+                autoDownloadEl.parentElement.classList.contains("flex-col")
+                    ? autoDownloadEl.parentElement
+                    : null;
+            const downloadsParent =
+                downloadsWrapper?.parentElement &&
+                downloadsWrapper.parentElement !== document.body &&
+                downloadsWrapper.parentElement.classList.contains("flex-col")
+                    ? downloadsWrapper.parentElement
+                    : null;
+            const stackContainer =
+                errorOverlayWrapper?.parentElement ||
+                actionbarsEl?.parentElement ||
+                downloadsParent ||
+                autoDownloadParent ||
+                null;
+            return { errorOverlayWrapper, downloadsWrapper, autoDownloadEl, actionbarsEl, stackContainer };
         };
 
         const updateOperationPanelPosition = () => {
-            const panel = document.getElementById("hf-backup-op-panel");
-            if (!panel) return;
-            const anchor = getOperationPanelTopAnchor();
-            let top = 16;
-            if (anchor) {
-                const rect = anchor.getBoundingClientRect();
-                if (Number.isFinite(rect.bottom)) {
-                    top = Math.max(8, Math.round(rect.bottom + 10));
+            if (!opPanel || !opPanelWrapper) return;
+            const { errorOverlayWrapper, downloadsWrapper, autoDownloadEl, actionbarsEl, stackContainer } = findNativeStackRefs();
+
+            if (stackContainer) {
+                Object.assign(opPanelWrapper.style, {
+                    position: "",
+                    top: "",
+                    right: "",
+                    bottom: "",
+                    left: "",
+                    zIndex: "",
+                    width: "",
+                });
+
+                if (downloadsWrapper && downloadsWrapper.parentElement === stackContainer) {
+                    if (autoDownloadEl && autoDownloadEl.parentElement === stackContainer) {
+                        if (downloadsWrapper.previousElementSibling !== opPanelWrapper) {
+                            downloadsWrapper.insertAdjacentElement("beforebegin", opPanelWrapper);
+                        }
+                    } else if (downloadsWrapper.nextElementSibling !== opPanelWrapper) {
+                        downloadsWrapper.insertAdjacentElement("afterend", opPanelWrapper);
+                    }
+                    return;
+                }
+                if (autoDownloadEl && autoDownloadEl.parentElement === stackContainer) {
+                    if (autoDownloadEl.previousElementSibling !== opPanelWrapper) {
+                        autoDownloadEl.insertAdjacentElement("beforebegin", opPanelWrapper);
+                    }
+                    return;
+                }
+                if (errorOverlayWrapper && errorOverlayWrapper.parentElement === stackContainer) {
+                    if (errorOverlayWrapper.nextElementSibling !== opPanelWrapper) {
+                        errorOverlayWrapper.insertAdjacentElement("afterend", opPanelWrapper);
+                    }
+                    return;
+                }
+                if (actionbarsEl && actionbarsEl.parentElement === stackContainer) {
+                    if (opPanelWrapper.parentElement !== stackContainer || actionbarsEl.nextElementSibling !== opPanelWrapper) {
+                        actionbarsEl.insertAdjacentElement("afterend", opPanelWrapper);
+                    }
+                    return;
+                }
+                if (opPanelWrapper.parentElement !== stackContainer) {
+                    stackContainer.appendChild(opPanelWrapper);
+                }
+                return;
+            }
+
+            if (opPanelWrapper.parentElement !== document.body) {
+                document.body.appendChild(opPanelWrapper);
+            }
+            const right = getOperationRightOffset();
+            let top = 56;
+            const downloadsPanel = document.getElementById("hf-downloader-panel");
+            if (downloadsPanel && downloadsPanel.style.display !== "none") {
+                const dlRect = downloadsPanel.getBoundingClientRect();
+                if (dlRect.height > 0 && Number.isFinite(dlRect.bottom)) {
+                    top = Math.max(56, Math.round(dlRect.bottom + 8));
                 }
             }
-            panel.style.top = `${top}px`;
-            panel.style.right = "16px";
-            panel.style.bottom = "auto";
-            panel.style.left = "auto";
-            panel.style.maxHeight = `calc(100vh - ${top + 16}px)`;
-            syncOperationPanelThemeFromJobQueue(panel);
+            Object.assign(opPanelWrapper.style, {
+                position: "fixed",
+                top: `${top}px`,
+                right: `${right}px`,
+                bottom: "auto",
+                left: "auto",
+                zIndex: "9999",
+                width: "auto",
+            });
+        };
+
+        const applyOperationPanelVisibility = () => {
+            if (!opPanel || !opPanelWrapper) return;
+            if (!opStatusHasEntries || opStatusPanelMinimized) {
+                opPanel.style.display = "none";
+                opPanelWrapper.style.display = "none";
+            } else {
+                opPanelWrapper.style.display = "flex";
+                opPanel.style.display = "flex";
+                opPanel.classList.toggle("hf-backup-op-collapsed", opStatusPanelCollapsed);
+                if (opCollapseBtn) {
+                    opCollapseBtn.innerHTML = opStatusPanelCollapsed
+                        ? `<i class="icon-[lucide--chevron-down] size-4"></i>`
+                        : `<i class="icon-[lucide--chevron-up] size-4"></i>`;
+                    opCollapseBtn.title = opStatusPanelCollapsed ? "Expand backup status" : "Collapse backup status";
+                    opCollapseBtn.setAttribute("aria-label", opStatusPanelCollapsed ? "Expand backup status" : "Collapse backup status");
+                    opCollapseBtn.setAttribute("aria-expanded", String(!opStatusPanelCollapsed));
+                }
+                updateOperationPanelPosition();
+            }
+        };
+
+        const setOperationPanelCollapsed = (value) => {
+            opStatusPanelCollapsed = Boolean(value);
+            applyOperationPanelVisibility();
+            publishBackupPanelState();
         };
 
         const setOperationPanelMinimized = (value) => {
             opStatusPanelMinimized = Boolean(value);
-            const panel = document.getElementById("hf-backup-op-panel");
-            if (!panel) return;
-            panel.classList.toggle("hf-backup-op-minimized", opStatusPanelMinimized);
-
-            const minimizeBtn = panel.querySelector(".hf-backup-op-minimize");
-            if (minimizeBtn) {
-                minimizeBtn.innerHTML = opStatusPanelMinimized ? "<i class=\"pi pi-plus\"></i>" : "<i class=\"pi pi-minus\"></i>";
-                minimizeBtn.title = opStatusPanelMinimized ? "Expand backup uploads" : "Minimize backup uploads";
+            if (!opStatusPanelMinimized) {
+                opStatusPanelCollapsed = false;
             }
+            applyOperationPanelVisibility();
+            publishBackupPanelState();
         };
 
         const hideOperationStatusPanel = () => {
-            const panel = document.getElementById("hf-backup-op-panel");
-            if (!panel) return;
-            panel.style.display = "none";
+            clearOpStatusTimers();
+            opStatusHasEntries = false;
+            opStatusHasRunning = false;
+            opStatusPanelMinimized = false;
+            opStatusPanelCollapsed = false;
+            applyOperationPanelVisibility();
+            publishBackupPanelState();
+        };
+
+        registerGlobalAction("restoreBackupOperationPanel", () => {
+            if (!opStatusHasEntries) return;
             setOperationPanelMinimized(false);
+            updateOperationPanelPosition();
+        });
+        registerGlobalAction("minimizeBackupOperationPanel", () => {
+            setOperationPanelMinimized(true);
+        });
+        registerGlobalAction("toggleBackupOperationPanel", () => {
+            setOperationPanelMinimized(!opStatusPanelMinimized);
+        });
+        registerGlobalAction("getBackupOperationPanelState", () => getBackupPanelState());
+
+        const applyOperationModeHeader = (refs, mode = "upload") => {
+            opStatusMode = mode === "restore" ? "restore" : "upload";
+            if (!refs) return;
+            const isRestore = opStatusMode === "restore";
+            if (refs.headerIcon) {
+                refs.headerIcon.className = `${isRestore ? "icon-[lucide--download]" : "icon-[lucide--upload]"} size-4 shrink-0`;
+                refs.headerIcon.style.color = "#3b82f6";
+            }
+            if (refs.headerLabel) {
+                refs.headerLabel.textContent = isRestore ? "Backup Restore" : "Backup Uploads";
+            }
         };
 
         const ensureOperationStatusPanel = () => {
-            let panel = document.getElementById("hf-backup-op-panel");
-            if (!panel) {
-                panel = document.createElement("div");
-                panel.id = "hf-backup-op-panel";
+            ensureTreeStyles();
+            if (!opPanel || !opPanelWrapper || !opPanelWrapper.isConnected) {
+                const existingWrapper = document.getElementById(OP_WRAPPER_ID);
+                if (existingWrapper) existingWrapper.remove();
+                const existingPanel = document.getElementById(OP_PANEL_ID);
+                if (existingPanel) existingPanel.remove();
+
+                opPanelWrapper = document.createElement("div");
+                opPanelWrapper.id = OP_WRAPPER_ID;
+                opPanelWrapper.setAttribute("data-testid", "hf-backup-op-overlay");
+                opPanelWrapper.className = OP_WRAPPER_CLASS;
+                opPanelWrapper.style.display = "none";
+
+                opPanel = document.createElement("div");
+                opPanel.id = OP_PANEL_ID;
+                opPanel.className = OP_PANEL_CLASS;
+                opPanel.style.display = "none";
 
                 const header = document.createElement("div");
                 header.className = "hf-backup-op-header";
 
                 const headerTitle = document.createElement("div");
                 headerTitle.className = "hf-backup-op-header-title";
-                headerTitle.textContent = "Backup Uploads";
+
+                const headerIcon = document.createElement("i");
+                headerIcon.className = "hf-backup-op-header-icon icon-[lucide--upload] size-4 shrink-0";
+                headerIcon.style.color = "#3b82f6";
+
+                const headerLabel = document.createElement("span");
+                headerLabel.className = "hf-backup-op-header-label text-sm font-medium text-foreground truncate";
+                headerLabel.textContent = "Backup Uploads";
+
+                headerTitle.appendChild(headerIcon);
+                headerTitle.appendChild(headerLabel);
 
                 const controls = document.createElement("div");
                 controls.className = "hf-backup-op-header-controls";
 
                 const count = document.createElement("div");
                 count.className = "hf-backup-op-count";
-                count.textContent = "1";
+                count.textContent = "Active: 1";
+
+                opCollapseBtn = document.createElement("button");
+                opCollapseBtn.type = "button";
+                opCollapseBtn.className = `${OP_BUTTON_ICON_CLASS} hf-backup-op-collapse`;
+                opCollapseBtn.innerHTML = `<i class="icon-[lucide--chevron-up] size-4"></i>`;
+                opCollapseBtn.title = "Collapse backup status";
+                opCollapseBtn.setAttribute("aria-label", "Collapse backup status");
+                opCollapseBtn.setAttribute("aria-expanded", "true");
+                opCollapseBtn.addEventListener("click", (event) => {
+                    event.stopPropagation();
+                    setOperationPanelCollapsed(!opStatusPanelCollapsed);
+                });
 
                 const minimizeBtn = document.createElement("button");
                 minimizeBtn.type = "button";
-                minimizeBtn.className = "hf-backup-op-minimize";
-                minimizeBtn.innerHTML = "<i class=\"pi pi-minus\"></i>";
-                minimizeBtn.title = "Minimize backup uploads";
+                minimizeBtn.className = `${OP_BUTTON_ICON_CLASS} hf-backup-op-minimize`;
+                minimizeBtn.innerHTML = `<i class="icon-[lucide--x] size-4"></i>`;
+                minimizeBtn.title = "Minimize backup status";
+                minimizeBtn.setAttribute("aria-label", "Minimize backup status");
                 minimizeBtn.addEventListener("click", () => {
-                    setOperationPanelMinimized(!opStatusPanelMinimized);
+                    if (opStatusHasRunning) {
+                        setOperationPanelMinimized(true);
+                    } else {
+                        hideOperationStatusPanel();
+                    }
                 });
 
                 controls.appendChild(count);
+                controls.appendChild(opCollapseBtn);
                 controls.appendChild(minimizeBtn);
                 header.appendChild(headerTitle);
                 header.appendChild(controls);
@@ -1066,32 +1281,71 @@ app.registerExtension({
                 applyNativeScrollbarClasses(body);
 
                 const item = document.createElement("div");
-                item.className = "hf-backup-op-item";
+                item.className = OP_ITEM_CLASS;
 
-                const main = document.createElement("div");
-                main.className = "hf-backup-op-main";
+                const progressContainer = document.createElement("div");
+                progressContainer.className = "hf-backup-op-progress-container";
+                const progressBar = document.createElement("div");
+                progressBar.className = "hf-backup-op-progress-bar indeterminate";
+                progressContainer.appendChild(progressBar);
+                item.appendChild(progressContainer);
 
-                const spinner = document.createElement("div");
-                spinner.className = "hf-backup-op-spinner";
+                const leading = document.createElement("div");
+                leading.className = "relative flex items-center gap-1";
+
+                const iconWrap = document.createElement("div");
+                iconWrap.className = "inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-[6px]";
+
+                const stateIcon = document.createElement("i");
+                stateIcon.className = "hf-backup-op-state-icon icon-[lucide--loader-circle] size-4 animate-spin text-primary-background";
+                iconWrap.appendChild(stateIcon);
+                leading.appendChild(iconWrap);
+
+                const content = document.createElement("div");
+                content.className = "hf-backup-op-content relative min-w-0 flex-1";
 
                 const title = document.createElement("div");
-                title.className = "hf-backup-op-title";
+                title.className = "hf-backup-op-title truncate opacity-90";
 
-                main.appendChild(spinner);
-                main.appendChild(title);
+                const meta = document.createElement("div");
+                meta.className = "hf-backup-op-meta";
 
                 const detail = document.createElement("div");
                 detail.className = "hf-backup-op-detail";
+                meta.appendChild(detail);
 
-                item.appendChild(main);
-                item.appendChild(detail);
+                const error = document.createElement("div");
+                error.className = "hf-backup-op-error";
+                error.style.display = "none";
+
+                content.appendChild(title);
+                content.appendChild(meta);
+                content.appendChild(error);
+
+                const statusLower = document.createElement("div");
+                statusLower.className = "hf-backup-op-status-lower";
+                statusLower.textContent = "UPLOADING";
+                statusLower.style.color = "#4aa3ff";
+
+                item.appendChild(leading);
+                item.appendChild(content);
+                item.appendChild(statusLower);
                 body.appendChild(item);
 
                 const actions = document.createElement("div");
                 actions.className = "hf-backup-op-actions";
+
+                const dismissButton = document.createElement("button");
+                dismissButton.type = "button";
+                dismissButton.className = `${OP_BUTTON_BASE_CLASS} hf-backup-op-dismiss hf-backup-op-footer-btn bg-secondary text-foreground hover:bg-accent`;
+                dismissButton.textContent = "Dismiss";
+                dismissButton.onclick = () => {
+                    hideOperationStatusPanel();
+                };
+
                 const refreshButton = document.createElement("button");
                 refreshButton.type = "button";
-                refreshButton.className = "hf-backup-op-refresh p-button p-component p-button-success";
+                refreshButton.className = "hf-backup-op-refresh hf-backup-op-footer-btn bg-primary text-primary-foreground border-0 hover:bg-primary/90";
                 refreshButton.textContent = "Refresh";
                 refreshButton.onclick = async () => {
                     refreshButton.disabled = true;
@@ -1110,7 +1364,7 @@ app.registerExtension({
                             refreshButton.textContent = originalLabel;
                             refreshButton.disabled = false;
                             hideOperationStatusPanel();
-                        }, 700);
+                        }, 500);
                         return;
                     }
                     setTimeout(() => {
@@ -1118,29 +1372,50 @@ app.registerExtension({
                         refreshButton.disabled = false;
                     }, 900);
                 };
+
+                actions.appendChild(dismissButton);
                 actions.appendChild(refreshButton);
 
-                panel.appendChild(header);
-                panel.appendChild(body);
-                panel.appendChild(actions);
-                document.body.appendChild(panel);
+                opPanel.appendChild(header);
+                opPanel.appendChild(body);
+                opPanel.appendChild(actions);
+                opPanelWrapper.appendChild(opPanel);
+
+                updateOperationPanelPosition();
 
                 if (!opStatusPositionHandlersAttached) {
                     window.addEventListener("resize", updateOperationPanelPosition, { passive: true });
                     window.addEventListener("scroll", updateOperationPanelPosition, { passive: true });
+                    if (typeof MutationObserver !== "undefined" && !opStatusBodyObserver) {
+                        opStatusBodyObserver = new MutationObserver(() => {
+                            if (opPanelWrapper && opPanel && opPanel.style.display !== "none") {
+                                updateOperationPanelPosition();
+                            }
+                        });
+                        opStatusBodyObserver.observe(document.body, { childList: true, subtree: true });
+                    }
                     opStatusPositionHandlersAttached = true;
                 }
             }
 
             updateOperationPanelPosition();
-            setOperationPanelMinimized(opStatusPanelMinimized);
 
             return {
-                panel,
-                spinner: panel.querySelector(".hf-backup-op-spinner"),
-                title: panel.querySelector(".hf-backup-op-title"),
-                detail: panel.querySelector(".hf-backup-op-detail"),
-                actions: panel.querySelector(".hf-backup-op-actions"),
+                wrapper: opPanelWrapper,
+                panel: opPanel,
+                headerIcon: opPanel.querySelector(".hf-backup-op-header-icon"),
+                headerLabel: opPanel.querySelector(".hf-backup-op-header-label"),
+                countBadge: opPanel.querySelector(".hf-backup-op-count"),
+                item: opPanel.querySelector(".hf-backup-op-item"),
+                stateIcon: opPanel.querySelector(".hf-backup-op-state-icon"),
+                title: opPanel.querySelector(".hf-backup-op-title"),
+                detail: opPanel.querySelector(".hf-backup-op-detail"),
+                error: opPanel.querySelector(".hf-backup-op-error"),
+                statusLower: opPanel.querySelector(".hf-backup-op-status-lower"),
+                progressBar: opPanel.querySelector(".hf-backup-op-progress-bar"),
+                actions: opPanel.querySelector(".hf-backup-op-actions"),
+                dismissBtn: opPanel.querySelector(".hf-backup-op-dismiss"),
+                refreshBtn: opPanel.querySelector(".hf-backup-op-refresh"),
             };
         };
 
@@ -1197,59 +1472,174 @@ app.registerExtension({
             return ordered;
         };
 
-        const showOperationProgress = ({ title, categories = [] }) => {
+        const inferOperationMode = (mode, title = "") => {
+            if (mode === "restore" || mode === "upload") return mode;
+            return /restore|download/i.test(String(title || "")) ? "restore" : "upload";
+        };
+
+        const showOperationProgress = ({ mode, title, categories = [] }) => {
             clearOpStatusTimers();
             const refs = ensureOperationStatusPanel();
-            refs.panel.style.display = "flex";
-            setOperationPanelMinimized(false);
-            updateOperationPanelPosition();
-            refs.title.textContent = title || "Backup in progress. Please wait.";
-            refs.spinner.classList.remove("done", "error");
-            refs.actions.style.display = "none";
+            const resolvedMode = inferOperationMode(mode, title);
+            applyOperationModeHeader(refs, resolvedMode);
+
+            opStatusHasEntries = true;
+            opStatusHasRunning = true;
+            opStatusPanelMinimized = false;
+
+            if (refs.countBadge) {
+                refs.countBadge.textContent = "Active: 1";
+            }
+            if (refs.title) {
+                refs.title.textContent = title || (resolvedMode === "restore" ? "Backup restore in progress" : "Backup upload in progress");
+                refs.title.title = refs.title.textContent;
+            }
+            if (refs.stateIcon) {
+                refs.stateIcon.className = "hf-backup-op-state-icon icon-[lucide--loader-circle] size-4 animate-spin text-primary-background";
+            }
+            if (refs.statusLower) {
+                refs.statusLower.textContent = resolvedMode === "restore" ? "DOWNLOADING" : "UPLOADING";
+                refs.statusLower.style.color = "#4aa3ff";
+            }
+            if (refs.progressBar) {
+                refs.progressBar.classList.add("indeterminate");
+                refs.progressBar.style.width = "";
+                refs.progressBar.style.backgroundColor = "#4aa3ff";
+            }
+            if (refs.error) {
+                refs.error.textContent = "";
+                refs.error.style.display = "none";
+            }
+            refs.item?.classList.remove("has-detail");
+            refs.actions?.classList.remove("visible");
 
             if (!categories.length) {
-                refs.detail.textContent = "Working...";
-                return;
+                if (refs.detail) refs.detail.textContent = "Working...";
+            } else {
+                let index = 0;
+                if (refs.detail) refs.detail.textContent = `Processing: ${categories[0]}`;
+                if (categories.length > 1) {
+                    opStatusRotateTimer = setInterval(() => {
+                        index = (index + 1) % categories.length;
+                        if (refs.detail) refs.detail.textContent = `Processing: ${categories[index]}`;
+                    }, 1400);
+                }
             }
 
-            let index = 0;
-            refs.detail.textContent = `Processing: ${categories[0]}`;
-            if (categories.length > 1) {
-                opStatusRotateTimer = setInterval(() => {
-                    index = (index + 1) % categories.length;
-                    refs.detail.textContent = `Processing: ${categories[index]}`;
-                }, 1400);
+            applyOperationPanelVisibility();
+            publishBackupPanelState();
+        };
+
+        const showOperationDone = ({ mode, title, detail, showRefresh = true }) => {
+            clearOpStatusTimers();
+            const refs = ensureOperationStatusPanel();
+            const resolvedMode = inferOperationMode(mode || opStatusMode, title);
+            applyOperationModeHeader(refs, resolvedMode);
+
+            opStatusHasEntries = true;
+            opStatusHasRunning = false;
+            opStatusPanelMinimized = false;
+
+            if (refs.countBadge) {
+                refs.countBadge.textContent = "Active: 0";
             }
+            if (refs.title) {
+                refs.title.textContent = title || "Operation complete.";
+                refs.title.title = refs.title.textContent;
+            }
+            if (refs.detail) {
+                refs.detail.textContent = detail || "";
+            }
+            if (refs.error) {
+                refs.error.textContent = "";
+                refs.error.style.display = "none";
+            }
+            refs.item?.classList.remove("has-detail");
+            if (refs.stateIcon) {
+                refs.stateIcon.className = "hf-backup-op-state-icon icon-[lucide--check-check] size-4 text-green-400";
+            }
+            if (refs.statusLower) {
+                refs.statusLower.textContent = resolvedMode === "restore" ? "DOWNLOADED" : "UPLOADED";
+                refs.statusLower.style.color = "#5bd98c";
+            }
+            if (refs.progressBar) {
+                refs.progressBar.classList.remove("indeterminate");
+                refs.progressBar.style.width = "100%";
+                refs.progressBar.style.backgroundColor = "#5bd98c";
+            }
+            if (refs.dismissBtn) {
+                refs.dismissBtn.style.display = "inline-flex";
+            }
+            if (refs.refreshBtn) {
+                refs.refreshBtn.style.display = showRefresh ? "inline-flex" : "none";
+                refs.refreshBtn.disabled = false;
+                refs.refreshBtn.textContent = "Refresh";
+            }
+            refs.actions?.classList.add("visible");
+
+            applyOperationPanelVisibility();
+            publishBackupPanelState();
         };
 
-        const showOperationDone = ({ title, detail, showRefresh = true }) => {
+        const showOperationError = ({ mode, title, detail }) => {
             clearOpStatusTimers();
             const refs = ensureOperationStatusPanel();
-            refs.panel.style.display = "flex";
-            setOperationPanelMinimized(false);
-            updateOperationPanelPosition();
-            refs.title.textContent = title || "Operation complete.";
-            refs.detail.textContent = detail || "";
-            refs.spinner.classList.remove("error");
-            refs.spinner.classList.add("done");
-            refs.actions.style.display = showRefresh ? "flex" : "none";
-        };
+            const resolvedMode = inferOperationMode(mode || opStatusMode, title);
+            applyOperationModeHeader(refs, resolvedMode);
 
-        const showOperationError = ({ title, detail }) => {
-            clearOpStatusTimers();
-            const refs = ensureOperationStatusPanel();
-            refs.panel.style.display = "flex";
-            setOperationPanelMinimized(false);
-            updateOperationPanelPosition();
-            refs.title.textContent = title || "Backup operation failed.";
-            refs.detail.textContent = detail || "";
-            refs.spinner.classList.remove("done");
-            refs.spinner.classList.add("error");
-            refs.actions.style.display = "none";
+            opStatusHasEntries = true;
+            opStatusHasRunning = false;
+            opStatusPanelMinimized = false;
+
+            if (refs.countBadge) {
+                refs.countBadge.textContent = "Active: 0";
+            }
+            if (refs.title) {
+                refs.title.textContent = title || "Backup operation failed.";
+                refs.title.title = refs.title.textContent;
+            }
+            if (refs.detail) {
+                refs.detail.textContent = resolvedMode === "restore" ? "Restore failed" : "Upload failed";
+            }
+            if (refs.error) {
+                refs.error.textContent = detail || "";
+                refs.error.title = detail || "";
+                refs.error.style.display = detail ? "block" : "none";
+            }
+            refs.item?.classList.toggle("has-detail", Boolean(detail));
+            if (refs.stateIcon) {
+                refs.stateIcon.className = "hf-backup-op-state-icon icon-[lucide--alert-circle] size-4 text-red-400";
+            }
+            if (refs.statusLower) {
+                refs.statusLower.textContent = "FAILED";
+                refs.statusLower.style.color = "#ff6b6b";
+            }
+            if (refs.progressBar) {
+                refs.progressBar.classList.remove("indeterminate");
+                refs.progressBar.style.width = "100%";
+                refs.progressBar.style.backgroundColor = "#ff6b6b";
+            }
+            if (refs.dismissBtn) {
+                refs.dismissBtn.style.display = "inline-flex";
+            }
+            if (refs.refreshBtn) {
+                refs.refreshBtn.style.display = "none";
+            }
+            refs.actions?.classList.add("visible");
+
+            applyOperationPanelVisibility();
+            publishBackupPanelState();
+
             opStatusHideTimer = setTimeout(() => {
                 hideOperationStatusPanel();
-            }, 7000);
+            }, OP_FAILED_TTL_MS);
         };
+
+        registerGlobalAction("showBackupOperationProgress", (opts = {}) => showOperationProgress(opts));
+        registerGlobalAction("showBackupOperationDone", (opts = {}) => showOperationDone(opts));
+        registerGlobalAction("showBackupOperationError", (opts = {}) => showOperationError(opts));
+        registerGlobalAction("hideBackupOperationPanel", () => hideOperationStatusPanel());
+        publishBackupPanelState();
 
         const showBackupDialog = async () => {
             ensureTreeStyles();
@@ -1916,6 +2306,7 @@ app.registerExtension({
                 if (backupSelectionTouched && items.length) {
                     try {
                         showOperationProgress({
+                            mode: "restore",
                             title: "Backup restore in progress. Please wait.",
                             categories: inferCategoriesFromItems(items, ["Selected items"]),
                         });
@@ -1935,6 +2326,7 @@ app.registerExtension({
                         });
                         await loadTree();
                         showOperationDone({
+                            mode: "restore",
                             title: "Backup restore complete",
                             detail: `Restored ${restoredFiles} file(s).`,
                             showRefresh: true,
@@ -1944,6 +2336,7 @@ app.registerExtension({
                         }
                     } catch (e) {
                         showOperationError({
+                            mode: "restore",
                             title: "Selected restore failed",
                             detail: String(e.message || e),
                         });
@@ -1961,6 +2354,7 @@ app.registerExtension({
 
                 try {
                     showOperationProgress({
+                        mode: "restore",
                         title: "Backup restore in progress. Please wait.",
                         categories: ["Settings", "Workflows", "Subgraphs", "Custom Nodes", "Models", "Input", "Output"],
                     });
@@ -1975,6 +2369,7 @@ app.registerExtension({
                     });
                     await loadTree();
                     showOperationDone({
+                        mode: "restore",
                         title: "Backup restore complete",
                         detail: "Restored backup items.",
                         showRefresh: true,
@@ -1984,6 +2379,7 @@ app.registerExtension({
                     }
                 } catch (e) {
                     showOperationError({
+                        mode: "restore",
                         title: "Backup restore failed",
                         detail: String(e.message || e),
                     });
@@ -2048,6 +2444,7 @@ app.registerExtension({
 
                 try {
                     showOperationProgress({
+                        mode: "upload",
                         title: "Backup in progress. Please wait.",
                         categories: inferCategoriesFromItems(items, ["Selected items"]),
                     });
@@ -2066,12 +2463,14 @@ app.registerExtension({
                     });
                     await loadTree();
                     showOperationDone({
+                        mode: "upload",
                         title: "Backup upload complete",
                         detail: `Uploaded ${uploaded} item(s).`,
                         showRefresh: true,
                     });
                 } catch (e) {
                     showOperationError({
+                        mode: "upload",
                         title: "Backup upload failed",
                         detail: String(e.message || e),
                     });
