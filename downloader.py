@@ -171,12 +171,17 @@ def abort_hf_transfer():
     try:
         from huggingface_hub.utils._http import close_session
         close_session()
+        return
+    except ImportError:
+        pass
     except Exception:
         pass
+    # Fallback for older huggingface_hub (requests.Session) without close_session();
+    # never close an httpx.Client directly via get_session() as it stays cached as closed.
     try:
         from huggingface_hub.utils._http import get_session
         sess = get_session()
-        if sess and hasattr(sess, "close"):
+        if sess and hasattr(sess, "close") and not hasattr(sess, "is_closed"):
             sess.close()
     except Exception:
         pass
