@@ -100,3 +100,10 @@ try:
         threading.Thread(target=_register_web_api_with_retry, daemon=True).start()
 except Exception as e:
     print(f"[ComfyUI_HuggingFace_Downloader] Web API not loaded: {e}")
+
+# Check GitHub for newer model database on startup (non-blocking daemon thread)
+try:
+    from .db_updater import start_background_db_update_check
+    start_background_db_update_check()
+except Exception as e:
+    print(f"[ComfyUI_HuggingFace_Downloader] Failed to start DB update check: {e}")

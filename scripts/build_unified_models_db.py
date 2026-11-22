@@ -829,8 +829,20 @@ def main() -> int:
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=True), encoding="utf-8")
 
     if args.write:
-        popular_path.write_text(json.dumps(output_doc, indent=2, ensure_ascii=True), encoding="utf-8")
+        import hashlib
+        db_bytes = json.dumps(output_doc, indent=2, ensure_ascii=True).encode("utf-8")
+        popular_path.write_bytes(db_bytes)
+        db_version_path = popular_path.parent / "db_version.json"
+        db_manifest = {
+            "schema_version": 1,
+            "built_at": built_at,
+            "row_count": len(updated_models),
+            "explorer_enabled": int(explorer_enabled_counts.get("enabled", 0)),
+            "sha256": hashlib.sha256(db_bytes).hexdigest(),
+        }
+        db_version_path.write_text(json.dumps(db_manifest, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
         print(f"Wrote unified DB: {popular_path}")
+        print(f"Wrote DB manifest: {db_version_path}")
     else:
         print("Dry run (no DB write)")
 

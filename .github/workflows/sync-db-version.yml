@@ -1,0 +1,58 @@
+name: Sync DB Version Manifest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "metadata/popular-models.json"
+
+permissions:
+  contents: write
+
+jobs:
+  sync-db-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update metadata/db_version.json if out of sync
+        run: |
+          python3 - <<'EOF'
+          import datetime, hashlib, json
+          from pathlib import Path
+
+          db_path = Path("metadata/popular-models.json")
+          ver_path = Path("metadata/db_version.json")
+          raw = db_path.read_bytes()
+          sha = hashlib.sha256(raw).hexdigest()
+
+          existing = json.loads(ver_path.read_text(encoding="utf-8")) if ver_path.exists() else {}
+          if existing.get("sha256") == sha:
+              print("db_version.json is already in sync.")
+              raise SystemExit(0)
+
+          data = json.loads(raw.decode("utf-8"))
+          models = data.get("models", {})
+          enabled = sum(1 for m in models.values() if isinstance(m, dict) and m.get("explorer_enabled"))
+          manifest = {
+              "schema_version": 1,
+              "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "row_count": len(models),
+              "explorer_enabled": enabled,
+              "sha256": sha,
+          }
+          ver_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+          print("Updated db_version.json:", manifest)
+          EOF
+
+      - name: Commit and push updated db_version.json
+        run: |
+          if git diff --quiet metadata/db_version.json && [ -n "$(git ls-files metadata/db_version.json)" ]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add metadata/db_version.json
+          git commit -m "Auto-sync metadata/db_version.json [skip ci]"
+          git push

@@ -291,6 +291,11 @@ def _looks_like_model_widget_value(value: str, node_type: str) -> bool:
         return True
     return False
 
+def invalidate_popular_models_cache() -> None:
+    global _popular_models_cache
+    _popular_models_cache = None
+
+
 def load_popular_models_registry() -> dict:
     """Load curated popular-models.json registry."""
     global _popular_models_cache
