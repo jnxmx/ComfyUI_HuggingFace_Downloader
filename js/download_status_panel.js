@@ -42,6 +42,7 @@ app.registerExtension({
         let clearFinishedBtn = null;
         let dismissAllBtn = null;
         let refreshBtn = null;
+        let refreshPromptBanner = null;
         let lastRenderedDownloads = {};
         let refreshBusy = false;
         let bootstrapDone = false;
@@ -49,6 +50,8 @@ app.registerExtension({
         let panelCollapsed = false;
         let lastVisibleCount = 0;
         let lastHasRunning = false;
+        let prevHasRunning = false;
+        let refreshPromptShownForBatch = false;
 
         const BUTTON_BASE_CLASS = "relative inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap appearance-none border border-solid border-border/60 rounded-md text-xs font-medium font-inter transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50";
         const BUTTON_DESTRUCTIVE_CLASS = "relative inline-flex items-center justify-center cursor-pointer border-0 rounded-md text-destructive bg-transparent hover:bg-accent size-6 transition-colors disabled:pointer-events-none disabled:opacity-50";
@@ -429,6 +432,7 @@ app.registerExtension({
                     cursor: not-allowed;
                 }
                 #${PANEL_ID}.hf-downloader-collapsed .hf-downloader-body,
+                #${PANEL_ID}.hf-downloader-collapsed .hf-downloader-refresh-prompt,
                 #${PANEL_ID}.hf-downloader-collapsed .hf-downloader-footer {
                     display: none !important;
                 }
@@ -706,8 +710,14 @@ app.registerExtension({
             footer.appendChild(dismissAllBtn);
             footer.appendChild(refreshBtn);
 
+            refreshPromptBanner = document.createElement("div");
+            refreshPromptBanner.className = "hf-downloader-refresh-prompt items-center justify-between gap-2 rounded-md border border-solid border-border/60 bg-secondary/60 px-2 py-1.5 text-xs text-foreground";
+            refreshPromptBanner.style.display = "none";
+            refreshPromptBanner.textContent = "Downloads finished — click Refresh to update ComfyUI node lists.";
+
             panel.appendChild(header);
             panel.appendChild(listBody);
+            panel.appendChild(refreshPromptBanner);
             panel.appendChild(footer);
             panelWrapper.appendChild(panel);
 
@@ -1147,6 +1157,10 @@ app.registerExtension({
             refreshBusy = true;
             refreshBtn.disabled = true;
             refreshBtn.textContent = "Refreshing...";
+            refreshPromptShownForBatch = false;
+            if (refreshPromptBanner) {
+                refreshPromptBanner.style.display = "none";
+            }
 
             const justCompletedIds = [];
             const completedPaths = [];
@@ -1342,12 +1356,29 @@ app.registerExtension({
                 (entry) => !RUNNING_STATUSES.has(entry.status) && entry.status !== "failed"
             );
             const showRefresh = !hasRunning && !hasFailed && hasSuccess;
+            if (hasRunning) {
+                refreshPromptShownForBatch = false;
+            } else if (prevHasRunning && !hasFailed && hasSuccess && !refreshPromptShownForBatch) {
+                refreshPromptShownForBatch = true;
+                try {
+                    app?.extensionManager?.toast?.add?.({
+                        severity: "success",
+                        summary: "Downloads finished",
+                        detail: "All model downloads finished. Click Refresh in the Downloads panel to update ComfyUI.",
+                        life: 7000
+                    });
+                } catch (_) {}
+            }
+            prevHasRunning = hasRunning;
+
+            const showClearFinished = !showRefresh && hasClearableFinished;
+            const showDismissAll = !showRefresh && hasNonRunning && (hasFailed || !hasClearableFinished);
 
             if (clearFinishedBtn) {
-                clearFinishedBtn.style.display = hasClearableFinished ? "inline-flex" : "none";
+                clearFinishedBtn.style.display = showClearFinished ? "inline-flex" : "none";
             }
             if (dismissAllBtn) {
-                dismissAllBtn.style.display = hasNonRunning ? "inline-flex" : "none";
+                dismissAllBtn.style.display = showDismissAll ? "inline-flex" : "none";
             }
             if (refreshBtn) {
                 refreshBtn.style.display = showRefresh ? "inline-flex" : "none";
@@ -1357,7 +1388,10 @@ app.registerExtension({
                     refreshBusy = false;
                 }
             }
-            footer?.classList.toggle("visible", hasClearableFinished || hasNonRunning || showRefresh);
+            if (refreshPromptBanner) {
+                refreshPromptBanner.style.display = showRefresh && refreshPromptShownForBatch ? "flex" : "none";
+            }
+            footer?.classList.toggle("visible", showClearFinished || showDismissAll || showRefresh);
 
             const order = {
                 failed: 0,
@@ -1453,60 +1487,21 @@ app.registerExtension({
                 
                 if (completedPaths.length > 0) {
                     try {
-                        if (window.hfDownloader && typeof window.hfDownloader.clearCompletedModelsFromStore === "function") {
-                            await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
-                        }
-                        if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
-                            await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
-                        }
-                        
-                        // Run native refresh to re-scan models, clear native error log and update subgraphs
-                        const runNativeRefreshMissingModels = async () => {
-                            try {
-                                const appEl = document.querySelector('#app') || document.querySelector('#root') || document.body;
-                                if (appEl) {
-                                    const vueApp = appEl.__vue_app__;
-                                    if (vueApp && vueApp._context?.provides) {
-                                        let pinia = null;
-                                        const symbols = Object.getOwnPropertySymbols(vueApp._context.provides);
-                                        for (const sym of symbols) {
-                                            if (sym.toString().includes("pinia") || sym.description === "pinia") {
-                                                pinia = vueApp._context.provides[sym];
-                                                break;
-                                            }
-                                        }
-                                        if (pinia) {
-                                            const storeMap = pinia._s || pinia.stores;
-                                            if (storeMap && typeof storeMap.get === "function" && storeMap.has("missingModel")) {
-                                                const missingModelStore = storeMap.get("missingModel");
-                                                if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
-                                                    await missingModelStore.refreshMissingModels();
-                                                    return;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (_) {}
-
-                            try {
-                                if (app && typeof app.refreshMissingModels === "function") {
-                                    await app.refreshMissingModels({ silent: true });
-                                }
-                            } catch (_) {}
-                        };
-
-                        await runNativeRefreshMissingModels();
-
-                        if (typeof app?.refreshComboInNodes === "function") {
-                            await app.refreshComboInNodes();
-                        }
-                        if (window.hfDownloader && typeof window.hfDownloader.refreshComboInNodesRecursive === "function") {
-                            // Removed: no longer using custom recursive combo refresh
-                        }
-                        
-                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                            app.graph.setDirtyCanvas(true, true);
+                        if (window.hfDownloader && typeof window.hfDownloader.refreshAfterModelDownload === "function") {
+                            await window.hfDownloader.refreshAfterModelDownload(completedPaths);
+                        } else {
+                            if (window.hfDownloader && typeof window.hfDownloader.clearCompletedModelsFromStore === "function") {
+                                await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
+                            }
+                            if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
+                                await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
+                            }
+                            if (typeof app?.refreshComboInNodes === "function") {
+                                await app.refreshComboInNodes();
+                            }
+                            if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                                app.graph.setDirtyCanvas(true, true);
+                            }
                         }
                     } catch (e) {
                         console.warn("[HF Downloader] Failed to auto-clear completed models during status poll:", e);

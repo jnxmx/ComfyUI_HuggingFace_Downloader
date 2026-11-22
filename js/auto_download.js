@@ -30,7 +30,7 @@ app.registerExtension({
         const RUN_NATIVE_VALIDATION_POLL_MS = 60;
         const RUN_HOOK_COOLDOWN_MS = 1800;
         const WORKFLOW_OPEN_TRIGGER_COOLDOWN_MS = 1800;
-        const WORKFLOW_OPEN_CANDIDATE_POLL_MS = 500;
+        const WORKFLOW_OPEN_CANDIDATE_POLL_MS = 150;
         const MODEL_STORE_IMPORT_CANDIDATES = [];
         const EXECUTION_ERROR_STORE_IMPORT_CANDIDATES = [];
         const MISSING_MODEL_STORE_IMPORT_CANDIDATES = [];
@@ -4083,12 +4083,59 @@ app.registerExtension({
         };
 
         /* ──────────────── UI Components ──────────────── */
+        const getLiveLoaderModelState = (graph = null) => {
+            const rootGraph = graph || app?.rootGraph || app?.graph;
+            const parts = [];
+            let allCombosPopulated = true;
+            forEachGraphNodeRecursive(rootGraph, (node) => {
+                if (!node || typeof node !== "object") return;
+                if (isGraphNodeBypassed(node)) return;
+                if (!isLocalModelLoaderNode(node)) return;
+                const widgets = Array.isArray(node.widgets) ? node.widgets : [];
+                for (const w of widgets) {
+                    if (!w || typeof w.value !== "string") continue;
+                    if (isDynamicGroupWidgetDisabledInNode(node, w.name)) continue;
+                    const opts = resolveComboWidgetOptionsNativeLike(w);
+                    const isModelWidget = isModelValidationInputName(w.name) || opts.length > 0;
+                    if (!isModelWidget) continue;
+                    if (isModelValidationInputName(w.name) && opts.length === 0) {
+                        allCombosPopulated = false;
+                    }
+                    parts.push(`${node.id ?? ""}:${w.name || ""}=${normalizeWorkflowPath(w.value)}`);
+                }
+            });
+            parts.sort();
+            return {
+                signature: parts.join("|"),
+                allCombosPopulated,
+            };
+        };
+
         const showResultsDialog = (data, options = {}) => {
             let pollTimer = null;
+            let loaderWatchTimer = null;
+            let adaptDebounceTimer = null;
+            let adaptAbortController = null;
             const stopPolling = () => {
                 if (pollTimer) {
                     clearInterval(pollTimer);
                     pollTimer = null;
+                }
+            };
+            const stopLoaderWatcher = () => {
+                if (loaderWatchTimer) {
+                    clearInterval(loaderWatchTimer);
+                    loaderWatchTimer = null;
+                }
+                if (adaptDebounceTimer) {
+                    clearTimeout(adaptDebounceTimer);
+                    adaptDebounceTimer = null;
+                }
+                if (adaptAbortController) {
+                    try {
+                        adaptAbortController.abort();
+                    } catch (_) {}
+                    adaptAbortController = null;
                 }
             };
 
@@ -4103,6 +4150,7 @@ app.registerExtension({
             const rowFolderPickers = [];
             let cleanupOverlayMount = () => {};
             const cleanupUi = () => {
+                stopLoaderWatcher();
                 while (rowFolderPickers.length) {
                     const picker = rowFolderPickers.pop();
                     try {
@@ -4905,7 +4953,127 @@ app.registerExtension({
             dlg.appendChild(panel);
             cleanupOverlayMount = mountOverlayInNativeStack(dlg);
             dlg.__hfOverlayCleanup = cleanupUi;
-            if (!options?.triggeredByWorkflowOpen) {
+
+            const dialogLoadGeneration = currentWorkflowLoadGeneration;
+            let lastLoaderSignature = getLiveLoaderModelState().signature;
+            const baseSummaryText = summaryInline.textContent;
+            let adaptInFlight = false;
+
+            const adaptToLoaderModelChange = async (expectedSignature) => {
+                if (!dlg.isConnected || dialogLoadGeneration !== currentWorkflowLoadGeneration) {
+                    return;
+                }
+                const workflow = serializeWorkflowForModelScan();
+                const liveStateNow = getLiveLoaderModelState();
+                if (liveStateNow.signature !== expectedSignature) {
+                    return;
+                }
+
+                const localMissing = collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, workflow);
+                if (localMissing.length === 0 && liveStateNow.allCombosPopulated) {
+                    void clearMissingModelStoreState([]);
+                    void clearModelValidationErrorsFromFrontendState();
+                    closeDialog();
+                    return;
+                }
+
+                if (!workflow || typeof workflow !== "object") {
+                    return;
+                }
+
+                if (adaptAbortController) {
+                    try {
+                        adaptAbortController.abort();
+                    } catch (_) {}
+                }
+                adaptAbortController = typeof AbortController !== "undefined" ? new AbortController() : null;
+                adaptInFlight = true;
+                summaryInline.textContent = baseSummaryText
+                    ? `${baseSummaryText} • Updating...`
+                    : "Updating...";
+
+                try {
+                    const reqPayload = {
+                        ...workflow,
+                        request_id: `adapt_${Date.now()}`,
+                        skip_hf_search: false,
+                    };
+                    const resp = api && typeof api.fetchApi === "function"
+                        ? await api.fetchApi("/check_missing_models", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(reqPayload),
+                            signal: adaptAbortController?.signal,
+                        })
+                        : await fetch("/check_missing_models", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(reqPayload),
+                            signal: adaptAbortController?.signal,
+                        });
+                    if (!dlg.isConnected || dialogLoadGeneration !== currentWorkflowLoadGeneration) {
+                        return;
+                    }
+                    if (resp.status !== 200) {
+                        summaryInline.textContent = baseSummaryText;
+                        return;
+                    }
+                    const nextData = await resp.json();
+                    if (!dlg.isConnected || dialogLoadGeneration !== currentWorkflowLoadGeneration) {
+                        return;
+                    }
+                    if (getLiveLoaderModelState().signature !== expectedSignature) {
+                        return;
+                    }
+                    nextData.missing = coalesceMissingEntriesByDestination(
+                        Array.isArray(nextData?.missing) ? nextData.missing : []
+                    );
+                    const nextRawMismatches = Array.isArray(nextData?.mismatches)
+                        ? [...nextData.mismatches]
+                        : (Array.isArray(nextData?.path_mismatches) ? [...nextData.path_mismatches] : []);
+                    const nextAutoFix = autoApplyPathMismatches(nextRawMismatches);
+                    nextData.mismatches = nextAutoFix.remaining;
+                    const nextMissingCount = nextData.missing.length;
+                    const nextMismatchCount = nextData.mismatches.length;
+                    if (nextMissingCount === 0 && nextMismatchCount === 0) {
+                        void clearMissingModelStoreState([]);
+                        void clearModelValidationErrorsFromFrontendState();
+                        closeDialog();
+                        return;
+                    }
+                    void syncResolvedUrlsIntoNativeMissingModelStore(nextData.missing);
+                    showResultsDialog(nextData, {
+                        ...options,
+                        triggeredByLoaderChange: true,
+                    });
+                } catch (err) {
+                    if (err?.name !== "AbortError" && dlg.isConnected) {
+                        summaryInline.textContent = baseSummaryText;
+                    }
+                } finally {
+                    adaptInFlight = false;
+                }
+            };
+
+            loaderWatchTimer = setInterval(() => {
+                if (!dlg.isConnected || dialogLoadGeneration !== currentWorkflowLoadGeneration) {
+                    stopLoaderWatcher();
+                    return;
+                }
+                if (adaptInFlight) return;
+                const currentSig = getLiveLoaderModelState().signature;
+                if (currentSig === lastLoaderSignature) return;
+                lastLoaderSignature = currentSig;
+                if (adaptDebounceTimer) {
+                    clearTimeout(adaptDebounceTimer);
+                }
+                adaptDebounceTimer = setTimeout(() => {
+                    adaptDebounceTimer = null;
+                    void adaptToLoaderModelChange(currentSig);
+                }, 250);
+            }, 400);
+
+            if (!options?.triggeredByWorkflowOpen && !options?.triggeredByLoaderChange) {
                 setTimeout(() => {
                     const firstUrlInput = dlg.querySelector(
                         "input[placeholder='HuggingFace URL...'], input[placeholder='HuggingFace repo/folder URL...']"
@@ -8488,42 +8656,6 @@ app.registerExtension({
                 return false;
             }
 
-            const preflightWorkflow =
-                serializeWorkflowForModelScan() ||
-                (workflowGraphData && typeof workflowGraphData === "object" ? workflowGraphData : null);
-            const enrichedResults = await enrichMissingEntriesViaBackend(frontendMissingEntries, {
-                workflow: preflightWorkflow,
-                requestId: `workflow_open_${Date.now()}`,
-                skipHfSearch: true,
-            });
-            if (myGen !== currentWorkflowLoadGeneration) {
-                return false;
-            }
-            if (enrichedResults && typeof enrichedResults === "object") {
-                const rawMismatches = Array.isArray(enrichedResults?.mismatches)
-                    ? [...enrichedResults.mismatches]
-                    : (Array.isArray(enrichedResults?.path_mismatches) ? [...enrichedResults.path_mismatches] : []);
-                const autoFix = autoApplyPathMismatches(rawMismatches);
-                if (autoFix.fixedRows > 0) {
-                    showToast({
-                        severity: "info",
-                        summary: "Model paths auto-fixed",
-                        detail: `Updated ${autoFix.fixedRefs} loader reference${autoFix.fixedRefs === 1 ? "" : "s"} to installed model paths.`,
-                        life: 3200,
-                    });
-                }
-                const remainingMissing = Array.isArray(enrichedResults?.missing) ? enrichedResults.missing : [];
-                const remainingMismatches = autoFix.remaining;
-                if (remainingMissing.length === 0 && remainingMismatches.length === 0) {
-                    void applyResolvedFrontendMissingModelState(
-                        workflowOpenCandidates,
-                        [],
-                        []
-                    );
-                    return false;
-                }
-            }
-
             if (myGen !== currentWorkflowLoadGeneration) {
                 return false;
             }
@@ -8541,14 +8673,12 @@ app.registerExtension({
                 return true;
             }
 
-            const resultsToShow = enrichedResults && typeof enrichedResults === "object"
-                ? enrichedResults
-                : {
-                    request_id: `workflow_open_${Date.now()}`,
-                    missing: frontendMissingEntries,
-                    found: [],
-                    mismatches: [],
-                };
+            const resultsToShow = {
+                request_id: `workflow_open_${Date.now()}`,
+                missing: frontendMissingEntries,
+                found: [],
+                mismatches: [],
+            };
             showResultsDialog(
                 resultsToShow,
                 {
@@ -8846,8 +8976,8 @@ app.registerExtension({
                     } catch (err) {
                         console.warn("[AutoDownload] Tab-switch workflow scan failed:", err);
                     }
-                }, 120);
-            }, 250);
+                }, 16);
+            }, 100);
             return true;
         };
 
@@ -9378,6 +9508,148 @@ app.registerExtension({
             }
         };
 
+        let inFlightModelRefreshPromise = null;
+        const recentlyRefreshedModelKeys = new Map();
+        const MODEL_REFRESH_DEDUPE_TTL_MS = 4000;
+
+        const normalizeRefreshModelKey = (value) => {
+            const norm = normalizeWorkflowPath(value || "").toLowerCase();
+            if (!norm) return "";
+            return getPathBasename(norm).toLowerCase() || norm;
+        };
+
+        const runSingleModelRefresh = async (paths = []) => {
+            const pathList = (Array.isArray(paths) ? paths : [paths])
+                .map((p) => String(p || "").trim())
+                .filter(Boolean);
+
+            if (pathList.length > 0) {
+                try {
+                    const cleared = await clearCompletedModelsFromStore(pathList);
+                    if (cleared) {
+                        await clearModelValidationErrorsFromFrontendState();
+                    }
+                } catch (e) {
+                    console.warn("[AutoDownload] Error clearing completed model from store:", e);
+                }
+            } else {
+                try {
+                    await clearModelValidationErrorsFromFrontendState();
+                } catch (_) {}
+            }
+
+            if (app && typeof app.refreshComboInNodes === "function") {
+                try {
+                    await app.refreshComboInNodes();
+                } catch (e) {}
+            }
+
+            // Let ComfyUI discover the downloaded file natively
+            const missingModelStore = await resolveMissingModelStore();
+            if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
+                try {
+                    await missingModelStore.refreshMissingModels({ silent: true });
+                } catch (e) {
+                    console.warn("[AutoDownload] Failed to run store.refreshMissingModels:", e);
+                }
+            } else if (app && typeof app.refreshMissingModels === "function") {
+                try {
+                    await app.refreshMissingModels({ silent: true });
+                } catch (e) {
+                    console.warn("[AutoDownload] Failed to run native refreshMissingModels:", e);
+                }
+            }
+
+            // Clean up any remaining stale visual red frames
+            const currentErrors = (typeof getNodeErrorsSnapshot === "function") ? getNodeErrorsSnapshot() : {};
+            const registeredNodeTypes = (typeof getRegisteredNodeTypesMap === "function") ? getRegisteredNodeTypesMap() : null;
+            if (typeof forEachGraphNodeRecursive === "function") {
+                forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
+                    if (!node || typeof node !== "object") return;
+                    if (registeredNodeTypes && node.type && !(node.type in registeredNodeTypes)) {
+                        return;
+                    }
+                    const execId = String(node.id || "");
+                    if (currentErrors && currentErrors[execId]) {
+                        return;
+                    }
+                    if (node.has_errors) {
+                        node.has_errors = false;
+                    }
+                    if (node.old_color !== undefined) {
+                        node.color = node.old_color;
+                        delete node.old_color;
+                    } else if (typeof node.color === "string" && (node.color.toLowerCase() === "#ff0000" || node.color.toLowerCase() === "red")) {
+                        delete node.color;
+                    }
+
+                    if (node.old_bgcolor !== undefined) {
+                        node.bgcolor = node.old_bgcolor;
+                        delete node.old_bgcolor;
+                    } else if (typeof node.bgcolor === "string" && (node.bgcolor.toLowerCase() === "#ff0000" || node.bgcolor.toLowerCase() === "red")) {
+                        delete node.bgcolor;
+                    }
+                });
+            }
+            if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                app.graph.setDirtyCanvas(true, true);
+            }
+            if (app?.canvas?.setDirty) {
+                app.canvas.setDirty(true, true);
+            }
+        };
+
+        const refreshAfterModelDownload = async (paths = []) => {
+            const now = Date.now();
+            for (const [k, ts] of recentlyRefreshedModelKeys.entries()) {
+                if (now - ts > MODEL_REFRESH_DEDUPE_TTL_MS) {
+                    recentlyRefreshedModelKeys.delete(k);
+                }
+            }
+
+            const rawList = (Array.isArray(paths) ? paths : [paths])
+                .map((p) => String(p || "").trim())
+                .filter(Boolean);
+            const keys = rawList.map(normalizeRefreshModelKey).filter(Boolean);
+            if (keys.length > 0 && keys.every((k) => recentlyRefreshedModelKeys.has(k))) {
+                if (inFlightModelRefreshPromise) {
+                    await inFlightModelRefreshPromise;
+                }
+                return false;
+            }
+            for (const k of keys) {
+                recentlyRefreshedModelKeys.set(k, now);
+            }
+            if (keys.length === 0) {
+                if (recentlyRefreshedModelKeys.has("__generic__")) {
+                    if (inFlightModelRefreshPromise) {
+                        await inFlightModelRefreshPromise;
+                    }
+                    return false;
+                }
+                recentlyRefreshedModelKeys.set("__generic__", now);
+            }
+
+            const prevPromise = inFlightModelRefreshPromise;
+            const currentPromise = (async () => {
+                if (prevPromise) {
+                    try {
+                        await prevPromise;
+                    } catch (_) {}
+                }
+                await runSingleModelRefresh(rawList);
+            })();
+            inFlightModelRefreshPromise = currentPromise;
+            try {
+                await currentPromise;
+                return true;
+            } finally {
+                if (inFlightModelRefreshPromise === currentPromise) {
+                    inFlightModelRefreshPromise = null;
+                }
+            }
+        };
+
         const installDisableMissingModelsRedFramesObserver = () => {
             const handleValidationError = () => {
                 const settingsUi = app?.ui?.settings;
@@ -9389,144 +9661,130 @@ app.registerExtension({
                 }, 100);
             };
 
-            let needsRefreshAfterExecution = false;
-
             if (api && typeof api.addEventListener === "function") {
                 api.addEventListener("validation_error", handleValidationError);
                 api.addEventListener("execution_error", handleValidationError);
-                
-                const clickNativeRefreshButton = () => {
-                    const btn = document.querySelector('#comfy-refresh-button') ||
-                                document.querySelector('button[title*="Refresh"]') ||
-                                document.querySelector('button[aria-label*="Refresh"]') ||
-                                document.querySelector('button .pi-refresh')?.closest('button') ||
-                                document.querySelector('button.pi-refresh');
-                    if (btn) {
-                        try {
-                            btn.click();
-                            return true;
-                        } catch (e) {
-                            console.warn("[AutoDownload] Failed to click native refresh button:", e);
-                        }
-                    }
-                    return false;
-                };
 
-                const runRefresh = async () => {
-                    if (typeof useCommandStore !== "undefined") {
-                        try {
-                            await useCommandStore().execute('Comfy.RefreshNodeDefinitions');
-                        } catch (e) {}
-                    }
-
-                    if (app && typeof app.refreshComboInNodes === "function") {
-                        try {
-                            await app.refreshComboInNodes();
-                        } catch (e) {}
-                    }
-                    
-                    // Phase 1: Let ComfyUI discover the downloaded file natively
-                    // (adapted from upstream PR #12317 refresh-after-download pattern)
-                    const missingModelStore = await resolveMissingModelStore();
-                    if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
-                        try {
-                            await missingModelStore.refreshMissingModels({ silent: true });
-                        } catch (e) {
-                            console.warn("[AutoDownload] Failed to run store.refreshMissingModels:", e);
-                        }
-                    } else if (app && typeof app.refreshMissingModels === "function") {
-                        try {
-                            await app.refreshMissingModels({ silent: true });
-                        } catch (e) {
-                            console.warn("[AutoDownload] Failed to run native refreshMissingModels:", e);
-                        }
-                    }
-                    
-                    // Phase 2: Clean up stale validation errors (red frames from
-                    // previous failed execution attempts — these won't auto-clear)
-                    if (typeof clearMissingModelStoreState === "function") {
-                        clearMissingModelStoreState([]);
-                    }
-                    if (typeof clearModelValidationErrorsFromFrontendState === "function") {
-                        clearModelValidationErrorsFromFrontendState();
-                    }
-
-                    // Phase 3: Forcefully clean up any remaining stale visual red frames
-                    // (e.g. if ComfyUI natively cleared lastNodeErrors but forgot to restore node.color)
-                    const currentErrors = (typeof getNodeErrorsSnapshot === "function") ? getNodeErrorsSnapshot() : {};
-                    const registeredNodeTypes = (typeof getRegisteredNodeTypesMap === "function") ? getRegisteredNodeTypesMap() : null;
-                    if (typeof forEachGraphNodeRecursive === "function") {
-                        forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
-                            if (!node || typeof node !== "object") return;
-                            if (registeredNodeTypes && node.type && !(node.type in registeredNodeTypes)) {
-                                return;
-                            }
-                            const execId = String(node.id || "");
-                            if (currentErrors && currentErrors[execId]) {
-                                return; // Node still has a valid execution error
-                            }
-                            if (node.has_errors) {
-                                node.has_errors = false;
-                            }
-                            if (node.old_color !== undefined) {
-                                node.color = node.old_color;
-                                delete node.old_color;
-                            } else if (typeof node.color === "string" && (node.color.toLowerCase() === "#ff0000" || node.color.toLowerCase() === "red")) {
-                                delete node.color;
-                            }
-
-                            if (node.old_bgcolor !== undefined) {
-                                node.bgcolor = node.old_bgcolor;
-                                delete node.old_bgcolor;
-                            } else if (typeof node.bgcolor === "string" && (node.bgcolor.toLowerCase() === "#ff0000" || node.bgcolor.toLowerCase() === "red")) {
-                                delete node.bgcolor;
-                            }
-                        });
-                        if (app?.canvas?.setDirty) {
-                            app.canvas.setDirty(true, true);
-                        }
-                    }
-                };
-
-                api.addEventListener("hf_download_finished", async (event) => {
-                    needsRefreshAfterExecution = true;
+                api.addEventListener("hf_download_finished", (event) => {
                     const path = event.detail?.path;
-                    if (path) {
-                        try {
-                            const cleared = await clearCompletedModelsFromStore(path);
-                            if (cleared) {
-                                await clearModelValidationErrorsFromFrontendState();
-                                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                                    app.graph.setDirtyCanvas(true, true);
-                                }
-                            }
-                        } catch (e) {
-                            console.warn("[AutoDownload] Error clearing completed model from store:", e);
-                        }
-                    }
-                    // Trigger full native refresh after a short delay
-                    setTimeout(runRefresh, 500);
-                });
-
-                api.addEventListener("executing", (e) => {
-                    // e.detail is the node ID currently executing. It is null when execution finishes.
-                    if (e.detail === null && needsRefreshAfterExecution) {
-                        needsRefreshAfterExecution = false;
-                        setTimeout(runRefresh, 500);
-                    }
+                    void refreshAfterModelDownload(path ? [path] : []);
                 });
             }
+        };
+
+        const installNodeUnbypassWatcher = () => {
+            if (window.__hfNodeUnbypassWatcherTimer) {
+                return;
+            }
+            let prevBypassMap = new WeakMap();
+            let lastGeneration = currentWorkflowLoadGeneration;
+            let unbypassCheckBusy = false;
+
+            const seedBypassMap = (graph) => {
+                prevBypassMap = new WeakMap();
+                forEachGraphNodeRecursive(graph, (node) => {
+                    if (!node || typeof node !== "object") return;
+                    prevBypassMap.set(node, isGraphNodeBypassed(node));
+                });
+            };
+
+            seedBypassMap(app?.rootGraph || app?.graph);
+
+            window.__hfNodeUnbypassWatcherTimer = setInterval(async () => {
+                const rootGraph = app?.rootGraph || app?.graph;
+                if (!rootGraph || typeof rootGraph !== "object") return;
+
+                if (lastGeneration !== currentWorkflowLoadGeneration) {
+                    lastGeneration = currentWorkflowLoadGeneration;
+                    seedBypassMap(rootGraph);
+                    return;
+                }
+
+                const unbypassedNodes = [];
+                forEachGraphNodeRecursive(rootGraph, (node) => {
+                    if (!node || typeof node !== "object") return;
+                    const bypassedNow = isGraphNodeBypassed(node);
+                    const wasBypassed = prevBypassMap.get(node);
+                    prevBypassMap.set(node, bypassedNow);
+                    if (wasBypassed === true && !bypassedNow) {
+                        unbypassedNodes.push(node);
+                    }
+                });
+
+                if (!unbypassedNodes.length) return;
+                if (!getWorkflowOpenAutoEnabled()) return;
+                if (unbypassCheckBusy) return;
+                if (document.getElementById("auto-download-dialog") || typeof activeAutoDownloadCancel === "function") {
+                    return;
+                }
+
+                unbypassCheckBusy = true;
+                try {
+                    const genAtTrigger = currentWorkflowLoadGeneration;
+                    const workflow = serializeWorkflowForModelScan();
+                    const allLiveMissing = collectLiveGraphMissingModelCandidatesNativeLike(rootGraph, workflow);
+                    const unbypassedIds = new Set(
+                        unbypassedNodes.map((n) => String(n?.id ?? "").trim()).filter(Boolean)
+                    );
+                    const unbypassedMissing = allLiveMissing.filter((c) => {
+                        const cid = String(c?.nodeId ?? c?.node_id ?? "").trim();
+                        const localCid = cid.includes(":") ? cid.split(":").pop() : cid;
+                        return (cid && unbypassedIds.has(cid)) || (localCid && unbypassedIds.has(localCid));
+                    });
+
+                    const candidatesToCheck = unbypassedMissing.length > 0 ? unbypassedMissing : allLiveMissing;
+                    if (candidatesToCheck.length > 0) {
+                        await runAutoDownload(new Set(), false, {
+                            suppressEmptyResults: true,
+                            triggeredByWorkflowOpen: true,
+                            frontendMissingModelCandidates: candidatesToCheck,
+                            reason: "node-unbypassed-missing-models",
+                        });
+                        return;
+                    }
+
+                    const hasUnpopulatedLoader = unbypassedNodes.some((node) => {
+                        if (!isLocalModelLoaderNode(node)) return false;
+                        const widgets = Array.isArray(node.widgets) ? node.widgets : [];
+                        return widgets.some((w) => {
+                            if (!w || typeof w.value !== "string" || !w.value.trim()) return false;
+                            if (isDynamicGroupWidgetDisabledInNode(node, w.name)) return false;
+                            if (!isModelValidationInputName(w.name)) return false;
+                            return resolveComboWidgetOptionsNativeLike(w).length === 0;
+                        });
+                    });
+
+                    if (hasUnpopulatedLoader && workflow) {
+                        const backendResults = await getWorkflowOpenBackendResults(workflow, genAtTrigger);
+                        if (genAtTrigger !== currentWorkflowLoadGeneration) return;
+                        if (document.getElementById("auto-download-dialog")) return;
+                        if (countDownloadRequiredScanResults(backendResults || {}) > 0) {
+                            showResultsDialog(backendResults, {
+                                suppressEmptyResults: true,
+                                triggeredByWorkflowOpen: true,
+                                reason: "node-unbypassed-missing-models",
+                            });
+                        }
+                    }
+                } catch (err) {
+                    console.warn("[AutoDownload] Unbypass missing-model check failed:", err);
+                } finally {
+                    unbypassCheckBusy = false;
+                }
+            }, 250);
         };
 
         registerGlobalAction("runAutoDownload", runAutoDownload);
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
         registerGlobalAction("clearCompletedModelsFromStore", clearCompletedModelsFromStore);
         registerGlobalAction("clearModelValidationErrorsFromFrontendState", clearModelValidationErrorsFromFrontendState);
+        registerGlobalAction("refreshAfterModelDownload", refreshAfterModelDownload);
         setupMissingModelsDialogObserver();
         // void installNativeMissingModelsSurfaceHook();
         installWorkflowOpenLoadGraphHook();
         installActiveWorkflowTabWatcher();
         // installWorkflowOpenMissingModelsWatcher();
+        installNodeUnbypassWatcher();
         installRunQueueCommandHooksNativeAware();
         installDisableMissingModelsRedFramesObserver();
     }
