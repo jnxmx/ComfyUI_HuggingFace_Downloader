@@ -5191,11 +5191,15 @@ app.registerExtension({
 
             const fullRepoSwitchRow = document.createElement("div");
             Object.assign(fullRepoSwitchRow.style, {
-                display: "flex",
+                // Shrink to the switch + label so clicks elsewhere across the dialog
+                // don't toggle it.
+                display: "inline-flex",
+                alignSelf: "flex-start",
                 alignItems: "center",
                 justifyContent: "flex-start",
                 gap: "10px",
                 marginTop: "2px",
+                cursor: "pointer",
             });
 
             const fullRepoSwitchText = document.createElement("span");
