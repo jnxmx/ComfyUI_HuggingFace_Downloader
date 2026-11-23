@@ -4427,6 +4427,8 @@ app.registerExtension({
                     rowWrapper.appendChild(row);
 
                     const rowData = {
+                        rowWrapper,
+                        folderPicker,
                         checkbox: cb,
                         displayName,
                         filename: m.filename,
@@ -4954,9 +4956,72 @@ app.registerExtension({
             cleanupOverlayMount = mountOverlayInNativeStack(dlg);
             dlg.__hfOverlayCleanup = cleanupUi;
 
+            let foundCount = foundModels.length;
+            let currentBaseSummaryText = summaryInline.textContent;
+            const updateSummaryLine = () => {
+                const parts = [`Missing: ${rowInputs.length}`];
+                if (foundCount > 0) {
+                    parts.push(`Found: ${foundCount}`);
+                }
+                if (mismatchModels.length > 0) {
+                    parts.push(`Mismatches: ${mismatchModels.length}`);
+                }
+                currentBaseSummaryText = parts.join(" • ");
+                summaryInline.textContent = currentBaseSummaryText;
+            };
+
+            dlg.__hfPruneCompletedModels = (completedPaths = []) => {
+                if (!dlg.isConnected) return;
+                const list = Array.isArray(completedPaths) ? completedPaths : [completedPaths];
+                const completedNames = new Set();
+                for (const raw of list) {
+                    const normalized = String(raw || "").trim().replace(/\\/g, "/");
+                    if (!normalized) continue;
+                    completedNames.add(normalized.toLowerCase());
+                    const base = normalized.split("/").pop();
+                    if (base) completedNames.add(base.toLowerCase());
+                }
+                if (completedNames.size === 0) return;
+
+                let removed = 0;
+                for (let i = rowInputs.length - 1; i >= 0; i -= 1) {
+                    const row = rowInputs[i];
+                    const candidates = [
+                        row.filename,
+                        row.requestedPath,
+                        row.originalFilename,
+                        row.displayName,
+                    ]
+                        .map((v) => String(v || "").trim().replace(/\\/g, "/"))
+                        .filter(Boolean);
+                    const matched = candidates.some((c) => {
+                        const lower = c.toLowerCase();
+                        const base = lower.split("/").pop();
+                        return completedNames.has(lower) || (base && completedNames.has(base));
+                    });
+                    if (!matched) continue;
+                    try {
+                        row.folderPicker?.destroy?.();
+                    } catch (_) {}
+                    row.rowWrapper?.remove?.();
+                    rowInputs.splice(i, 1);
+                    removed += 1;
+                }
+                if (removed === 0) return;
+
+                foundCount += removed;
+                if (rowInputs.length === 0 && mismatchModels.length === 0) {
+                    closeDialog();
+                    return;
+                }
+                updateSummaryLine();
+                if (rowInputs.length === 0) {
+                    downloadBtn.disabled = true;
+                }
+            };
+
             const dialogLoadGeneration = currentWorkflowLoadGeneration;
             let lastLoaderSignature = getLiveLoaderModelState().signature;
-            const baseSummaryText = summaryInline.textContent;
             let adaptInFlight = false;
 
             const adaptToLoaderModelChange = async (expectedSignature) => {
@@ -4988,8 +5053,8 @@ app.registerExtension({
                 }
                 adaptAbortController = typeof AbortController !== "undefined" ? new AbortController() : null;
                 adaptInFlight = true;
-                summaryInline.textContent = baseSummaryText
-                    ? `${baseSummaryText} • Updating...`
+                summaryInline.textContent = currentBaseSummaryText
+                    ? `${currentBaseSummaryText} • Updating...`
                     : "Updating...";
 
                 try {
@@ -5015,7 +5080,7 @@ app.registerExtension({
                         return;
                     }
                     if (resp.status !== 200) {
-                        summaryInline.textContent = baseSummaryText;
+                        summaryInline.textContent = currentBaseSummaryText;
                         return;
                     }
                     const nextData = await resp.json();
@@ -5048,7 +5113,7 @@ app.registerExtension({
                     });
                 } catch (err) {
                     if (err?.name !== "AbortError" && dlg.isConnected) {
-                        summaryInline.textContent = baseSummaryText;
+                        summaryInline.textContent = currentBaseSummaryText;
                     }
                 } finally {
                     adaptInFlight = false;
@@ -9604,6 +9669,14 @@ app.registerExtension({
         };
 
         const refreshAfterModelDownload = async (paths = []) => {
+            const rawList = (Array.isArray(paths) ? paths : [paths])
+                .map((p) => String(p || "").trim())
+                .filter(Boolean);
+            const openAutoDownloadDlg = document.getElementById("auto-download-dialog");
+            if (openAutoDownloadDlg && typeof openAutoDownloadDlg.__hfPruneCompletedModels === "function") {
+                openAutoDownloadDlg.__hfPruneCompletedModels(rawList);
+            }
+
             const now = Date.now();
             for (const [k, ts] of recentlyRefreshedModelKeys.entries()) {
                 if (now - ts > MODEL_REFRESH_DEDUPE_TTL_MS) {
@@ -9611,9 +9684,6 @@ app.registerExtension({
                 }
             }
 
-            const rawList = (Array.isArray(paths) ? paths : [paths])
-                .map((p) => String(p || "").trim())
-                .filter(Boolean);
             const keys = rawList.map(normalizeRefreshModelKey).filter(Boolean);
             if (keys.length > 0 && keys.every((k) => recentlyRefreshedModelKeys.has(k))) {
                 if (inFlightModelRefreshPromise) {

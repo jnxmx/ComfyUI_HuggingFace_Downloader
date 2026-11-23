@@ -2401,6 +2401,82 @@ async def folder_structure(request):
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
 
+
+_IN_PROGRESS_DOWNLOAD_STATUSES = {
+    "queued",
+    "downloading",
+    "copying",
+    "verifying",
+    "cleaning_cache",
+    "finalizing",
+}
+
+
+def _filter_active_downloads_from_missing(result: dict) -> dict:
+    """Exclude models that are currently queued or actively downloading from missing results."""
+    if not isinstance(result, dict):
+        return result
+    missing = result.get("missing")
+    if not isinstance(missing, list) or not missing:
+        return result
+
+    with download_status_lock:
+        active_items = [
+            dict(info)
+            for info in download_status.values()
+            if isinstance(info, dict)
+            and str(info.get("status") or "").strip().lower() in _IN_PROGRESS_DOWNLOAD_STATUSES
+        ]
+
+    if not active_items:
+        return result
+
+    active_names = set()
+    for info in active_items:
+        for key in ("filename", "requested_path", "path", "target_filename", "display_name"):
+            val = str(info.get(key) or "").strip().replace("\\", "/")
+            if val:
+                active_names.add(os.path.basename(val).lower())
+
+    if not active_names:
+        return result
+
+    found = result.setdefault("found", [])
+    existing_found_names = {
+        os.path.basename(str(f.get("filename") or f.get("requested_path") or "").replace("\\", "/")).lower()
+        for f in found
+        if isinstance(f, dict)
+    }
+
+    remaining_missing = []
+    for entry in missing:
+        if not isinstance(entry, dict):
+            remaining_missing.append(entry)
+            continue
+        entry_names = {
+            os.path.basename(str(entry.get(key) or "").strip().replace("\\", "/")).lower()
+            for key in ("filename", "requested_path", "display_name")
+            if entry.get(key)
+        }
+        if entry_names & active_names:
+            canonical_name = str(entry.get("filename") or entry.get("requested_path") or "").strip()
+            base_lower = os.path.basename(canonical_name.replace("\\", "/")).lower()
+            if base_lower and base_lower not in existing_found_names:
+                existing_found_names.add(base_lower)
+                found.append({
+                    "filename": canonical_name,
+                    "requested_path": entry.get("requested_path") or canonical_name,
+                    "folder": entry.get("folder") or entry.get("suggested_folder") or "",
+                    "node_id": entry.get("node_id"),
+                    "node_title": entry.get("node_title"),
+                    "in_progress": True,
+                })
+        else:
+            remaining_missing.append(entry)
+
+    result["missing"] = remaining_missing
+    return result
+
 async def check_missing_models(request):
     """
     Analyzes the workflow JSON to find missing models.
@@ -2431,6 +2507,7 @@ async def check_missing_models(request):
             data,
             status_cb
         )
+        _filter_active_downloads_from_missing(result)
         _set_search_status(request_id, {"message": "Done", "source": "complete"})
         result["request_id"] = request_id
         return web.json_response(result)
