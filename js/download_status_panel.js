@@ -1461,6 +1461,7 @@ app.registerExtension({
             publishPanelState();
         };
 
+        let hasCompletedInitialPoll = false;
         const pollStatus = async () => {
             try {
                 const resp = await fetch("/download_status");
@@ -1472,10 +1473,13 @@ app.registerExtension({
                 for (const [id, info] of Object.entries(downloads)) {
                     if (info && SUCCESS_STATUSES.has(info.status) && !processedDownloadIds.has(id)) {
                         processedDownloadIds.add(id);
-                        if (info.path) completedPaths.push(info.path);
-                        if (info.filename) completedPaths.push(info.filename);
+                        if (hasCompletedInitialPoll) {
+                            if (info.path) completedPaths.push(info.path);
+                            if (info.filename) completedPaths.push(info.filename);
+                        }
                     }
                 }
+                hasCompletedInitialPoll = true;
                 
                 // Clean up old processed IDs that are no longer in the active status list
                 const currentIds = new Set(Object.keys(downloads));
