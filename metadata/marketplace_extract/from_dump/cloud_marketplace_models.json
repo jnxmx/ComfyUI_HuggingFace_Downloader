@@ -1,9 +1,149 @@
 {
-  "version": "2.6.0",
+  "version": "2.7.0",
   "description": "Models extracted from live Comfy Cloud marketplace API scan",
   "source": "cloud_marketplace_export",
-  "scraped_at": "2026-11-18",
+  "scraped_at": "2026-11-25",
   "models": {
+    "juggernautXL_v9Rdphoto2Lightning.safetensors": {
+      "url": "https://huggingface.co/AiWise/Juggernaut-XL-V9-GE-RDPhoto2-Lightning_4S/blob/main/juggernautXL_v9Rdphoto2Lightning.safetensors",
+      "type": "checkpoints",
+      "directory": "checkpoints",
+      "source": "cloud_marketplace_export",
+      "asset_id": "9672930a-9b79-44d8-82f4-0c83d1f54ab2",
+      "provider": "huggingface.co",
+      "content_length": 7105348284,
+      "repo_id": "AiWise/Juggernaut-XL-V9-GE-RDPhoto2-Lightning_4S"
+    },
+    "ultratex_flux2_vae_fp32.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/UltraTex/blob/main/vae/ultratex_flux2_vae_fp32.safetensors",
+      "type": "vae",
+      "directory": "vae",
+      "source": "cloud_marketplace_export",
+      "asset_id": "330eecca-0868-4ba4-9e2e-a940f59a477f",
+      "provider": "huggingface.co",
+      "content_length": 336211292,
+      "repo_id": "Comfy-Org/UltraTex"
+    },
+    "sensenova_u1.6_8b_mot_8step_lora_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/SenseNova-U1/blob/main/loras/sensenova_u1.6_8b_mot_8step_lora_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "2d0f6f93-a3f2-40c0-a694-91e66e9fcc6f",
+      "provider": "huggingface.co",
+      "content_length": 814855596,
+      "repo_id": "Comfy-Org/SenseNova-U1"
+    },
+    "sensenova_u1.6_8b_mot_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/SenseNova-U1/resolve/main/checkpoints/sensenova_u1.6_8b_mot_int8_convrot.safetensors",
+      "type": "checkpoints",
+      "directory": "checkpoints",
+      "source": "cloud_marketplace_export",
+      "asset_id": "3922bcbc-4021-4ac6-9fd4-700502681834",
+      "provider": "huggingface.co",
+      "content_length": 17628895236,
+      "repo_id": "Comfy-Org/SenseNova-U1"
+    },
+    "sensenova_u1.6_8b_mot_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/SenseNova-U1/resolve/main/checkpoints/sensenova_u1.6_8b_mot_bf16.safetensors",
+      "type": "checkpoints",
+      "directory": "checkpoints",
+      "source": "cloud_marketplace_export",
+      "asset_id": "e551b01c-2111-457a-aec9-12cc5ef0c90a",
+      "provider": "huggingface.co",
+      "content_length": 35065860024,
+      "repo_id": "Comfy-Org/SenseNova-U1"
+    },
+    "flux-2-klein-9b_empty_prompt.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/UltraTex/resolve/main/embeddings/flux-2-klein-9b_empty_prompt.safetensors",
+      "type": "embeddings",
+      "directory": "embeddings",
+      "source": "cloud_marketplace_export",
+      "asset_id": "67020725-9c3b-40fd-be17-236482df5932",
+      "provider": "huggingface.co",
+      "content_length": 25170136,
+      "repo_id": "Comfy-Org/UltraTex"
+    },
+    "ultratex_flux2_klein_9b_albedo_lora_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/UltraTex/resolve/main/loras/ultratex_flux2_klein_9b_albedo_lora_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "cd5dfb97-773b-4402-8f0d-4df2c3d4217f",
+      "provider": "huggingface.co",
+      "content_length": 478172752,
+      "repo_id": "Comfy-Org/UltraTex"
+    },
+    "ultratex_flux2_klein_9b_metallic_roughness_lora_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/UltraTex/resolve/main/loras/ultratex_flux2_klein_9b_metallic_roughness_lora_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "eb665af2-5415-490c-aad5-fcbac76042a7",
+      "provider": "huggingface.co",
+      "content_length": 478172752,
+      "repo_id": "Comfy-Org/UltraTex"
+    },
+    "flux-2-klein-9b_distill_lora_avg_rank_345_bf16.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/UltraTex/resolve/main/loras/flux-2-klein-9b_distill_lora_avg_rank_345_bf16.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "a58debc9-5d32-4e1c-8e81-157aaf2b73ee",
+      "provider": "huggingface.co",
+      "content_length": 1955413970,
+      "repo_id": "Comfy-Org/UltraTex"
+    },
+    "h3_image_character_swap_v1.safetensors": {
+      "url": "https://huggingface.co/akatz-ai/MiniMax-H3-Image-Character-Swap-LoRA/resolve/main/h3_image_character_swap_v1.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "1beb5e58-4941-4133-ada9-5390c6a57e6f",
+      "provider": "huggingface.co",
+      "content_length": 155110448,
+      "repo_id": "akatz-ai/MiniMax-H3-Image-Character-Swap-LoRA"
+    },
+    "flux-2-klein-base-9b_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/UltraTex/resolve/main/diffusion_models/flux-2-klein-base-9b_int8_convrot.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "b68eaf01-aea4-40b8-982e-c1adcb6d9941",
+      "provider": "huggingface.co",
+      "content_length": 9439884541,
+      "repo_id": "Comfy-Org/UltraTex"
+    },
+    "rmbg3_bf16.safetensors": {
+      "url": "https://huggingface.co/briaai/RMBG-3.0-Comfy/blob/main/diffusion_models/rmbg3_bf16.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "47fa1d92-c745-4024-a8de-3dd2a8f4a169",
+      "provider": "huggingface.co",
+      "content_length": 16452934194,
+      "repo_id": "briaai/RMBG-3.0-Comfy"
+    },
+    "rmbg3_int8_convrot.safetensors": {
+      "url": "https://huggingface.co/briaai/RMBG-3.0-Comfy/blob/main/diffusion_models/rmbg3_int8_convrot.safetensors",
+      "type": "diffusion_models",
+      "directory": "diffusion_models",
+      "source": "cloud_marketplace_export",
+      "asset_id": "25e33add-a408-4954-be5c-68de561c439c",
+      "provider": "huggingface.co",
+      "content_length": 8408562474,
+      "repo_id": "briaai/RMBG-3.0-Comfy"
+    },
+    "h3_character_swap_v1.5.safetensors": {
+      "url": "https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/blob/main/h3_character_swap_v1.5.safetensors",
+      "type": "loras",
+      "directory": "loras",
+      "source": "cloud_marketplace_export",
+      "asset_id": "0b8c6069-097d-498c-80b8-de0941c59300",
+      "provider": "huggingface.co",
+      "content_length": 155110792,
+      "repo_id": "akatz-ai/MiniMax-H3-Character-Swap-LoRA"
+    },
     "LTX2.3-22B_IC-LoRA-CrossView-Warp_v0.9_18000.safetensors": {
       "url": "https://huggingface.co/Cseti/LTX2.3-22B_IC-LoRA-CrossView-Warp/resolve/main/LTX2.3-22B_IC-LoRA-CrossView-Warp_v0.9_18000.safetensors",
       "type": "loras",
