@@ -3545,16 +3545,6 @@ def setup(app_or_server):
             item["destination_key"] = destination_key
             retry_payload = _build_retry_payload(item)
 
-            if download_mode == "file":
-                try:
-                    target_dir = resolve_target_dir(folder)
-                    os.makedirs(target_dir, exist_ok=True)
-                    dest_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, os.path.basename(requested_filename or filename))))
-                    if is_path_within_allowed_roots(dest_path) and not os.path.exists(dest_path):
-                        open(dest_path, 'a').close()
-                except Exception as e:
-                    print(f"[DEBUG] Failed to create empty placeholder file for {filename}: {e}")
-
             with download_queue_lock:
                 download_queue.append(item)
             _set_download_status(download_id, {
@@ -3688,10 +3678,95 @@ def setup(app_or_server):
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
+    def _extract_hf_repo_for_entry(entry: dict | None) -> str:
+        if not isinstance(entry, dict):
+            return ""
+        hf_repo = str(entry.get("hf_repo") or "").strip()
+        if hf_repo:
+            return hf_repo
+        url = str(entry.get("url") or "").strip()
+        if url and _is_supported_hf_link(url):
+            try:
+                parsed = _build_parsed_download_info(entry)
+                return str(parsed.get("repo") or "").strip()
+            except Exception:
+                return ""
+        return ""
+
+    def _cleanup_cancelled_download_artifacts(
+        download_id: str,
+        item: dict | None = None,
+        status_entry: dict | None = None,
+        extra_dest_path: str | None = None,
+    ) -> None:
+        """Remove cached HF repo data and placeholder/unverified files for a cancelled download."""
+        payload = item if isinstance(item, dict) else (
+            status_entry.get("retry_payload") if isinstance(status_entry, dict) and isinstance(status_entry.get("retry_payload"), dict) else {}
+        )
+
+        # Remove unverified downloaded file (e.g. cancelled while pending verification)
+        if extra_dest_path:
+            try:
+                resolved_extra = os.path.realpath(os.path.abspath(extra_dest_path))
+                if is_path_within_allowed_roots(resolved_extra) and os.path.isfile(resolved_extra):
+                    os.remove(resolved_extra)
+                    print(f"[DEBUG] Removed cancelled unverified file: {resolved_extra}")
+            except Exception as e:
+                print(f"[DEBUG] Failed to remove cancelled unverified file {extra_dest_path}: {e}")
+
+        # Remove 0-byte placeholder file created when queuing
+        folder = str((payload.get("folder") if isinstance(payload, dict) else "") or (status_entry.get("folder") if isinstance(status_entry, dict) else "") or "").strip()
+        download_mode = str((payload.get("download_mode") if isinstance(payload, dict) else "") or (status_entry.get("download_mode") if isinstance(status_entry, dict) else "") or "file").strip().lower()
+        target_name = str(
+            (payload.get("requested_path") if isinstance(payload, dict) else "")
+            or (payload.get("target_filename") if isinstance(payload, dict) else "")
+            or (payload.get("filename") if isinstance(payload, dict) else "")
+            or (status_entry.get("requested_path") if isinstance(status_entry, dict) else "")
+            or (status_entry.get("filename") if isinstance(status_entry, dict) else "")
+            or ""
+        ).strip()
+        if download_mode == "file" and folder and target_name:
+            try:
+                target_dir = resolve_target_dir(folder)
+                placeholder_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, os.path.basename(target_name))))
+                if is_path_within_allowed_roots(placeholder_path) and os.path.isfile(placeholder_path) and os.path.getsize(placeholder_path) == 0:
+                    os.remove(placeholder_path)
+                    print(f"[DEBUG] Removed 0-byte placeholder for cancelled download: {placeholder_path}")
+            except Exception as e:
+                print(f"[DEBUG] Failed to remove placeholder for cancelled download {download_id}: {e}")
+
+        repo_id = _extract_hf_repo_for_entry(payload)
+        if not repo_id:
+            return
+
+        # Avoid deleting cache if another non-terminal download still uses the same repo
+        repo_in_use = False
+        with download_status_lock:
+            for other_id, other_info in download_status.items():
+                if other_id == download_id or not isinstance(other_info, dict):
+                    continue
+                other_status = str(other_info.get("status") or "").strip().lower()
+                if other_status in ("completed", "failed", "cancelled"):
+                    continue
+                other_repo = _extract_hf_repo_for_entry(other_info.get("retry_payload"))
+                if other_repo and other_repo.lower() == repo_id.lower():
+                    repo_in_use = True
+                    break
+
+        if not repo_in_use:
+            def _bg_clear_cache():
+                try:
+                    from .downloader import clear_cache_for_repo
+                    clear_cache_for_repo(repo_id)
+                except Exception as e:
+                    print(f"[DEBUG] Failed to clear cache for cancelled download {download_id} ({repo_id}): {e}")
+            threading.Thread(target=_bg_clear_cache, name=f"hf-cancel-cache-{download_id[:8]}", daemon=True).start()
+
     def _cancel_single_download(download_id: str) -> str:
         _clear_pause_request(download_id)
         _request_cancel(download_id)
 
+        removed_item = None
         removed_from_queue = False
         removed_from_paused = False
         with download_queue_lock:
@@ -3700,13 +3775,19 @@ def setup(app_or_server):
                 for item in download_queue:
                     if item.get("download_id") == download_id:
                         removed_from_queue = True
+                        removed_item = dict(item)
                         continue
                     kept.append(item)
                 if removed_from_queue:
                     download_queue[:] = kept
             if download_id in paused_downloads:
-                paused_downloads.pop(download_id, None)
+                popped = paused_downloads.pop(download_id, None)
+                if removed_item is None and isinstance(popped, dict):
+                    removed_item = dict(popped)
                 removed_from_paused = True
+
+        with download_status_lock:
+            current = dict(download_status.get(download_id, {}))
 
         if removed_from_queue or removed_from_paused:
             _set_download_status(download_id, {
@@ -3716,15 +3797,20 @@ def setup(app_or_server):
                 "finished_at": time.time()
             })
             _clear_cancel_request(download_id)
+            _cleanup_cancelled_download_artifacts(download_id, item=removed_item, status_entry=current)
             return "cancelled"
 
+        removed_verify_entries = []
         with pending_verifications_lock:
-            before = len(pending_verifications)
-            pending_verifications[:] = [
-                entry for entry in pending_verifications
-                if entry.get("download_id") != download_id
-            ]
-            removed_from_verify = len(pending_verifications) < before
+            kept_verify = []
+            for entry in pending_verifications:
+                if entry.get("download_id") == download_id:
+                    removed_verify_entries.append(dict(entry))
+                else:
+                    kept_verify.append(entry)
+            removed_from_verify = len(removed_verify_entries) > 0
+            if removed_from_verify:
+                pending_verifications[:] = kept_verify
         if removed_from_verify:
             _set_download_status(download_id, {
                 "status": "cancelled",
@@ -3733,10 +3819,14 @@ def setup(app_or_server):
                 "finished_at": time.time()
             })
             _clear_cancel_request(download_id)
+            for v_entry in removed_verify_entries:
+                _cleanup_cancelled_download_artifacts(
+                    download_id,
+                    status_entry=current,
+                    extra_dest_path=v_entry.get("dest_path"),
+                )
             return "cancelled"
 
-        with download_status_lock:
-            current = dict(download_status.get(download_id, {}))
         current_status = current.get("status")
         if current_status in ("cancelled", "failed", "completed"):
             _clear_cancel_request(download_id)
@@ -3766,6 +3856,7 @@ def setup(app_or_server):
                 "finished_at": time.time()
             })
             _clear_cancel_request(download_id)
+            _cleanup_cancelled_download_artifacts(download_id, status_entry=current)
             return "cancelled"
 
         # Fallback when status entry is missing or still queued in race window.
@@ -3776,6 +3867,7 @@ def setup(app_or_server):
             "finished_at": time.time()
         })
         _clear_cancel_request(download_id)
+        _cleanup_cancelled_download_artifacts(download_id, status_entry=current)
         return "cancelled"
 
     async def cancel_download(request):

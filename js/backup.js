@@ -1,5 +1,6 @@
 import { app } from "../../../scripts/app.js";
 import { setNativeStackPanelVisible, unmountFromNativeStack } from "./native_stack.js";
+import { forceRefreshModels } from "./comfy_stores.js";
 
 app.registerExtension({
     name: "backupToHuggingFace",
@@ -589,19 +590,7 @@ app.registerExtension({
 
         const refreshComfyUiState = async () => {
             try {
-                if (typeof app?.refreshComboInNodes === "function") {
-                    const maybePromise = app.refreshComboInNodes();
-                    if (maybePromise && typeof maybePromise.then === "function") {
-                        await maybePromise;
-                    }
-                }
-                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                    app.graph.setDirtyCanvas(true, true);
-                }
-                if (app?.canvas && typeof app.canvas.setDirty === "function") {
-                    app.canvas.setDirty(true, true);
-                }
-                return true;
+                return await forceRefreshModels();
             } catch (error) {
                 console.warn("[HF Backup] Refresh hook failed:", error);
                 return false;

@@ -166,8 +166,58 @@ def clear_cache_for_path(downloaded_path: str):
         print(f"[DEBUG] Cache cleaning failed: {e}")
 
 
+def _remove_file_with_retry(path: str, attempts: int = 8, delay: float = 0.25) -> bool:
+    """Remove a single file, retrying briefly on Windows file-lock errors (WinError 32)."""
+    for idx in range(max(1, attempts)):
+        try:
+            os.remove(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except PermissionError as e:
+            if idx + 1 >= attempts:
+                print(f"[DEBUG] Failed to remove {path}: {e}")
+                return False
+            time.sleep(delay)
+        except Exception as e:
+            print(f"[DEBUG] Failed to remove {path}: {e}")
+            return False
+    return False
+
+
+def _remove_tree_with_retry(path: str, attempts: int = 8, delay: float = 0.25) -> bool:
+    """Remove a directory tree, retrying briefly on Windows file-lock errors (WinError 32)."""
+    if not os.path.exists(path):
+        return True
+    last_err = None
+    for idx in range(max(1, attempts)):
+        try:
+            shutil.rmtree(path)
+            return True
+        except FileNotFoundError:
+            return True
+        except PermissionError as e:
+            last_err = e
+            if idx + 1 < attempts:
+                time.sleep(delay)
+        except Exception as e:
+            last_err = e
+            break
+    if os.path.exists(path):
+        shutil.rmtree(path, ignore_errors=True)
+        if os.path.exists(path) and last_err is not None:
+            print(f"[DEBUG] Failed to fully remove directory {path}: {last_err}")
+            return False
+    return True
+
+
 def abort_hf_transfer():
-    """Abort any in-flight huggingface_hub network transfers by closing global sessions."""
+    """Abort any in-flight huggingface_hub HTTP and Xet network transfers."""
+    try:
+        from huggingface_hub.utils._xet import abort_xet_session
+        abort_xet_session()
+    except Exception:
+        pass
     try:
         from huggingface_hub.utils._http import close_session
         close_session()
@@ -198,8 +248,8 @@ def cleanup_repo_locks(repo_id: str):
         if os.path.isdir(locks_repo_dir):
             for name in os.listdir(locks_repo_dir):
                 if name.endswith(".lock"):
-                    _safe_remove(os.path.join(locks_repo_dir, name))
-            shutil.rmtree(locks_repo_dir, ignore_errors=True)
+                    _remove_file_with_retry(os.path.join(locks_repo_dir, name))
+            _remove_tree_with_retry(locks_repo_dir)
             print(f"[DEBUG] Cleaned locks for {normalized_repo}")
     except Exception as e:
         print(f"[DEBUG] Failed to clean locks for {normalized_repo}: {e}")
@@ -217,37 +267,15 @@ def clear_cache_for_repo(repo_id: str):
     cleanup_repo_locks(normalized_repo)
 
     try:
-        cache_info = scan_cache_dir()
-        commit_hashes = []
-        for repo in getattr(cache_info, "repos", []) or []:
-            repo_key = str(getattr(repo, "repo_id", "") or "").strip()
-            if repo_key.lower() != normalized_repo.lower():
-                continue
-            for revision in getattr(repo, "revisions", []) or []:
-                commit_hash = str(getattr(revision, "commit_hash", "") or "").strip()
-                if commit_hash:
-                    commit_hashes.append(commit_hash)
-        for commit_hash in commit_hashes:
-            try:
-                delete_strategy = cache_info.delete_revisions(commit_hash)
-                print(f"[DEBUG] Deleting cached revision for repo cleanup: {commit_hash}")
-                delete_strategy.execute()
-            except Exception as inner:
-                print(f"[DEBUG] Failed to delete revision {commit_hash}: {inner}")
-    except Exception as e:
-        print(f"[DEBUG] Repo cache cleanup via scan_cache_dir failed: {e}")
-
-    # Interrupted downloads can leave orphaned *.incomplete blobs outside tracked revisions.
-    try:
         repo_folder = f"models--{normalized_repo.replace('/', '--')}"
         repo_cache_dir = os.path.join(_get_hf_cache_dir(), repo_folder)
         blobs_dir = os.path.join(repo_cache_dir, "blobs")
         if os.path.isdir(blobs_dir):
             for name in os.listdir(blobs_dir):
                 if name.endswith(".incomplete"):
-                    _safe_remove(os.path.join(blobs_dir, name))
+                    _remove_file_with_retry(os.path.join(blobs_dir, name))
         if os.path.isdir(repo_cache_dir):
-            shutil.rmtree(repo_cache_dir, ignore_errors=True)
+            _remove_tree_with_retry(repo_cache_dir)
         print(f"[DEBUG] Repo cache cleaned for {normalized_repo}")
     except Exception as e:
         print(f"[DEBUG] Repo cache directory cleanup failed: {e}")
@@ -981,7 +1009,7 @@ def run_download(parsed_data: dict,
                 while worker_thread.is_alive():
                     if cancel_check and cancel_check():
                         abort_hf_transfer()
-                        worker_thread.join(timeout=3.0)
+                        worker_thread.join(timeout=10.0)
                         if repo_id:
                             cleanup_repo_locks(repo_id)
                         raise InterruptedError("Download cancelled")

@@ -1,6 +1,6 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
-import { resolveMissingModelStore } from "./comfy_stores.js";
+import { forceRefreshModels } from "./comfy_stores.js";
 import { mountInNativeStack, setNativeStackPanelVisible } from "./native_stack.js";
 
 app.registerExtension({
@@ -58,6 +58,7 @@ app.registerExtension({
             "cancelling"
         ]);
         const SUCCESS_STATUSES = new Set(["downloaded", "completed", "verifying"]);
+        const DISK_READY_STATUSES = new Set(["downloaded", "completed"]);
 
         const dismissedEntryIds = new Set();
         const itemNodes = new Map();
@@ -73,17 +74,12 @@ app.registerExtension({
         let footer = null;
         let clearFinishedBtn = null;
         let dismissAllBtn = null;
-        let refreshBtn = null;
-        let refreshPromptBanner = null;
         let lastRenderedDownloads = {};
         let lastRenderedBackupTasks = {};
-        let refreshBusy = false;
         let bootstrapDone = false;
         let panelMinimized = false;
         let lastVisibleCount = 0;
         let lastHasRunning = false;
-        let prevHasRunning = false;
-        let refreshPromptShownForBatch = false;
 
         const BUTTON_BASE_CLASS =
             "relative inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap appearance-none border border-solid border-border/60 rounded-md text-xs font-medium font-inter transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50";
@@ -341,11 +337,11 @@ app.registerExtension({
                     background: var(--accent, rgba(255, 255, 255, 0.15));
                 }
                 #${PANEL_ID} .hf-queue-cancel-all {
-                    background: rgba(239, 68, 68, 0.18);
-                    color: #f87171;
+                    background: var(--secondary, rgba(255, 255, 255, 0.08));
+                    color: var(--foreground, #e5e7eb);
                 }
                 #${PANEL_ID} .hf-queue-cancel-all:hover:not(:disabled) {
-                    background: rgba(239, 68, 68, 0.3);
+                    background: rgba(239, 68, 68, 0.25);
                     color: #fca5a5;
                 }
                 #${PANEL_ID} .hf-queue-tabs {
@@ -563,13 +559,8 @@ app.registerExtension({
                     border-radius: 7px;
                     cursor: pointer;
                 }
-                #${PANEL_ID} .hf-downloader-refresh:disabled {
-                    opacity: 0.6;
-                    cursor: not-allowed;
-                }
                 #${PANEL_ID}.hf-downloader-collapsed .hf-queue-tabs,
                 #${PANEL_ID}.hf-downloader-collapsed .hf-downloader-body,
-                #${PANEL_ID}.hf-downloader-collapsed .hf-downloader-refresh-prompt,
                 #${PANEL_ID}.hf-downloader-collapsed .hf-downloader-footer {
                     display: none !important;
                 }
@@ -860,28 +851,11 @@ app.registerExtension({
                 dismissEntriesByStatus(true);
             });
 
-            refreshBtn = document.createElement("button");
-            refreshBtn.type = "button";
-            refreshBtn.className = "hf-downloader-refresh hf-downloader-footer-btn bg-secondary text-foreground hover:bg-accent";
-            refreshBtn.textContent = "Refresh";
-            refreshBtn.style.display = "none";
-            refreshBtn.addEventListener("click", () => {
-                void handleRefresh();
-            });
-
             footer.appendChild(clearFinishedBtn);
             footer.appendChild(dismissAllBtn);
-            footer.appendChild(refreshBtn);
-
-            refreshPromptBanner = document.createElement("div");
-            refreshPromptBanner.className =
-                "hf-downloader-refresh-prompt mx-3 mb-2 items-center justify-between gap-2 rounded-md border border-solid border-border/60 bg-secondary/60 px-2.5 py-1.5 text-xs text-foreground";
-            refreshPromptBanner.style.display = "none";
-            refreshPromptBanner.textContent = "Downloads finished — click Refresh to update ComfyUI node lists.";
 
             panel.appendChild(header);
             panel.appendChild(listBody);
-            panel.appendChild(refreshPromptBanner);
             panel.appendChild(footer);
             panelWrapper.appendChild(panel);
 
@@ -1462,126 +1436,6 @@ app.registerExtension({
             }
         };
 
-        const handleRefresh = async () => {
-            if (refreshBusy || !refreshBtn) return;
-            refreshBusy = true;
-            refreshBtn.disabled = true;
-            refreshBtn.textContent = "Refreshing...";
-            refreshPromptShownForBatch = false;
-            if (refreshPromptBanner) {
-                refreshPromptBanner.style.display = "none";
-            }
-
-            const justCompletedIds = [];
-            const completedPaths = [];
-            if (listBody) {
-                const cards = listBody.querySelectorAll("[data-download-id]");
-                for (const card of cards) {
-                    const id = card.getAttribute("data-download-id");
-                    const kind = card.getAttribute("data-entry-kind") || "download";
-                    if (id) {
-                        justCompletedIds.push(id);
-                        const refs = itemNodes.get(id);
-                        if (refs && refs.lastInfo && kind === "download") {
-                            if (refs.lastInfo.path) completedPaths.push(refs.lastInfo.path);
-                            if (refs.lastInfo.filename) completedPaths.push(refs.lastInfo.filename);
-                        }
-                    }
-                }
-            }
-            for (const id of justCompletedIds) {
-                dismissedEntryIds.add(id);
-            }
-            if (listBody) {
-                listBody.replaceChildren();
-            }
-            itemNodes.clear();
-            lastVisibleCount = 0;
-            lastHasRunning = false;
-            applyPanelVisibility();
-            publishPanelState();
-
-            try {
-                if (
-                    window.hfDownloader &&
-                    typeof window.hfDownloader.clearCompletedModelsFromStore === "function" &&
-                    completedPaths.length > 0
-                ) {
-                    try {
-                        await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
-                    } catch (e) {
-                        console.warn("[HF Downloader] Failed to clear completed models from store:", e);
-                    }
-                }
-
-                if (
-                    window.hfDownloader &&
-                    typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function"
-                ) {
-                    try {
-                        await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
-                    } catch (e) {
-                        console.warn("[HF Downloader] Failed to clear validation errors:", e);
-                    }
-                }
-
-                const runNativeRefreshMissingModels = async () => {
-                    try {
-                        const missingModelStore = await resolveMissingModelStore();
-                        if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
-                            await missingModelStore.refreshMissingModels();
-                            return;
-                        }
-                    } catch (_) {}
-
-                    try {
-                        if (app && typeof app.refreshMissingModels === "function") {
-                            await app.refreshMissingModels({ silent: true });
-                        }
-                    } catch (_) {}
-                };
-
-                await runNativeRefreshMissingModels();
-
-                if (typeof app?.refreshComboInNodes === "function") {
-                    const maybePromise = app.refreshComboInNodes();
-                    if (maybePromise && typeof maybePromise.then === "function") {
-                        await maybePromise;
-                    }
-                }
-
-                const clickNativeRefreshButton = () => {
-                    const btn =
-                        document.querySelector("#comfy-refresh-button") ||
-                        document.querySelector('button[title*="Refresh"]') ||
-                        document.querySelector('button[aria-label*="Refresh"]') ||
-                        document.querySelector("button .pi-refresh")?.closest("button") ||
-                        document.querySelector("button.pi-refresh");
-                    if (btn) {
-                        try {
-                            btn.click();
-                        } catch (e) {
-                            console.warn("[HF Downloader] Failed to click native refresh button:", e);
-                        }
-                    }
-                };
-
-                clickNativeRefreshButton();
-
-                if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                    app.graph.setDirtyCanvas(true, true);
-                }
-            } catch (err) {
-                console.warn("[HF Downloader] Comfy refresh hook failed:", err);
-            } finally {
-                refreshBusy = false;
-                if (refreshBtn) {
-                    refreshBtn.disabled = false;
-                    refreshBtn.textContent = "Refresh";
-                }
-            }
-        };
-
         const matchesActiveFilter = (entry) => {
             if (activeFilter === "active") {
                 return ACTIVE_NON_TERMINAL_STATUSES.has(entry.status);
@@ -1721,36 +1575,13 @@ app.registerExtension({
             }
 
             const hasFailed = entries.some((entry) => entry.status === "failed");
-            const hasRunning = runningCount > 0;
-            const hasPaused = pausedCount > 0;
-            const hasAnyActiveOrPaused = hasRunning || hasPaused;
-            const hasModelSuccess = entries.some(
-                (entry) => entry._kind === "download" && SUCCESS_STATUSES.has(entry.status)
-            );
-            const hasAnySuccess = entries.some((entry) => SUCCESS_STATUSES.has(entry.status));
             const hasNonActive = entries.some((entry) => !ACTIVE_NON_TERMINAL_STATUSES.has(entry.status));
             const hasClearableFinished = entries.some(
                 (entry) => !ACTIVE_NON_TERMINAL_STATUSES.has(entry.status) && entry.status !== "failed"
             );
 
-            const showRefresh = !hasAnyActiveOrPaused && !hasFailed && hasModelSuccess;
-            if (hasAnyActiveOrPaused) {
-                refreshPromptShownForBatch = false;
-            } else if (prevHasRunning && !hasFailed && hasModelSuccess && !refreshPromptShownForBatch) {
-                refreshPromptShownForBatch = true;
-                try {
-                    app?.extensionManager?.toast?.add?.({
-                        severity: "success",
-                        summary: "Downloads finished",
-                        detail: "All model downloads finished. Click Refresh in the Downloads panel to update ComfyUI.",
-                        life: 7000
-                    });
-                } catch (_) {}
-            }
-            prevHasRunning = hasAnyActiveOrPaused;
-
-            const showClearFinished = !showRefresh && hasClearableFinished;
-            const showDismissAll = !showRefresh && hasNonActive && (hasFailed || !hasClearableFinished);
+            const showClearFinished = hasClearableFinished;
+            const showDismissAll = hasNonActive && (hasFailed || !hasClearableFinished);
 
             if (clearFinishedBtn) {
                 clearFinishedBtn.style.display = showClearFinished ? "inline-flex" : "none";
@@ -1758,18 +1589,7 @@ app.registerExtension({
             if (dismissAllBtn) {
                 dismissAllBtn.style.display = showDismissAll ? "inline-flex" : "none";
             }
-            if (refreshBtn) {
-                refreshBtn.style.display = showRefresh ? "inline-flex" : "none";
-                if (!showRefresh) {
-                    refreshBtn.disabled = false;
-                    refreshBtn.textContent = "Refresh";
-                    refreshBusy = false;
-                }
-            }
-            if (refreshPromptBanner) {
-                refreshPromptBanner.style.display = showRefresh && refreshPromptShownForBatch ? "flex" : "none";
-            }
-            footer?.classList.toggle("visible", showClearFinished || showDismissAll || showRefresh || hasAnySuccess && !hasAnyActiveOrPaused && !hasFailed);
+            footer?.classList.toggle("visible", showClearFinished || showDismissAll);
 
             const order = {
                 failed: 0,
@@ -1878,7 +1698,7 @@ app.registerExtension({
             const backupTasks = data.backup_tasks || {};
             const completedPaths = [];
             for (const [id, info] of Object.entries(downloads)) {
-                if (info && SUCCESS_STATUSES.has(info.status) && !processedDownloadIds.has(id)) {
+                if (info && DISK_READY_STATUSES.has(toUiStatus(info.status)) && !processedDownloadIds.has(id)) {
                     processedDownloadIds.add(id);
                     if (hasCompletedInitialPoll) {
                         if (info.path) completedPaths.push(info.path);
@@ -1897,27 +1717,13 @@ app.registerExtension({
 
             if (completedPaths.length > 0) {
                 try {
-                    if (window.hfDownloader && typeof window.hfDownloader.refreshAfterModelDownload === "function") {
-                        await window.hfDownloader.refreshAfterModelDownload(completedPaths);
-                    } else {
-                        if (window.hfDownloader && typeof window.hfDownloader.clearCompletedModelsFromStore === "function") {
-                            await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
-                        }
-                        if (
-                            window.hfDownloader &&
-                            typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function"
-                        ) {
-                            await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
-                        }
-                        if (typeof app?.refreshComboInNodes === "function") {
-                            await app.refreshComboInNodes();
-                        }
-                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                            app.graph.setDirtyCanvas(true, true);
-                        }
+                    const openAutoDownloadDlg = document.getElementById("auto-download-dialog");
+                    if (openAutoDownloadDlg && typeof openAutoDownloadDlg.__hfPruneCompletedModels === "function") {
+                        openAutoDownloadDlg.__hfPruneCompletedModels(completedPaths);
                     }
+                    await forceRefreshModels();
                 } catch (e) {
-                    console.warn("[HF Downloader] Failed to auto-clear completed models during status update:", e);
+                    console.warn("[HF Downloader] Failed to refresh models after download:", e);
                 }
             }
 

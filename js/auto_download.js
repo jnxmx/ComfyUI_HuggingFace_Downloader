@@ -14,6 +14,7 @@ import {
     subscribeRightSidePanel,
     rebindPendingStoreSubscriptions,
     dismissNativeErrorDialog,
+    forceRefreshModels,
 } from "./comfy_stores.js";
 import { mountInNativeStack, unmountFromNativeStack } from "./native_stack.js";
 
@@ -5540,9 +5541,9 @@ app.registerExtension({
                     return;
                 }
 
-                setStatus("Queuing downloads...", "#9ad6ff");
+                setStatus("");
                 downloadBtn.disabled = true;
-                downloadBtnLabel.textContent = "Queued";
+                downloadBtnLabel.textContent = "Queuing...";
 
                 const queueable = [];
                 const queueRows = [];
@@ -5593,15 +5594,14 @@ app.registerExtension({
                         }
                     }
 
-                    setStatus(`Queued ${queued.length} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
-                    try {
-                        window?.hfDownloader?.restoreDownloadPanel?.();
-                        window?.hfDownloader?.pollDownloadStatusNow?.();
-                    } catch (_) {}
                     cleanupUi();
                     if (dlg.parentElement) {
                         dlg.remove();
                     }
+                    try {
+                        window?.hfDownloader?.restoreDownloadPanel?.();
+                        window?.hfDownloader?.pollDownloadStatusNow?.();
+                    } catch (_) {}
 
                     const statusMap = {};
                     const pending = new Set(downloadIds);
@@ -6090,11 +6090,7 @@ app.registerExtension({
                 if (typeof resume !== "function") {
                     return;
                 }
-                if (app && typeof app.refreshComboInNodes === "function") {
-                    try {
-                        await app.refreshComboInNodes();
-                    } catch (e) {}
-                }
+                await forceRefreshModels();
                 try {
                     resume();
                 } catch (resumeErr) {
@@ -9233,164 +9229,6 @@ app.registerExtension({
             return changed;
         };
 
-        const clearCompletedModelsFromStore = async (filenamesOrPaths) => {
-            const list = Array.isArray(filenamesOrPaths) ? filenamesOrPaths : [filenamesOrPaths];
-            const validList = list.filter(Boolean);
-            if (!validList.length) return false;
-
-            const normalizedBases = validList.map(f => String(f).split(/[/\\]/).pop().trim().toLowerCase());
-
-            const filterCandidates = (candidates) => {
-                if (!Array.isArray(candidates)) return [];
-                return candidates.filter((c) => {
-                    const candidateName = String(c?.name || "").trim().toLowerCase();
-                    const candidateFile = String(c?.filename || "").trim().toLowerCase();
-                    const candBaseName = candidateName.split(/[/\\]/).pop().trim();
-                    const candBaseFile = candidateFile.split(/[/\\]/).pop().trim();
-                    if (normalizedBases.includes(candidateName) || normalizedBases.includes(candidateFile) ||
-                        normalizedBases.includes(candBaseName) || normalizedBases.includes(candBaseFile)) {
-                        return false;
-                    }
-                    const fullNormalizedList = validList.map(f => String(f).trim().toLowerCase().replace(/\\/g, "/"));
-                    const candDir = String(c?.directory || c?.folder || "").trim().toLowerCase().replace(/\\/g, "/");
-                    if (candDir) {
-                        for (const fullNormalized of fullNormalizedList) {
-                            if (fullNormalized.endsWith(candDir + "/" + candidateName)) {
-                                return false;
-                            }
-                        }
-                    }
-                    return true;
-                });
-            };
-
-            let changed = false;
-
-            // 1. Clear from missingModelStore
-            try {
-                const missingModelStore = await resolveMissingModelStore();
-                if (missingModelStore) {
-                    const candidates = unwrapStoreValue(missingModelStore.missingModelCandidates);
-                    if (Array.isArray(candidates) && candidates.length) {
-                        const nextCandidates = filterCandidates(candidates);
-                        if (nextCandidates.length !== candidates.length) {
-                            changed = true;
-                            if (nextCandidates.length === 0) {
-                                if (typeof missingModelStore.clearMissingModels === "function") {
-                                    try { missingModelStore.clearMissingModels(); } catch (e) {}
-                                } else if ("value" in missingModelStore.missingModelCandidates) {
-                                    missingModelStore.missingModelCandidates.value = null;
-                                } else {
-                                    missingModelStore.missingModelCandidates = null;
-                                }
-                            } else {
-                                if (typeof missingModelStore.setMissingModels === "function") {
-                                    try { missingModelStore.setMissingModels(nextCandidates); } catch (e) {}
-                                } else if ("value" in missingModelStore.missingModelCandidates) {
-                                    missingModelStore.missingModelCandidates.value = nextCandidates;
-                                } else {
-                                    missingModelStore.missingModelCandidates = nextCandidates;
-                                }
-                            }
-                        }
-                    }
-                    
-                    const missingNodeModelsObj = unwrapStoreValue(missingModelStore.missingNodeModels);
-                    if (missingNodeModelsObj && typeof missingNodeModelsObj === "object") {
-                        for (const [nodeId, models] of Object.entries(missingNodeModelsObj)) {
-                            if (Array.isArray(models)) {
-                                const originalLength = models.length;
-                                const filtered = models.filter((m) => {
-                                    const base = String(m).split(/[/\\]/).pop().trim().toLowerCase();
-                                    return !normalizedBases.includes(base);
-                                });
-                                if (filtered.length !== originalLength) {
-                                    changed = true;
-                                    missingNodeModelsObj[nodeId] = filtered;
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                console.warn("[AutoDownload] Error clearing missingModelStore candidates:", e);
-            }
-
-            // 2. Clear from activeWorkflow and all open workflows in workflowStore
-            try {
-                const workflowStore = unwrapStoreValue(app?.extensionManager?.workflow);
-                const workflows = [];
-                if (workflowStore) {
-                    if (workflowStore.activeWorkflow) {
-                        workflows.push(workflowStore.activeWorkflow);
-                    }
-                    const storeWorkflows = unwrapStoreValue(workflowStore.workflows);
-                    if (Array.isArray(storeWorkflows)) {
-                        for (const wf of storeWorkflows) {
-                            if (wf && !workflows.includes(wf)) {
-                                workflows.push(wf);
-                            }
-                        }
-                    } else if (storeWorkflows && typeof storeWorkflows === "object") {
-                        for (const wf of Object.values(storeWorkflows)) {
-                            if (wf && !workflows.includes(wf)) {
-                                workflows.push(wf);
-                            }
-                        }
-                    }
-                }
-
-                for (const wf of workflows) {
-                    try {
-                        const pendingWarnings = unwrapStoreValue(wf?.pendingWarnings);
-                        if (pendingWarnings) {
-                            const candidates = unwrapStoreValue(pendingWarnings.missingModelCandidates);
-                            if (Array.isArray(candidates) && candidates.length) {
-                                const nextCandidates = filterCandidates(candidates);
-                                if (nextCandidates.length !== candidates.length) {
-                                    changed = true;
-                                    if (nextCandidates.length === 0) {
-                                        if ("value" in pendingWarnings.missingModelCandidates) {
-                                            pendingWarnings.missingModelCandidates.value = null;
-                                        } else {
-                                            pendingWarnings.missingModelCandidates = null;
-                                        }
-                                    } else {
-                                        if ("value" in pendingWarnings.missingModelCandidates) {
-                                            pendingWarnings.missingModelCandidates.value = nextCandidates;
-                                        } else {
-                                            pendingWarnings.missingModelCandidates = nextCandidates;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } catch (_) {}
-                }
-            } catch (e) {
-                console.warn("[AutoDownload] Error clearing workflow pending warnings:", e);
-            }
-
-            if (changed) {
-                // Dismiss error overlay if no more missing models or execution/node errors
-                try {
-                    const executionErrorStore = await resolveExecutionErrorStore();
-                    if (executionErrorStore) {
-                        const hasErrors = unwrapStoreValue(executionErrorStore.hasAnyError);
-                        if (!hasErrors) {
-                            if (typeof executionErrorStore.dismissErrorOverlay === "function") {
-                                executionErrorStore.dismissErrorOverlay();
-                            } else if ("isErrorOverlayOpen" in executionErrorStore) {
-                                executionErrorStore.isErrorOverlayOpen = false;
-                            }
-                        }
-                    }
-                } catch (_) {}
-            }
-
-            return changed;
-        };
-
         const buildMissingModelCandidatesSignature = (candidates = []) => {
             if (!Array.isArray(candidates) || !candidates.length) {
                 return "";
@@ -9962,97 +9800,6 @@ app.registerExtension({
             }, 140);
         };
 
-        let inFlightModelRefreshPromise = null;
-        const recentlyRefreshedModelKeys = new Map();
-        const MODEL_REFRESH_DEDUPE_TTL_MS = 4000;
-
-        const normalizeRefreshModelKey = (value) => {
-            const norm = normalizeWorkflowPath(value || "").toLowerCase();
-            if (!norm) return "";
-            return getPathBasename(norm).toLowerCase() || norm;
-        };
-
-        const runSingleModelRefresh = async (paths = []) => {
-            const pathList = (Array.isArray(paths) ? paths : [paths])
-                .map((p) => String(p || "").trim())
-                .filter(Boolean);
-
-            if (pathList.length > 0) {
-                try {
-                    const cleared = await clearCompletedModelsFromStore(pathList);
-                    if (cleared) {
-                        await clearModelValidationErrorsFromFrontendState();
-                    }
-                } catch (e) {
-                    console.warn("[AutoDownload] Error clearing completed model from store:", e);
-                }
-            } else {
-                try {
-                    await clearModelValidationErrorsFromFrontendState();
-                } catch (_) {}
-            }
-
-            if (app && typeof app.refreshComboInNodes === "function") {
-                try {
-                    await app.refreshComboInNodes();
-                } catch (e) {}
-            }
-
-            // Let ComfyUI discover the downloaded file natively
-            const missingModelStore = await resolveMissingModelStore();
-            if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
-                try {
-                    await missingModelStore.refreshMissingModels({ silent: true });
-                } catch (e) {
-                    console.warn("[AutoDownload] Failed to run store.refreshMissingModels:", e);
-                }
-            } else if (app && typeof app.refreshMissingModels === "function") {
-                try {
-                    await app.refreshMissingModels({ silent: true });
-                } catch (e) {
-                    console.warn("[AutoDownload] Failed to run native refreshMissingModels:", e);
-                }
-            }
-
-            // Clean up any remaining stale visual red frames
-            const currentErrors = (typeof getNodeErrorsSnapshot === "function") ? getNodeErrorsSnapshot() : {};
-            const registeredNodeTypes = (typeof getRegisteredNodeTypesMap === "function") ? getRegisteredNodeTypesMap() : null;
-            if (typeof forEachGraphNodeRecursive === "function") {
-                forEachGraphNodeRecursive(app?.rootGraph || app?.graph, (node) => {
-                    if (!node || typeof node !== "object") return;
-                    if (registeredNodeTypes && node.type && !(node.type in registeredNodeTypes)) {
-                        return;
-                    }
-                    const execId = String(node.id || "");
-                    if (currentErrors && currentErrors[execId]) {
-                        return;
-                    }
-                    if (node.has_errors) {
-                        node.has_errors = false;
-                    }
-                    if (node.old_color !== undefined) {
-                        node.color = node.old_color;
-                        delete node.old_color;
-                    } else if (typeof node.color === "string" && (node.color.toLowerCase() === "#ff0000" || node.color.toLowerCase() === "red")) {
-                        delete node.color;
-                    }
-
-                    if (node.old_bgcolor !== undefined) {
-                        node.bgcolor = node.old_bgcolor;
-                        delete node.old_bgcolor;
-                    } else if (typeof node.bgcolor === "string" && (node.bgcolor.toLowerCase() === "#ff0000" || node.bgcolor.toLowerCase() === "red")) {
-                        delete node.bgcolor;
-                    }
-                });
-            }
-            if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                app.graph.setDirtyCanvas(true, true);
-            }
-            if (app?.canvas?.setDirty) {
-                app.canvas.setDirty(true, true);
-            }
-        };
-
         const refreshAfterModelDownload = async (paths = []) => {
             const rawList = (Array.isArray(paths) ? paths : [paths])
                 .map((p) => String(p || "").trim())
@@ -10061,52 +9808,7 @@ app.registerExtension({
             if (openAutoDownloadDlg && typeof openAutoDownloadDlg.__hfPruneCompletedModels === "function") {
                 openAutoDownloadDlg.__hfPruneCompletedModels(rawList);
             }
-
-            const now = Date.now();
-            for (const [k, ts] of recentlyRefreshedModelKeys.entries()) {
-                if (now - ts > MODEL_REFRESH_DEDUPE_TTL_MS) {
-                    recentlyRefreshedModelKeys.delete(k);
-                }
-            }
-
-            const keys = rawList.map(normalizeRefreshModelKey).filter(Boolean);
-            if (keys.length > 0 && keys.every((k) => recentlyRefreshedModelKeys.has(k))) {
-                if (inFlightModelRefreshPromise) {
-                    await inFlightModelRefreshPromise;
-                }
-                return false;
-            }
-            for (const k of keys) {
-                recentlyRefreshedModelKeys.set(k, now);
-            }
-            if (keys.length === 0) {
-                if (recentlyRefreshedModelKeys.has("__generic__")) {
-                    if (inFlightModelRefreshPromise) {
-                        await inFlightModelRefreshPromise;
-                    }
-                    return false;
-                }
-                recentlyRefreshedModelKeys.set("__generic__", now);
-            }
-
-            const prevPromise = inFlightModelRefreshPromise;
-            const currentPromise = (async () => {
-                if (prevPromise) {
-                    try {
-                        await prevPromise;
-                    } catch (_) {}
-                }
-                await runSingleModelRefresh(rawList);
-            })();
-            inFlightModelRefreshPromise = currentPromise;
-            try {
-                await currentPromise;
-                return true;
-            } finally {
-                if (inFlightModelRefreshPromise === currentPromise) {
-                    inFlightModelRefreshPromise = null;
-                }
-            }
+            return await forceRefreshModels();
         };
 
         const installReactiveMissingModelSubscription = () => {
@@ -10395,9 +10097,9 @@ app.registerExtension({
 
         registerGlobalAction("runAutoDownload", runAutoDownload);
         registerGlobalAction("showManualDownloadDialog", showManualDownloadDialog);
-        registerGlobalAction("clearCompletedModelsFromStore", clearCompletedModelsFromStore);
         registerGlobalAction("clearModelValidationErrorsFromFrontendState", clearModelValidationErrorsFromFrontendState);
         registerGlobalAction("refreshAfterModelDownload", refreshAfterModelDownload);
+        registerGlobalAction("forceRefreshModels", forceRefreshModels);
         installReactiveMissingModelSubscription();
         installApiValidationAndDownloadListeners();
         installEventDrivenUnbypassHook();

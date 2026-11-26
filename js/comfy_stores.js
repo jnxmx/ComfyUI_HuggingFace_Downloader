@@ -413,3 +413,65 @@ export const dismissNativeErrorDialog = async () => {
     } catch (_) {}
     return false;
 };
+
+let modelRefreshInFlight = null;
+let modelRefreshPending = false;
+
+const waitForNativeRefreshIdle = async (store, timeoutMs = 6000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Boolean(unwrapStoreValue(store?.isRefreshingMissingModels)) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+};
+
+const executeSingleForcedModelRefresh = async () => {
+    const missingModelStore = await resolveMissingModelStore();
+    if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
+        await waitForNativeRefreshIdle(missingModelStore);
+        if (!Boolean(unwrapStoreValue(missingModelStore.isRefreshingMissingModels))) {
+            await missingModelStore.refreshMissingModels();
+        } else if (app && typeof app.refreshMissingModels === "function") {
+            await app.refreshMissingModels({ silent: true });
+        }
+    } else if (app && typeof app.refreshMissingModels === "function") {
+        await app.refreshMissingModels({ silent: true });
+    } else if (app && typeof app.reloadNodeDefs === "function") {
+        await app.reloadNodeDefs();
+    }
+
+    try {
+        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+            app.graph.setDirtyCanvas(true, true);
+        }
+        if (app?.canvas && typeof app.canvas.setDirty === "function") {
+            app.canvas.setDirty(true, true);
+        }
+    } catch (_) {}
+};
+
+export const forceRefreshModels = async () => {
+    if (modelRefreshInFlight) {
+        modelRefreshPending = true;
+        return modelRefreshInFlight;
+    }
+
+    const runner = (async () => {
+        try {
+            do {
+                modelRefreshPending = false;
+                await executeSingleForcedModelRefresh();
+            } while (modelRefreshPending);
+            return true;
+        } catch (err) {
+            console.warn("[HF Downloader] forceRefreshModels failed:", err);
+            return false;
+        } finally {
+            if (modelRefreshInFlight === runner) {
+                modelRefreshInFlight = null;
+            }
+        }
+    })();
+
+    modelRefreshInFlight = runner;
+    return runner;
+};
