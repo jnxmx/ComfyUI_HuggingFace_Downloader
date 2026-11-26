@@ -3694,7 +3694,7 @@ def search_huggingface_variants(
     results: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
     target_category = str(category or "").strip()
-    if target_category in {"", "all", "other"}:
+    if target_category in {"", "all", "other", "__other__"}:
         target_category = ""
 
     for cand in sorted_candidates[:8]:

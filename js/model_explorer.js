@@ -367,6 +367,170 @@ const showConfirmDialog = ({
         confirmBtn.focus();
     });
 
+const showMoveFolderDialog = ({
+    filename = "",
+    currentFolder = "",
+    folders = [],
+} = {}) =>
+    new Promise((resolve) => {
+        const existing = document.getElementById("hf-model-explorer-move-dialog");
+        if (existing) existing.remove();
+
+        const overlay = document.createElement("div");
+        overlay.id = "hf-model-explorer-move-dialog";
+        applyTemplateDialogOverlayStyle(overlay, 10001);
+
+        const panel = document.createElement("div");
+        applyTemplateDialogPanelStyle(panel, {
+            minWidth: "380px",
+            maxWidth: "520px",
+            width: "min(520px, 100%)",
+            padding: "24px",
+            gap: "14px",
+        });
+
+        const heading = document.createElement("div");
+        heading.textContent = "Move model";
+        Object.assign(heading.style, {
+            fontFamily: "Inter, Arial, sans-serif",
+            fontSize: "20px",
+            fontWeight: "600",
+            lineHeight: "1.25",
+            color: "var(--input-text)",
+        });
+
+        const detail = document.createElement("div");
+        detail.textContent = currentFolder
+            ? `Move "${filename}" from "${currentFolder}" to:`
+            : `Move "${filename}" to:`;
+        Object.assign(detail.style, {
+            fontSize: "14px",
+            lineHeight: "1.4",
+            color: "var(--descrip-text, #c4c9d4)",
+            wordBreak: "break-word",
+        });
+
+        const select = document.createElement("select");
+        Object.assign(select.style, {
+            width: "100%",
+            height: "38px",
+            borderRadius: "8px",
+            border: "1px solid var(--border, #494a50)",
+            background: "var(--secondary, #262729)",
+            color: "var(--foreground, #ffffff)",
+            padding: "0 10px",
+            fontSize: "14px",
+            fontFamily: 'var(--font-inter, "Inter", sans-serif)',
+            outline: "none",
+            boxSizing: "border-box",
+        });
+
+        const uniqueFolders = [...new Set((Array.isArray(folders) ? folders : []).map((f) => String(f || "").trim()).filter(Boolean))];
+        if (currentFolder && !uniqueFolders.includes(currentFolder)) {
+            uniqueFolders.unshift(currentFolder);
+        }
+        uniqueFolders.sort((a, b) => a.localeCompare(b));
+
+        for (const folder of uniqueFolders) {
+            const opt = document.createElement("option");
+            opt.value = folder;
+            opt.textContent = folder === currentFolder ? `${folder} (current)` : folder;
+            select.appendChild(opt);
+        }
+
+        const customOpt = document.createElement("option");
+        customOpt.value = "__custom__";
+        customOpt.textContent = "Custom folder...";
+        select.appendChild(customOpt);
+
+        const defaultFolder = uniqueFolders.find((f) => f !== currentFolder) || currentFolder || "__custom__";
+        select.value = defaultFolder;
+
+        const customInput = document.createElement("input");
+        customInput.type = "text";
+        customInput.placeholder = "e.g. loras/wan or background_removal";
+        Object.assign(customInput.style, {
+            display: select.value === "__custom__" ? "block" : "none",
+            width: "100%",
+            height: "38px",
+            borderRadius: "8px",
+            border: "1px solid var(--border, #494a50)",
+            background: "var(--secondary, #262729)",
+            color: "var(--foreground, #ffffff)",
+            padding: "0 10px",
+            fontSize: "14px",
+            fontFamily: 'var(--font-inter, "Inter", sans-serif)',
+            outline: "none",
+            boxSizing: "border-box",
+        });
+
+        select.addEventListener("change", () => {
+            const isCustom = select.value === "__custom__";
+            customInput.style.display = isCustom ? "block" : "none";
+            if (isCustom) customInput.focus();
+        });
+
+        const actions = document.createElement("div");
+        Object.assign(actions.style, {
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "8px",
+            marginTop: "4px",
+        });
+
+        let settled = false;
+        const onKeyDown = (event) => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                settle(null);
+            } else if (event.key === "Enter" && document.activeElement === customInput) {
+                event.preventDefault();
+                submit();
+            }
+        };
+        const settle = (value) => {
+            if (settled) return;
+            settled = true;
+            document.removeEventListener("keydown", onKeyDown);
+            overlay.remove();
+            resolve(value);
+        };
+        const submit = () => {
+            const chosen = select.value === "__custom__" ? customInput.value.trim() : select.value.trim();
+            if (!chosen) {
+                customInput.focus();
+                return;
+            }
+            settle(chosen);
+        };
+
+        const cancelBtn = createConfirmDialogButton("Cancel", "default");
+        cancelBtn.onclick = () => settle(null);
+
+        const moveBtn = createConfirmDialogButton("Move", "primary");
+        moveBtn.onclick = submit;
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(moveBtn);
+
+        panel.appendChild(heading);
+        panel.appendChild(detail);
+        panel.appendChild(select);
+        panel.appendChild(customInput);
+        panel.appendChild(actions);
+        overlay.appendChild(panel);
+
+        overlay.addEventListener("click", (event) => {
+            if (event.target === overlay) {
+                settle(null);
+            }
+        });
+
+        document.addEventListener("keydown", onKeyDown);
+        document.body.appendChild(overlay);
+        select.focus();
+    });
+
 let modelToNodeStorePromise = null;
 const resolveModelToNodeStore = async () => {
     if (modelToNodeStorePromise) {
@@ -553,8 +717,8 @@ class ModelExplorerDialog {
         this.searchTimer = null;
     }
 
-    async fetchExplorer(pathAndQuery, init = {}) {
-        return await fetchWithTimeout(`${MODEL_EXPLORER_API_BASE}${pathAndQuery}`, init);
+    async fetchExplorer(pathAndQuery, init = {}, timeoutMs = 15000) {
+        return await fetchWithTimeout(`${MODEL_EXPLORER_API_BASE}${pathAndQuery}`, init, timeoutMs);
     }
 
     ensureStyles() {
@@ -763,82 +927,36 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-hfsearch-btn[hidden] {
                 display: none;
             }
-            .hf-me-hfsearch-overlay {
-                position: fixed;
-                inset: 0;
-                z-index: 100020;
-                background: rgba(0, 0, 0, 0.55);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 1.5rem;
-            }
-            .hf-me-hfsearch-modal {
-                width: min(760px, 95vw);
-                max-height: 82vh;
-                background: var(--background, #171718);
-                color: var(--foreground, #ffffff);
-                border: 1px solid var(--border, #494a50);
-                border-radius: 16px;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
-                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
-                font-family: var(--font-inter, "Inter", sans-serif);
-            }
-            .hf-me-hfsearch-header {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 0.75rem;
-                padding: 16px 20px;
-                border-bottom: 1px solid var(--border, #494a50);
-                font-weight: 600;
-                font-size: 16px;
-            }
-            .hf-me-hfsearch-body {
-                padding: 12px 20px 20px;
-                overflow-y: auto;
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-            }
-            .hf-me-hfsearch-row {
+            #hf-model-explorer-dialog .hf-me-hfsearch-banner {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
                 gap: 12px;
-                padding: 10px 14px;
-                border-radius: 8px;
-                background: var(--color-charcoal-700, #202121);
-                border: 1px solid var(--border, #494a50);
+                padding: 10px 16px;
+                border-radius: 12px;
+                background: var(--secondary, #262729);
+                color: var(--foreground, #ffffff);
+                font-family: var(--font-inter, "Inter", sans-serif);
+                font-size: 13px;
+                line-height: 18px;
             }
-            .hf-me-hfsearch-meta {
-                min-width: 0;
-                flex: 1 1 auto;
+            #hf-model-explorer-dialog .hf-me-hfsearch-banner-title {
                 display: flex;
-                flex-direction: column;
-                gap: 4px;
-            }
-            .hf-me-hfsearch-fn {
-                font-weight: 600;
-                font-size: 14px;
-                word-break: break-all;
-            }
-            .hf-me-hfsearch-sub {
-                font-size: 12px;
-                color: var(--muted-foreground, #8a8a8a);
-                display: flex;
-                flex-wrap: wrap;
-                gap: 10px;
                 align-items: center;
+                gap: 8px;
+                min-width: 0;
+                font-weight: 500;
             }
-            .hf-me-hfsearch-sub a {
-                color: var(--color-azure-400, #31b9f4);
+            #hf-model-explorer-dialog .hf-me-tag--link {
+                color: var(--primary, #0b8ce9);
                 text-decoration: none;
             }
-            .hf-me-hfsearch-sub a:hover {
+            #hf-model-explorer-dialog .hf-me-tag--link:hover {
                 text-decoration: underline;
+            }
+            #hf-model-explorer-dialog .hf-me-tag--priority {
+                background: rgba(34, 197, 94, 0.16);
+                color: #86efac;
             }
             #hf-model-explorer-dialog .hf-me-searchbox {
                 position: relative;
@@ -1351,9 +1469,9 @@ class ModelExplorerDialog {
                 justify-content: flex-end;
                 gap: 6px;
                 align-self: center;
-                width: calc(36px + 6.5rem + 6px);
-                min-width: calc(36px + 6.5rem + 6px);
-                max-width: calc(36px + 6.5rem + 6px);
+                width: calc(36px + 36px + 6.5rem + 12px);
+                min-width: calc(36px + 36px + 6.5rem + 12px);
+                max-width: calc(36px + 36px + 6.5rem + 12px);
             }
             #hf-model-explorer-dialog .hf-me-action-btn {
                 position: relative;
@@ -1391,6 +1509,29 @@ class ModelExplorerDialog {
             }
             #hf-model-explorer-dialog .hf-me-action-btn--secondary:hover:not(:disabled),
             #hf-model-explorer-dialog .hf-me-action-btn--primary:hover:not(:disabled) {
+                background: var(--border, #494a50);
+            }
+            #hf-model-explorer-dialog .hf-me-action-btn--move {
+                background: var(--muted, #3c3d42);
+                color: var(--foreground, #ffffff);
+                min-width: 36px;
+                width: 36px;
+                padding: 0;
+                opacity: 0;
+                pointer-events: none;
+                transform: scale(0.95);
+                transition: opacity 150ms ease, transform 150ms ease, background-color 150ms ease;
+            }
+            #hf-model-explorer-dialog .hf-me-row:hover .hf-me-action-btn--move,
+            #hf-model-explorer-dialog .hf-me-row:focus-within .hf-me-action-btn--move {
+                opacity: 1;
+                pointer-events: auto;
+                transform: none;
+            }
+            #hf-model-explorer-dialog .hf-me-action-btn--move:disabled {
+                opacity: 1;
+            }
+            #hf-model-explorer-dialog .hf-me-action-btn--move:hover:not(:disabled) {
                 background: var(--border, #494a50);
             }
             #hf-model-explorer-dialog .hf-me-action-btn--destructive {
@@ -2099,12 +2240,13 @@ class ModelExplorerDialog {
     }
 
     async refreshGroups() {
+        this.hfSearchSeq = (this.hfSearchSeq || 0) + 1;
         this.setLoading(true);
         try {
             const params = new URLSearchParams();
             const selectedBase = Array.isArray(this.filters.base) ? this.filters.base : [];
             const selectedPrecision = Array.isArray(this.filters.precision) ? this.filters.precision : [];
-            if (this.filters.category && this.filters.category !== MODEL_EXPLORER_OTHER_CATEGORY_KEY) {
+            if (this.filters.category) {
                 params.set("category", this.filters.category);
             }
             if (selectedBase.length === 1) params.set("base", selectedBase[0]);
@@ -2113,7 +2255,7 @@ class ModelExplorerDialog {
             if (this.filters.installedOnly) params.set("installed_only", "true");
             params.set("installed_first", "true");
             params.set("offset", "0");
-            params.set("limit", "300");
+            params.set("limit", "1500");
             const resp = await this.fetchExplorer(`/groups?${params.toString()}`);
             if (!resp.ok) {
                 this.renderError(`Model Explorer groups failed (HTTP ${resp.status}).`);
@@ -2316,6 +2458,9 @@ class ModelExplorerDialog {
 
         const actions = installed
             ? `
+                <button class="hf-me-action-btn p-button p-component hf-me-action-btn--move" data-action="move" data-key="${variantKey}" aria-label="Move model to another folder" title="Move to another folder">
+                    <i class="icon-[lucide--arrow-right] size-3.5" aria-hidden="true"></i>
+                </button>
                 <button class="hf-me-action-btn p-button p-component hf-me-action-btn--destructive" data-action="delete" data-key="${variantKey}" aria-label="Delete model">
                     <i class="icon-[lucide--trash-2] size-3.5" aria-hidden="true"></i>
                 </button>
@@ -2449,6 +2594,8 @@ class ModelExplorerDialog {
                     await this.useVariant(pair.group, pair.variant, button);
                 } else if (action === "delete") {
                     await this.deleteVariant(pair.group, pair.variant, button);
+                } else if (action === "move") {
+                    await this.moveVariant(pair.group, pair.variant, button);
                 }
             };
         });
@@ -2486,108 +2633,154 @@ class ModelExplorerDialog {
         await this.refreshGroups();
     }
 
-    openHfSearchResultsModal(query) {
-        const existing = document.querySelector(".hf-me-hfsearch-overlay");
-        if (existing) existing.remove();
+    async searchOnHuggingFace(query) {
+        const cleanQuery = String(query || "").trim();
+        if (cleanQuery.length < 2 || !this.body) return;
 
-        const overlay = document.createElement("div");
-        overlay.className = "hf-me-hfsearch-overlay";
-        overlay.innerHTML = `
-            <div class="hf-me-hfsearch-modal" role="dialog" aria-modal="true">
-                <div class="hf-me-hfsearch-header">
-                    <span>Hugging Face Search: "${escapeHtml(query)}"</span>
-                    <button type="button" class="p-button p-component p-button-text" data-hfsearch-close="1" style="padding:0.25rem 0.5rem;">✕</button>
+        const seq = (this.hfSearchSeq = (this.hfSearchSeq || 0) + 1);
+        const renderBanner = (subtitleHtml) => `
+            <div class="hf-me-hfsearch-banner">
+                <div class="hf-me-hfsearch-banner-title">
+                    <i class="pi pi-globe" aria-hidden="true"></i>
+                    <span>${subtitleHtml}</span>
                 </div>
-                <div class="hf-me-hfsearch-body">
-                    <div class="hf-me-empty">Searching Hugging Face for "${escapeHtml(query)}"...</div>
-                </div>
+                <button type="button" class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-hf-back="1">
+                    <i class="icon-[lucide--arrow-left] size-3.5" aria-hidden="true"></i>
+                    <span>Back to catalog</span>
+                </button>
             </div>
         `;
-        const closeModal = () => overlay.remove();
-        overlay.addEventListener("click", (e) => {
-            if (e.target === overlay || e.target.closest("[data-hfsearch-close]")) {
-                closeModal();
+        const bindBackButton = () => {
+            const backBtn = this.body.querySelector("[data-hf-back]");
+            if (backBtn) {
+                backBtn.onclick = () => {
+                    this.hfSearchSeq += 1;
+                    this.renderGroups();
+                };
             }
-        });
-        document.body.appendChild(overlay);
-        return overlay;
-    }
+        };
 
-    async searchOnHuggingFace(query) {
-        const overlay = this.openHfSearchResultsModal(query);
-        const body = overlay.querySelector(".hf-me-hfsearch-body");
+        this.body.innerHTML = `
+            ${renderBanner(`Searching Hugging Face for "${escapeHtml(cleanQuery)}"...`)}
+            <div class="hf-me-empty">Searching Hugging Face for "${escapeHtml(cleanQuery)}"...</div>
+        `;
+        bindBackButton();
+
         try {
-            const params = new URLSearchParams({ q: query, limit: "15" });
-            if (this.filters.category) {
+            const params = new URLSearchParams({ q: cleanQuery, limit: "15" });
+            if (this.filters.category && this.filters.category !== MODEL_EXPLORER_OTHER_CATEGORY_KEY) {
                 params.set("category", this.filters.category);
             }
-            const resp = await this.fetchExplorer(`/hf_search?${params.toString()}`);
+            const resp = await this.fetchExplorer(`/hf_search?${params.toString()}`, {}, 45000);
             const data = await resp.json().catch(() => ({}));
-            if (!overlay.isConnected) return;
+            if (seq !== this.hfSearchSeq || !this.body.isConnected) return;
             if (!resp.ok || data.ok === false) {
-                body.innerHTML = `<div class="hf-me-empty">Search failed: ${escapeHtml(data.error || `HTTP ${resp.status}`)}</div>`;
+                this.body.innerHTML = `
+                    ${renderBanner(`Hugging Face search failed for "${escapeHtml(cleanQuery)}"`)}
+                    <div class="hf-me-empty">Search failed: ${escapeHtml(data.error || `HTTP ${resp.status}`)}</div>
+                `;
+                bindBackButton();
                 return;
             }
             const results = Array.isArray(data.results) ? data.results : [];
             if (!results.length) {
-                body.innerHTML = `<div class="hf-me-empty">No matching model files found on Hugging Face for "${escapeHtml(query)}".</div>`;
+                this.body.innerHTML = `
+                    ${renderBanner(`Hugging Face results for "${escapeHtml(cleanQuery)}" (0)`)}
+                    <div class="hf-me-empty">No matching model files found on Hugging Face for "${escapeHtml(cleanQuery)}".</div>
+                `;
+                bindBackButton();
                 return;
             }
-            body.innerHTML = results.map((item, idx) => {
-                const repoUrl = `https://huggingface.co/${escapeHtml(item.repo_id)}`;
-                const badge = item.is_priority_author
-                    ? `<span style="background:rgba(34,197,94,0.18);color:#86efac;padding:0.08rem 0.35rem;border-radius:0.25rem;">priority</span>`
-                    : "";
-                const folder = escapeHtml(item.directory || this.filters.category || "checkpoints");
-                return `
-                    <div class="hf-me-hfsearch-row">
-                        <div class="hf-me-hfsearch-meta">
-                            <div class="hf-me-hfsearch-fn">${escapeHtml(item.filename)}</div>
-                            <div class="hf-me-hfsearch-sub">
-                                <a href="${repoUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.repo_id)}</a>
-                                ${badge}
-                                <span>→ ${folder}/</span>
-                                <span>♥ ${Number(item.likes || 0)}</span>
+
+            const defaultFolder =
+                this.filters.category && this.filters.category !== MODEL_EXPLORER_OTHER_CATEGORY_KEY
+                    ? this.filters.category
+                    : "checkpoints";
+
+            const rowsHtml = results
+                .map((item, idx) => {
+                    const repoUrl = `https://huggingface.co/${escapeHtml(item.repo_id)}`;
+                    const folder = escapeHtml(item.directory || defaultFolder);
+                    const tags = [
+                        `<a class="hf-me-tag hf-me-tag--link" href="${repoUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.repo_id)}</a>`,
+                    ];
+                    if (item.is_priority_author) {
+                        tags.push(`<span class="hf-me-tag hf-me-tag--priority">priority</span>`);
+                    }
+                    tags.push(`<span class="hf-me-tag">${folder}/</span>`);
+                    tags.push(`<span class="hf-me-tag hf-me-tag--size">♥ ${Number(item.likes || 0)}</span>`);
+
+                    return `
+                        <div class="hf-me-row">
+                            <div class="hf-me-main">
+                                <div class="hf-me-file">${escapeHtml(item.filename)}</div>
+                            </div>
+                            <div class="hf-me-meta">
+                                <div class="hf-me-tags">${tags.join("")}</div>
+                                <div class="hf-me-actions">
+                                    <button type="button" class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-hf-dl-idx="${idx}">
+                                        <i class="icon-[lucide--download] size-3.5" aria-hidden="true"></i>
+                                        <span>Download</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                        <button type="button" class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-hf-dl-idx="${idx}">
-                            <i class="icon-[lucide--download]" aria-hidden="true"></i>
-                            <span>Download</span>
-                        </button>
-                    </div>
-                `;
-            }).join("");
+                    `;
+                })
+                .join("");
 
-            body.querySelectorAll("button[data-hf-dl-idx]").forEach((btn) => {
+            this.body.innerHTML = `
+                ${renderBanner(`Hugging Face results for "${escapeHtml(cleanQuery)}" (${results.length})`)}
+                ${rowsHtml}
+            `;
+            bindBackButton();
+
+            this.body.querySelectorAll("button[data-hf-dl-idx]").forEach((btn) => {
                 btn.onclick = async () => {
                     const item = results[Number(btn.getAttribute("data-hf-dl-idx"))];
                     if (!item?.url) return;
                     btn.disabled = true;
                     btn.textContent = "Queued";
-                    const dlResp = await this.fetchExplorer("/download", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            models: [{
-                                filename: item.filename,
-                                url: item.url,
-                                folder: item.directory || this.filters.category || "checkpoints",
-                            }],
-                        }),
-                    });
-                    if (!dlResp.ok) {
+                    try {
+                        const dlResp = await this.fetchExplorer("/download", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                models: [
+                                    {
+                                        filename: item.filename,
+                                        url: item.url,
+                                        folder: item.directory || defaultFolder,
+                                    },
+                                ],
+                            }),
+                        });
+                        if (!dlResp.ok) {
+                            throw new Error(`HTTP ${dlResp.status}`);
+                        }
+                        showToast({
+                            severity: "info",
+                            summary: "Queued",
+                            detail: `${item.filename} queued for download.`,
+                        });
+                    } catch (dlErr) {
                         btn.disabled = false;
-                        btn.textContent = "Download";
-                        showToast({ severity: "error", summary: "Queue failed", detail: `HTTP ${dlResp.status}` });
-                        return;
+                        btn.innerHTML = `<i class="icon-[lucide--download] size-3.5" aria-hidden="true"></i><span>Download</span>`;
+                        showToast({
+                            severity: "error",
+                            summary: "Queue failed",
+                            detail: String(dlErr?.message || dlErr),
+                        });
                     }
-                    showToast({ severity: "info", summary: "Queued", detail: `${item.filename} queued for download.` });
                 };
             });
         } catch (err) {
-            if (overlay.isConnected) {
-                body.innerHTML = `<div class="hf-me-empty">Search error: ${escapeHtml(err?.message || String(err))}</div>`;
-            }
+            if (seq !== this.hfSearchSeq || !this.body.isConnected) return;
+            this.body.innerHTML = `
+                ${renderBanner(`Hugging Face search failed for "${escapeHtml(cleanQuery)}"`)}
+                <div class="hf-me-empty">Search error: ${escapeHtml(err?.message || String(err))}</div>
+            `;
+            bindBackButton();
         }
     }
 
@@ -2663,6 +2856,74 @@ class ModelExplorerDialog {
             });
             button.disabled = false;
             button.innerHTML = `<i class="icon-[lucide--trash-2] size-3.5" aria-hidden="true"></i>`;
+        }
+    }
+
+    async moveVariant(group, variant, button) {
+        let folders = [];
+        try {
+            const resp = await fetchWithTimeout("/folder_structure", {}, 10000);
+            if (resp.ok) {
+                const data = await resp.json();
+                if (Array.isArray(data)) folders = data;
+            }
+        } catch (_err) {
+            // Fall back to known explorer categories if /folder_structure fails
+        }
+        if (!folders.length && Array.isArray(this.categories)) {
+            folders = this.categories.map((c) => c?.id).filter(Boolean);
+        }
+
+        const currentFolder = String(variant.directory || group.category || "").trim();
+        const targetFolder = await showMoveFolderDialog({
+            filename: variant.filename,
+            currentFolder,
+            folders,
+        });
+        if (!targetFolder) return;
+
+        button.disabled = true;
+        button.innerHTML = `<i class="pi pi-spin pi-spinner-dotted" aria-hidden="true"></i>`;
+        try {
+            const resp = await this.fetchExplorer("/move", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    filename: variant.filename,
+                    category: group.category,
+                    model_path: variant.model_path,
+                    target_folder: targetFolder,
+                }),
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                throw new Error(data?.error || `HTTP ${resp.status}`);
+            }
+            const status = String(data?.status || "");
+            if (status === "already_in_place") {
+                showToast({
+                    severity: "info",
+                    summary: "Already in folder",
+                    detail: `${variant.filename} is already in ${data?.target_folder || targetFolder}.`,
+                });
+                button.disabled = false;
+                button.innerHTML = `<i class="icon-[lucide--arrow-right] size-3.5" aria-hidden="true"></i>`;
+                return;
+            }
+            showToast({
+                severity: "success",
+                summary: "Model moved",
+                detail: `Moved ${variant.filename} to ${data?.target_folder || targetFolder}.`,
+            });
+            await this.refreshAll();
+        } catch (error) {
+            showToast({
+                severity: "error",
+                summary: "Move failed",
+                detail: String(error?.message || error),
+            });
+            button.disabled = false;
+            button.innerHTML = `<i class="icon-[lucide--arrow-right] size-3.5" aria-hidden="true"></i>`;
         }
     }
 }

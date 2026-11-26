@@ -171,6 +171,8 @@ MODEL_LIBRARY_CATEGORY_CANONICAL = {
     "ultralytics/segm": "ultralytics",
     "depthanything": "depthanything",
     "ipadapter": "ipadapter",
+    "frame_interpolation": "frame_interpolation",
+    "background_removal": "background_removal",
     "segformer_b2_clothes": "segformer_b2_clothes",
     "segformer_b3_clothes": "segformer_b3_clothes",
     "segformer_b3_fashion": "segformer_b3_fashion",
@@ -195,7 +197,10 @@ MODEL_EXPLORER_ALLOWED_CATEGORIES = {
     "animatediff_models",
     "animatediff_motion_lora",
     "ipadapter",
+    "frame_interpolation",
+    "background_removal",
 }
+MODEL_EXPLORER_OTHER_CATEGORY_KEY = "__other__"
 
 MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES = {"checkpoints", "diffusion_models", "loras"}
 MODEL_EXPLORER_VISIBLE_SOURCES = {
@@ -351,6 +356,13 @@ def _load_model_explorer_catalog() -> dict:
                 category = str(category or "").strip()
                 if not category:
                     continue
+                if category == "other":
+                    dir_lower = _normalize_rel_path(str(entry.get("directory") or "")).lower()
+                    dir_top = dir_lower.split("/", 1)[0] if dir_lower else ""
+                    if dir_top in {"rife", "film", "interpolation", "frame_interpolation"}:
+                        category = "frame_interpolation"
+                    elif dir_top in {"rmbg", "birefnet", "transparent-background", "background_removal"}:
+                        category = "background_removal"
 
                 type_value = str(entry.get("type") or "").strip().lower()
                 manager_type_value = str(entry.get("manager_type") or "").strip().lower()
@@ -3417,24 +3429,28 @@ def setup(app_or_server):
     _safe_add_route("GET", "/hf_downloader_model_explorer_v2/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/hf_downloader_model_explorer_v2/use", model_explorer_use)
     _safe_add_route("POST", "/hf_downloader_model_explorer_v2/delete", model_explorer_delete)
+    _safe_add_route("POST", "/hf_downloader_model_explorer_v2/move", model_explorer_move)
     _safe_add_route("GET", "/hf_model_explorer/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/hf_model_explorer/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/hf_model_explorer/groups", model_explorer_list_groups)
     _safe_add_route("GET", "/hf_model_explorer/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/hf_model_explorer/use", model_explorer_use)
     _safe_add_route("POST", "/hf_model_explorer/delete", model_explorer_delete)
+    _safe_add_route("POST", "/hf_model_explorer/move", model_explorer_move)
     _safe_add_route("GET", "/api/hf_downloader/model_explorer/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/api/hf_downloader/model_explorer/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/api/hf_downloader/model_explorer/groups", model_explorer_list_groups)
     _safe_add_route("GET", "/api/hf_downloader/model_explorer/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/api/hf_downloader/model_explorer/use", model_explorer_use)
     _safe_add_route("POST", "/api/hf_downloader/model_explorer/delete", model_explorer_delete)
+    _safe_add_route("POST", "/api/hf_downloader/model_explorer/move", model_explorer_move)
     _safe_add_route("GET", "/api/model_explorer/categories", model_explorer_list_categories)
     _safe_add_route("GET", "/api/model_explorer/filters", model_explorer_get_filters)
     _safe_add_route("GET", "/api/model_explorer/groups", model_explorer_list_groups)
     _safe_add_route("GET", "/api/model_explorer/hf_search", model_explorer_hf_search)
     _safe_add_route("POST", "/api/model_explorer/use", model_explorer_use)
     _safe_add_route("POST", "/api/model_explorer/delete", model_explorer_delete)
+    _safe_add_route("POST", "/api/model_explorer/move", model_explorer_move)
 
     _safe_add_route("GET", "/folder_structure", folder_structure)
     _safe_add_route("GET", "/backup_browser_tree", backup_browser_tree)
@@ -4858,6 +4874,14 @@ def _model_explorer_filename_from_local_record(record: dict, category: str) -> s
     return filename
 
 
+def _model_explorer_matches_category_filter(category: str, category_filter: str) -> bool:
+    if not category_filter:
+        return True
+    if category_filter == MODEL_EXPLORER_OTHER_CATEGORY_KEY:
+        return bool(category) and category not in MODEL_EXPLORER_ALLOWED_CATEGORIES
+    return category == category_filter
+
+
 def _model_explorer_collect_local_only_rows(
     catalog_rows: list[dict],
     local_entries: list[dict],
@@ -4885,7 +4909,7 @@ def _model_explorer_collect_local_only_rows(
         category = _model_explorer_category_from_local_record(record)
         if not category:
             continue
-        if category_filter and category != category_filter:
+        if not _model_explorer_matches_category_filter(category, category_filter):
             continue
         filename = _model_explorer_filename_from_local_record(record, category)
         if not filename:
@@ -4953,13 +4977,14 @@ def _sync_model_explorer_get_filters(category_filter: str, installed_only: bool)
     rows = _model_explorer_collect_rows()
     precisions = set()
     bases = set()
-    local_entries, local_name_map = _scan_local_models_for_explorer(category_filter)
+    scan_category = "" if category_filter == MODEL_EXPLORER_OTHER_CATEGORY_KEY else category_filter
+    local_entries, local_name_map = _scan_local_models_for_explorer(scan_category)
     local_only_rows = _model_explorer_collect_local_only_rows(rows, local_entries, local_name_map, category_filter)
     rows_for_filters = rows + local_only_rows
 
     for row in rows_for_filters:
         category = str(row.get("explorer_category") or "").strip()
-        if category_filter and category != category_filter:
+        if not _model_explorer_matches_category_filter(category, category_filter):
             continue
         if installed_only:
             installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
@@ -5002,7 +5027,8 @@ def _sync_model_explorer_list_groups(
     installed_first: bool,
 ) -> dict:
     rows = _model_explorer_collect_rows()
-    local_entries, local_name_map = _scan_local_models_for_explorer(category_filter)
+    scan_category = "" if category_filter == MODEL_EXPLORER_OTHER_CATEGORY_KEY else category_filter
+    local_entries, local_name_map = _scan_local_models_for_explorer(scan_category)
     local_only_rows = _model_explorer_collect_local_only_rows(rows, local_entries, local_name_map, category_filter)
     all_rows = rows + local_only_rows
 
@@ -5013,7 +5039,7 @@ def _sync_model_explorer_list_groups(
             continue
 
         category = str(row.get("explorer_category") or "").strip()
-        if category_filter and category != category_filter:
+        if not _model_explorer_matches_category_filter(category, category_filter):
             continue
 
         base_value = _canonical_model_explorer_base(str(row.get("explorer_base") or "").strip()) or (
@@ -5188,7 +5214,11 @@ async def model_explorer_use(request):
     return web.json_response(payload, status=status)
 
 
-def _sync_model_explorer_delete(filename: str, category: str, requested_model_path: str) -> tuple[dict, int]:
+def _resolve_model_explorer_local_file(
+    filename: str,
+    category: str,
+    requested_model_path: str,
+) -> tuple[dict | None, tuple[dict, int] | None]:
     _, local_name_map = _scan_local_models_for_explorer(category)
     filename_norm = _normalize_rel_path(filename)
     basename = os.path.basename(filename_norm).strip() or filename_norm
@@ -5202,7 +5232,7 @@ def _sync_model_explorer_delete(filename: str, category: str, requested_model_pa
     if not candidates and basename:
         candidates = list(local_name_map.get(basename.lower()) or [])
     if not candidates:
-        return {"error": "Model file not found locally."}, 404
+        return None, ({"error": "Model file not found locally."}, 404)
 
     chosen = None
     preferred = []
@@ -5228,12 +5258,12 @@ def _sync_model_explorer_delete(filename: str, category: str, requested_model_pa
         chosen = fallback[0]
 
     if chosen is None:
-        return {"error": "No matching installed model path found."}, 404
+        return None, ({"error": "No matching installed model path found."}, 404)
 
     candidate, rel_path, widget_path = chosen
     absolute_path = os.path.abspath(str(candidate.get("absolute_path") or ""))
     if not absolute_path or not os.path.isfile(absolute_path):
-        return {"error": "Resolved model path is not a file."}, 404
+        return None, ({"error": "Resolved model path is not a file."}, 404)
     try:
         import folder_paths
     except ImportError:
@@ -5258,7 +5288,23 @@ def _sync_model_explorer_delete(filename: str, category: str, requested_model_pa
             break
 
     if not allowed:
-        return {"error": "Refusing to delete path outside registered model paths."}, 400
+        return None, ({"error": "Refusing to modify path outside registered model paths."}, 400)
+
+    return {
+        "absolute_path": absolute_path,
+        "rel_path": rel_path,
+        "widget_path": widget_path,
+    }, None
+
+
+def _sync_model_explorer_delete(filename: str, category: str, requested_model_path: str) -> tuple[dict, int]:
+    resolved, err = _resolve_model_explorer_local_file(filename, category, requested_model_path)
+    if err is not None:
+        return err
+
+    absolute_path = resolved["absolute_path"]
+    rel_path = resolved["rel_path"]
+    widget_path = resolved["widget_path"]
 
     try:
         os.remove(absolute_path)
@@ -5271,6 +5317,85 @@ def _sync_model_explorer_delete(filename: str, category: str, requested_model_pa
         "filename": filename,
         "rel_path": rel_path,
         "model_path": widget_path,
+    }, 200
+
+
+def _sync_model_explorer_move(
+    filename: str,
+    category: str,
+    requested_model_path: str,
+    target_folder: str,
+) -> tuple[dict, int]:
+    safe_target = sanitize_rel_folder(target_folder)
+    if not safe_target:
+        return {"error": "Invalid target folder."}, 400
+
+    resolved, err = _resolve_model_explorer_local_file(filename, category, requested_model_path)
+    if err is not None:
+        return err
+
+    source_path = resolved["absolute_path"]
+    source_basename = os.path.basename(source_path)
+    if not source_basename:
+        return {"error": "Could not determine source filename."}, 400
+
+    norm_target = _normalize_rel_path(safe_target)
+    top_folder, _, sub_folder = norm_target.partition("/")
+    search_roots = _resolve_model_search_paths(top_folder)
+    if not search_roots:
+        return {"error": "Could not resolve target folder path."}, 500
+
+    models_root = os.path.abspath(_get_models_root())
+    preferred_root = None
+    for root in search_roots:
+        if _is_within_directory(models_root, source_path) and _is_within_directory(models_root, root):
+            preferred_root = root
+            break
+    if preferred_root is None:
+        preferred_root = search_roots[0]
+
+    dest_dir = os.path.abspath(os.path.join(preferred_root, sub_folder)) if sub_folder else os.path.abspath(preferred_root)
+    if not _is_within_directory(preferred_root, dest_dir) or not is_path_within_allowed_roots(dest_dir):
+        return {"error": "Refusing to move outside registered model paths."}, 400
+
+    dest_path = os.path.abspath(os.path.join(dest_dir, source_basename))
+    if not _is_within_directory(dest_dir, dest_path):
+        return {"error": "Invalid destination path."}, 400
+
+    if dest_path == source_path:
+        return {
+            "status": "already_in_place",
+            "filename": filename,
+            "from": source_path,
+            "to": dest_path,
+            "target_folder": norm_target,
+        }, 200
+
+    if os.path.exists(dest_path):
+        return {
+            "error": f"Destination already exists: {dest_path}",
+            "status": "destination_exists",
+        }, 409
+
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        shutil.move(source_path, dest_path)
+    except Exception as e:
+        return {"error": f"Move failed: {e}"}, 500
+
+    _invalidate_model_library_local_cache()
+    if folder_paths is not None and hasattr(folder_paths, "clear_cache"):
+        try:
+            folder_paths.clear_cache()
+        except Exception:
+            pass
+
+    return {
+        "status": "moved",
+        "filename": filename,
+        "from": source_path,
+        "to": dest_path,
+        "target_folder": norm_target,
     }, 200
 
 
@@ -5287,6 +5412,31 @@ async def model_explorer_delete(request):
         return web.json_response({"error": "Missing filename."}, status=400)
 
     payload, status = await asyncio.to_thread(_sync_model_explorer_delete, filename, category, requested_model_path)
+    return web.json_response(payload, status=status)
+
+
+async def model_explorer_move(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    filename = str(data.get("filename") or "").strip()
+    category = str(data.get("category") or "").strip()
+    requested_model_path = _normalize_rel_path(str(data.get("model_path") or "").strip())
+    target_folder = str(data.get("target_folder") or "").strip()
+    if not filename:
+        return web.json_response({"error": "Missing filename."}, status=400)
+    if not target_folder:
+        return web.json_response({"error": "Missing target_folder."}, status=400)
+
+    payload, status = await asyncio.to_thread(
+        _sync_model_explorer_move,
+        filename,
+        category,
+        requested_model_path,
+        target_folder,
+    )
     return web.json_response(payload, status=status)
 
 
