@@ -6115,6 +6115,9 @@ app.registerExtension({
                 if (aborted) return;
                 aborted = true;
                 skipRequested = false;
+                if (activeAutoDownloadCancel === cancelCurrentScan) {
+                    activeAutoDownloadCancel = null;
+                }
                 cleanupSearchListener();
                 try {
                     controller.abort();
@@ -6131,7 +6134,6 @@ app.registerExtension({
                     } catch (_) {}
                 }
             };
-            activeAutoDownloadCancel = cancelCurrentScan;
 
             try {
                 let initialWorkflow = null;
@@ -6166,6 +6168,36 @@ app.registerExtension({
                 } catch (_) {
                     initialModels = [];
                 }
+
+                const preResolvedWorkflow = initialWorkflow || serializeWorkflowForModelScan();
+                const preResolvedFrontendMissing =
+                    await createRunHookFallbackMissingModelsFromFrontendStore(
+                        Array.isArray(options?.frontendMissingModelCandidates)
+                            ? options.frontendMissingModelCandidates
+                            : null
+                    );
+                if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration) {
+                    cancelCurrentScan();
+                    return;
+                }
+                if (
+                    preResolvedFrontendMissing.length > 0 &&
+                    preResolvedFrontendMissing.every((entry) => Boolean(String(entry?.url || "").trim()))
+                ) {
+                    void syncResolvedUrlsIntoNativeMissingModelStore(preResolvedFrontendMissing);
+                    showResultsDialog(
+                        {
+                            request_id: requestId,
+                            missing: preResolvedFrontendMissing,
+                            found: [],
+                            mismatches: [],
+                        },
+                        options || {}
+                    );
+                    return;
+                }
+
+                activeAutoDownloadCancel = cancelCurrentScan;
 
                 // Show loading dialog immediately
                 loadingDlg = showLoadingDialog((targetFilename) => {
@@ -6271,14 +6303,15 @@ app.registerExtension({
                     };
                 }
 
-                const workflow = initialWorkflow || serializeWorkflowForModelScan();
+                const workflow = preResolvedWorkflow || initialWorkflow || serializeWorkflowForModelScan();
                 if (!workflow || typeof workflow !== "object") {
                     throw new Error("Workflow is not ready for missing-model scan.");
                 }
                 console.log("[AutoDownload] Scanning workflow:", workflow);
 
-                const frontendStoreFallbackMissing =
-                    await createRunHookFallbackMissingModelsFromFrontendStore(
+                const frontendStoreFallbackMissing = preResolvedFrontendMissing.length
+                    ? preResolvedFrontendMissing
+                    : await createRunHookFallbackMissingModelsFromFrontendStore(
                         Array.isArray(options?.frontendMissingModelCandidates)
                             ? options.frontendMissingModelCandidates
                             : null
@@ -6290,15 +6323,35 @@ app.registerExtension({
                 if (frontendStoreFallbackMissing.length) {
                     loadingDlg.setStatus("Resolving links...");
                     loadingDlg.setDetail("Checking curated model registry for native missing-model candidates.");
-                    const enrichedFastPathResults = await enrichMissingEntriesViaBackend(
+                    let enrichedFastPathResults = await enrichMissingEntriesViaBackend(
                         frontendStoreFallbackMissing,
                         {
                             workflow,
                             requestId,
-                            skipHfSearch: skipAllUnresolved,
+                            skipHfSearch: true,
                             signal: controller.signal
                         }
                     );
+                    const needsHfNetworkSearch =
+                        !skipAllUnresolved &&
+                        !aborted &&
+                        myLoadGeneration === currentWorkflowLoadGeneration &&
+                        !(enrichedFastPathResults?.cancelled || enrichedFastPathResults?.status === "cancelled") &&
+                        Array.isArray(enrichedFastPathResults?.missing) &&
+                        enrichedFastPathResults.missing.some((entry) => !String(entry?.url || "").trim());
+                    if (needsHfNetworkSearch) {
+                        loadingDlg.setStatus("Searching Hugging Face...");
+                        loadingDlg.setDetail("Looking up remaining missing models on Hugging Face.");
+                        enrichedFastPathResults = await enrichMissingEntriesViaBackend(
+                            enrichedFastPathResults.missing,
+                            {
+                                workflow,
+                                requestId,
+                                skipHfSearch: false,
+                                signal: controller.signal
+                            }
+                        );
+                    }
                     if (loadingDlg) {
                         cleanupSearchListener();
                         loadingDlg.cleanup();
@@ -9532,14 +9585,18 @@ app.registerExtension({
             return false;
         };
 
+        let workflowOpenTriggerInFlightGen = -1;
+
         const triggerAutoDownloadFromWorkflowOpen = async (candidates = [], workflowGraphData = null, extraOpts = {}) => {
             const myGen = currentWorkflowLoadGeneration;
-            if (workflowOpenTriggeredForCurrentLoad) {
+            if (workflowOpenTriggeredForCurrentLoad || workflowOpenTriggerInFlightGen === myGen) {
                 return false;
             }
             if (workflowGraphData ? isComfyDefaultWorkflow(workflowGraphData) : isLiveGraphDefaultWorkflow(app?.rootGraph)) {
                 return false;
             }
+            workflowOpenTriggerInFlightGen = myGen;
+            try {
             const workflowOpenCandidates = Array.isArray(candidates)
                 ? candidates
                     .filter((candidate) => isMissingModelCandidate(candidate))
@@ -9612,6 +9669,11 @@ app.registerExtension({
                 }
             );
             return true;
+            } finally {
+                if (workflowOpenTriggerInFlightGen === myGen) {
+                    workflowOpenTriggerInFlightGen = -1;
+                }
+            }
         };
 
         const getWorkflowOpenBackendResults = async (graphData = null, expectedGeneration = currentWorkflowLoadGeneration) => {
@@ -9716,7 +9778,7 @@ app.registerExtension({
             if (document.getElementById("auto-download-dialog") || typeof activeAutoDownloadCancel === "function") return;
 
             const cachedEntry = workflowScanCache.get(tabKey);
-            if (cachedEntry && cachedEntry.revKey === revKey) {
+            if (cachedEntry && cachedEntry.revKey === revKey && !cachedEntry.hasMissing) {
                 return;
             }
 
@@ -9725,7 +9787,7 @@ app.registerExtension({
             if (expectedGeneration !== currentWorkflowLoadGeneration) return;
 
             if (liveCandidates.length > 0) {
-                workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true });
+                workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true, hasMissing: true });
                 await triggerAutoDownloadFromWorkflowOpen(liveCandidates, null, {
                     onUserDismiss: () => markCurrentTabDismissed(tabKey, revKey),
                 });
@@ -9735,19 +9797,24 @@ app.registerExtension({
             // Quick local heuristic check before incurring graph serialize + /check_missing_models
             const workflow = serializeWorkflowForModelScan();
             if (!workflow || isComfyDefaultWorkflow(workflow)) {
-                workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true });
+                workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true, hasMissing: false });
                 return;
             }
             if (!workflowLikelyContainsModelReferences(workflow)) {
-                workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true });
+                workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true, hasMissing: false });
                 return;
             }
 
             const backendResults = await getWorkflowOpenBackendResults(workflow, expectedGeneration);
             if (expectedGeneration !== currentWorkflowLoadGeneration) return;
 
-            workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true });
             const backendTargetCount = countDownloadRequiredScanResults(backendResults || {});
+            workflowScanCache.set(tabKey, {
+                revKey,
+                dismissed: false,
+                handled: true,
+                hasMissing: backendTargetCount > 0,
+            });
             const backendSignature = backendTargetCount > 0 ? buildScanResultsSignature(backendResults) : "";
             if (!backendSignature || workflowOpenTriggeredForCurrentLoad) return;
 
@@ -9814,6 +9881,7 @@ app.registerExtension({
             }
             abortActiveAutoDownloadForTabSwitch();
             cachedNativeMissingCandidates = [];
+            workflowOpenTriggerInFlightGen = -1;
             workflowOpenLastTriggeredAt = 0;
             workflowOpenLastHandledSignature = "";
             workflowOpenLastHandledPath = "";
