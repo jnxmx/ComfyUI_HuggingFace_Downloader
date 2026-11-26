@@ -119,10 +119,14 @@ const resolveStoreAsync = async (storeId, maxRetries = 50, retryDelayMs = 300) =
     }
 };
 
-export const resolveMissingModelStore = () => resolveStoreAsync("missingModel");
-export const resolveExecutionErrorStore = () => resolveStoreAsync("executionError");
-export const resolveModelStore = () => resolveStoreAsync("model");
-export const resolveRightSidePanelStore = () => resolveStoreAsync("rightSidePanel");
+export const resolveMissingModelStore = () => resolveStoreAsync("missingModel", 3, 50);
+export const resolveExecutionErrorStore = () => resolveStoreAsync("executionError", 3, 50);
+export const resolveModelStore = async () => {
+    const sync = findPiniaStore("models") || findPiniaStore("model");
+    if (sync) return sync;
+    return (await resolveStoreAsync("models", 1, 0)) || findPiniaStore("model");
+};
+export const resolveRightSidePanelStore = () => resolveStoreAsync("rightSidePanel", 3, 50);
 
 export const getMissingModelCandidates = () => {
     const store = findPiniaStore("missingModel");

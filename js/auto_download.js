@@ -7366,9 +7366,13 @@ app.registerExtension({
 
             ensureNativeSidebarStyles();
             ensureGatedAccessStyles();
+            const storeCandidatesFallback = getMissingModelCandidates();
+            if (storeCandidatesFallback.length > 0 && !cachedNativeMissingCandidates.length) {
+                cachedNativeMissingCandidates = storeCandidatesFallback;
+            }
             const activeCandidates = Array.isArray(candidates) && candidates.length
                 ? candidates
-                : cachedNativeMissingCandidates;
+                : (cachedNativeMissingCandidates.length ? cachedNativeMissingCandidates : storeCandidatesFallback);
 
             const uncheckedUrls = [];
 
@@ -10145,6 +10149,42 @@ app.registerExtension({
                     }, delayMs);
                 }
             }, { immediate: true });
+
+            if (typeof document !== "undefined") {
+                document.addEventListener("click", (event) => {
+                    const target = event?.target;
+                    if (!(target instanceof Element)) return;
+                    if (
+                        !target.closest(
+                            '[aria-label*="properties panel" i], [data-testid^="panel-tab-"], [data-testid="error-overlay"] button'
+                        )
+                    ) {
+                        return;
+                    }
+                    const storeCandidates = getMissingModelCandidates();
+                    if (storeCandidates.length > 0 && !cachedNativeMissingCandidates.length) {
+                        cachedNativeMissingCandidates = storeCandidates;
+                    }
+                    const hasCandidates =
+                        cachedNativeMissingCandidates.length > 0 ||
+                        storeCandidates.length > 0 ||
+                        Boolean(document.querySelector(MISSING_MODELS_LIST_SELECTOR)) ||
+                        Boolean(document.querySelector('[data-testid="missing-model-importable-rows"], [data-testid="missing-model-actions"]'));
+                    if (!hasCandidates) return;
+
+                    void enrichNativeMissingModelStoreFromCatalog();
+                    if (typeof requestAnimationFrame === "function") {
+                        requestAnimationFrame(() => syncMissingModelsObserverWithStore(true));
+                    } else {
+                        syncMissingModelsObserverWithStore(true);
+                    }
+                    for (const delayMs of [120, 350]) {
+                        setTimeout(() => {
+                            syncMissingModelsObserverWithStore(true);
+                        }, delayMs);
+                    }
+                }, true);
+            }
         };
 
         const installApiValidationAndDownloadListeners = () => {
