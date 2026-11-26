@@ -86,7 +86,7 @@ export const findPiniaStore = (storeId) => {
     return null;
 };
 
-const resolveStoreAsync = async (storeId, maxRetries = 6, retryDelayMs = 120) => {
+const resolveStoreAsync = async (storeId, maxRetries = 50, retryDelayMs = 300) => {
     const syncStore = findPiniaStore(storeId);
     if (syncStore) return syncStore;
 
@@ -128,169 +128,212 @@ export const getMissingModelCandidates = () => {
     return Array.isArray(list) ? list : [];
 };
 
+const pendingStoreSubscriptions = new Set();
+
+export const rebindPendingStoreSubscriptions = () => {
+    let reboundCount = 0;
+    for (const entry of Array.from(pendingStoreSubscriptions)) {
+        const store = findPiniaStore(entry.storeId);
+        if (store && entry.bind(store)) {
+            reboundCount += 1;
+        }
+    }
+    return reboundCount;
+};
+
+const observePiniaStore = (storeId, attachFn, { immediate = false } = {}) => {
+    let cancelled = false;
+    let bound = false;
+    let cleanupFn = null;
+    let pendingEntry = null;
+
+    const tryBind = (store) => {
+        if (cancelled || bound || !store) return false;
+        bound = true;
+        if (pendingEntry) {
+            pendingStoreSubscriptions.delete(pendingEntry);
+            pendingEntry = null;
+        }
+        cleanupFn = attachFn(store, immediate);
+        return true;
+    };
+
+    const syncStore = findPiniaStore(storeId);
+    if (syncStore) {
+        tryBind(syncStore);
+    } else {
+        pendingEntry = { storeId, bind: tryBind };
+        pendingStoreSubscriptions.add(pendingEntry);
+        void resolveStoreAsync(storeId).then((store) => {
+            if (store) {
+                tryBind(store);
+            }
+        });
+    }
+
+    return () => {
+        cancelled = true;
+        if (pendingEntry) {
+            pendingStoreSubscriptions.delete(pendingEntry);
+            pendingEntry = null;
+        }
+        try {
+            if (typeof cleanupFn === "function") cleanupFn();
+        } catch (_) {}
+    };
+};
+
 export const subscribeMissingModels = (callback, { immediate = false } = {}) => {
     if (typeof callback !== "function") {
         return () => {};
     }
-    let cancelled = false;
-    let storeUnsub = null;
-    let actionUnsub = null;
-
-    const emitCurrent = (store) => {
-        if (cancelled || !store) return;
-        const candidates = unwrapStoreValue(store.missingModelCandidates);
-        callback(Array.isArray(candidates) ? candidates : [], store);
-    };
-
-    void resolveMissingModelStore().then((store) => {
-        if (cancelled || !store) return;
-        if (typeof store.$subscribe === "function") {
-            storeUnsub = store.$subscribe(
-                () => {
-                    emitCurrent(store);
-                },
-                { detached: true }
-            );
-        } else if (typeof store.$onAction === "function") {
-            actionUnsub = store.$onAction(({ name, after }) => {
-                if (
-                    name === "setMissingModels" ||
-                    name === "addMissingModels" ||
-                    name === "clearMissingModels" ||
-                    name.startsWith("removeMissingModel")
-                ) {
-                    after(() => emitCurrent(store));
-                }
-            }, true);
-        }
-        if (immediate) {
-            emitCurrent(store);
-        }
-    });
-
-    return () => {
-        cancelled = true;
-        try {
-            if (typeof storeUnsub === "function") storeUnsub();
-        } catch (_) {}
-        try {
-            if (typeof actionUnsub === "function") actionUnsub();
-        } catch (_) {}
-    };
+    return observePiniaStore(
+        "missingModel",
+        (store, shouldEmitImmediate) => {
+            let storeUnsub = null;
+            let actionUnsub = null;
+            const emitCurrent = () => {
+                const candidates = unwrapStoreValue(store.missingModelCandidates);
+                callback(Array.isArray(candidates) ? candidates : [], store);
+            };
+            if (typeof store.$subscribe === "function") {
+                storeUnsub = store.$subscribe(
+                    () => {
+                        emitCurrent();
+                    },
+                    { detached: true }
+                );
+            } else if (typeof store.$onAction === "function") {
+                actionUnsub = store.$onAction(({ name, after }) => {
+                    if (
+                        name === "setMissingModels" ||
+                        name === "addMissingModels" ||
+                        name === "clearMissingModels" ||
+                        name.startsWith("removeMissingModel")
+                    ) {
+                        after(() => emitCurrent());
+                    }
+                }, true);
+            }
+            if (shouldEmitImmediate) {
+                emitCurrent();
+            }
+            return () => {
+                try {
+                    if (typeof storeUnsub === "function") storeUnsub();
+                } catch (_) {}
+                try {
+                    if (typeof actionUnsub === "function") actionUnsub();
+                } catch (_) {}
+            };
+        },
+        { immediate }
+    );
 };
 
 export const subscribeExecutionErrors = (callback, { immediate = false } = {}) => {
     if (typeof callback !== "function") {
         return () => {};
     }
-    let cancelled = false;
-    let storeUnsub = null;
-    let actionUnsub = null;
-
-    const readSnapshot = (store, fromAction = null) => ({
-        isErrorOverlayOpen: Boolean(unwrapStoreValue(store?.isErrorOverlayOpen)),
-        lastNodeErrors: unwrapStoreValue(store?.lastNodeErrors) || null,
-        surfacedNodeErrors: unwrapStoreValue(store?.surfacedNodeErrors) || null,
-        hasMissingError: Boolean(unwrapStoreValue(store?.hasMissingError)),
-        hasAnyError: Boolean(unwrapStoreValue(store?.hasAnyError)),
-        lastExecutionError: unwrapStoreValue(store?.lastExecutionError) || null,
-        store,
-        fromAction,
-    });
-
-    const emitCurrent = (store, fromAction = null) => {
-        if (cancelled || !store) return;
-        callback(readSnapshot(store, fromAction));
-    };
-
-    void resolveExecutionErrorStore().then((store) => {
-        if (cancelled || !store) return;
-        if (typeof store.$subscribe === "function") {
-            storeUnsub = store.$subscribe(
-                () => {
-                    emitCurrent(store, null);
-                },
-                { detached: true }
-            );
-        }
-        if (typeof store.$onAction === "function") {
-            const watchedActions = new Set([
-                "showErrorOverlay",
-                "showExecutionError",
-                "recordNodeErrors",
-                "recordPromptError",
-                "surfaceMissingMedia",
-            ]);
-            actionUnsub = store.$onAction(({ name, after }) => {
-                if (watchedActions.has(name)) {
-                    after(() => emitCurrent(store, name));
-                }
-            }, true);
-        }
-        if (immediate) {
-            emitCurrent(store, null);
-        }
-    });
-
-    return () => {
-        cancelled = true;
-        try {
-            if (typeof storeUnsub === "function") storeUnsub();
-        } catch (_) {}
-        try {
-            if (typeof actionUnsub === "function") actionUnsub();
-        } catch (_) {}
-    };
+    const watchedActions = new Set([
+        "showErrorOverlay",
+        "showExecutionError",
+        "recordExecutionError",
+        "recordNodeErrors",
+        "recordPromptError",
+        "surfaceMissingMedia",
+    ]);
+    return observePiniaStore(
+        "executionError",
+        (store, shouldEmitImmediate) => {
+            let storeUnsub = null;
+            let actionUnsub = null;
+            const emitCurrent = (fromAction = null) => {
+                callback({
+                    isErrorOverlayOpen: Boolean(unwrapStoreValue(store?.isErrorOverlayOpen)),
+                    lastNodeErrors: unwrapStoreValue(store?.lastNodeErrors) || null,
+                    surfacedNodeErrors: unwrapStoreValue(store?.surfacedNodeErrors) || null,
+                    hasMissingError: Boolean(unwrapStoreValue(store?.hasMissingError)),
+                    hasAnyError: Boolean(unwrapStoreValue(store?.hasAnyError)),
+                    lastExecutionError: unwrapStoreValue(store?.lastExecutionError) || null,
+                    store,
+                    fromAction,
+                });
+            };
+            if (typeof store.$subscribe === "function") {
+                storeUnsub = store.$subscribe(
+                    () => {
+                        emitCurrent(null);
+                    },
+                    { detached: true }
+                );
+            }
+            if (typeof store.$onAction === "function") {
+                actionUnsub = store.$onAction(({ name, after }) => {
+                    if (watchedActions.has(name)) {
+                        after(() => emitCurrent(name));
+                    }
+                }, true);
+            }
+            if (shouldEmitImmediate) {
+                emitCurrent(null);
+            }
+            return () => {
+                try {
+                    if (typeof storeUnsub === "function") storeUnsub();
+                } catch (_) {}
+                try {
+                    if (typeof actionUnsub === "function") actionUnsub();
+                } catch (_) {}
+            };
+        },
+        { immediate }
+    );
 };
 
 export const subscribeRightSidePanel = (callback, { immediate = false } = {}) => {
     if (typeof callback !== "function") {
         return () => {};
     }
-    let cancelled = false;
-    let storeUnsub = null;
-    let actionUnsub = null;
-
-    const readSnapshot = (store) => ({
-        isOpen: Boolean(unwrapStoreValue(store?.isOpen)),
-        activeTab: unwrapStoreValue(store?.activeTab) ?? null,
-        store,
-    });
-
-    const emitCurrent = (store) => {
-        if (cancelled || !store) return;
-        callback(readSnapshot(store));
-    };
-
-    void resolveRightSidePanelStore().then((store) => {
-        if (cancelled || !store) return;
-        if (typeof store.$subscribe === "function") {
-            storeUnsub = store.$subscribe(
-                () => {
-                    emitCurrent(store);
-                },
-                { detached: true }
-            );
-        }
-        if (typeof store.$onAction === "function") {
-            actionUnsub = store.$onAction(({ after }) => {
-                after(() => emitCurrent(store));
-            }, true);
-        }
-        if (immediate) {
-            emitCurrent(store);
-        }
-    });
-
-    return () => {
-        cancelled = true;
-        try {
-            if (typeof storeUnsub === "function") storeUnsub();
-        } catch (_) {}
-        try {
-            if (typeof actionUnsub === "function") actionUnsub();
-        } catch (_) {}
-    };
+    return observePiniaStore(
+        "rightSidePanel",
+        (store, shouldEmitImmediate) => {
+            let storeUnsub = null;
+            let actionUnsub = null;
+            const emitCurrent = () => {
+                callback({
+                    isOpen: Boolean(unwrapStoreValue(store?.isOpen)),
+                    activeTab: unwrapStoreValue(store?.activeTab) ?? null,
+                    store,
+                });
+            };
+            if (typeof store.$subscribe === "function") {
+                storeUnsub = store.$subscribe(
+                    () => {
+                        emitCurrent();
+                    },
+                    { detached: true }
+                );
+            }
+            if (typeof store.$onAction === "function") {
+                actionUnsub = store.$onAction(({ after }) => {
+                    after(() => emitCurrent());
+                }, true);
+            }
+            if (shouldEmitImmediate) {
+                emitCurrent();
+            }
+            return () => {
+                try {
+                    if (typeof storeUnsub === "function") storeUnsub();
+                } catch (_) {}
+                try {
+                    if (typeof actionUnsub === "function") actionUnsub();
+                } catch (_) {}
+            };
+        },
+        { immediate }
+    );
 };
 
 export const dismissNativeErrorDialog = async () => {

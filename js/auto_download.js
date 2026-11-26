@@ -12,6 +12,7 @@ import {
     subscribeMissingModels,
     subscribeExecutionErrors,
     subscribeRightSidePanel,
+    rebindPendingStoreSubscriptions,
     dismissNativeErrorDialog,
 } from "./comfy_stores.js";
 import { mountInNativeStack, unmountFromNativeStack } from "./native_stack.js";
@@ -1558,8 +1559,16 @@ app.registerExtension({
                 return new Set();
             }
             const values = new Set();
+            const visitedGraphs = new Set();
             const visitGraph = (currentGraph) => {
-                const nodes = Array.isArray(currentGraph?.nodes) ? currentGraph.nodes : [];
+                if (!currentGraph || typeof currentGraph !== "object" || visitedGraphs.has(currentGraph)) {
+                    return;
+                }
+                visitedGraphs.add(currentGraph);
+
+                const nodes = Array.isArray(currentGraph?.nodes)
+                    ? currentGraph.nodes
+                    : (Array.isArray(currentGraph?._nodes) ? currentGraph._nodes : []);
                 for (const node of nodes) {
                     if (!node || typeof node !== "object") continue;
                     if (isGraphNodeBypassed(node)) continue;
@@ -1573,8 +1582,28 @@ app.registerExtension({
                         }
                     }
 
-                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
-                        visitGraph(node.subgraph);
+                    const innerGraph =
+                        (typeof node?.getInnerGraph === "function" ? node.getInnerGraph() : null) ||
+                        node?.subgraph;
+                    if (innerGraph && typeof innerGraph === "object") {
+                        visitGraph(innerGraph);
+                    }
+                }
+
+                const subgraphs = currentGraph?.subgraphs;
+                if (subgraphs) {
+                    if (typeof subgraphs.values === "function") {
+                        for (const sub of subgraphs.values()) {
+                            if (sub && typeof sub === "object") visitGraph(sub);
+                        }
+                    } else if (Array.isArray(subgraphs)) {
+                        for (const sub of subgraphs) {
+                            if (sub && typeof sub === "object") visitGraph(sub);
+                        }
+                    } else if (typeof subgraphs === "object") {
+                        for (const sub of Object.values(subgraphs)) {
+                            if (sub && typeof sub === "object") visitGraph(sub);
+                        }
                     }
                 }
             };
@@ -1599,7 +1628,9 @@ app.registerExtension({
                 const candWidgetName = String(candidate?.widgetName || candidate?.input_name || "").trim();
                 if (candNodeId) {
                     const localNodeId = candNodeId.includes(":") ? candNodeId.split(":").pop() : candNodeId;
-                    const targetNode = findNodeByIdRecursive(rootGraph, localNodeId);
+                    const targetNode =
+                        getGraphNodeByExecutionId(candNodeId) ||
+                        findNodeByIdRecursive(rootGraph, localNodeId);
                     if (targetNode) {
                         if (isGraphNodeBypassed(targetNode)) return true;
                         const widgets = Array.isArray(targetNode?.widgets) ? targetNode.widgets : [];
@@ -2078,9 +2109,13 @@ app.registerExtension({
                             }
                         }
 
-                        // If options list is empty/unpopulated and there is no linked HF downloader,
+                        // If options list is unpopulated (non-array) and there is no linked HF downloader,
                         // do not falsely treat every valid model name as missing on startup.
-                        if (!hasOptions && !upstreamUrlInfo) {
+                        // When widgetType === "combo" and widget.options.values is an explicit empty [],
+                        // 0 models are installed in that folder so the selected model is missing (e.g. inside subgraphs).
+                        const hasExplicitEmptyOptions =
+                            widgetType === "combo" && Array.isArray(widget?.options?.values);
+                        if (!hasOptions && !upstreamUrlInfo && !hasExplicitEmptyOptions) {
                             continue;
                         }
 
@@ -3979,6 +4014,235 @@ app.registerExtension({
             (document.head || document.documentElement).appendChild(style);
         };
 
+        const HF_ACCESS_CACHE_TTL_MS = 30000;
+        const hfAccessCheckCache = new Map();
+        const hfAccessCheckInFlight = new Map();
+        const HF_NON_REPO_PREFIXES = new Set([
+            "api",
+            "docs",
+            "join",
+            "login",
+            "models",
+            "datasets",
+            "spaces",
+            "settings",
+            "organizations",
+            "pricing",
+            "enterprise",
+            "blog",
+            "learn",
+            "tasks",
+        ]);
+
+        const extractHfRepoIdFromUrl = (rawUrl) => {
+            const text = String(rawUrl || "").trim();
+            if (!text) return "";
+            const match = text.match(/https?:\/\/(?:www\.)?huggingface\.co\/(?:models\/)?([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)/i);
+            if (!match) return "";
+            const owner = String(match[1] || "").trim();
+            const repo = String(match[2] || "").replace(/\.git$/i, "").trim();
+            if (!owner || !repo || HF_NON_REPO_PREFIXES.has(owner.toLowerCase())) {
+                return "";
+            }
+            return `${owner}/${repo}`;
+        };
+
+        const getCachedHfAccessForUrl = (url) => {
+            const repoId = extractHfRepoIdFromUrl(url);
+            if (!repoId) return null;
+            const cached = hfAccessCheckCache.get(repoId.toLowerCase());
+            if (!cached) return null;
+            if ((Date.now() - cached.checkedAt) >= HF_ACCESS_CACHE_TTL_MS) {
+                return null;
+            }
+            return cached;
+        };
+
+        const checkHfAccessForUrls = async (urls, { forceRefresh = false } = {}) => {
+            const list = Array.isArray(urls) ? urls : [urls];
+            const uniqueUrls = [];
+            const seenUrls = new Set();
+            const repoToSampleUrl = new Map();
+
+            for (const raw of list) {
+                const u = String(raw || "").trim();
+                if (!u || seenUrls.has(u)) continue;
+                const repoId = extractHfRepoIdFromUrl(u);
+                if (!repoId) continue;
+                seenUrls.add(u);
+                uniqueUrls.push(u);
+                const key = repoId.toLowerCase();
+                if (!repoToSampleUrl.has(key)) {
+                    repoToSampleUrl.set(key, u);
+                }
+            }
+
+            if (!repoToSampleUrl.size) {
+                return hfAccessCheckCache;
+            }
+
+            const pendingPromises = [];
+            const urlsToQuery = [];
+            const keysToQuery = [];
+
+            for (const [key, sampleUrl] of repoToSampleUrl.entries()) {
+                if (!forceRefresh) {
+                    const cached = hfAccessCheckCache.get(key);
+                    if (cached && (Date.now() - cached.checkedAt) < HF_ACCESS_CACHE_TTL_MS) {
+                        continue;
+                    }
+                    const inflight = hfAccessCheckInFlight.get(key);
+                    if (inflight) {
+                        pendingPromises.push(inflight);
+                        continue;
+                    }
+                }
+                keysToQuery.push(key);
+                urlsToQuery.push(sampleUrl);
+            }
+
+            if (urlsToQuery.length) {
+                const reqPromise = (async () => {
+                    try {
+                        const resp = await fetch("/hf_check_access", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                urls: urlsToQuery,
+                                force_refresh: Boolean(forceRefresh),
+                            }),
+                        });
+                        if (!resp.ok) return;
+                        const data = await resp.json().catch(() => ({}));
+                        const repos = data?.repos && typeof data.repos === "object" ? data.repos : {};
+                        const now = Date.now();
+                        for (const [repoId, info] of Object.entries(repos)) {
+                            if (!info || info.status === "unknown") continue;
+                            hfAccessCheckCache.set(String(repoId).toLowerCase(), {
+                                ...info,
+                                checkedAt: now,
+                            });
+                        }
+                    } catch (_) {
+                        // Fail open on transient check errors.
+                    } finally {
+                        for (const key of keysToQuery) {
+                            if (hfAccessCheckInFlight.get(key) === reqPromise) {
+                                hfAccessCheckInFlight.delete(key);
+                            }
+                        }
+                    }
+                })();
+                for (const key of keysToQuery) {
+                    hfAccessCheckInFlight.set(key, reqPromise);
+                }
+                pendingPromises.push(reqPromise);
+            }
+
+            if (pendingPromises.length) {
+                await Promise.all(pendingPromises);
+            }
+            return hfAccessCheckCache;
+        };
+
+        const ensureGatedAccessStyles = () => {
+            if (typeof document === "undefined" || document.getElementById("hf-gated-access-styles")) {
+                return;
+            }
+            const style = document.createElement("style");
+            style.id = "hf-gated-access-styles";
+            style.textContent = `
+                .hf-gated-banner {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                    padding: 8px 10px;
+                    border-radius: 8px;
+                    background: rgba(245, 158, 11, 0.10);
+                    border: 1px solid rgba(245, 158, 11, 0.38);
+                    color: #fbbf24;
+                    font-size: 12px;
+                    line-height: 1.35;
+                    box-sizing: border-box;
+                }
+                .hf-gated-banner-row {
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 7px;
+                }
+                .hf-gated-banner-text {
+                    min-width: 0;
+                    flex: 1 1 auto;
+                }
+                .hf-gated-banner-actions {
+                    display: flex;
+                    flex-wrap: wrap;
+                    align-items: center;
+                    gap: 6px;
+                    padding-left: 21px;
+                }
+                .hf-gated-lock-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 6px;
+                    border: 1px solid rgba(245, 158, 11, 0.45);
+                    background: rgba(245, 158, 11, 0.12);
+                    color: #f59e0b;
+                    cursor: pointer;
+                    text-decoration: none;
+                    flex-shrink: 0;
+                    transition: background-color 120ms ease;
+                }
+                .hf-gated-lock-btn:hover {
+                    background: rgba(245, 158, 11, 0.24);
+                }
+                .hf-gated-lock-btn-native {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 8px;
+                }
+                .hf-gated-pill-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 5px;
+                    height: 26px;
+                    padding: 0 9px;
+                    border-radius: 6px;
+                    border: 1px solid rgba(245, 158, 11, 0.42);
+                    background: rgba(245, 158, 11, 0.16);
+                    color: #fbbf24;
+                    font-family: var(--font-inter, Inter, sans-serif);
+                    font-size: 11px;
+                    font-weight: 500;
+                    line-height: 1;
+                    cursor: pointer;
+                    text-decoration: none;
+                    white-space: nowrap;
+                    transition: background-color 120ms ease, opacity 120ms ease;
+                }
+                .hf-gated-pill-btn:hover:not(:disabled) {
+                    background: rgba(245, 158, 11, 0.26);
+                }
+                .hf-gated-pill-btn:disabled {
+                    opacity: 0.55;
+                    cursor: not-allowed;
+                }
+                .hf-gated-pill-btn-secondary {
+                    border-color: var(--border-default, rgba(255, 255, 255, 0.14));
+                    background: var(--secondary-background, rgba(255, 255, 255, 0.08));
+                    color: var(--foreground, #e5e7eb);
+                }
+                .hf-gated-pill-btn-secondary:hover:not(:disabled) {
+                    background: var(--secondary-background-hover, rgba(255, 255, 255, 0.15));
+                }
+            `;
+            (document.head || document.documentElement).appendChild(style);
+        };
+
         const createMissingCountBadge = (count = 0) => {
             const badge = document.createElement("span");
             badge.setAttribute("data-testid", "hf-model-count-badge");
@@ -4452,6 +4716,7 @@ app.registerExtension({
 
             removeExistingAutoDownloadDialog();
             ensureAutoDownloadOverlayControlStyles();
+            ensureGatedAccessStyles();
 
             const dlg = document.createElement("div");
             dlg.id = "auto-download-dialog";
@@ -4461,8 +4726,18 @@ app.registerExtension({
             let content = null;
             const rowFolderPickers = [];
             let cleanupOverlayMount = () => {};
+            let dialogFocusHandler = null;
+            let dialogAccessCheckTimer = null;
             const cleanupUi = () => {
                 stopLoaderWatcher();
+                if (dialogFocusHandler) {
+                    window.removeEventListener("focus", dialogFocusHandler);
+                    dialogFocusHandler = null;
+                }
+                if (dialogAccessCheckTimer) {
+                    clearTimeout(dialogAccessCheckTimer);
+                    dialogAccessCheckTimer = null;
+                }
                 while (rowFolderPickers.length) {
                     const picker = rowFolderPickers.pop();
                     try {
@@ -4614,6 +4889,12 @@ app.registerExtension({
             }
             summaryInline.textContent = summaryParts.join(" • ");
 
+            const gatedBanner = document.createElement("div");
+            gatedBanner.className = "hf-gated-banner";
+            gatedBanner.setAttribute("data-testid", "hf-gated-banner");
+            gatedBanner.style.display = "none";
+            panel.appendChild(gatedBanner);
+
             const listFrame = document.createElement("div");
             listFrame.className = "flex flex-col overflow-hidden";
 
@@ -4664,20 +4945,107 @@ app.registerExtension({
             const rowInputs = [];
             let downloadBtn = null;
             let downloadBtnLabel = null;
+            let runDialogAccessCheck = async () => {};
+
+            const renderDialogGatedBanner = () => {
+                const lockedRows = rowInputs.filter((r) => r.isGatedLocked);
+                if (!lockedRows.length) {
+                    gatedBanner.style.display = "none";
+                    gatedBanner.replaceChildren();
+                    return;
+                }
+                const anyNeedsToken = lockedRows.some((r) => r.gatedInfo?.needs_token);
+                const uniqueRepos = new Map();
+                for (const r of lockedRows) {
+                    const repoId = String(r.gatedInfo?.repo_id || "").trim();
+                    const repoUrl = String(r.gatedInfo?.repo_url || "").trim();
+                    if (repoId && repoUrl && !uniqueRepos.has(repoId)) {
+                        uniqueRepos.set(repoId, repoUrl);
+                    }
+                }
+
+                gatedBanner.replaceChildren();
+                const topRow = document.createElement("div");
+                topRow.className = "hf-gated-banner-row";
+                const lockIcon = document.createElement("i");
+                lockIcon.className = "icon-[lucide--lock] size-3.5 shrink-0";
+                lockIcon.style.marginTop = "2px";
+                lockIcon.setAttribute("aria-hidden", "true");
+                const textEl = document.createElement("span");
+                textEl.className = "hf-gated-banner-text";
+                const noun = lockedRows.length === 1 ? "1 model is gated" : `${lockedRows.length} models are gated`;
+                textEl.textContent = anyNeedsToken
+                    ? `${noun} — add your HF token in Settings and accept the license.`
+                    : `${noun} — accept the license on Hugging Face, then re-check.`;
+                topRow.appendChild(lockIcon);
+                topRow.appendChild(textEl);
+                gatedBanner.appendChild(topRow);
+
+                const actionsRow = document.createElement("div");
+                actionsRow.className = "hf-gated-banner-actions";
+                if (uniqueRepos.size > 0 && uniqueRepos.size <= 2) {
+                    for (const [repoId, repoUrl] of uniqueRepos.entries()) {
+                        const linkBtn = document.createElement("a");
+                        linkBtn.className = "hf-gated-pill-btn";
+                        linkBtn.href = repoUrl;
+                        linkBtn.target = "_blank";
+                        linkBtn.rel = "noopener noreferrer";
+                        linkBtn.title = `Open ${repoId} on Hugging Face`;
+                        linkBtn.innerHTML = `<i class="icon-[lucide--external-link] size-3 shrink-0" aria-hidden="true"></i><span>${uniqueRepos.size === 1 ? "Accept license" : repoId}</span>`;
+                        actionsRow.appendChild(linkBtn);
+                    }
+                }
+
+                const recheckBtn = document.createElement("button");
+                recheckBtn.type = "button";
+                recheckBtn.className = "hf-gated-pill-btn hf-gated-pill-btn-secondary";
+                recheckBtn.setAttribute("data-testid", "hf-gated-recheck-btn");
+                recheckBtn.innerHTML = `<i class="icon-[lucide--refresh-cw] size-3 shrink-0" aria-hidden="true"></i><span>Re-check</span>`;
+                recheckBtn.onclick = async (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    recheckBtn.disabled = true;
+                    const labelSpan = recheckBtn.querySelector("span");
+                    if (labelSpan) labelSpan.textContent = "Checking...";
+                    try {
+                        await runDialogAccessCheck({ forceRefresh: true });
+                    } finally {
+                        if (recheckBtn.isConnected) {
+                            recheckBtn.disabled = false;
+                            if (labelSpan) labelSpan.textContent = "Re-check";
+                        }
+                    }
+                };
+                actionsRow.appendChild(recheckBtn);
+                gatedBanner.appendChild(actionsRow);
+                gatedBanner.style.display = "flex";
+            };
+
             const updateDownloadButtonState = () => {
                 if (!downloadBtn || !downloadBtnLabel) return;
                 const total = rowInputs.length;
-                const checked = rowInputs.filter((r) => r.checkbox.checked).length;
+                const checkedRows = rowInputs.filter((r) => r.checkbox.checked);
+                const checked = checkedRows.length;
+                const lockedChecked = checkedRows.filter((r) => r.isGatedLocked);
                 if (total === 0 || checked === 0) {
                     downloadBtn.disabled = true;
+                    downloadBtn.title = "";
                     downloadBtnLabel.textContent = "Select models to download";
+                } else if (lockedChecked.length > 0) {
+                    downloadBtn.disabled = true;
+                    downloadBtn.title = "Accept the model license on Hugging Face (click the lock icon) and click Re-check";
+                    downloadBtnLabel.textContent = lockedChecked.length === 1
+                        ? "Accept license for 1 gated model"
+                        : `Accept license for ${lockedChecked.length} gated models`;
                 } else if (checked === total) {
                     downloadBtn.disabled = false;
+                    downloadBtn.title = "";
                     downloadBtnLabel.textContent = total === 1
                         ? "Download model"
                         : `Download all (${total})`;
                 } else {
                     downloadBtn.disabled = false;
+                    downloadBtn.title = "";
                     downloadBtnLabel.textContent = checked === 1
                         ? "Download 1 model"
                         : `Download ${checked} of ${total} models`;
@@ -4773,7 +5141,19 @@ app.registerExtension({
                         locateModelNodeOnCanvas(m);
                     };
 
+                    const lockBtn = document.createElement("a");
+                    lockBtn.className = "hf-gated-lock-btn";
+                    lockBtn.setAttribute("data-testid", "hf-model-lock-btn");
+                    lockBtn.target = "_blank";
+                    lockBtn.rel = "noopener noreferrer";
+                    lockBtn.style.display = "none";
+                    lockBtn.innerHTML = `<i class="icon-[lucide--lock] size-3.5" aria-hidden="true"></i>`;
+                    lockBtn.addEventListener("click", (event) => {
+                        event.stopPropagation();
+                    });
+
                     topLine.appendChild(nameEl);
+                    topLine.appendChild(lockBtn);
                     topLine.appendChild(toggleLabel);
                     topLine.appendChild(locateBtn);
 
@@ -4822,7 +5202,21 @@ app.registerExtension({
                         userEditedFolder: false,
                         folderLocked: false,
                         lockedFolder: "",
+                        lockBtn,
+                        isGatedLocked: false,
+                        gatedInfo: null,
                     };
+                    const scheduleRowAccessCheck = () => {
+                        if (dialogAccessCheckTimer) {
+                            clearTimeout(dialogAccessCheckTimer);
+                        }
+                        dialogAccessCheckTimer = setTimeout(() => {
+                            dialogAccessCheckTimer = null;
+                            void runDialogAccessCheck({ forceRefresh: false });
+                        }, 350);
+                    };
+                    urlInput.addEventListener("input", scheduleRowAccessCheck);
+                    urlInput.addEventListener("change", scheduleRowAccessCheck);
                     const onFolderEdited = () => {
                         rowData.userEditedFolder = true;
                         updateFolderTooltip();
@@ -4895,6 +5289,7 @@ app.registerExtension({
                                     rowData.resolvedUrl = alt.url;
                                     cb.checked = true;
                                     updateDownloadButtonState();
+                                    void runDialogAccessCheck({ forceRefresh: false });
                                 }
                                 if (alt.suggested_folder && !rowData.userEditedFolder && !rowData.preferAuthoritativeFolder) {
                                     rowData.folderInput.value = alt.suggested_folder;
@@ -5279,6 +5674,51 @@ app.registerExtension({
             cleanupOverlayMount = mountOverlayInNativeStack(dlg);
             dlg.__hfOverlayCleanup = cleanupUi;
 
+            runDialogAccessCheck = async ({ forceRefresh = false } = {}) => {
+                if (!dlg.isConnected && !panel.isConnected) return;
+                const urls = rowInputs
+                    .map((r) => String(r.urlInput?.value || "").trim())
+                    .filter(Boolean);
+                if (urls.length) {
+                    await checkHfAccessForUrls(urls, { forceRefresh });
+                }
+                if (!dlg.isConnected) return;
+                for (const row of rowInputs) {
+                    const url = String(row.urlInput?.value || "").trim();
+                    const access = url ? getCachedHfAccessForUrl(url) : null;
+                    const locked = Boolean(access && access.gated && !access.accessible);
+                    row.isGatedLocked = locked;
+                    row.gatedInfo = access || null;
+                    if (row.lockBtn) {
+                        if (locked && access?.repo_url) {
+                            row.lockBtn.href = access.repo_url;
+                            row.lockBtn.title = access.repo_id
+                                ? `Gated model (${access.repo_id}) — click to accept license on Hugging Face`
+                                : "Gated model — click to accept license on Hugging Face";
+                            row.lockBtn.style.display = "inline-flex";
+                        } else {
+                            row.lockBtn.removeAttribute("href");
+                            row.lockBtn.removeAttribute("title");
+                            row.lockBtn.style.display = "none";
+                        }
+                    }
+                }
+                renderDialogGatedBanner();
+                updateDownloadButtonState();
+            };
+
+            let lastDialogFocusRecheckAt = 0;
+            dialogFocusHandler = () => {
+                if (!dlg.isConnected) return;
+                if (!rowInputs.some((r) => r.isGatedLocked)) return;
+                const now = Date.now();
+                if ((now - lastDialogFocusRecheckAt) < 1200) return;
+                lastDialogFocusRecheckAt = now;
+                void runDialogAccessCheck({ forceRefresh: true });
+            };
+            window.addEventListener("focus", dialogFocusHandler);
+            void runDialogAccessCheck({ forceRefresh: false });
+
             let currentBaseSummaryText = summaryInline.textContent;
             const updateSummaryLine = () => {
                 countBadge.textContent = String(rowInputs.length);
@@ -5335,6 +5775,7 @@ app.registerExtension({
                     return;
                 }
                 updateSummaryLine();
+                renderDialogGatedBanner();
                 updateDownloadButtonState();
             };
 
@@ -6481,7 +6922,36 @@ app.registerExtension({
                 return;
             }
             if (btnEl) {
+                btnEl.dataset.hfQueuing = "1";
                 btnEl.disabled = true;
+                setNativeMainButtonLabel(btnEl, "Checking...");
+            }
+            await checkHfAccessForUrls(validItems.map((item) => item.url));
+            const lockedItems = validItems.filter((item) => {
+                const access = getCachedHfAccessForUrl(item.url);
+                return Boolean(access && access.gated && !access.accessible);
+            });
+            if (lockedItems.length > 0) {
+                if (btnEl) {
+                    delete btnEl.dataset.hfQueuing;
+                    setNativeMainButtonLabel(
+                        btnEl,
+                        btnEl.dataset.hfDefaultLabel || defaultLabel
+                    );
+                }
+                injectNativeSidebarMissingModelButtonsSync(cachedNativeMissingCandidates);
+                const needsToken = lockedItems.some((item) => getCachedHfAccessForUrl(item.url)?.needs_token);
+                showToast({
+                    severity: "warn",
+                    summary: "License required",
+                    detail: needsToken
+                        ? "Gated model — add your HF token in Settings and accept the license."
+                        : "Gated model — accept the license on Hugging Face, then retry.",
+                    life: 4500,
+                });
+                return;
+            }
+            if (btnEl) {
                 setNativeMainButtonLabel(btnEl, "Queuing...");
             }
             try {
@@ -6508,7 +6978,11 @@ app.registerExtension({
                     setNativeMainButtonLabel(btnEl, validItems.length > 1 ? `Queued (${queuedCount})` : "Queued");
                     setTimeout(() => {
                         if (!btnEl.isConnected) return;
-                        btnEl.disabled = false;
+                        delete btnEl.dataset.hfQueuing;
+                        const splitParent = btnEl.closest('[data-hf-download-to-comfy]');
+                        if (splitParent?.dataset?.hfGatedLocked !== "1") {
+                            btnEl.disabled = false;
+                        }
                         setNativeMainButtonLabel(
                             btnEl,
                             btnEl.dataset.hfDefaultLabel || defaultLabel
@@ -6524,7 +6998,11 @@ app.registerExtension({
                     life: 4500
                 });
                 if (btnEl) {
-                    btnEl.disabled = false;
+                    delete btnEl.dataset.hfQueuing;
+                    const splitParent = btnEl.closest('[data-hf-download-to-comfy]');
+                    if (splitParent?.dataset?.hfGatedLocked !== "1") {
+                        btnEl.disabled = false;
+                    }
                     setNativeMainButtonLabel(
                         btnEl,
                         btnEl.dataset.hfDefaultLabel || defaultLabel
@@ -6776,6 +7254,54 @@ app.registerExtension({
             return { group, mainBtn, chevronBtn };
         };
 
+        let nativeSidebarFocusListenerAttached = false;
+        let lastNativeSidebarFocusRecheckAt = 0;
+
+        const hasNativeRowLockIndicator = (rowEl) => {
+            if (!rowEl || !(rowEl instanceof Element)) return false;
+            const candidates = rowEl.querySelectorAll(
+                '[class*="lucide--lock"], [title*="gated" i], [aria-label*="gated" i], [data-testid*="lock" i]'
+            );
+            for (const el of candidates) {
+                if (el.closest('[data-testid="hf-native-row-lock"]')) continue;
+                return true;
+            }
+            return false;
+        };
+
+        const isNativeRowLocked = (rowEl, queueItem) => {
+            const access = getCachedHfAccessForUrl(queueItem?.url);
+            if (access) {
+                return {
+                    locked: Boolean(access.gated && !access.accessible),
+                    access,
+                };
+            }
+            if (hasNativeRowLockIndicator(rowEl)) {
+                return { locked: true, access: null };
+            }
+            return { locked: false, access: null };
+        };
+
+        const ensureNativeSidebarFocusRecheck = () => {
+            if (nativeSidebarFocusListenerAttached || typeof window === "undefined") return;
+            nativeSidebarFocusListenerAttached = true;
+            window.addEventListener("focus", () => {
+                const recheckBar = document.querySelector('[data-testid="hf-native-gated-recheck-bar"]');
+                if (!recheckBar) return;
+                const now = Date.now();
+                if ((now - lastNativeSidebarFocusRecheckAt) < 1200) return;
+                lastNativeSidebarFocusRecheckAt = now;
+                const urls = Array.from(document.querySelectorAll('[data-testid="hf-download-split"]'))
+                    .map((el) => el?._hfQueueItem?.url)
+                    .filter(Boolean);
+                if (!urls.length) return;
+                void checkHfAccessForUrls(urls, { forceRefresh: true }).then(() => {
+                    injectNativeSidebarMissingModelButtonsSync(cachedNativeMissingCandidates);
+                });
+            });
+        };
+
         const injectNativeSidebarMissingModelButtonsSync = (candidates = []) => {
             const rowsContainers = Array.from(
                 document.querySelectorAll('[data-testid="missing-model-importable-rows"]')
@@ -6786,13 +7312,17 @@ app.registerExtension({
             if (!rowsContainers.length && !actionsContainers.length) return;
 
             ensureNativeSidebarStyles();
+            ensureGatedAccessStyles();
             const activeCandidates = Array.isArray(candidates) && candidates.length
                 ? candidates
                 : cachedNativeMissingCandidates;
 
+            const uncheckedUrls = [];
+
             for (const rowsContainer of rowsContainers) {
                 const containerQueueItems = [];
                 const seenQueueKeys = new Set();
+                let lockedRowCount = 0;
                 const rows = getDirectNativeMissingModelRows(rowsContainer);
                 rows.forEach((rowEl, idx) => {
                     const { candidate, rowLabel, rowFolderHint } = matchCandidateForNativeRow(
@@ -6808,14 +7338,19 @@ app.registerExtension({
                             seenQueueKeys.add(dedupeKey);
                             containerQueueItems.push(queueItem);
                         }
+                        if (extractHfRepoIdFromUrl(queueItem.url) && !getCachedHfAccessForUrl(queueItem.url)) {
+                            uncheckedUrls.push(queueItem.url);
+                        }
                     }
 
                     const nativeDownloadBtn = rowEl.querySelector('[data-testid="missing-model-download"]');
                     const nativeLocateBtn = rowEl.querySelector('[data-testid="missing-model-locate"]');
                     const anchorBtn = nativeDownloadBtn || (queueItem ? nativeLocateBtn : null);
                     let splitGroup = rowEl.querySelector('[data-testid="hf-download-split"]');
+                    let rowLockBtn = rowEl.querySelector('[data-testid="hf-native-row-lock"]');
 
                     if (!anchorBtn || !queueItem) {
+                        if (rowLockBtn) rowLockBtn.remove();
                         if (splitGroup) {
                             splitGroup.remove();
                         }
@@ -6867,14 +7402,66 @@ app.registerExtension({
                         if (splitGroup.nextElementSibling !== anchorBtn) {
                             anchorBtn.insertAdjacentElement("beforebegin", splitGroup);
                         }
-                        const mainEl = splitGroup.querySelector('[data-testid="hf-download-to-comfy"]');
-                        if (mainEl) {
-                            mainEl.title = `Download ${queueItem.filename} to ComfyUI (models/${queueItem.folder})`;
-                        }
                     }
 
                     splitGroup._hfQueueItem = queueItem;
                     splitGroup._hfNativeDownloadBtn = nativeDownloadBtn || null;
+
+                    const { locked: rowLocked, access: rowAccess } = isNativeRowLocked(rowEl, queueItem);
+                    if (rowLocked) lockedRowCount += 1;
+                    const mainEl = splitGroup.querySelector('[data-testid="hf-download-to-comfy"]');
+                    const defaultRowTitle = `Download ${queueItem.filename} to ComfyUI (models/${queueItem.folder})`;
+
+                    if (rowLocked) {
+                        if (splitGroup.dataset.hfGatedLocked !== "1") {
+                            splitGroup.dataset.hfGatedLocked = "1";
+                        }
+                        if (mainEl) {
+                            if (!mainEl.disabled) mainEl.disabled = true;
+                            const lockTitle = "Accept license on Hugging Face first";
+                            if (mainEl.title !== lockTitle) mainEl.title = lockTitle;
+                        }
+                        const nativeHasLock = hasNativeRowLockIndicator(rowEl);
+                        if (!nativeHasLock && rowAccess?.repo_url) {
+                            if (!rowLockBtn) {
+                                rowLockBtn = document.createElement("a");
+                                rowLockBtn.className = "hf-gated-lock-btn hf-gated-lock-btn-native";
+                                rowLockBtn.setAttribute("data-testid", "hf-native-row-lock");
+                                rowLockBtn.target = "_blank";
+                                rowLockBtn.rel = "noopener noreferrer";
+                                rowLockBtn.innerHTML = `<i class="icon-[lucide--lock] size-4" aria-hidden="true"></i>`;
+                            }
+                            if (rowLockBtn.getAttribute("href") !== rowAccess.repo_url) {
+                                rowLockBtn.href = rowAccess.repo_url;
+                            }
+                            const lockLinkTitle = rowAccess.repo_id
+                                ? `Accept license for ${rowAccess.repo_id} on Hugging Face`
+                                : "Accept license on Hugging Face";
+                            if (rowLockBtn.title !== lockLinkTitle) {
+                                rowLockBtn.title = lockLinkTitle;
+                            }
+                            if (rowLockBtn.nextElementSibling !== splitGroup) {
+                                splitGroup.insertAdjacentElement("beforebegin", rowLockBtn);
+                            }
+                        } else if (rowLockBtn) {
+                            rowLockBtn.remove();
+                        }
+                    } else {
+                        if (splitGroup.dataset.hfGatedLocked === "1") {
+                            delete splitGroup.dataset.hfGatedLocked;
+                        }
+                        if (mainEl) {
+                            if (mainEl.dataset.hfQueuing !== "1" && mainEl.disabled) {
+                                mainEl.disabled = false;
+                            }
+                            if (mainEl.title !== defaultRowTitle) {
+                                mainEl.title = defaultRowTitle;
+                            }
+                        }
+                        if (rowLockBtn) {
+                            rowLockBtn.remove();
+                        }
+                    }
                 });
 
                 const cardScope = rowsContainer.parentElement || document;
@@ -6886,12 +7473,14 @@ app.registerExtension({
                     : null;
                 let allWrap = cardScope.querySelector('[data-testid="hf-native-download-all-wrap"]');
                 let allSplit = cardScope.querySelector('[data-testid="hf-download-all-split"]');
+                let recheckBar = cardScope.querySelector('[data-testid="hf-native-gated-recheck-bar"]');
 
                 const shouldShowDownloadAll =
                     containerQueueItems.length > 0 &&
                     (Boolean(nativeDownloadAllBtn) || containerQueueItems.length > 1);
 
                 if (!shouldShowDownloadAll) {
+                    if (recheckBar) recheckBar.remove();
                     if (allSplit) allSplit.remove();
                     if (allWrap) allWrap.remove();
                     if (nativeDownloadAllBtn) {
@@ -6979,7 +7568,7 @@ app.registerExtension({
                     if (!allWrap) {
                         allWrap = document.createElement("div");
                         allWrap.setAttribute("data-testid", "hf-native-download-all-wrap");
-                        allWrap.className = "flex items-center pt-2";
+                        allWrap.className = "flex flex-col gap-2 pt-2";
                     }
                     if (allSplit.parentElement !== allWrap) {
                         allWrap.appendChild(allSplit);
@@ -6988,6 +7577,96 @@ app.registerExtension({
                         rowsContainer.insertAdjacentElement("afterend", allWrap);
                     }
                 }
+
+                const allMainEl = allSplit.querySelector('[data-testid="hf-download-all-to-comfy"]');
+                if (lockedRowCount > 0) {
+                    if (allSplit.dataset.hfGatedLocked !== "1") {
+                        allSplit.dataset.hfGatedLocked = "1";
+                    }
+                    if (allMainEl) {
+                        if (!allMainEl.disabled) allMainEl.disabled = true;
+                        const allLockTitle = "Accept license for locked models on Hugging Face first";
+                        if (allMainEl.title !== allLockTitle) allMainEl.title = allLockTitle;
+                    }
+                    if (!recheckBar) {
+                        recheckBar = document.createElement("div");
+                        recheckBar.setAttribute("data-testid", "hf-native-gated-recheck-bar");
+                        recheckBar.className = "hf-gated-banner";
+                        Object.assign(recheckBar.style, {
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "8px",
+                            padding: "6px 8px",
+                            fontSize: "11px",
+                        });
+                        const msgWrap = document.createElement("div");
+                        msgWrap.className = "flex min-w-0 items-center gap-1.5";
+                        msgWrap.innerHTML = `<i class="icon-[lucide--lock] size-3.5 shrink-0" aria-hidden="true"></i><span class="truncate" data-hf-gated-msg="true"></span>`;
+                        const recheckBtn = document.createElement("button");
+                        recheckBtn.type = "button";
+                        recheckBtn.className = "hf-gated-pill-btn hf-gated-pill-btn-secondary shrink-0";
+                        recheckBtn.setAttribute("data-testid", "hf-native-gated-recheck-btn");
+                        recheckBtn.innerHTML = `<i class="icon-[lucide--refresh-cw] size-3 shrink-0" aria-hidden="true"></i><span>Re-check</span>`;
+                        recheckBtn.addEventListener("click", (event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            recheckBtn.disabled = true;
+                            const labelSpan = recheckBtn.querySelector("span");
+                            if (labelSpan) labelSpan.textContent = "Checking...";
+                            const urls = (Array.isArray(allSplit?._hfQueueItems) ? allSplit._hfQueueItems : [])
+                                .map((item) => item?.url)
+                                .filter(Boolean);
+                            void checkHfAccessForUrls(urls, { forceRefresh: true }).finally(() => {
+                                if (recheckBtn.isConnected) {
+                                    recheckBtn.disabled = false;
+                                    if (labelSpan) labelSpan.textContent = "Re-check";
+                                }
+                                injectNativeSidebarMissingModelButtonsSync(cachedNativeMissingCandidates);
+                            });
+                        });
+                        recheckBar.appendChild(msgWrap);
+                        recheckBar.appendChild(recheckBtn);
+                    }
+                    const msgSpan = recheckBar.querySelector("[data-hf-gated-msg]");
+                    const nextMsg = lockedRowCount === 1
+                        ? "Accept license for 1 locked model, then re-check."
+                        : `Accept license for ${lockedRowCount} locked models, then re-check.`;
+                    if (msgSpan && msgSpan.textContent !== nextMsg) {
+                        msgSpan.textContent = nextMsg;
+                    }
+                    if (actionsEl && actionsEl.parentElement) {
+                        if (recheckBar.nextElementSibling !== actionsEl) {
+                            actionsEl.insertAdjacentElement("beforebegin", recheckBar);
+                        }
+                    } else if (allWrap) {
+                        if (recheckBar.nextElementSibling !== allSplit) {
+                            allWrap.insertBefore(recheckBar, allSplit);
+                        }
+                    }
+                    ensureNativeSidebarFocusRecheck();
+                } else {
+                    if (allSplit.dataset.hfGatedLocked === "1") {
+                        delete allSplit.dataset.hfGatedLocked;
+                    }
+                    if (allMainEl) {
+                        if (allMainEl.dataset.hfQueuing !== "1" && allMainEl.disabled) {
+                            allMainEl.disabled = false;
+                        }
+                        if (allMainEl.title !== "Download all missing models to ComfyUI") {
+                            allMainEl.title = "Download all missing models to ComfyUI";
+                        }
+                    }
+                    if (recheckBar) {
+                        recheckBar.remove();
+                    }
+                }
+            }
+
+            if (uncheckedUrls.length) {
+                void checkHfAccessForUrls(uncheckedUrls, { forceRefresh: false }).then(() => {
+                    injectNativeSidebarMissingModelButtonsSync(cachedNativeMissingCandidates);
+                });
             }
         };
 
@@ -7065,14 +7744,14 @@ app.registerExtension({
             if (importableRows) {
                 return (
                     importableRows.closest(
-                        'aside, [data-testid="right-side-panel"], .right-side-panel, [class*="right-side-panel"], [class*="side-bar"], [class*="sidebar"], .p-splitterpanel'
+                        'aside, [data-testid="properties-panel"], [data-testid="right-side-panel"], .right-side-panel, [class*="right-side-panel"], [class*="side-bar"], [class*="sidebar"], .p-splitterpanel'
                     ) ||
                     importableRows.parentElement ||
                     importableRows
                 );
             }
             const knownSidePanel = document.querySelector(
-                '[data-testid="right-side-panel"], .right-side-panel, [class*="right-side-panel"], [data-testid="sidebar-right"], .comfyui-body-right'
+                '[data-testid="properties-panel"], [data-testid="right-side-panel"], .right-side-panel, [class*="right-side-panel"], [data-testid="sidebar-right"], .comfyui-body-right'
             );
             if (knownSidePanel) {
                 return knownSidePanel;
@@ -9084,11 +9763,14 @@ app.registerExtension({
             });
         };
 
-        const handleNativeMissingCandidates = (candidates = []) => {
+        let prevExecutionErrorOverlayOpen = false;
+
+        const handleNativeMissingCandidates = async (candidates = []) => {
             const list = Array.isArray(candidates) ? candidates : [];
             if (!list.length) return false;
             if (!getWorkflowOpenAutoEnabled()) return false;
 
+            const loadGenAtStart = currentWorkflowLoadGeneration;
             const tabKey = getTabCacheKey();
             const revKey = computeLiveGraphRevisionKey(app?.rootGraph);
             const cached = workflowScanCache.get(tabKey);
@@ -9109,17 +9791,22 @@ app.registerExtension({
                 return false;
             }
 
-            workflowOpenLastHandledSignature = sig;
-            workflowOpenLastHandledPath = tabKey;
-            workflowScanCache.set(tabKey, {
-                revKey,
-                dismissed: false,
-                handled: true,
-                candidatesSig: sig,
-            });
-            void triggerAutoDownloadFromWorkflowOpen(list, null, {
+            const triggered = await triggerAutoDownloadFromWorkflowOpen(list, null, {
                 onUserDismiss: () => markCurrentTabDismissed(tabKey, revKey),
             });
+            if (!triggered) {
+                return false;
+            }
+            if (loadGenAtStart === currentWorkflowLoadGeneration) {
+                workflowOpenLastHandledSignature = sig;
+                workflowOpenLastHandledPath = tabKey;
+                workflowScanCache.set(tabKey, {
+                    revKey,
+                    dismissed: false,
+                    handled: true,
+                    candidatesSig: sig,
+                });
+            }
             return true;
         };
 
@@ -9136,6 +9823,7 @@ app.registerExtension({
             workflowOpenLastHandledSignature = "";
             workflowOpenLastHandledPath = "";
             workflowOpenTriggeredForCurrentLoad = false;
+            prevExecutionErrorOverlayOpen = false;
         };
 
         extensionLifecycleHandlers.loadedGraphNode = (node) => {
@@ -9148,6 +9836,19 @@ app.registerExtension({
 
         extensionLifecycleHandlers.afterLoadGraph = () => {
             isLoadingWorkflow = false;
+            rebindPendingStoreSubscriptions();
+            const currentStoreCandidates = getMissingModelCandidates();
+            if (currentStoreCandidates.length > 0) {
+                cachedNativeMissingCandidates = currentStoreCandidates;
+            }
+            const hasNativeMissing =
+                cachedNativeMissingCandidates.length > 0 ||
+                Boolean(document.querySelector(MISSING_MODELS_LIST_SELECTOR));
+            syncMissingModelsObserverWithStore(hasNativeMissing);
+            if (hasNativeMissing) {
+                void enrichNativeMissingModelStoreFromCatalog();
+            }
+
             const loadGen = currentWorkflowLoadGeneration;
             const tabKey = getTabCacheKey();
             lastObservedActiveWorkflowKey = tabKey;
@@ -9162,7 +9863,7 @@ app.registerExtension({
             if (postSettleScanTimer) {
                 clearTimeout(postSettleScanTimer);
             }
-            postSettleScanTimer = setTimeout(() => {
+            postSettleScanTimer = setTimeout(async () => {
                 postSettleScanTimer = null;
                 if (loadGen !== currentWorkflowLoadGeneration) return;
                 if (workflowOpenTriggeredForCurrentLoad) {
@@ -9175,7 +9876,10 @@ app.registerExtension({
                     cachedNativeMissingCandidates = nativeCandidates;
                     syncMissingModelsObserverWithStore(true);
                     void enrichNativeMissingModelStoreFromCatalog();
-                    if (handleNativeMissingCandidates(nativeCandidates)) {
+                    if (await handleNativeMissingCandidates(nativeCandidates)) {
+                        return;
+                    }
+                    if (loadGen !== currentWorkflowLoadGeneration || workflowOpenTriggeredForCurrentLoad) {
                         return;
                     }
                 }
@@ -9387,14 +10091,28 @@ app.registerExtension({
 
                 const nodeErrors = nodeErrorsSnapshot || getNodeErrorsSnapshot();
                 const failures = getNativeModelValidationFailures(nodeErrors);
+                const storeCandidates = getMissingModelCandidates();
+                if (storeCandidates.length > 0 && !cachedNativeMissingCandidates.length) {
+                    cachedNativeMissingCandidates = storeCandidates;
+                }
+                const liveFallbackCandidates =
+                    failures.length || forceFromMissingStore || cachedNativeMissingCandidates.length > 0 || storeCandidates.length > 0
+                        ? []
+                        : collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, null);
                 const hasMissingStoreCandidates = Boolean(
                     forceFromMissingStore ||
                     cachedNativeMissingCandidates.length > 0 ||
-                    getMissingModelCandidates().length > 0
+                    storeCandidates.length > 0 ||
+                    liveFallbackCandidates.length > 0
                 );
                 if (!failures.length && !hasMissingStoreCandidates) {
                     return;
                 }
+
+                const frontendMissingCandidates =
+                    cachedNativeMissingCandidates.length > 0
+                        ? cachedNativeMissingCandidates
+                        : (storeCandidates.length > 0 ? storeCandidates : liveFallbackCandidates);
 
                 runHookLastTriggeredAt = now;
                 suppressNativeErrorOverlay();
@@ -9404,6 +10122,9 @@ app.registerExtension({
                     triggeredByRunHook: true,
                     reason: "model-validation",
                     runHookFailures: failures,
+                    ...(frontendMissingCandidates.length > 0
+                        ? { frontendMissingModelCandidates: frontendMissingCandidates }
+                        : {}),
                 });
             };
 
@@ -9412,11 +10133,10 @@ app.registerExtension({
                 triggerRunHookFromErrorState(detail?.node_errors || getNodeErrorsSnapshot(), false);
             };
 
-            let prevOverlayOpen = false;
             subscribeExecutionErrors((snapshot) => {
                 const isOpen = Boolean(snapshot?.isErrorOverlayOpen);
-                const openedNow = isOpen && !prevOverlayOpen;
-                prevOverlayOpen = isOpen;
+                const openedNow = isOpen && !prevExecutionErrorOverlayOpen;
+                prevExecutionErrorOverlayOpen = isOpen;
                 if (isLoadingWorkflow) return;
 
                 if (openedNow || snapshot?.fromAction) {
