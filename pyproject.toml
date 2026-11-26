@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI_HuggingFace_Downloader"
 description = "Auto-detect and download missing ComfyUI workflow models, browse 30,000+ models in Model Explorer, and back up or restore ComfyUI to Hugging Face."
-version = "1.41.5"
+version = "1.41.6"
 license = {text = "MIT License"}
 
 

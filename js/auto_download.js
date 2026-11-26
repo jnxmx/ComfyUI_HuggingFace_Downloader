@@ -9807,8 +9807,12 @@ app.registerExtension({
 
             const backendResults = await getWorkflowOpenBackendResults(workflow, expectedGeneration);
             if (expectedGeneration !== currentWorkflowLoadGeneration) return;
+            if (!backendResults || typeof backendResults !== "object") {
+                // Do not poison workflowScanCache when the preflight timed out or failed.
+                return;
+            }
 
-            const backendTargetCount = countDownloadRequiredScanResults(backendResults || {});
+            const backendTargetCount = countDownloadRequiredScanResults(backendResults);
             workflowScanCache.set(tabKey, {
                 revKey,
                 dismissed: false,
@@ -10118,10 +10122,15 @@ app.registerExtension({
             }, { immediate: true });
 
             subscribeRightSidePanel(() => {
+                const storeCandidates = getMissingModelCandidates();
+                if (storeCandidates.length > 0 && !cachedNativeMissingCandidates.length) {
+                    cachedNativeMissingCandidates = storeCandidates;
+                }
                 const hasCandidates =
                     cachedNativeMissingCandidates.length > 0 ||
-                    getMissingModelCandidates().length > 0 ||
-                    Boolean(document.querySelector(MISSING_MODELS_LIST_SELECTOR));
+                    storeCandidates.length > 0 ||
+                    Boolean(document.querySelector(MISSING_MODELS_LIST_SELECTOR)) ||
+                    Boolean(document.querySelector('[data-testid="missing-model-importable-rows"], [data-testid="missing-model-actions"]'));
                 if (!hasCandidates) return;
 
                 void enrichNativeMissingModelStoreFromCatalog();
@@ -10130,9 +10139,11 @@ app.registerExtension({
                 } else {
                     syncMissingModelsObserverWithStore(true);
                 }
-                setTimeout(() => {
-                    syncMissingModelsObserverWithStore(true);
-                }, 120);
+                for (const delayMs of [60, 200, 450]) {
+                    setTimeout(() => {
+                        syncMissingModelsObserverWithStore(true);
+                    }, delayMs);
+                }
             }, { immediate: true });
         };
 

@@ -298,33 +298,44 @@ export const subscribeRightSidePanel = (callback, { immediate = false } = {}) =>
     if (typeof callback !== "function") {
         return () => {};
     }
-    return observePiniaStore(
+    let lastOpen = null;
+    let lastTab = null;
+
+    const emitFromPanelStore = (panelStore, force = false) => {
+        const isOpen = Boolean(unwrapStoreValue(panelStore?.isOpen));
+        const activeTab = unwrapStoreValue(panelStore?.activeTab) ?? null;
+        if (!force && isOpen === lastOpen && activeTab === lastTab) {
+            return;
+        }
+        lastOpen = isOpen;
+        lastTab = activeTab;
+        callback({
+            isOpen,
+            activeTab,
+            store: panelStore || null,
+        });
+    };
+
+    const unsubPanel = observePiniaStore(
         "rightSidePanel",
         (store, shouldEmitImmediate) => {
             let storeUnsub = null;
             let actionUnsub = null;
-            const emitCurrent = () => {
-                callback({
-                    isOpen: Boolean(unwrapStoreValue(store?.isOpen)),
-                    activeTab: unwrapStoreValue(store?.activeTab) ?? null,
-                    store,
-                });
-            };
             if (typeof store.$subscribe === "function") {
                 storeUnsub = store.$subscribe(
                     () => {
-                        emitCurrent();
+                        emitFromPanelStore(store, false);
                     },
                     { detached: true }
                 );
             }
             if (typeof store.$onAction === "function") {
                 actionUnsub = store.$onAction(({ after }) => {
-                    after(() => emitCurrent());
+                    after(() => emitFromPanelStore(store, true));
                 }, true);
             }
             if (shouldEmitImmediate) {
-                emitCurrent();
+                emitFromPanelStore(store, true);
             }
             return () => {
                 try {
@@ -337,6 +348,48 @@ export const subscribeRightSidePanel = (callback, { immediate = false } = {}) =>
         },
         { immediate }
     );
+
+    const unsubSetting = observePiniaStore(
+        "setting",
+        (settingStore) => {
+            let settingUnsub = null;
+            let settingActionUnsub = null;
+            const onSettingChange = () => {
+                const panelStore = findPiniaStore("rightSidePanel");
+                if (panelStore) {
+                    emitFromPanelStore(panelStore, false);
+                }
+            };
+            if (typeof settingStore.$subscribe === "function") {
+                settingUnsub = settingStore.$subscribe(onSettingChange, { detached: true });
+            }
+            if (typeof settingStore.$onAction === "function") {
+                settingActionUnsub = settingStore.$onAction(({ name, args, after }) => {
+                    if (name === "set" && String(args?.[0] || "") === "Comfy.RightSidePanel.IsOpen") {
+                        after(onSettingChange);
+                    }
+                }, true);
+            }
+            return () => {
+                try {
+                    if (typeof settingUnsub === "function") settingUnsub();
+                } catch (_) {}
+                try {
+                    if (typeof settingActionUnsub === "function") settingActionUnsub();
+                } catch (_) {}
+            };
+        },
+        { immediate: false }
+    );
+
+    return () => {
+        try {
+            unsubPanel();
+        } catch (_) {}
+        try {
+            unsubSetting();
+        } catch (_) {}
+    };
 };
 
 export const dismissNativeErrorDialog = async () => {
