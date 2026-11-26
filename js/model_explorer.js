@@ -410,10 +410,19 @@ const showMoveFolderDialog = ({
             wordBreak: "break-word",
         });
 
+        const applyFieldFocusStyle = (el) => {
+            el.addEventListener("focus", () => {
+                el.style.borderColor = "var(--ring, #8a8a8a)";
+            });
+            el.addEventListener("blur", () => {
+                el.style.borderColor = "var(--border, #494a50)";
+            });
+        };
+
         const select = document.createElement("select");
         Object.assign(select.style, {
             width: "100%",
-            height: "38px",
+            height: "40px",
             borderRadius: "8px",
             border: "1px solid var(--border, #494a50)",
             background: "var(--secondary, #262729)",
@@ -423,7 +432,9 @@ const showMoveFolderDialog = ({
             fontFamily: 'var(--font-inter, "Inter", sans-serif)',
             outline: "none",
             boxSizing: "border-box",
+            transition: "border-color 150ms ease",
         });
+        applyFieldFocusStyle(select);
 
         const uniqueFolders = [...new Set((Array.isArray(folders) ? folders : []).map((f) => String(f || "").trim()).filter(Boolean))];
         if (currentFolder && !uniqueFolders.includes(currentFolder)) {
@@ -452,7 +463,7 @@ const showMoveFolderDialog = ({
         Object.assign(customInput.style, {
             display: select.value === "__custom__" ? "block" : "none",
             width: "100%",
-            height: "38px",
+            height: "40px",
             borderRadius: "8px",
             border: "1px solid var(--border, #494a50)",
             background: "var(--secondary, #262729)",
@@ -462,7 +473,9 @@ const showMoveFolderDialog = ({
             fontFamily: 'var(--font-inter, "Inter", sans-serif)',
             outline: "none",
             boxSizing: "border-box",
+            transition: "border-color 150ms ease",
         });
+        applyFieldFocusStyle(customInput);
 
         select.addEventListener("change", () => {
             const isCustom = select.value === "__custom__";
@@ -520,10 +533,15 @@ const showMoveFolderDialog = ({
         panel.appendChild(actions);
         overlay.appendChild(panel);
 
+        let pointerDownOnBackdrop = false;
+        overlay.addEventListener("pointerdown", (event) => {
+            pointerDownOnBackdrop = event.target === overlay;
+        });
         overlay.addEventListener("click", (event) => {
-            if (event.target === overlay) {
+            if (pointerDownOnBackdrop && event.target === overlay) {
                 settle(null);
             }
+            pointerDownOnBackdrop = false;
         });
 
         document.addEventListener("keydown", onKeyDown);
@@ -934,7 +952,8 @@ class ModelExplorerDialog {
                 gap: 12px;
                 padding: 10px 16px;
                 border-radius: 12px;
-                background: var(--secondary, #262729);
+                background: var(--card, #262729);
+                border: 1px solid var(--border, #494a50);
                 color: var(--foreground, #ffffff);
                 font-family: var(--font-inter, "Inter", sans-serif);
                 font-size: 13px;
@@ -1424,7 +1443,7 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-meta {
                 margin-left: auto;
                 display: grid;
-                grid-template-columns: minmax(0, 1fr) calc(36px + 6.5rem + 6px);
+                grid-template-columns: minmax(0, 1fr) calc(36px + 36px + 6.5rem + 12px);
                 align-items: center;
                 gap: 10px;
                 min-width: 0;
@@ -1461,6 +1480,7 @@ class ModelExplorerDialog {
                 color: var(--muted-foreground, #8a8a8a);
                 font-size: 12px;
                 font-weight: 400;
+                font-variant-numeric: tabular-nums;
                 padding: 0 4px;
             }
             #hf-model-explorer-dialog .hf-me-actions {
@@ -1728,7 +1748,7 @@ class ModelExplorerDialog {
                     </button>
                 </div>
                 <button id="hf-me-hfsearch-btn" type="button" class="hf-me-hfsearch-btn" hidden>
-                    <i class="pi pi-globe" aria-hidden="true"></i>
+                    <i class="icon-[lucide--globe] size-4" aria-hidden="true"></i>
                     <span>Search on Hugging Face</span>
                 </button>
             </div>
@@ -2510,7 +2530,7 @@ class ModelExplorerDialog {
                 <div class="hf-me-empty" style="display:flex;flex-direction:column;align-items:center;gap:0.75rem;">
                     <div>No models found for "${escapeHtml(q)}" in local database.</div>
                     <button type="button" class="hf-me-hfsearch-btn" data-hf-empty-search="1">
-                        <i class="pi pi-globe" aria-hidden="true"></i>
+                        <i class="icon-[lucide--globe] size-4" aria-hidden="true"></i>
                         <span>Search "${escapeHtml(q)}" on Hugging Face</span>
                     </button>
                 </div>
@@ -2641,7 +2661,7 @@ class ModelExplorerDialog {
         const renderBanner = (subtitleHtml) => `
             <div class="hf-me-hfsearch-banner">
                 <div class="hf-me-hfsearch-banner-title">
-                    <i class="pi pi-globe" aria-hidden="true"></i>
+                    <i class="icon-[lucide--globe] size-4" aria-hidden="true"></i>
                     <span>${subtitleHtml}</span>
                 </div>
                 <button type="button" class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-hf-back="1">

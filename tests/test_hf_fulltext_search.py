@@ -140,6 +140,55 @@ class TestHFFulltextSearch(unittest.TestCase):
             self.assertTrue(results[0]["is_priority_author"])
             self.assertEqual(results[0]["directory"], "diffusion_models")
 
+    def test_search_huggingface_variants_multi_term_and_multiword_repo_match(self):
+        def fake_list_models(**kwargs):
+            if kwargs.get("author"):
+                return []
+            if kwargs.get("search") == "flux-dev":
+                return [
+                    SimpleNamespace(modelId="randomuser/flux-dev-mirror", likes=50, downloads=100),
+                    SimpleNamespace(modelId="Comfy-Org/flux1-dev", likes=25, downloads=200),
+                ]
+            return []
+
+        def fake_repo_files(api, rid, token=None):
+            if rid == "Comfy-Org/flux1-dev":
+                return ["flux1-dev-fp8.safetensors", "ae.safetensors"]
+            if rid == "randomuser/flux-dev-mirror":
+                return ["flux-dev-fp8.safetensors"]
+            return []
+
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen_json({"hits": []})), \
+             patch.object(md.HfApi, "list_models", side_effect=fake_list_models), \
+             patch.object(md, "_get_repo_files", side_effect=fake_repo_files):
+            results = md.search_huggingface_variants("flux dev", category="diffusion_models")
+            self.assertGreaterEqual(len(results), 2)
+            self.assertEqual(results[0]["repo_id"], "Comfy-Org/flux1-dev")
+            self.assertTrue(results[0]["is_priority_author"])
+
+    def test_search_huggingface_variants_priority_author_fallback(self):
+        def fake_list_models(**kwargs):
+            if kwargs.get("author") == "Kijai":
+                return [SimpleNamespace(modelId="Kijai/WanVideo_comfy", likes=80, downloads=500)]
+            return []
+
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen_json({"hits": []})), \
+             patch.object(md.HfApi, "list_models", side_effect=fake_list_models), \
+             patch.object(
+                 md,
+                 "_get_repo_files",
+                 side_effect=lambda api, rid, token=None: (
+                     ["Wan2_1-T2V-14B_fp8_e4m3fn.safetensors", "README.md"]
+                     if rid == "Kijai/WanVideo_comfy"
+                     else []
+                 ),
+             ):
+            results = md.search_huggingface_variants("Wan2_1-T2V-14B", category="diffusion_models")
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["repo_id"], "Kijai/WanVideo_comfy")
+            self.assertTrue(results[0]["is_priority_author"])
+            self.assertEqual(results[0]["filename"], "Wan2_1-T2V-14B_fp8_e4m3fn.safetensors")
+
 
 if __name__ == "__main__":
     unittest.main()

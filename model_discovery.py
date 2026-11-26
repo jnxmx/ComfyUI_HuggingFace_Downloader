@@ -3657,21 +3657,65 @@ def search_huggingface_variants(
     for hit in ft_hits:
         _add_candidate(hit["repo_id"], likes=hit.get("likes", 0), from_fulltext=True)
 
-    # 2. Standard Hugging Face repository search
-    if _hf_search_allowed():
+    # Build expanded search terms (same strategy as search_huggingface_model)
+    stem = os.path.splitext(clean_query)[0]
+    tokens = [t for t in re.split(r"[-_.\s/]+", stem) if t]
+    search_terms: list[str] = []
+    for cand_term in [
+        clean_query,
+        stem,
+        stem.replace("_", "-"),
+        stem.replace("-", "_"),
+        "-".join(tokens[:3]) if len(tokens) >= 3 else "",
+        "-".join(tokens[:2]) if len(tokens) >= 2 else "",
+    ]:
+        t = str(cand_term or "").strip()
+        if len(t) >= 2 and t not in search_terms:
+            search_terms.append(t)
+
+    # 2. Standard Hugging Face repository search (multi-term expansion)
+    list_models_added = 0
+    for term in search_terms[:4]:
+        if not _hf_search_allowed() or list_models_added >= 6:
+            break
         try:
-            repo_query = os.path.splitext(clean_query)[0] if "." in clean_query else clean_query
-            models = list(call_with_timeout(api.list_models, search=repo_query, limit=12, sort="downloads"))
+            models = list(call_with_timeout(api.list_models, search=term, limit=20, sort="downloads"))
             for m in models:
                 rid = getattr(m, "modelId", None) or getattr(m, "id", None)
                 if rid:
+                    was_new = str(rid).strip() not in candidate_map
                     _add_candidate(
                         rid,
                         likes=int(getattr(m, "likes", 0) or 0),
                         downloads=int(getattr(m, "downloads", 0) or 0),
                     )
+                    if was_new:
+                        list_models_added += 1
         except Exception:
-            pass
+            continue
+
+    # 3. Priority authors fallback when fewer than 3 priority-author candidates exist
+    prio_count = sum(
+        1 for rid in candidate_map
+        if rid.split("/", 1)[0].lower() in priority_lower
+    )
+    if prio_count < 3 and _hf_search_allowed():
+        author_term = "-".join(tokens[:2]) if len(tokens) >= 2 else (stem or clean_query)
+        for author in PRIORITY_AUTHORS[:8]:
+            if not _hf_search_allowed():
+                break
+            try:
+                models = list(call_with_timeout(api.list_models, author=author, search=author_term, limit=5))
+                for m in models:
+                    rid = getattr(m, "modelId", None) or getattr(m, "id", None)
+                    if rid:
+                        _add_candidate(
+                            rid,
+                            likes=int(getattr(m, "likes", 0) or 0),
+                            downloads=int(getattr(m, "downloads", 0) or 0),
+                        )
+            except Exception:
+                continue
 
     if not candidate_map:
         return []
@@ -3685,7 +3729,11 @@ def search_huggingface_variants(
         rid_lower = rid.lower()
         owner = rid_lower.split("/", 1)[0]
         is_prio = 1 if owner in priority_lower else 0
-        exact_repo = 1 if (q_lower in rid_lower or (q_stem and q_stem in rid_lower)) else 0
+        exact_repo = 1 if (
+            q_lower in rid_lower
+            or (q_stem and q_stem in rid_lower)
+            or (q_tokens and all(tok in rid_lower for tok in q_tokens))
+        ) else 0
         ft_bonus = 1 if cand.get("from_fulltext") else 0
         return (is_prio, exact_repo, ft_bonus, cand.get("likes", 0), cand.get("downloads", 0))
 
@@ -3697,8 +3745,9 @@ def search_huggingface_variants(
     if target_category in {"", "all", "other", "__other__"}:
         target_category = ""
 
-    for cand in sorted_candidates[:8]:
-        if len(results) >= limit:
+    collect_cap = max(limit * 2, limit)
+    for cand in sorted_candidates[:16]:
+        if len(results) >= collect_cap or not _hf_search_allowed():
             break
         rid = cand["repo_id"]
         try:
@@ -3713,22 +3762,35 @@ def search_huggingface_variants(
         if not model_files:
             continue
 
-        # Prefer files matching the query string or its tokens
-        exact_matches = [f for f in model_files if q_lower in f.lower()]
+        # Prefer exact basename, then substring matches, then token matches, then repo name matches
+        exact_basename = [f for f in model_files if os.path.basename(f).lower() == q_lower]
+        exact_matches = [f for f in model_files if q_lower in f.lower() and f not in exact_basename]
         token_matches = [
             f for f in model_files
             if q_tokens and all(tok in f.lower() for tok in q_tokens)
-        ] if not exact_matches else []
-        repo_matches = model_files[:6] if (not exact_matches and not token_matches and q_stem in rid.lower()) else []
+        ] if (not exact_basename and not exact_matches) else []
+        repo_matches = (
+            model_files[:6]
+            if (
+                not exact_basename
+                and not exact_matches
+                and not token_matches
+                and (
+                    (q_stem and q_stem in rid.lower())
+                    or (q_tokens and all(tok in rid.lower() for tok in q_tokens))
+                )
+            )
+            else []
+        )
 
-        picked = exact_matches or token_matches or repo_matches
+        picked = (exact_basename + exact_matches) or token_matches or repo_matches
         if not picked:
             continue
 
         owner = rid.split("/", 1)[0].lower()
         is_prio = owner in priority_lower
         for hf_path in picked[:6]:
-            if len(results) >= limit:
+            if len(results) >= collect_cap:
                 break
             fn = os.path.basename(hf_path)
             url = f"https://huggingface.co/{rid}/resolve/main/{hf_path}"
@@ -3747,7 +3809,17 @@ def search_huggingface_variants(
                 "is_priority_author": is_prio,
             })
 
-    return results
+    results.sort(
+        key=lambda r: (
+            1 if str(r.get("filename") or "").lower() == q_lower else 0,
+            1 if r.get("is_priority_author") else 0,
+            1 if q_lower in str(r.get("filename") or "").lower() else 0,
+            int(r.get("likes") or 0),
+            int(r.get("downloads") or 0),
+        ),
+        reverse=True,
+    )
+    return results[:limit]
 
 def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb=None) -> Dict[str, Any]:
     """
