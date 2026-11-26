@@ -113,6 +113,25 @@ class TestDbUpdater(unittest.TestCase):
             self.assertEqual(f.read(), self.old_db)
         self.assertFalse(os.path.exists(f"{self.db_path}.tmp"))
 
+    def test_missing_db_downloads_even_when_manifest_matches(self):
+        os.remove(self.db_path)
+        remote_manifest = json.dumps({
+            "schema_version": 1,
+            "built_at": "2026-11-18T10:00:00+00:00",
+            "row_count": 1,
+            "sha256": self.old_sha,
+        }).encode("utf-8")
+
+        with patch("urllib.request.urlopen", side_effect=[_make_resp(remote_manifest), _make_resp(self.old_db)]), \
+             patch.object(db_updater, "_invalidate_runtime_caches") as mock_inv:
+            res = db_updater.check_and_update_database(db_path=self.db_path, version_path=self.ver_path)
+            self.assertTrue(res["updated"])
+            self.assertEqual(res["row_count"], 1)
+            mock_inv.assert_called_once()
+
+        with open(self.db_path, "rb") as f:
+            self.assertEqual(f.read(), self.old_db)
+
 
 if __name__ == "__main__":
     unittest.main()

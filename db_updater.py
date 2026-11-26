@@ -72,7 +72,9 @@ def _is_remote_newer(
     remote_sha = str(remote_manifest.get("sha256") or "").strip().lower()
     if not remote_sha:
         return False
-    if local_sha256 and local_sha256.lower() == remote_sha:
+    if not local_sha256:
+        return True
+    if local_sha256.lower() == remote_sha:
         return False
 
     if isinstance(local_manifest, dict):
@@ -95,6 +97,8 @@ def _invalidate_runtime_caches() -> None:
         from . import web_api
         if hasattr(web_api, "_invalidate_model_library_assets_cache"):
             web_api._invalidate_model_library_assets_cache()
+        if hasattr(web_api, "_invalidate_model_explorer_catalog_cache"):
+            web_api._invalidate_model_explorer_catalog_cache()
     except Exception:
         pass
 

@@ -478,8 +478,26 @@ app.registerExtension({
                     text-decoration: underline;
                     cursor: pointer;
                 }
+                #${PANEL_ID} .hf-downloader-gated-callout {
+                    margin-top: 6px;
+                    padding: 7px 9px;
+                    border-radius: 8px;
+                    background: rgba(245, 158, 11, 0.10);
+                    border: 1px solid rgba(245, 158, 11, 0.35);
+                    color: #fbbf24;
+                    font-size: 11px;
+                    line-height: 1.35;
+                    display: none;
+                    align-items: flex-start;
+                    gap: 7px;
+                    word-break: break-word;
+                }
+                #${PANEL_ID} .hf-downloader-gated-text {
+                    min-width: 0;
+                    flex: 1 1 auto;
+                }
                 #${PANEL_ID} .hf-downloader-actions {
-                    margin-top: 5px;
+                    margin-top: 6px;
                     display: none;
                     flex-wrap: wrap;
                     align-items: center;
@@ -492,11 +510,26 @@ app.registerExtension({
                     font-size: 11px;
                     color: var(--muted-foreground, #9ca3af);
                 }
-                #${PANEL_ID} .hf-downloader-repo-link {
+                #${PANEL_ID} .hf-downloader-action-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 5px;
+                    height: 26px;
+                    padding: 0 9px;
+                    border-radius: 6px;
                     font-size: 11px;
-                    color: #93c5fd;
-                    text-decoration: underline;
-                    cursor: pointer;
+                    font-weight: 500;
+                    line-height: 1;
+                    text-decoration: none;
+                }
+                #${PANEL_ID} .hf-downloader-action-btn-amber {
+                    background: rgba(245, 158, 11, 0.16);
+                    border: 1px solid rgba(245, 158, 11, 0.42);
+                    color: #fbbf24;
+                }
+                #${PANEL_ID} .hf-downloader-action-btn-amber:hover {
+                    background: rgba(245, 158, 11, 0.26);
                 }
                 #${PANEL_ID} .hf-downloader-empty-filter {
                     padding: 18px 12px;
@@ -953,6 +986,20 @@ app.registerExtension({
             }
         };
 
+        const isGatedEntry = (info) => {
+            if (!info || typeof info !== "object") return false;
+            const kind = info._kind || "download";
+            const isBackup = kind === "backup_upload" || kind === "backup_download";
+            if (isBackup || toUiStatus(info.status) !== "failed") return false;
+            const errorCode = String(info.error_code || "").trim();
+            const errorText = String(info.error || "").trim();
+            const hasGatedMarkers =
+                /gated|accept (its|the|model) terms|acceptance of its conditions|request access|ask for access|authorized list|restricted|agreement|agree to the license|license agreement|403/i.test(
+                    errorText
+                );
+            return errorCode === "gated_repo" || errorCode === "hf_forbidden" || hasGatedMarkers;
+        };
+
         const createItemNode = () => {
             const item = document.createElement("div");
             item.className = ITEM_CLASS;
@@ -970,6 +1017,18 @@ app.registerExtension({
             error.className = "hf-downloader-error";
             error.style.display = "none";
 
+            const gatedCallout = document.createElement("div");
+            gatedCallout.className = "hf-downloader-gated-callout";
+            gatedCallout.style.display = "none";
+            const gatedLockIcon = document.createElement("i");
+            gatedLockIcon.className = "icon-[lucide--lock] size-3.5 shrink-0";
+            gatedLockIcon.style.marginTop = "1px";
+            gatedLockIcon.setAttribute("aria-hidden", "true");
+            const gatedText = document.createElement("span");
+            gatedText.className = "hf-downloader-gated-text";
+            gatedCallout.appendChild(gatedLockIcon);
+            gatedCallout.appendChild(gatedText);
+
             const actions = document.createElement("div");
             actions.className = "hf-downloader-actions";
 
@@ -978,21 +1037,27 @@ app.registerExtension({
             agreementHint.textContent = "Accept model agreement and retry download.";
 
             const repoLink = document.createElement("a");
-            repoLink.className = "hf-downloader-repo-link";
-            repoLink.textContent = "Open model page";
+            repoLink.className = `${BUTTON_BASE_CLASS} hf-downloader-action-btn hf-downloader-action-btn-amber`;
+            const repoLinkIcon = document.createElement("i");
+            repoLinkIcon.className = "icon-[lucide--external-link] size-3 shrink-0";
+            repoLinkIcon.setAttribute("aria-hidden", "true");
+            const repoLinkLabel = document.createElement("span");
+            repoLinkLabel.textContent = "Accept license";
+            repoLink.appendChild(repoLinkIcon);
+            repoLink.appendChild(repoLinkLabel);
             repoLink.target = "_blank";
             repoLink.rel = "noopener noreferrer";
             repoLink.style.display = "none";
 
             const retryBtn = document.createElement("button");
             retryBtn.type = "button";
-            retryBtn.className = "hf-downloader-retry p-button p-component p-button-sm p-button-warning";
+            retryBtn.className = `${BUTTON_BASE_CLASS} hf-downloader-action-btn bg-secondary text-foreground hover:bg-accent`;
             retryBtn.textContent = "Retry";
             retryBtn.style.display = "none";
 
             const dismissBtn = document.createElement("button");
             dismissBtn.type = "button";
-            dismissBtn.className = "hf-downloader-dismiss p-button p-component p-button-sm p-button-secondary";
+            dismissBtn.className = `${BUTTON_BASE_CLASS} hf-downloader-action-btn bg-secondary text-foreground hover:bg-accent`;
             dismissBtn.textContent = "Dismiss";
             dismissBtn.style.display = "none";
 
@@ -1004,6 +1069,7 @@ app.registerExtension({
             content.appendChild(name);
             content.appendChild(subtitle);
             content.appendChild(error);
+            content.appendChild(gatedCallout);
             content.appendChild(actions);
 
             const rowActions = document.createElement("div");
@@ -1040,6 +1106,8 @@ app.registerExtension({
                 pauseResumeBtn,
                 cancelBtn,
                 error,
+                gatedCallout,
+                gatedText,
                 actions,
                 agreementHint,
                 repoLink,
@@ -1088,20 +1156,20 @@ app.registerExtension({
 
             if (info._kind === "backup_upload") {
                 parts.push("Backup upload");
-                parts.push(stText);
+                parts.push(isGatedEntry(info) ? "License required" : stText);
                 return parts.join(" • ");
             }
 
             if (info._kind === "backup_download") {
                 parts.push("Backup restore");
-                parts.push(stText);
+                parts.push(isGatedEntry(info) ? "License required" : stText);
                 if (info.total_files > 0) {
                     parts.push(`${info.completed_files || 0}/${info.total_files} files`);
                 }
                 return parts.join(" • ");
             }
 
-            parts.push(stText);
+            parts.push(isGatedEntry(info) ? "License required" : stText);
             const totalBytes = info.total_bytes || 0;
             const downloadedBytes = info.downloaded_bytes || 0;
             if (totalBytes && downloadedBytes && (info.status === "downloading" || info.status === "paused" || info.status === "pausing")) {
@@ -1146,11 +1214,13 @@ app.registerExtension({
                 info.status === "verifying";
             refs.root.classList.toggle("is-active-row", isActivelyRunning);
 
+            const isGated = isGatedEntry(info);
             refs.subtitle.textContent = buildSubtitleParts(info);
-            refs.subtitle.style.color =
-                info.status === "failed" || info.status === "paused" || info.status === "pausing"
+            refs.subtitle.style.color = isGated
+                ? "var(--warning, #f59e0b)"
+                : (info.status === "failed" || info.status === "paused" || info.status === "pausing"
                     ? statusColor(info.status)
-                    : "";
+                    : "");
 
             refs.currentDownloadId = info.id;
             refs.currentIsBackup = isBackup;
@@ -1259,17 +1329,8 @@ app.registerExtension({
                 refs.progressBar.style.backgroundColor = statusColor(info.status);
             }
 
-            const errorCode = String(info.error_code || "").trim();
             const errorText = String(info.error || "").trim();
             const isFailed = info.status === "failed";
-            const hasGatedMarkers =
-                /gated|accept (its|the|model) terms|acceptance of its conditions|request access|ask for access|authorized list|restricted|agreement|agree to the license|license agreement|403/i.test(
-                    errorText
-                );
-            const isGated =
-                !isBackup &&
-                isFailed &&
-                (errorCode === "gated_repo" || errorCode === "hf_forbidden" || hasGatedMarkers);
             let repoUrl = String(info.repo_url || "").trim();
             if (!repoUrl && info.repo_id) {
                 repoUrl = `https://huggingface.co/${info.repo_id}`;
@@ -1280,15 +1341,37 @@ app.registerExtension({
                     repoUrl = match[0].replace(/[.,;:)]+$/, "");
                 }
             }
-            const actionMessage = String(info.action_message || "").trim();
+            let repoId = String(info.repo_id || "").trim();
+            if (!repoId && repoUrl) {
+                const m = repoUrl.match(/https?:\/\/huggingface\.co\/([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)/i);
+                if (m) repoId = m[1];
+            }
             const retryPayload =
                 info.retry_payload && typeof info.retry_payload === "object" ? info.retry_payload : null;
+            const needsToken =
+                Boolean(info.needs_token) ||
+                /add your hugging face token|hf_token/i.test(errorText);
 
-            if (isFailed && errorText) {
+            if (isGated) {
+                renderErrorWithLinks(refs.error, "");
+                refs.error.title = "";
+                refs.error.style.display = "none";
+                refs.gatedCallout.style.display = "flex";
+                refs.gatedText.textContent = needsToken
+                    ? "Gated model — add your HF token in Settings and accept the license."
+                    : "Gated model — accept the license on Hugging Face, then retry.";
+                refs.gatedCallout.title = errorText;
+            } else if (isFailed && errorText) {
+                refs.gatedCallout.style.display = "none";
+                refs.gatedText.textContent = "";
+                refs.gatedCallout.title = "";
                 renderErrorWithLinks(refs.error, errorText);
                 refs.error.title = errorText;
                 refs.error.style.display = "block";
             } else {
+                refs.gatedCallout.style.display = "none";
+                refs.gatedText.textContent = "";
+                refs.gatedCallout.title = "";
                 renderErrorWithLinks(refs.error, "");
                 refs.error.title = "";
                 refs.error.style.display = "none";
@@ -1298,15 +1381,18 @@ app.registerExtension({
 
             refs.root.classList.toggle("has-detail", (isFailed && !!errorText) || isInterrupted || isGated);
             refs.actions.classList.toggle("visible", isGated || isInterrupted);
-            refs.agreementHint.textContent =
-                actionMessage || "Agree to the license on Hugging Face, then retry download.";
-            refs.agreementHint.style.display = isGated ? "inline" : "none";
+            refs.agreementHint.textContent = "";
+            refs.agreementHint.style.display = "none";
 
             if (isGated && repoUrl) {
                 refs.repoLink.href = repoUrl;
-                refs.repoLink.style.display = "inline";
+                refs.repoLink.title = repoId
+                    ? `Open ${repoId} on Hugging Face`
+                    : "Open model page on Hugging Face";
+                refs.repoLink.style.display = "inline-flex";
             } else {
                 refs.repoLink.removeAttribute("href");
+                refs.repoLink.removeAttribute("title");
                 refs.repoLink.style.display = "none";
             }
 
@@ -1596,7 +1682,15 @@ app.registerExtension({
                     headerTitleEl.textContent = `${pausedCount} paused`;
                 } else {
                     const failedCount = entries.filter((entry) => entry.status === "failed").length;
-                    headerTitleEl.textContent = failedCount > 0 ? `${failedCount} failed` : `${entries.length} completed`;
+                    const gatedFailedCount = entries.filter((entry) => isGatedEntry(entry)).length;
+                    if (failedCount > 0) {
+                        headerTitleEl.textContent =
+                            gatedFailedCount === failedCount
+                                ? (gatedFailedCount === 1 ? "1 needs access" : `${gatedFailedCount} need access`)
+                                : `${failedCount} failed`;
+                    } else {
+                        headerTitleEl.textContent = `${entries.length} completed`;
+                    }
                 }
             }
 

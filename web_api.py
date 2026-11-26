@@ -10,6 +10,7 @@ import shutil
 import re
 from collections import Counter
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, unquote
 from aiohttp import web
 from .backup import (
@@ -32,6 +33,7 @@ from .file_manager import (
     is_path_within_allowed_roots,
     sanitize_rel_folder,
 )
+from . import model_discovery
 from .model_discovery import process_workflow_for_missing_models, SearchCancelledException
 from .downloader import (
     run_download,
@@ -41,6 +43,7 @@ from .downloader import (
     get_blob_paths,
     get_token,
     get_xet_live_progress,
+    check_hf_repo_access,
 )
 from .parse_link import parse_link
 try:
@@ -213,6 +216,32 @@ MODEL_EXPLORER_EXCLUDED_EXTENSIONS = {
 
 _model_explorer_catalog_cache = {"mtime": 0.0, "models": {}}
 _model_explorer_catalog_lock = threading.Lock()
+_model_explorer_missing_db_check_last_at = 0.0
+_model_explorer_missing_db_check_lock = threading.Lock()
+
+
+def _invalidate_model_explorer_catalog_cache() -> None:
+    global _model_explorer_catalog_cache
+    with _model_explorer_catalog_lock:
+        _model_explorer_catalog_cache = {"mtime": 0.0, "models": {}}
+
+
+def _trigger_missing_explorer_db_download() -> None:
+    global _model_explorer_missing_db_check_last_at
+    now = time.monotonic()
+    with _model_explorer_missing_db_check_lock:
+        if now - _model_explorer_missing_db_check_last_at < 60.0:
+            return
+        _model_explorer_missing_db_check_last_at = now
+
+    def _worker():
+        try:
+            from .db_updater import check_and_update_database
+            check_and_update_database()
+        except Exception as e:
+            print(f"[ComfyUI_HuggingFace_Downloader] On-demand DB download failed: {e}")
+
+    threading.Thread(target=_worker, name="hf-downloader-db-selfheal", daemon=True).start()
 _model_explorer_precision_pattern = re.compile(
     r"(?:^|[-_.])("
     r"fp(?:32|16|8|4)"
@@ -279,6 +308,7 @@ def _model_explorer_infer_wan_base(filename: str, base_value: str = "") -> str:
 def _load_model_explorer_catalog() -> dict:
     global _model_explorer_catalog_cache
     if not os.path.exists(MODEL_EXPLORER_DB_PATH):
+        _trigger_missing_explorer_db_download()
         return {}
 
     try:
@@ -692,11 +722,22 @@ def _classify_download_failure(item: dict, error_message: str) -> dict:
     )
     is_hf_related = bool(repo_id) or "huggingface.co" in lowered or _is_supported_hf_link(str(item.get("url") or ""))
     if is_hf_related and any(marker in lowered for marker in gated_markers):
+        needs_token = (
+            "add your hugging face token" in lowered
+            or "hf_token" in lowered
+            or not bool(get_token())
+        )
+        action_message = (
+            "Add a Hugging Face token in Settings and accept the model license."
+            if needs_token
+            else "Accept the license on Hugging Face, then retry."
+        )
         result.update(
             {
                 "error_code": "gated_repo",
                 "action_hint": "accept_model_agreement",
-                "action_message": "Agree to the license on Hugging Face, then retry download.",
+                "needs_token": needs_token,
+                "action_message": action_message,
             }
         )
         return result
@@ -3528,6 +3569,109 @@ def setup(app_or_server):
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
+    def _sync_check_hf_access(payload: dict) -> dict:
+        force_refresh = bool(payload.get("force_refresh"))
+        token = get_token()
+        raw_urls: list[str] = []
+        for u in (payload.get("urls") or []):
+            if isinstance(u, str) and u.strip():
+                raw_urls.append(u.strip())
+        for model in (payload.get("models") or []):
+            if isinstance(model, dict):
+                u = str(model.get("url") or "").strip()
+                if u:
+                    raw_urls.append(u)
+        explicit_repos: list[str] = []
+        for r in (payload.get("repos") or []):
+            if isinstance(r, str) and r.strip():
+                explicit_repos.append(r.strip().strip("/"))
+
+        url_to_repo: dict[str, str] = {}
+        ordered_repos: list[str] = []
+        seen_repos: set[str] = set()
+
+        def _add_repo(repo_name: str):
+            clean = str(repo_name or "").strip().strip("/")
+            if not clean or "/" not in clean:
+                return
+            key = clean.lower()
+            if key not in seen_repos:
+                seen_repos.add(key)
+                ordered_repos.append(clean)
+
+        for url in raw_urls:
+            repo_name = ""
+            if _is_supported_hf_link(url):
+                try:
+                    parsed = parse_link(url)
+                    repo_name = str(parsed.get("repo") or "").strip().strip("/")
+                except Exception:
+                    repo_name = ""
+            if repo_name and "/" in repo_name:
+                url_to_repo[url] = repo_name
+                _add_repo(repo_name)
+
+        for repo_name in explicit_repos:
+            _add_repo(repo_name)
+
+        repo_results: dict[str, dict] = {}
+        if ordered_repos:
+            max_workers = min(6, len(ordered_repos))
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                future_map = {
+                    pool.submit(check_hf_repo_access, repo_name, token, force_refresh): repo_name
+                    for repo_name in ordered_repos
+                }
+                for future, repo_name in future_map.items():
+                    try:
+                        repo_results[repo_name] = future.result()
+                    except Exception:
+                        repo_results[repo_name] = {
+                            "repo_id": repo_name,
+                            "repo_url": f"https://huggingface.co/{repo_name}",
+                            "accessible": True,
+                            "gated": False,
+                            "needs_token": False,
+                            "status": "unknown",
+                        }
+
+        results = []
+        for url in raw_urls:
+            repo_name = url_to_repo.get(url, "")
+            if repo_name and repo_name in repo_results:
+                info = dict(repo_results[repo_name])
+                info["url"] = url
+                results.append(info)
+            else:
+                results.append({
+                    "url": url,
+                    "repo_id": repo_name,
+                    "repo_url": f"https://huggingface.co/{repo_name}" if repo_name else "",
+                    "accessible": True,
+                    "gated": False,
+                    "needs_token": False,
+                    "status": "ok" if not repo_name else "unknown",
+                })
+
+        return {
+            "has_token": bool(token),
+            "repos": repo_results,
+            "results": results,
+        }
+
+    async def hf_check_access(request):
+        """Pre-check Hugging Face repository access before starting downloads."""
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        try:
+            payload = data if isinstance(data, dict) else {}
+            res = await asyncio.to_thread(_sync_check_hf_access, payload)
+            return web.json_response(res)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
     def _cancel_single_download(download_id: str) -> str:
         _clear_pause_request(download_id)
         _request_cancel(download_id)
@@ -4464,6 +4608,7 @@ def setup(app_or_server):
         
     _safe_add_route("POST", "/restart", restart)
     _safe_add_route("POST", "/queue_download", queue_download)
+    _safe_add_route("POST", "/hf_check_access", hf_check_access)
     _safe_add_route("POST", "/api/model_explorer/download", model_explorer_download_proxy)
     _safe_add_route("POST", "/api/hf_downloader/model_explorer/download", model_explorer_download_proxy)
     _safe_add_route("POST", "/cancel_download", cancel_download)

@@ -421,6 +421,135 @@ def get_remote_file_metadata(repo_id: str,
     return None, None, None
 
 
+_HF_ACCESS_CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
+_HF_ACCESS_CACHE_LOCK = threading.Lock()
+_HF_ACCESS_CACHE_TTL_SECONDS = 30.0
+
+_GATED_ACCESS_ERROR_MARKERS = (
+    "gated",
+    "request access",
+    "ask for access",
+    "authorized list",
+    "restricted",
+    "agreement",
+    "agree",
+    "accept its terms",
+    "accept the terms",
+    "accept model agreement",
+    "acceptance of its conditions",
+    "gatedrepo",
+    "403",
+)
+
+
+def check_hf_repo_access(
+    repo_id: str,
+    token: Optional[str] = None,
+    force_refresh: bool = False,
+) -> dict:
+    """Check whether the current token (or public access) can access a Hugging Face repo."""
+    clean_repo = str(repo_id or "").strip().strip("/")
+    if not clean_repo or "/" not in clean_repo:
+        return {
+            "repo_id": clean_repo,
+            "repo_url": f"https://huggingface.co/{clean_repo}" if clean_repo else "",
+            "accessible": True,
+            "gated": False,
+            "needs_token": False,
+            "status": "ok",
+        }
+
+    effective_token = token if token is not None else get_token()
+    token_str = str(effective_token or "").strip()
+    cache_key = (clean_repo.lower(), token_str)
+    repo_url = f"https://huggingface.co/{clean_repo}"
+
+    if not force_refresh:
+        with _HF_ACCESS_CACHE_LOCK:
+            cached = _HF_ACCESS_CACHE.get(cache_key)
+            if cached and (time.time() - cached[0]) < _HF_ACCESS_CACHE_TTL_SECONDS:
+                return dict(cached[1])
+
+    try:
+        from huggingface_hub.utils import GatedRepoError  # type: ignore
+    except Exception:
+        GatedRepoError = None  # type: ignore
+
+    def _gated_result(needs_tok: bool) -> dict:
+        return {
+            "repo_id": clean_repo,
+            "repo_url": repo_url,
+            "accessible": False,
+            "gated": True,
+            "needs_token": bool(needs_tok),
+            "error_code": "gated_repo",
+            "status": "gated",
+        }
+
+    def _ok_result() -> dict:
+        return {
+            "repo_id": clean_repo,
+            "repo_url": repo_url,
+            "accessible": True,
+            "gated": False,
+            "needs_token": False,
+            "status": "ok",
+        }
+
+    def _unknown_result() -> dict:
+        return {
+            "repo_id": clean_repo,
+            "repo_url": repo_url,
+            "accessible": True,
+            "gated": False,
+            "needs_token": False,
+            "status": "unknown",
+        }
+
+    api = HfApi()
+    result: dict
+    try:
+        api.auth_check(clean_repo, token=token_str if token_str else None)
+        result = _ok_result()
+    except Exception as exc:
+        if GatedRepoError is not None and isinstance(exc, GatedRepoError):
+            result = _gated_result(not bool(token_str))
+        else:
+            err_lower = str(exc or "").lower()
+            resp_status = getattr(getattr(exc, "response", None), "status_code", None)
+            if resp_status == 403 or any(marker in err_lower for marker in _GATED_ACCESS_ERROR_MARKERS):
+                result = _gated_result(not bool(token_str))
+            elif (resp_status == 401 or "401" in err_lower or "invalid credentials" in err_lower) and token_str:
+                try:
+                    api.auth_check(clean_repo, token=False)
+                    result = _ok_result()
+                except Exception as exc2:
+                    if GatedRepoError is not None and isinstance(exc2, GatedRepoError):
+                        result = _gated_result(True)
+                    else:
+                        err2_lower = str(exc2 or "").lower()
+                        resp2_status = getattr(getattr(exc2, "response", None), "status_code", None)
+                        if (
+                            resp2_status in (401, 403)
+                            or "401" in err2_lower
+                            or "403" in err2_lower
+                            or any(marker in err2_lower for marker in _GATED_ACCESS_ERROR_MARKERS)
+                        ):
+                            result = _gated_result(True)
+                        else:
+                            result = _unknown_result()
+            elif resp_status == 401 or "401" in err_lower or "invalid credentials" in err_lower:
+                result = _gated_result(True)
+            else:
+                result = _unknown_result()
+
+    if result.get("status") != "unknown":
+        with _HF_ACCESS_CACHE_LOCK:
+            _HF_ACCESS_CACHE[cache_key] = (time.time(), dict(result))
+
+    return dict(result)
+
+
 def format_download_error(e: Exception | str, repo_name: str = "", token: Optional[str] = None) -> str:
     raw_error = str(e or "").strip()
     raw_error_lower = raw_error.lower()

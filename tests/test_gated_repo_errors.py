@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Ensure mocks for ComfyUI environment
 for mod_name in ["comfy_api", "comfy_api.latest", "folder_paths", "server", "aiohttp", "aiohttp.web"]:
@@ -84,12 +84,118 @@ class TestGatedRepoErrors(unittest.TestCase):
         self.assertEqual(res.get("action_hint"), "accept_model_agreement")
         self.assertEqual(res.get("repo_id"), "black-forest-labs/flux-3-image-klein-comfy")
         self.assertEqual(res.get("repo_url"), "https://huggingface.co/black-forest-labs/flux-3-image-klein-comfy")
+        self.assertIn("license", res.get("action_message", "").lower())
+
+    def test_classify_download_failure_needs_token_flag(self):
+        """_classify_download_failure sets needs_token accurately from token/message."""
+        item = {
+            "filename": "ltx.safetensors",
+            "url": "https://huggingface.co/Lightricks/LTX-2.5/resolve/main/ltx.safetensors",
+            "folder": "diffusion_models",
+        }
+        with patch.object(web_api, "get_token", return_value="hf_valid"):
+            res_with_token = web_api._classify_download_failure(
+                item,
+                "The repository 'Lightricks/LTX-2.5' is gated and requires agreeing to its license.",
+            )
+        self.assertFalse(res_with_token.get("needs_token"))
+        self.assertEqual(
+            res_with_token.get("action_message"),
+            "Accept the license on Hugging Face, then retry.",
+        )
+
+        with patch.object(web_api, "get_token", return_value=None):
+            res_no_token = web_api._classify_download_failure(
+                item,
+                "The repository 'Lightricks/LTX-2.5' is gated. Add your Hugging Face token.",
+            )
+        self.assertTrue(res_no_token.get("needs_token"))
+        self.assertEqual(
+            res_no_token.get("action_message"),
+            "Add a Hugging Face token in Settings and accept the model license.",
+        )
 
     def test_extract_repo_id_from_error_quotes(self):
         """_extract_repo_id_from_error parses repo name from repository 'owner/name'."""
         msg = "The repository 'black-forest-labs/flux-3-image-klein-comfy' is gated."
         repo_id = web_api._extract_repo_id_from_error(msg)
         self.assertEqual(repo_id, "black-forest-labs/flux-3-image-klein-comfy")
+
+    def test_check_hf_repo_access_accessible_and_cached(self):
+        """check_hf_repo_access caches ok results and bypasses cache on force_refresh."""
+        dl._HF_ACCESS_CACHE.clear()
+        mock_api = MagicMock()
+        with patch.object(dl, "HfApi", return_value=mock_api):
+            res1 = dl.check_hf_repo_access("Lightricks/LTX-2.5", token="hf_tok")
+            res2 = dl.check_hf_repo_access("Lightricks/LTX-2.5", token="hf_tok")
+            res3 = dl.check_hf_repo_access("Lightricks/LTX-2.5", token="hf_tok", force_refresh=True)
+
+        self.assertTrue(res1["accessible"])
+        self.assertFalse(res1["gated"])
+        self.assertEqual(res1["status"], "ok")
+        self.assertEqual(res2, res1)
+        self.assertEqual(res3, res1)
+        self.assertEqual(mock_api.auth_check.call_count, 2)
+
+    def test_check_hf_repo_access_gated_with_and_without_token(self):
+        """check_hf_repo_access reports gated=True and needs_token based on token presence."""
+        from huggingface_hub.utils import GatedRepoError
+
+        dl._HF_ACCESS_CACHE.clear()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 403
+        mock_resp.headers = {}
+        gated_err = GatedRepoError("Cannot access gated repo", response=mock_resp)
+
+        mock_api = MagicMock()
+        mock_api.auth_check.side_effect = gated_err
+
+        with patch.object(dl, "HfApi", return_value=mock_api):
+            res_with_tok = dl.check_hf_repo_access("Lightricks/LTX-2.5", token="hf_tok")
+            res_no_tok = dl.check_hf_repo_access("Lightricks/LTX-2.5", token="")
+
+        self.assertFalse(res_with_tok["accessible"])
+        self.assertTrue(res_with_tok["gated"])
+        self.assertFalse(res_with_tok["needs_token"])
+        self.assertEqual(res_with_tok["error_code"], "gated_repo")
+        self.assertEqual(res_with_tok["repo_url"], "https://huggingface.co/Lightricks/LTX-2.5")
+
+        self.assertFalse(res_no_tok["accessible"])
+        self.assertTrue(res_no_tok["gated"])
+        self.assertTrue(res_no_tok["needs_token"])
+
+    def test_check_hf_repo_access_public_repo_with_restricted_token(self):
+        """401 with token retries unauthenticated and marks public repos accessible."""
+        dl._HF_ACCESS_CACHE.clear()
+        mock_api = MagicMock()
+        mock_api.auth_check.side_effect = [
+            RuntimeError("401 Client Error: Invalid credentials"),
+            None,
+        ]
+
+        with patch.object(dl, "HfApi", return_value=mock_api):
+            res = dl.check_hf_repo_access("some-org/public-model", token="hf_restricted")
+
+        self.assertTrue(res["accessible"])
+        self.assertFalse(res["gated"])
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(mock_api.auth_check.call_count, 2)
+
+    def test_check_hf_repo_access_transient_error_fails_open_without_caching(self):
+        """Transient network errors fail open (accessible=True, status=unknown) without caching."""
+        dl._HF_ACCESS_CACHE.clear()
+        mock_api = MagicMock()
+        mock_api.auth_check.side_effect = TimeoutError("Connection timed out")
+
+        with patch.object(dl, "HfApi", return_value=mock_api):
+            res1 = dl.check_hf_repo_access("some-org/model", token="hf_tok")
+            res2 = dl.check_hf_repo_access("some-org/model", token="hf_tok")
+
+        self.assertTrue(res1["accessible"])
+        self.assertFalse(res1["gated"])
+        self.assertEqual(res1["status"], "unknown")
+        self.assertEqual(res2["status"], "unknown")
+        self.assertEqual(mock_api.auth_check.call_count, 2)
 
 
 if __name__ == "__main__":
