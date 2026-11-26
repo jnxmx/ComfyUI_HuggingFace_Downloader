@@ -9769,20 +9769,13 @@ app.registerExtension({
             const list = Array.isArray(candidates) ? candidates : [];
             if (!list.length) return false;
             if (!getWorkflowOpenAutoEnabled()) return false;
+            if (workflowOpenTriggeredForCurrentLoad) return false;
 
             const loadGenAtStart = currentWorkflowLoadGeneration;
             const tabKey = getTabCacheKey();
             const revKey = computeLiveGraphRevisionKey(app?.rootGraph);
-            const cached = workflowScanCache.get(tabKey);
             const sig = buildMissingModelCandidatesSignature(list);
 
-            if (
-                cached &&
-                cached.revKey === revKey &&
-                (cached.dismissed || (sig && sig === cached.candidatesSig))
-            ) {
-                return false;
-            }
             if (
                 sig &&
                 sig === workflowOpenLastHandledSignature &&
@@ -9804,6 +9797,7 @@ app.registerExtension({
                     revKey,
                     dismissed: false,
                     handled: true,
+                    hasMissing: true,
                     candidatesSig: sig,
                 });
             }
@@ -9819,6 +9813,7 @@ app.registerExtension({
                 postSettleScanTimer = null;
             }
             abortActiveAutoDownloadForTabSwitch();
+            cachedNativeMissingCandidates = [];
             workflowOpenLastTriggeredAt = 0;
             workflowOpenLastHandledSignature = "";
             workflowOpenLastHandledPath = "";
@@ -9838,9 +9833,7 @@ app.registerExtension({
             isLoadingWorkflow = false;
             rebindPendingStoreSubscriptions();
             const currentStoreCandidates = getMissingModelCandidates();
-            if (currentStoreCandidates.length > 0) {
-                cachedNativeMissingCandidates = currentStoreCandidates;
-            }
+            cachedNativeMissingCandidates = currentStoreCandidates;
             const hasNativeMissing =
                 cachedNativeMissingCandidates.length > 0 ||
                 Boolean(document.querySelector(MISSING_MODELS_LIST_SELECTOR));
@@ -9855,8 +9848,14 @@ app.registerExtension({
             const revKey = computeLiveGraphRevisionKey(app?.rootGraph);
             const cachedEntry = workflowScanCache.get(tabKey);
 
-            // Fast exit on already-scanned tabs (e.g. switching tabs with skipAssetScans: true)
-            if (cachedEntry && cachedEntry.revKey === revKey) {
+            // Fast exit only when the tab was already scanned at this revision AND had no missing models.
+            // If it had missing models (or native store currently has candidates), re-prompt on tab return.
+            if (
+                cachedEntry &&
+                cachedEntry.revKey === revKey &&
+                !cachedEntry.hasMissing &&
+                currentStoreCandidates.length === 0
+            ) {
                 return;
             }
 

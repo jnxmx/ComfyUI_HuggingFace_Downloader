@@ -39,8 +39,10 @@ const resolvePiniaInstance = () => {
     try {
         const candidates = [
             app?.vueApp,
+            typeof document !== "undefined" ? document.getElementById("vue-app")?.__vue_app__ : null,
             typeof document !== "undefined" ? document.getElementById("app")?.__vue_app__ : null,
             typeof document !== "undefined" ? document.getElementById("root")?.__vue_app__ : null,
+            typeof document !== "undefined" ? document.querySelector("[data-v-app]")?.__vue_app__ : null,
             typeof document !== "undefined" ? document.body?.__vue_app__ : null,
         ];
         for (const vueApp of candidates) {
@@ -49,12 +51,13 @@ const resolvePiniaInstance = () => {
             const symbols = Object.getOwnPropertySymbols(provides);
             for (const sym of symbols) {
                 const desc = String(sym.description || sym.toString() || "");
-                if (desc.includes("pinia")) {
-                    const pinia = provides[sym];
-                    if (pinia && (pinia._s || pinia.stores)) {
-                        cachedPinia = pinia;
-                        return cachedPinia;
-                    }
+                const val = provides[sym];
+                const isPinia =
+                    desc.includes("pinia") ||
+                    Boolean(val && typeof val === "object" && (val._s instanceof Map || val.stores) && typeof val.use === "function");
+                if (isPinia && val && (val._s || val.stores)) {
+                    cachedPinia = val;
+                    return cachedPinia;
                 }
             }
         }
