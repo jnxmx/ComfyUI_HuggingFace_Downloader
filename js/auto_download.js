@@ -8,7 +8,10 @@ import {
     resolveMissingModelStore,
     resolveExecutionErrorStore,
     resolveModelStore,
+    getMissingModelCandidates,
     subscribeMissingModels,
+    subscribeExecutionErrors,
+    subscribeRightSidePanel,
     dismissNativeErrorDialog,
 } from "./comfy_stores.js";
 import { mountInNativeStack, unmountFromNativeStack } from "./native_stack.js";
@@ -7061,18 +7064,31 @@ app.registerExtension({
             const importableRows = document.querySelector('[data-testid="missing-model-importable-rows"]');
             if (importableRows) {
                 return (
-                    importableRows.closest('[data-testid="error-overlay"], aside, [class*="side-bar"], [class*="sidebar"]') ||
+                    importableRows.closest(
+                        'aside, [data-testid="right-side-panel"], .right-side-panel, [class*="right-side-panel"], [class*="side-bar"], [class*="sidebar"], .p-splitterpanel'
+                    ) ||
                     importableRows.parentElement ||
                     importableRows
                 );
             }
-            return (
-                document.querySelector('[data-testid="error-overlay"]') ||
-                document.querySelector(MISSING_MODELS_LIST_SELECTOR)?.closest('.p-dialog') ||
-                document.querySelector(MISSING_MODELS_LIST_SELECTOR) ||
-                document.querySelector('[data-testid="sidebar-right"], .comfyui-body-right') ||
-                null
+            const knownSidePanel = document.querySelector(
+                '[data-testid="right-side-panel"], .right-side-panel, [class*="right-side-panel"], [data-testid="sidebar-right"], .comfyui-body-right'
             );
+            if (knownSidePanel) {
+                return knownSidePanel;
+            }
+            const panels = document.querySelectorAll('.p-splitterpanel, aside, [class*="sidebar"], [class*="side-bar"]');
+            for (const panel of panels) {
+                const text = String(panel?.textContent || "");
+                if (
+                    text.includes("Workflow Overview") ||
+                    text.includes("Missing Models") ||
+                    panel.querySelector('[data-testid="missing-model-actions"]')
+                ) {
+                    return panel;
+                }
+            }
+            return document.querySelector(MISSING_MODELS_LIST_SELECTOR)?.closest(".p-dialog") || null;
         };
 
         // Option 1A: Lazy container-scoped observer active ONLY when missingModelStore has candidates.
@@ -9068,6 +9084,45 @@ app.registerExtension({
             });
         };
 
+        const handleNativeMissingCandidates = (candidates = []) => {
+            const list = Array.isArray(candidates) ? candidates : [];
+            if (!list.length) return false;
+            if (!getWorkflowOpenAutoEnabled()) return false;
+
+            const tabKey = getTabCacheKey();
+            const revKey = computeLiveGraphRevisionKey(app?.rootGraph);
+            const cached = workflowScanCache.get(tabKey);
+            const sig = buildMissingModelCandidatesSignature(list);
+
+            if (
+                cached &&
+                cached.revKey === revKey &&
+                (cached.dismissed || (sig && sig === cached.candidatesSig))
+            ) {
+                return false;
+            }
+            if (
+                sig &&
+                sig === workflowOpenLastHandledSignature &&
+                (!tabKey || tabKey === workflowOpenLastHandledPath)
+            ) {
+                return false;
+            }
+
+            workflowOpenLastHandledSignature = sig;
+            workflowOpenLastHandledPath = tabKey;
+            workflowScanCache.set(tabKey, {
+                revKey,
+                dismissed: false,
+                handled: true,
+                candidatesSig: sig,
+            });
+            void triggerAutoDownloadFromWorkflowOpen(list, null, {
+                onUserDismiss: () => markCurrentTabDismissed(tabKey, revKey),
+            });
+            return true;
+        };
+
         // Native ComfyUI lifecycle hooks (zero setInterval, zero loadGraphData monkey-patching)
         extensionLifecycleHandlers.beforeLoadGraph = () => {
             isLoadingWorkflow = true;
@@ -9110,10 +9165,19 @@ app.registerExtension({
             postSettleScanTimer = setTimeout(() => {
                 postSettleScanTimer = null;
                 if (loadGen !== currentWorkflowLoadGeneration) return;
-                // If Pinia missingModelStore already received candidates (from pipeline or showPendingWarnings),
-                // the reactive subscriber handles it cleanly without a second fallback scan.
-                if (workflowOpenTriggeredForCurrentLoad || cachedNativeMissingCandidates.length > 0) {
+                if (workflowOpenTriggeredForCurrentLoad) {
                     return;
+                }
+                const nativeCandidates = cachedNativeMissingCandidates.length
+                    ? cachedNativeMissingCandidates
+                    : getMissingModelCandidates();
+                if (nativeCandidates.length > 0) {
+                    cachedNativeMissingCandidates = nativeCandidates;
+                    syncMissingModelsObserverWithStore(true);
+                    void enrichNativeMissingModelStoreFromCatalog();
+                    if (handleNativeMissingCandidates(nativeCandidates)) {
+                        return;
+                    }
                 }
                 void runUncachedFallbackBackendScan(loadGen, tabKey, revKey);
             }, 140);
@@ -9271,53 +9335,38 @@ app.registerExtension({
                 const list = Array.isArray(candidates) ? candidates : [];
                 cachedNativeMissingCandidates = list;
                 syncMissingModelsObserverWithStore(list.length > 0);
+                if (list.length > 0) {
+                    void enrichNativeMissingModelStoreFromCatalog();
+                }
 
                 if (isLoadingWorkflow || !list.length) {
                     return;
                 }
 
+                handleNativeMissingCandidates(list);
+            }, { immediate: true });
+
+            subscribeRightSidePanel(() => {
+                const hasCandidates =
+                    cachedNativeMissingCandidates.length > 0 ||
+                    getMissingModelCandidates().length > 0 ||
+                    Boolean(document.querySelector(MISSING_MODELS_LIST_SELECTOR));
+                if (!hasCandidates) return;
+
                 void enrichNativeMissingModelStoreFromCatalog();
-
-                if (!getWorkflowOpenAutoEnabled()) {
-                    return;
+                if (typeof requestAnimationFrame === "function") {
+                    requestAnimationFrame(() => syncMissingModelsObserverWithStore(true));
+                } else {
+                    syncMissingModelsObserverWithStore(true);
                 }
-
-                const tabKey = getTabCacheKey();
-                const revKey = computeLiveGraphRevisionKey(app?.rootGraph);
-                const cached = workflowScanCache.get(tabKey);
-                const sig = buildMissingModelCandidatesSignature(list);
-
-                if (
-                    cached &&
-                    cached.revKey === revKey &&
-                    (cached.dismissed || (sig && sig === cached.candidatesSig))
-                ) {
-                    return;
-                }
-                if (
-                    sig &&
-                    sig === workflowOpenLastHandledSignature &&
-                    (!tabKey || tabKey === workflowOpenLastHandledPath)
-                ) {
-                    return;
-                }
-
-                workflowOpenLastHandledSignature = sig;
-                workflowOpenLastHandledPath = tabKey;
-                workflowScanCache.set(tabKey, {
-                    revKey,
-                    dismissed: false,
-                    handled: true,
-                    candidatesSig: sig,
-                });
-                void triggerAutoDownloadFromWorkflowOpen(list, null, {
-                    onUserDismiss: () => markCurrentTabDismissed(tabKey, revKey),
-                });
+                setTimeout(() => {
+                    syncMissingModelsObserverWithStore(true);
+                }, 120);
             }, { immediate: true });
         };
 
         const installApiValidationAndDownloadListeners = () => {
-            const handleValidationEvent = (event) => {
+            const triggerRunHookFromErrorState = (nodeErrorsSnapshot = null, forceFromMissingStore = false) => {
                 const settingsUi = app?.ui?.settings;
                 const disableRedFrames = settingsUi?.getSettingValue("downloader.disable_missing_model_red_frames") === true;
                 if (disableRedFrames) {
@@ -9326,7 +9375,7 @@ app.registerExtension({
                     }, 80);
                 }
 
-                // Option 2B: Do not intercept queuePrompt; react to native validation_error / execution_error events.
+                // Option 2B: Do not intercept queuePrompt; react to native validation/execution error events & store state.
                 if (!getRunHookEnabled()) return;
                 if (document.getElementById("auto-download-dialog") || typeof activeAutoDownloadCancel === "function") {
                     return;
@@ -9336,10 +9385,14 @@ app.registerExtension({
                     return;
                 }
 
-                const detail = event?.detail;
-                const nodeErrors = detail?.node_errors || getNodeErrorsSnapshot();
+                const nodeErrors = nodeErrorsSnapshot || getNodeErrorsSnapshot();
                 const failures = getNativeModelValidationFailures(nodeErrors);
-                if (!failures.length) {
+                const hasMissingStoreCandidates = Boolean(
+                    forceFromMissingStore ||
+                    cachedNativeMissingCandidates.length > 0 ||
+                    getMissingModelCandidates().length > 0
+                );
+                if (!failures.length && !hasMissingStoreCandidates) {
                     return;
                 }
 
@@ -9353,6 +9406,31 @@ app.registerExtension({
                     runHookFailures: failures,
                 });
             };
+
+            const handleValidationEvent = (event) => {
+                const detail = event?.detail;
+                triggerRunHookFromErrorState(detail?.node_errors || getNodeErrorsSnapshot(), false);
+            };
+
+            let prevOverlayOpen = false;
+            subscribeExecutionErrors((snapshot) => {
+                const isOpen = Boolean(snapshot?.isErrorOverlayOpen);
+                const openedNow = isOpen && !prevOverlayOpen;
+                prevOverlayOpen = isOpen;
+                if (isLoadingWorkflow) return;
+
+                if (openedNow || snapshot?.fromAction) {
+                    const hasMissing = Boolean(
+                        snapshot?.hasMissingError ||
+                        cachedNativeMissingCandidates.length > 0 ||
+                        getMissingModelCandidates().length > 0
+                    );
+                    triggerRunHookFromErrorState(
+                        snapshot?.lastNodeErrors || snapshot?.surfacedNodeErrors || null,
+                        hasMissing
+                    );
+                }
+            }, { immediate: false });
 
             if (api && typeof api.addEventListener === "function") {
                 api.addEventListener("validation_error", handleValidationEvent);

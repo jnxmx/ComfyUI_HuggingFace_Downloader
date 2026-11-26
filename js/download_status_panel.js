@@ -554,8 +554,15 @@ app.registerExtension({
             }
         };
 
+        const apiFetch = (url, options) => {
+            if (api && typeof api.fetchApi === "function") {
+                return api.fetchApi(url, options);
+            }
+            return fetch(url, options);
+        };
+
         const postJson = async (url, payload) => {
-            const resp = await fetch(url, {
+            const resp = await apiFetch(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload || {})
@@ -566,42 +573,79 @@ app.registerExtension({
             return resp.json().catch(() => ({}));
         };
 
-        const cancelDownload = async (downloadId) => {
+        const CONTROL_PENDING_TTL_MS = 2500;
+        const pendingControlActions = new Map(); // id -> { kind, statusAtClick, expiresAt }
+
+        const markControlPending = (id, kind, currentStatus) => {
+            if (!id) return;
+            pendingControlActions.set(id, {
+                kind,
+                statusAtClick: String(currentStatus || ""),
+                expiresAt: Date.now() + CONTROL_PENDING_TTL_MS,
+            });
+        };
+
+        const isControlPendingFor = (id, kind, currentStatus) => {
+            const entry = pendingControlActions.get(id);
+            if (!entry) return false;
+            if (Date.now() > entry.expiresAt || String(currentStatus || "") !== entry.statusAtClick) {
+                pendingControlActions.delete(id);
+                return false;
+            }
+            return entry.kind === kind || entry.kind === "cancel";
+        };
+
+        const triggerControlFollowUpPoll = () => {
+            void pollStatus();
+            setTimeout(() => {
+                void pollStatus();
+            }, 400);
+        };
+
+        const cancelDownload = async (downloadId, currentStatus = "") => {
             if (!downloadId) return;
+            markControlPending(downloadId, "cancel", currentStatus);
             try {
                 await postJson("/cancel_download", { download_id: downloadId });
-                void pollStatus();
+                triggerControlFollowUpPoll();
             } catch (err) {
+                pendingControlActions.delete(downloadId);
                 console.warn("[HF Downloader] Failed to cancel download:", err);
             }
         };
 
-        const pauseDownload = async (downloadId) => {
+        const pauseDownload = async (downloadId, currentStatus = "") => {
             if (!downloadId) return;
+            markControlPending(downloadId, "pause", currentStatus);
             try {
                 await postJson("/pause_download", { download_id: downloadId });
-                void pollStatus();
+                triggerControlFollowUpPoll();
             } catch (err) {
+                pendingControlActions.delete(downloadId);
                 console.warn("[HF Downloader] Failed to pause download:", err);
             }
         };
 
-        const resumeDownload = async (downloadId) => {
+        const resumeDownload = async (downloadId, currentStatus = "") => {
             if (!downloadId) return;
+            markControlPending(downloadId, "resume", currentStatus);
             try {
                 await postJson("/resume_download", { download_id: downloadId });
-                void pollStatus();
+                triggerControlFollowUpPoll();
             } catch (err) {
+                pendingControlActions.delete(downloadId);
                 console.warn("[HF Downloader] Failed to resume download:", err);
             }
         };
 
-        const cancelBackupTask = async (taskId) => {
+        const cancelBackupTask = async (taskId, currentStatus = "") => {
             if (!taskId) return;
+            markControlPending(taskId, "cancel", currentStatus);
             try {
                 await postJson("/cancel_backup_task", { task_id: taskId });
-                void pollStatus();
+                triggerControlFollowUpPoll();
             } catch (err) {
+                pendingControlActions.delete(taskId);
                 console.warn("[HF Downloader] Failed to cancel backup task:", err);
             }
         };
@@ -616,7 +660,7 @@ app.registerExtension({
                 } else {
                     await postJson("/pause_download", { pause_all: true });
                 }
-                await pollStatus();
+                triggerControlFollowUpPoll();
             } catch (err) {
                 console.warn(`[HF Downloader] Failed to ${mode} all downloads:`, err);
             } finally {
@@ -628,7 +672,7 @@ app.registerExtension({
             if (cancelAllBtn) cancelAllBtn.disabled = true;
             try {
                 await postJson("/cancel_download", { cancel_all: true, include_backups: true });
-                await pollStatus();
+                triggerControlFollowUpPoll();
             } catch (err) {
                 console.warn("[HF Downloader] Failed to cancel all items:", err);
             } finally {
@@ -663,7 +707,7 @@ app.registerExtension({
         const dismissInterrupted = async (downloadId) => {
             if (!downloadId) return false;
             try {
-                const resp = await fetch("/dismiss_interrupted", {
+                const resp = await apiFetch("/dismiss_interrupted", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ download_id: downloadId })
@@ -688,14 +732,6 @@ app.registerExtension({
                     void dismissInterrupted(info.id);
                 }
                 dismissedEntryIds.add(info.id);
-            }
-            renderList(lastRenderedDownloads, lastRenderedBackupTasks);
-        };
-
-        const setActiveFilter = (nextFilter) => {
-            activeFilter = nextFilter;
-            for (const [key, btn] of Object.entries(filterButtons)) {
-                btn.classList.toggle("active", key === activeFilter);
             }
             renderList(lastRenderedDownloads, lastRenderedBackupTasks);
         };
@@ -997,7 +1033,7 @@ app.registerExtension({
             item.appendChild(rowActions);
             item.appendChild(progressContainer);
 
-            return {
+            const refs = {
                 root: item,
                 name,
                 subtitle,
@@ -1010,8 +1046,39 @@ app.registerExtension({
                 retryBtn,
                 dismissBtn,
                 progressContainer,
-                progressBar
+                progressBar,
+                pauseResumeMode: "none",
+                currentDownloadId: "",
+                currentIsBackup: false,
+                lastStatus: ""
             };
+
+            pauseResumeBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!refs.currentDownloadId || refs.currentIsBackup) return;
+                if (refs.pauseResumeMode === "pause") {
+                    pauseResumeBtn.disabled = true;
+                    void pauseDownload(refs.currentDownloadId, refs.lastStatus);
+                } else if (refs.pauseResumeMode === "resume") {
+                    pauseResumeBtn.disabled = true;
+                    void resumeDownload(refs.currentDownloadId, refs.lastStatus);
+                }
+            });
+
+            cancelBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!refs.currentDownloadId) return;
+                cancelBtn.disabled = true;
+                if (refs.currentIsBackup) {
+                    void cancelBackupTask(refs.currentDownloadId, refs.lastStatus);
+                } else {
+                    void cancelDownload(refs.currentDownloadId, refs.lastStatus);
+                }
+            });
+
+            return refs;
         };
 
         const buildSubtitleParts = (info) => {
@@ -1085,65 +1152,61 @@ app.registerExtension({
                     ? statusColor(info.status)
                     : "";
 
-            // Pause / Resume button (for model downloads)
-            if (!isBackup && PAUSABLE_STATUSES.has(info.status)) {
-                refs.pauseResumeBtn.style.display = "inline-flex";
-                refs.pauseResumeBtn.setAttribute("data-testid", "hf-item-pause-btn");
-                refs.pauseResumeBtn.title = "Pause download";
-                refs.pauseResumeBtn.setAttribute("aria-label", "Pause download");
-                refs.pauseResumeBtn.innerHTML = `<i class="icon-[lucide--pause] size-3.5"></i>`;
-                refs.pauseResumeBtn.disabled = false;
-                refs.pauseResumeBtn.onclick = (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    refs.pauseResumeBtn.disabled = true;
-                    void pauseDownload(info.id);
-                };
-            } else if (!isBackup && info.status === "paused") {
-                refs.pauseResumeBtn.style.display = "inline-flex";
-                refs.pauseResumeBtn.setAttribute("data-testid", "hf-item-resume-btn");
-                refs.pauseResumeBtn.title = "Resume download";
-                refs.pauseResumeBtn.setAttribute("aria-label", "Resume download");
-                refs.pauseResumeBtn.innerHTML = `<i class="icon-[lucide--play] size-3.5 text-green-400"></i>`;
-                refs.pauseResumeBtn.disabled = false;
-                refs.pauseResumeBtn.onclick = (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    refs.pauseResumeBtn.disabled = true;
-                    void resumeDownload(info.id);
-                };
-            } else {
+            refs.currentDownloadId = info.id;
+            refs.currentIsBackup = isBackup;
+            refs.lastStatus = info.status || "queued";
+
+            // Pause / Resume button (for model downloads) - only update DOM structure when mode changes so WS ticks never drop clicks
+            const nextPauseMode =
+                !isBackup && PAUSABLE_STATUSES.has(info.status)
+                    ? "pause"
+                    : !isBackup && info.status === "paused"
+                        ? "resume"
+                        : "none";
+
+            if (nextPauseMode === "pause") {
+                if (refs.pauseResumeMode !== "pause") {
+                    refs.pauseResumeMode = "pause";
+                    refs.pauseResumeBtn.style.display = "inline-flex";
+                    refs.pauseResumeBtn.setAttribute("data-testid", "hf-item-pause-btn");
+                    refs.pauseResumeBtn.title = "Pause download";
+                    refs.pauseResumeBtn.setAttribute("aria-label", "Pause download");
+                    refs.pauseResumeBtn.innerHTML = `<i class="icon-[lucide--pause] size-3.5"></i>`;
+                }
+                refs.pauseResumeBtn.disabled = isControlPendingFor(info.id, "pause", info.status);
+            } else if (nextPauseMode === "resume") {
+                if (refs.pauseResumeMode !== "resume") {
+                    refs.pauseResumeMode = "resume";
+                    refs.pauseResumeBtn.style.display = "inline-flex";
+                    refs.pauseResumeBtn.setAttribute("data-testid", "hf-item-resume-btn");
+                    refs.pauseResumeBtn.title = "Resume download";
+                    refs.pauseResumeBtn.setAttribute("aria-label", "Resume download");
+                    refs.pauseResumeBtn.innerHTML = `<i class="icon-[lucide--play] size-3.5 text-green-400"></i>`;
+                }
+                refs.pauseResumeBtn.disabled = isControlPendingFor(info.id, "resume", info.status);
+            } else if (refs.pauseResumeMode !== "none") {
+                refs.pauseResumeMode = "none";
                 refs.pauseResumeBtn.style.display = "none";
                 refs.pauseResumeBtn.removeAttribute("data-testid");
-                refs.pauseResumeBtn.onclick = null;
+                refs.pauseResumeBtn.disabled = false;
             }
 
             // Cancel button (model downloads + backup uploads/downloads)
             const canCancel = CAN_CANCEL_STATUSES.has(info.status);
             if (canCancel) {
-                refs.cancelBtn.style.display = "inline-flex";
-                refs.cancelBtn.setAttribute(
-                    "data-testid",
-                    isBackup ? "hf-backup-item-cancel-btn" : "hf-item-cancel-btn"
-                );
-                refs.cancelBtn.title = isBackup ? "Cancel backup task" : "Cancel download";
-                refs.cancelBtn.setAttribute("aria-label", isBackup ? "Cancel backup task" : "Cancel download");
-                refs.cancelBtn.disabled = info.status === "cancelling";
-                refs.cancelBtn.onclick = (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    refs.cancelBtn.disabled = true;
-                    if (isBackup) {
-                        void cancelBackupTask(info.id);
-                    } else {
-                        void cancelDownload(info.id);
-                    }
-                };
-            } else {
+                const expectedTestId = isBackup ? "hf-backup-item-cancel-btn" : "hf-item-cancel-btn";
+                if (refs.cancelBtn.style.display !== "inline-flex" || refs.cancelBtn.getAttribute("data-testid") !== expectedTestId) {
+                    refs.cancelBtn.style.display = "inline-flex";
+                    refs.cancelBtn.setAttribute("data-testid", expectedTestId);
+                    refs.cancelBtn.title = isBackup ? "Cancel backup task" : "Cancel download";
+                    refs.cancelBtn.setAttribute("aria-label", isBackup ? "Cancel backup task" : "Cancel download");
+                }
+                refs.cancelBtn.disabled =
+                    info.status === "cancelling" || isControlPendingFor(info.id, "cancel", info.status);
+            } else if (refs.cancelBtn.style.display !== "none") {
                 refs.cancelBtn.style.display = "none";
                 refs.cancelBtn.removeAttribute("data-testid");
                 refs.cancelBtn.disabled = false;
-                refs.cancelBtn.onclick = null;
             }
 
             // Progress bar
@@ -1538,17 +1601,23 @@ app.registerExtension({
             }
 
             if (pauseAllBtn) {
-                if (pausableCount > 0) {
-                    pauseAllBtn.style.display = "inline-flex";
-                    pauseAllBtn.dataset.mode = "pause";
-                    pauseAllBtn.title = "Pause all downloads";
-                    pauseAllBtn.innerHTML = `<i class="icon-[lucide--pause] size-3.5 shrink-0"></i><span>Pause all</span>`;
-                } else if (pausedCount > 0) {
-                    pauseAllBtn.style.display = "inline-flex";
-                    pauseAllBtn.dataset.mode = "resume";
-                    pauseAllBtn.title = "Resume all paused downloads";
-                    pauseAllBtn.innerHTML = `<i class="icon-[lucide--play] size-3.5 shrink-0"></i><span>Resume all</span>`;
-                } else {
+                const nextAllMode = pausableCount > 0 ? "pause" : pausedCount > 0 ? "resume" : "none";
+                if (nextAllMode === "pause") {
+                    if (pauseAllBtn.dataset.mode !== "pause") {
+                        pauseAllBtn.style.display = "inline-flex";
+                        pauseAllBtn.dataset.mode = "pause";
+                        pauseAllBtn.title = "Pause all downloads";
+                        pauseAllBtn.innerHTML = `<i class="icon-[lucide--pause] size-3.5 shrink-0"></i><span>Pause all</span>`;
+                    }
+                } else if (nextAllMode === "resume") {
+                    if (pauseAllBtn.dataset.mode !== "resume") {
+                        pauseAllBtn.style.display = "inline-flex";
+                        pauseAllBtn.dataset.mode = "resume";
+                        pauseAllBtn.title = "Resume all paused downloads";
+                        pauseAllBtn.innerHTML = `<i class="icon-[lucide--play] size-3.5 shrink-0"></i><span>Resume all</span>`;
+                    }
+                } else if (pauseAllBtn.dataset.mode !== "none") {
+                    pauseAllBtn.dataset.mode = "none";
                     pauseAllBtn.style.display = "none";
                 }
             }
@@ -1764,7 +1833,7 @@ app.registerExtension({
 
         const pollStatus = async () => {
             try {
-                const resp = await fetch("/download_status");
+                const resp = await apiFetch("/download_status");
                 if (resp.status !== 200) return;
                 const data = await resp.json();
                 await applyStatusSnapshot(data);

@@ -119,6 +119,7 @@ const resolveStoreAsync = async (storeId, maxRetries = 6, retryDelayMs = 120) =>
 export const resolveMissingModelStore = () => resolveStoreAsync("missingModel");
 export const resolveExecutionErrorStore = () => resolveStoreAsync("executionError");
 export const resolveModelStore = () => resolveStoreAsync("model");
+export const resolveRightSidePanelStore = () => resolveStoreAsync("rightSidePanel");
 
 export const getMissingModelCandidates = () => {
     const store = findPiniaStore("missingModel");
@@ -160,6 +161,120 @@ export const subscribeMissingModels = (callback, { immediate = false } = {}) => 
                 ) {
                     after(() => emitCurrent(store));
                 }
+            }, true);
+        }
+        if (immediate) {
+            emitCurrent(store);
+        }
+    });
+
+    return () => {
+        cancelled = true;
+        try {
+            if (typeof storeUnsub === "function") storeUnsub();
+        } catch (_) {}
+        try {
+            if (typeof actionUnsub === "function") actionUnsub();
+        } catch (_) {}
+    };
+};
+
+export const subscribeExecutionErrors = (callback, { immediate = false } = {}) => {
+    if (typeof callback !== "function") {
+        return () => {};
+    }
+    let cancelled = false;
+    let storeUnsub = null;
+    let actionUnsub = null;
+
+    const readSnapshot = (store, fromAction = null) => ({
+        isErrorOverlayOpen: Boolean(unwrapStoreValue(store?.isErrorOverlayOpen)),
+        lastNodeErrors: unwrapStoreValue(store?.lastNodeErrors) || null,
+        surfacedNodeErrors: unwrapStoreValue(store?.surfacedNodeErrors) || null,
+        hasMissingError: Boolean(unwrapStoreValue(store?.hasMissingError)),
+        hasAnyError: Boolean(unwrapStoreValue(store?.hasAnyError)),
+        lastExecutionError: unwrapStoreValue(store?.lastExecutionError) || null,
+        store,
+        fromAction,
+    });
+
+    const emitCurrent = (store, fromAction = null) => {
+        if (cancelled || !store) return;
+        callback(readSnapshot(store, fromAction));
+    };
+
+    void resolveExecutionErrorStore().then((store) => {
+        if (cancelled || !store) return;
+        if (typeof store.$subscribe === "function") {
+            storeUnsub = store.$subscribe(
+                () => {
+                    emitCurrent(store, null);
+                },
+                { detached: true }
+            );
+        }
+        if (typeof store.$onAction === "function") {
+            const watchedActions = new Set([
+                "showErrorOverlay",
+                "showExecutionError",
+                "recordNodeErrors",
+                "recordPromptError",
+                "surfaceMissingMedia",
+            ]);
+            actionUnsub = store.$onAction(({ name, after }) => {
+                if (watchedActions.has(name)) {
+                    after(() => emitCurrent(store, name));
+                }
+            }, true);
+        }
+        if (immediate) {
+            emitCurrent(store, null);
+        }
+    });
+
+    return () => {
+        cancelled = true;
+        try {
+            if (typeof storeUnsub === "function") storeUnsub();
+        } catch (_) {}
+        try {
+            if (typeof actionUnsub === "function") actionUnsub();
+        } catch (_) {}
+    };
+};
+
+export const subscribeRightSidePanel = (callback, { immediate = false } = {}) => {
+    if (typeof callback !== "function") {
+        return () => {};
+    }
+    let cancelled = false;
+    let storeUnsub = null;
+    let actionUnsub = null;
+
+    const readSnapshot = (store) => ({
+        isOpen: Boolean(unwrapStoreValue(store?.isOpen)),
+        activeTab: unwrapStoreValue(store?.activeTab) ?? null,
+        store,
+    });
+
+    const emitCurrent = (store) => {
+        if (cancelled || !store) return;
+        callback(readSnapshot(store));
+    };
+
+    void resolveRightSidePanelStore().then((store) => {
+        if (cancelled || !store) return;
+        if (typeof store.$subscribe === "function") {
+            storeUnsub = store.$subscribe(
+                () => {
+                    emitCurrent(store);
+                },
+                { detached: true }
+            );
+        }
+        if (typeof store.$onAction === "function") {
+            actionUnsub = store.$onAction(({ after }) => {
+                after(() => emitCurrent(store));
             }, true);
         }
         if (immediate) {
