@@ -3,6 +3,8 @@
 
 # --- LOCAL TOOLS & DOCUMENTATION ---
 ANTIGRAVITY.md
+UI_GUIDELINES.md
+RELEASE_GUIDE.md
 NODEPACK_FUNCTIONALITY.md
 check_braces.py
 check_syntax.js

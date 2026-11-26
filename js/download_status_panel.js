@@ -1574,6 +1574,7 @@ app.registerExtension({
                 cancelAllBtn.style.display = cancelableCount > 0 ? "inline-flex" : "none";
             }
 
+            const hasAnyActiveOrPaused = runningCount > 0 || pausedCount > 0;
             const hasFailed = entries.some((entry) => entry.status === "failed");
             const hasNonActive = entries.some((entry) => !ACTIVE_NON_TERMINAL_STATUSES.has(entry.status));
             const hasClearableFinished = entries.some(
