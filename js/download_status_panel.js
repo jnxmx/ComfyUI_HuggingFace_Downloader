@@ -1,4 +1,7 @@
 import { app } from "../../../scripts/app.js";
+import { api } from "../../../scripts/api.js";
+import { resolveMissingModelStore } from "./comfy_stores.js";
+import { mountInNativeStack, setNativeStackPanelVisible } from "./native_stack.js";
 
 app.registerExtension({
     name: "hfDownloaderStatusPanel",
@@ -6,24 +9,52 @@ app.registerExtension({
         const WRAPPER_ID = "hf-downloader-panel-wrapper";
         const PANEL_ID = "hf-downloader-panel";
         const STYLE_ID = "hf-downloader-panel-styles";
-        const POLL_INTERVAL_MS = 1000;
+        const WATCHDOG_INTERVAL_MS = 3000;
+        const WS_STALE_THRESHOLD_MS = 4000;
         const FAILED_TTL_MS = 120000;
         const CANCELLED_TTL_MS = 1500;
 
         const RUNNING_STATUSES = new Set([
             "queued",
             "downloading",
+            "uploading",
             "copying",
             "cleaning_cache",
             "finalizing",
+            "verifying",
+            "pausing",
             "cancelling"
         ]);
-        const CAN_CANCEL_STATUSES = new Set([
+        const ACTIVE_NON_TERMINAL_STATUSES = new Set([
+            "queued",
+            "downloading",
+            "uploading",
+            "copying",
+            "cleaning_cache",
+            "finalizing",
+            "verifying",
+            "pausing",
+            "paused",
+            "cancelling"
+        ]);
+        const PAUSABLE_STATUSES = new Set([
             "queued",
             "downloading",
             "copying",
             "cleaning_cache",
             "finalizing",
+            "verifying"
+        ]);
+        const CAN_CANCEL_STATUSES = new Set([
+            "queued",
+            "downloading",
+            "uploading",
+            "copying",
+            "cleaning_cache",
+            "finalizing",
+            "verifying",
+            "pausing",
+            "paused",
             "cancelling"
         ]);
         const SUCCESS_STATUSES = new Set(["downloaded", "completed", "verifying"]);
@@ -35,8 +66,9 @@ app.registerExtension({
         let panelWrapper = null;
         let panel = null;
         let listBody = null;
-        let countBadge = null;
-        let collapseBtn = null;
+        let headerTitleEl = null;
+        let pauseAllBtn = null;
+        let cancelAllBtn = null;
         let minimizeBtn = null;
         let footer = null;
         let clearFinishedBtn = null;
@@ -44,21 +76,27 @@ app.registerExtension({
         let refreshBtn = null;
         let refreshPromptBanner = null;
         let lastRenderedDownloads = {};
+        let lastRenderedBackupTasks = {};
         let refreshBusy = false;
         let bootstrapDone = false;
         let panelMinimized = false;
-        let panelCollapsed = false;
         let lastVisibleCount = 0;
         let lastHasRunning = false;
         let prevHasRunning = false;
         let refreshPromptShownForBatch = false;
 
-        const BUTTON_BASE_CLASS = "relative inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap appearance-none border border-solid border-border/60 rounded-md text-xs font-medium font-inter transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50";
-        const BUTTON_DESTRUCTIVE_CLASS = "relative inline-flex items-center justify-center cursor-pointer border-0 rounded-md text-destructive bg-transparent hover:bg-accent size-6 transition-colors disabled:pointer-events-none disabled:opacity-50";
-        const BUTTON_TEXONLY_ICON_CLASS = "flex size-6 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
-        const WRAPPER_CLASS = "pointer-events-none flex w-full justify-end transition-all duration-300 ease-out";
-        const PANEL_CLASS = "pointer-events-auto flex flex-col gap-1.5 rounded-lg border border-solid border-border border-l-4 bg-background p-2.5 text-foreground shadow-md";
-        const ITEM_CLASS = "hf-downloader-item relative flex items-center justify-between gap-2 overflow-hidden rounded-md border border-solid border-border/60 bg-secondary/40 px-2 py-1.5 text-xs text-foreground transition-colors duration-150 ease-in-out";
+        const BUTTON_BASE_CLASS =
+            "relative inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap appearance-none border border-solid border-border/60 rounded-md text-xs font-medium font-inter transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50";
+        const ACTION_ICON_BTN_CLASS =
+            "inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
+        const HEADER_ICON_BTN_CLASS =
+            "inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40";
+        const WRAPPER_CLASS =
+            "pointer-events-none flex w-full justify-end transition-all duration-300 ease-out";
+        const PANEL_CLASS =
+            "pointer-events-auto flex flex-col overflow-hidden rounded-xl border border-solid border-border bg-background text-foreground shadow-lg";
+        const ITEM_CLASS =
+            "hf-downloader-item relative flex items-center gap-2.5 overflow-hidden rounded-lg px-2.5 py-2 text-xs text-foreground transition-colors duration-150 ease-in-out";
 
         const registerGlobalAction = (name, action) => {
             if (typeof window === "undefined") return;
@@ -70,7 +108,7 @@ app.registerExtension({
 
         const getPanelState = () => ({
             minimized: panelMinimized,
-            collapsed: panelCollapsed,
+            collapsed: false,
             hasRunning: lastHasRunning,
             hasEntries: lastVisibleCount > 0
         });
@@ -87,36 +125,20 @@ app.registerExtension({
 
         const applyPanelVisibility = () => {
             if (!panel || !panelWrapper) return;
-            if (!lastVisibleCount || panelMinimized) {
+            const visible = Boolean(lastVisibleCount && !panelMinimized);
+            if (!visible) {
                 panel.style.display = "none";
                 panelWrapper.style.display = "none";
+                setNativeStackPanelVisible(WRAPPER_ID, false);
             } else {
                 panelWrapper.style.display = "flex";
                 panel.style.display = "flex";
-                panel.classList.toggle("hf-downloader-collapsed", panelCollapsed);
-                if (collapseBtn) {
-                    collapseBtn.innerHTML = panelCollapsed
-                        ? `<i class="icon-[lucide--chevron-down] size-4"></i>`
-                        : `<i class="icon-[lucide--chevron-up] size-4"></i>`;
-                    collapseBtn.title = panelCollapsed ? "Expand downloads" : "Collapse downloads";
-                    collapseBtn.setAttribute("aria-label", panelCollapsed ? "Expand downloads" : "Collapse downloads");
-                    collapseBtn.setAttribute("aria-expanded", String(!panelCollapsed));
-                }
-                updatePanelPosition();
+                setNativeStackPanelVisible(panelWrapper, true, { id: WRAPPER_ID, priority: 20 });
             }
-        };
-
-        const setPanelCollapsed = (value) => {
-            panelCollapsed = Boolean(value);
-            applyPanelVisibility();
-            publishPanelState();
         };
 
         const setPanelMinimized = (value) => {
             panelMinimized = Boolean(value);
-            if (!panelMinimized) {
-                panelCollapsed = false;
-            }
             applyPanelVisibility();
             publishPanelState();
         };
@@ -135,9 +157,10 @@ app.registerExtension({
         registerGlobalAction("pollDownloadStatusNow", () => pollStatus());
 
         const toUiStatus = (status) => {
-            if (status === "verifying" || status === "completed") return "downloaded";
-            if (status === "interrupted") return "interrupted";
-            return status || "queued";
+            const norm = String(status || "").trim().toLowerCase();
+            if (norm === "verifying" || norm === "completed") return "downloaded";
+            if (norm === "interrupted") return "interrupted";
+            return norm || "queued";
         };
 
         const statusLabel = (status) => {
@@ -146,13 +169,19 @@ app.registerExtension({
                     return "Queued";
                 case "downloading":
                     return "Downloading";
+                case "uploading":
+                    return "Uploading";
+                case "pausing":
+                    return "Pausing";
+                case "paused":
+                    return "Paused";
                 case "copying":
                     return "Copying";
                 case "cleaning_cache":
                 case "finalizing":
                     return "Finalizing";
                 case "downloaded":
-                    return "Downloaded";
+                    return "Completed";
                 case "failed":
                     return "Failed";
                 case "cancelled":
@@ -160,7 +189,7 @@ app.registerExtension({
                 case "cancelling":
                     return "Cancelling";
                 case "interrupted":
-                    return "Interrupted (Server restarted)";
+                    return "Interrupted";
                 default:
                     return "Queued";
             }
@@ -169,22 +198,26 @@ app.registerExtension({
         const statusColor = (status) => {
             switch (status) {
                 case "downloading":
-                    return "#4aa3ff";
+                case "uploading":
+                    return "#60a5fa";
                 case "copying":
                 case "cleaning_cache":
                 case "finalizing":
-                    return "#9ad6ff";
+                    return "#93c5fd";
+                case "paused":
+                case "pausing":
+                    return "var(--warning, #f59e0b)";
                 case "downloaded":
-                    return "#5bd98c";
+                    return "#4ade80";
                 case "failed":
-                    return "#ff6b6b";
+                    return "#f87171";
                 case "cancelled":
                 case "cancelling":
-                    return "#a1a8b5";
+                    return "#9ca3af";
                 case "interrupted":
-                    return "#ff9f43";
+                    return "var(--warning, #f59e0b)";
                 default:
-                    return "#9aa1ad";
+                    return "#9ca3af";
             }
         };
 
@@ -198,6 +231,9 @@ app.registerExtension({
             const genericPhases = new Set([
                 "queued",
                 "downloading",
+                "uploading",
+                "pausing",
+                "paused",
                 "copying",
                 "cleaning_cache",
                 "finalizing",
@@ -214,6 +250,25 @@ app.registerExtension({
             return phase;
         };
 
+        const formatBytes = (value) => {
+            if (value === null || value === undefined || Number.isNaN(Number(value))) return "--";
+            const units = ["B", "KB", "MB", "GB", "TB"];
+            let size = Number(value);
+            let unitIndex = 0;
+            while (size >= 1024 && unitIndex < units.length - 1) {
+                size /= 1024;
+                unitIndex += 1;
+            }
+            const decimals = size >= 10 || unitIndex === 0 ? 0 : 1;
+            return `${size.toFixed(decimals)} ${units[unitIndex]}`;
+        };
+
+        const formatSpeed = (speedBps) => {
+            const num = Number(speedBps || 0);
+            if (!Number.isFinite(num) || num <= 0) return "";
+            return `${formatBytes(num)}/s`;
+        };
+
         const ensureStyles = () => {
             if (document.getElementById(STYLE_ID)) return;
 
@@ -222,47 +277,105 @@ app.registerExtension({
             style.textContent = `
                 #${PANEL_ID} {
                     position: relative;
-                    width: min(480px, calc(100vw - 32px));
-                    max-width: min(480px, calc(100vw - 32px));
-                    max-height: min(42vh, 360px);
+                    width: min(350px, calc(100vw - 32px));
+                    max-width: min(350px, calc(100vw - 32px));
+                    min-width: min(310px, calc(100vw - 32px));
+                    max-height: min(60vh, 520px);
                     box-sizing: border-box;
-                    border-left-width: 4px;
-                    border-left-color: #3b82f6;
+                    border-radius: 12px;
+                    border: 1px solid var(--hf-queue-border, var(--border-default, rgba(255, 255, 255, 0.12)));
+                    background: var(--hf-queue-bg, var(--comfy-menu-bg, var(--background, #1c1d22)));
+                    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
                     overflow: hidden;
                     pointer-events: auto;
                 }
-                #${PANEL_ID} .hf-downloader-header {
+                #${PANEL_ID} .hf-queue-header {
                     display: flex;
                     align-items: center;
                     justify-content: space-between;
                     gap: 8px;
-                    min-height: 24px;
-                    padding: 0;
+                    padding: 10px 12px;
+                    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
                     background: transparent;
                 }
-                #${PANEL_ID} .hf-downloader-header-title {
-                    padding: 0;
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
+                #${PANEL_ID} .hf-queue-header-title {
+                    font-size: 14px;
+                    font-weight: 600;
+                    line-height: 1.2;
+                    color: var(--foreground, #f3f4f6);
                     min-width: 0;
                     flex: 1 1 auto;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
                 }
-                #${PANEL_ID} .hf-downloader-header-controls {
+                #${PANEL_ID} .hf-queue-header-controls {
                     display: inline-flex;
                     align-items: center;
                     gap: 6px;
                     flex-shrink: 0;
                 }
-                #${PANEL_ID} .hf-downloader-count {
-                    font-size: 11px;
-                    line-height: 1;
+                #${PANEL_ID} .hf-queue-action-pill {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 5px;
+                    height: 28px;
+                    padding: 0 9px;
+                    border-radius: 8px;
+                    border: none;
+                    font-size: 12px;
                     font-weight: 500;
-                    padding: 3px 8px;
-                    border-radius: 999px;
-                    background: rgba(59, 130, 246, 0.16);
-                    color: #93c5fd;
+                    cursor: pointer;
                     white-space: nowrap;
+                    transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease;
+                }
+                #${PANEL_ID} .hf-queue-action-pill:disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                }
+                #${PANEL_ID} .hf-queue-pause-all {
+                    background: var(--secondary, rgba(255, 255, 255, 0.08));
+                    color: var(--foreground, #e5e7eb);
+                }
+                #${PANEL_ID} .hf-queue-pause-all:hover:not(:disabled) {
+                    background: var(--accent, rgba(255, 255, 255, 0.15));
+                }
+                #${PANEL_ID} .hf-queue-cancel-all {
+                    background: rgba(239, 68, 68, 0.18);
+                    color: #f87171;
+                }
+                #${PANEL_ID} .hf-queue-cancel-all:hover:not(:disabled) {
+                    background: rgba(239, 68, 68, 0.3);
+                    color: #fca5a5;
+                }
+                #${PANEL_ID} .hf-queue-tabs {
+                    display: flex;
+                    align-items: center;
+                    gap: 4px;
+                    padding: 8px 12px 4px 12px;
+                }
+                #${PANEL_ID} .hf-queue-tab {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    height: 28px;
+                    padding: 0 11px;
+                    border-radius: 8px;
+                    border: none;
+                    background: transparent;
+                    color: var(--muted-foreground, #9ca3af);
+                    font-size: 12px;
+                    font-weight: 500;
+                    cursor: pointer;
+                    transition: background-color 150ms ease, color 150ms ease;
+                }
+                #${PANEL_ID} .hf-queue-tab:hover {
+                    color: var(--foreground, #f3f4f6);
+                }
+                #${PANEL_ID} .hf-queue-tab.active {
+                    background: var(--secondary, rgba(255, 255, 255, 0.1));
+                    color: var(--foreground, #ffffff);
+                    font-weight: 600;
                 }
                 #${PANEL_ID} .hf-downloader-body {
                     flex: 1 1 auto;
@@ -270,11 +383,62 @@ app.registerExtension({
                     overflow-y: auto;
                     display: flex;
                     flex-direction: column;
-                    gap: 6px;
+                    gap: 4px;
+                    padding: 6px 10px 10px 10px;
                 }
                 #${PANEL_ID} .hf-downloader-item {
-                    min-height: 44px;
+                    min-height: 52px;
                     box-sizing: border-box;
+                    background: transparent;
+                }
+                #${PANEL_ID} .hf-downloader-item:hover {
+                    background: rgba(255, 255, 255, 0.04);
+                }
+                #${PANEL_ID} .hf-downloader-item.is-active-row {
+                    background: var(--secondary, rgba(255, 255, 255, 0.07));
+                }
+                #${PANEL_ID} .hf-downloader-item.has-detail {
+                    align-items: flex-start;
+                }
+                #${PANEL_ID} .hf-downloader-icon-tile {
+                    width: 36px;
+                    height: 36px;
+                    border-radius: 8px;
+                    background: rgba(255, 255, 255, 0.07);
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    flex-shrink: 0;
+                }
+                #${PANEL_ID} .hf-downloader-content {
+                    min-width: 0;
+                    flex: 1 1 auto;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2px;
+                }
+                #${PANEL_ID} .hf-downloader-name {
+                    font-size: 13px;
+                    font-weight: 500;
+                    line-height: 1.3;
+                    color: var(--foreground, #f3f4f6);
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                #${PANEL_ID} .hf-downloader-subtitle {
+                    font-size: 11px;
+                    line-height: 1.3;
+                    color: var(--muted-foreground, #9ca3af);
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+                #${PANEL_ID} .hf-downloader-row-actions {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 2px;
+                    flex-shrink: 0;
                 }
                 #${PANEL_ID} .hf-downloader-progress-container {
                     position: absolute;
@@ -289,126 +453,65 @@ app.registerExtension({
                 #${PANEL_ID} .hf-downloader-progress-bar {
                     height: 100%;
                     width: 0%;
-                    background: #3b82f6;
+                    background: #60a5fa;
                     transition: width 200ms ease-out, background-color 200ms ease-in-out;
                 }
-                #${PANEL_ID} .hf-downloader-item.has-detail {
-                    height: auto;
-                    min-height: 64px;
-                    max-height: none;
-                    align-items: flex-start;
+                #${PANEL_ID} .hf-downloader-progress-bar.indeterminate {
+                    width: 40% !important;
+                    animation: hf-queue-indeterminate 1.25s ease-in-out infinite;
                 }
-                #${PANEL_ID} .hf-downloader-content {
-                    min-width: 0;
-                    flex: 1 1 auto;
-                    padding-right: 52px;
-                }
-                #${PANEL_ID} .hf-downloader-item.has-detail .hf-downloader-content {
-                    padding-right: 56px;
-                }
-                #${PANEL_ID} .hf-downloader-name {
-                    font-weight: 500;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
-                }
-                #${PANEL_ID} .hf-downloader-meta {
-                    margin-top: 2px;
-                    color: var(--muted-foreground, var(--descrip-text, #9ca3af));
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    gap: 6px;
-                    min-width: 0;
-                    font-size: 11px;
-                    line-height: 1.2;
-                }
-                #${PANEL_ID} .hf-downloader-size-text {
-                    min-width: 0;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
-                }
-                #${PANEL_ID} .hf-downloader-state-icon {
-                    width: 16px;
-                    height: 16px;
-                    display: inline-block;
-                }
-                #${PANEL_ID} .hf-downloader-status-lower {
-                    font-size: 10px;
-                    font-weight: 600;
-                    letter-spacing: 0.02em;
-                    white-space: nowrap;
-                    position: absolute;
-                    right: 8px;
-                    bottom: 7px;
-                    line-height: 1;
-                    pointer-events: none;
-                    z-index: 2;
-                    text-transform: uppercase;
-                }
-                #${PANEL_ID} .hf-downloader-cancel {
-                    position: absolute;
-                    right: 8px;
-                    top: 50%;
-                    opacity: 0;
-                    pointer-events: none;
-                    transform: translateY(calc(-50% + 2px));
-                    transition: opacity 140ms ease-in-out, transform 140ms ease-in-out;
-                    z-index: 5;
-                }
-                #${PANEL_ID} .hf-downloader-item:hover .hf-downloader-cancel,
-                #${PANEL_ID} .hf-downloader-cancel:focus-visible {
-                    opacity: 1;
-                    pointer-events: auto;
-                    transform: translateY(-50%);
-                }
-                #${PANEL_ID} .hf-downloader-item.can-cancel:hover .hf-downloader-status-lower {
-                    visibility: hidden;
+                @keyframes hf-queue-indeterminate {
+                    0% { transform: translateX(-110%); }
+                    100% { transform: translateX(260%); }
                 }
                 #${PANEL_ID} .hf-downloader-error {
-                    margin-top: 4px;
+                    margin-top: 3px;
                     font-size: 11px;
-                    line-height: 1.25;
-                    color: #ffb4b4;
+                    line-height: 1.3;
+                    color: #fca5a5;
                     white-space: normal;
                     word-break: break-word;
                     display: none;
                 }
                 #${PANEL_ID} .hf-downloader-error a {
-                    color: #4aa3ff;
+                    color: #60a5fa;
                     text-decoration: underline;
                     cursor: pointer;
                 }
-                #${PANEL_ID} .hf-downloader-error a:hover {
-                    color: #79beff;
-                }
                 #${PANEL_ID} .hf-downloader-actions {
-                    margin-top: 6px;
+                    margin-top: 5px;
                     display: none;
                     flex-wrap: wrap;
                     align-items: center;
-                    gap: 8px;
+                    gap: 6px;
                 }
                 #${PANEL_ID} .hf-downloader-actions.visible {
                     display: inline-flex;
                 }
                 #${PANEL_ID} .hf-downloader-agreement-hint {
                     font-size: 11px;
-                    color: var(--descrip-text, #9aa4b6);
+                    color: var(--muted-foreground, #9ca3af);
                 }
                 #${PANEL_ID} .hf-downloader-repo-link {
                     font-size: 11px;
-                    color: #9ad6ff;
+                    color: #93c5fd;
                     text-decoration: underline;
                     cursor: pointer;
+                }
+                #${PANEL_ID} .hf-downloader-empty-filter {
+                    padding: 18px 12px;
+                    text-align: center;
+                    font-size: 12px;
+                    color: var(--muted-foreground, #9ca3af);
+                    display: none;
                 }
                 #${PANEL_ID} .hf-downloader-footer {
                     display: none;
                     align-items: center;
                     justify-content: flex-end;
                     gap: 6px;
-                    padding-top: 4px;
+                    padding: 8px 12px 10px 12px;
+                    border-top: 1px solid rgba(255, 255, 255, 0.08);
                     background: transparent;
                 }
                 #${PANEL_ID} .hf-downloader-footer.visible {
@@ -419,18 +522,19 @@ app.registerExtension({
                     align-items: center;
                     justify-content: center;
                     gap: 4px;
-                    height: 24px;
-                    padding: 0 8px;
+                    height: 28px;
+                    padding: 0 10px;
                     font-size: 12px;
                     line-height: 1;
                     font-weight: 500;
-                    border-radius: 6px;
+                    border-radius: 7px;
                     cursor: pointer;
                 }
                 #${PANEL_ID} .hf-downloader-refresh:disabled {
                     opacity: 0.6;
                     cursor: not-allowed;
                 }
+                #${PANEL_ID}.hf-downloader-collapsed .hf-queue-tabs,
                 #${PANEL_ID}.hf-downloader-collapsed .hf-downloader-body,
                 #${PANEL_ID}.hf-downloader-collapsed .hf-downloader-refresh-prompt,
                 #${PANEL_ID}.hf-downloader-collapsed .hf-downloader-footer {
@@ -440,327 +544,102 @@ app.registerExtension({
             document.head.appendChild(style);
         };
 
-        const syncPanelThemeFromJobQueue = () => {
-            if (!panel || typeof window === "undefined" || !window.getComputedStyle) return;
-
-            const textNodes = document.querySelectorAll("h1, h2, h3, h4, span, div");
-            let jobQueueTitle = null;
-            for (const node of textNodes) {
-                if ((node.textContent || "").trim() !== "Job Queue") continue;
-                if (node.closest(`#${PANEL_ID}`)) continue;
-                jobQueueTitle = node;
-                break;
-            }
-
-            if (!jobQueueTitle) {
-                panel.style.removeProperty("--hf-queue-bg");
-                panel.style.removeProperty("--hf-queue-border");
-                return;
-            }
-
-            const candidates = [
-                jobQueueTitle.closest("[class*='panel']"),
-                jobQueueTitle.closest("[class*='queue']"),
-                jobQueueTitle.closest("[role='dialog']"),
-                jobQueueTitle.closest("section"),
-                jobQueueTitle.parentElement
-            ];
-
-            const nativePanel = candidates.find((el) => el && el !== panel);
-            if (!nativePanel) return;
-
-            const styles = window.getComputedStyle(nativePanel);
-            const bg = styles.backgroundColor;
-            const border = styles.borderColor;
-            if (bg && bg !== "rgba(0, 0, 0, 0)") {
-                panel.style.setProperty("--hf-queue-bg", bg);
-            }
-            if (border && border !== "rgba(0, 0, 0, 0)") {
-                panel.style.setProperty("--hf-queue-border", border);
-            }
-        };
-
-        const getRightOffset = () => {
-            // 1. Try native overlay flex container if present
-            const overlayContainer = document.querySelector('.pointer-events-none.flex.w-full.justify-end');
-            if (overlayContainer && overlayContainer.offsetParent !== null) {
-                const rect = overlayContainer.getBoundingClientRect();
-                if (rect.width > 0 && rect.right < window.innerWidth) {
-                    const offset = window.innerWidth - rect.right + 12;
-                    if (offset > 12 && offset < window.innerWidth * 0.7) {
-                        return Math.round(offset);
-                    }
-                }
-            }
-
-            // 2. Try graph-canvas-container bounding rect
-            const canvas = document.querySelector('.graph-canvas-container');
-            if (canvas) {
-                const rect = canvas.getBoundingClientRect();
-                const offset = window.innerWidth - rect.right + 12;
-                if (offset > 12 && offset < window.innerWidth * 0.7) {
-                    return Math.round(offset);
-                }
-            }
-
-            // 3. Fallback: inspect any right sidebars
-            const sidebars = document.querySelectorAll(`
-                .comfyui-body-right,
-                [data-testid="sidebar-right"],
-                [class*="sidebar"][class*="right"],
-                [class*="side-bar"][class*="right"],
-                aside
-            `);
-
-            for (const sb of sidebars) {
-                if (!sb || sb.closest(`#${PANEL_ID}`)) continue;
-                const style = window.getComputedStyle(sb);
-                if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
-                const rect = sb.getBoundingClientRect();
-                if (rect.width > 80 && rect.left < window.innerWidth) {
-                    const offset = window.innerWidth - rect.left + 12;
-                    if (offset > 12 && offset < window.innerWidth * 0.7) {
-                        return Math.round(offset);
-                    }
-                }
-            }
-
-            return 16;
-        };
-
-        const findNativeStackRefs = () => {
-            const errorOverlayEl = document.querySelector('[data-testid="error-overlay"]');
-            const errorOverlayWrapper = errorOverlayEl?.parentElement || null;
-            const autoDownloadEl = document.getElementById("auto-download-dialog");
-            const actionbarsEl = document.querySelector('[data-testid="top-menu-actionbars"]');
-            const autoDownloadParent =
-                autoDownloadEl?.parentElement &&
-                autoDownloadEl.parentElement !== document.body &&
-                autoDownloadEl.parentElement.classList.contains("flex-col")
-                    ? autoDownloadEl.parentElement
-                    : null;
-            const stackContainer =
-                errorOverlayWrapper?.parentElement ||
-                actionbarsEl?.parentElement ||
-                autoDownloadParent ||
-                null;
-            return { errorOverlayWrapper, autoDownloadEl, actionbarsEl, stackContainer };
-        };
-
         const updatePanelPosition = () => {
             if (!panel || !panelWrapper) return;
-            const { errorOverlayWrapper, autoDownloadEl, actionbarsEl, stackContainer } = findNativeStackRefs();
-
-            if (stackContainer) {
-                Object.assign(panelWrapper.style, {
-                    position: "",
-                    top: "",
-                    right: "",
-                    bottom: "",
-                    left: "",
-                    zIndex: "",
-                    width: "",
-                });
-
-                if (autoDownloadEl && autoDownloadEl.parentElement === stackContainer) {
-                    if (autoDownloadEl.previousElementSibling !== panelWrapper) {
-                        autoDownloadEl.insertAdjacentElement("beforebegin", panelWrapper);
-                    }
-                    return;
-                }
-                if (errorOverlayWrapper && errorOverlayWrapper.parentElement === stackContainer) {
-                    if (errorOverlayWrapper.nextElementSibling !== panelWrapper) {
-                        errorOverlayWrapper.insertAdjacentElement("afterend", panelWrapper);
-                    }
-                    return;
-                }
-                if (actionbarsEl && actionbarsEl.parentElement === stackContainer) {
-                    if (panelWrapper.parentElement !== stackContainer || actionbarsEl.nextElementSibling !== panelWrapper) {
-                        actionbarsEl.insertAdjacentElement("afterend", panelWrapper);
-                    }
-                    return;
-                }
-                if (panelWrapper.parentElement !== stackContainer) {
-                    stackContainer.appendChild(panelWrapper);
-                }
-                return;
+            const visible = Boolean(lastVisibleCount && !panelMinimized);
+            if (visible) {
+                setNativeStackPanelVisible(panelWrapper, true, { id: WRAPPER_ID, priority: 20 });
+            } else {
+                setNativeStackPanelVisible(WRAPPER_ID, false);
             }
-
-            if (panelWrapper.parentElement !== document.body) {
-                document.body.appendChild(panelWrapper);
-            }
-            const right = getRightOffset();
-            Object.assign(panelWrapper.style, {
-                position: "fixed",
-                top: "56px",
-                right: `${right}px`,
-                bottom: "auto",
-                left: "auto",
-                zIndex: "9999",
-                width: "auto",
-            });
         };
 
-        const dismissEntriesByStatus = async (includeFailed = false) => {
-            for (const [id, info] of Object.entries(lastRenderedDownloads || {})) {
-                const status = toUiStatus(info?.status);
-                if (RUNNING_STATUSES.has(status)) continue;
-                if (!includeFailed && status === "failed") continue;
-                if (status === "interrupted") {
-                    void dismissInterrupted(id);
-                }
-                dismissedEntryIds.add(id);
+        const postJson = async (url, payload) => {
+            const resp = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload || {})
+            });
+            if (!resp.ok) {
+                throw new Error(`HTTP ${resp.status}`);
             }
-            renderList(lastRenderedDownloads);
-        };
-
-        const ensurePanel = () => {
-            if (panel && panelWrapper) return panel;
-            ensureStyles();
-
-            panelWrapper = document.createElement("div");
-            panelWrapper.id = WRAPPER_ID;
-            panelWrapper.setAttribute("data-testid", "hf-downloads-overlay");
-            panelWrapper.className = WRAPPER_CLASS;
-            panelWrapper.style.display = "none";
-
-            panel = document.createElement("div");
-            panel.id = PANEL_ID;
-            panel.className = PANEL_CLASS;
-            panel.style.display = "none";
-
-            const header = document.createElement("div");
-            header.className = "hf-downloader-header";
-
-            const title = document.createElement("div");
-            title.className = "hf-downloader-header-title";
-            title.innerHTML =
-                `<i class="icon-[lucide--download] size-4 shrink-0" style="color: #3b82f6;"></i>` +
-                `<span class="text-sm font-medium text-foreground truncate">Downloads</span>`;
-
-            const controls = document.createElement("div");
-            controls.className = "hf-downloader-header-controls";
-
-            countBadge = document.createElement("div");
-            countBadge.className = "hf-downloader-count";
-            countBadge.textContent = "Active: 0";
-
-            collapseBtn = document.createElement("button");
-            collapseBtn.type = "button";
-            collapseBtn.className = `${BUTTON_TEXONLY_ICON_CLASS} hf-downloader-collapse`;
-            collapseBtn.innerHTML = `<i class="icon-[lucide--chevron-up] size-4"></i>`;
-            collapseBtn.title = "Collapse downloads";
-            collapseBtn.setAttribute("aria-label", "Collapse downloads");
-            collapseBtn.setAttribute("aria-expanded", "true");
-            collapseBtn.addEventListener("click", (event) => {
-                event.stopPropagation();
-                setPanelCollapsed(!panelCollapsed);
-            });
-
-            minimizeBtn = document.createElement("button");
-            minimizeBtn.type = "button";
-            minimizeBtn.className = `${BUTTON_TEXONLY_ICON_CLASS} hf-downloader-minimize`;
-            minimizeBtn.innerHTML = `<i class="icon-[lucide--x] size-4"></i>`;
-            minimizeBtn.title = "Minimize downloads";
-            minimizeBtn.setAttribute("aria-label", "Minimize downloads");
-            minimizeBtn.addEventListener("click", () => {
-                setPanelMinimized(true);
-            });
-
-            controls.appendChild(countBadge);
-            controls.appendChild(collapseBtn);
-            controls.appendChild(minimizeBtn);
-            header.appendChild(title);
-            header.appendChild(controls);
-
-            listBody = document.createElement("div");
-            listBody.className = "hf-downloader-body";
-
-            footer = document.createElement("div");
-            footer.className = "hf-downloader-footer";
-
-            clearFinishedBtn = document.createElement("button");
-            clearFinishedBtn.type = "button";
-            clearFinishedBtn.className = `${BUTTON_BASE_CLASS} hf-downloader-footer-btn bg-secondary text-foreground hover:bg-accent`;
-            clearFinishedBtn.textContent = "Clear finished";
-            clearFinishedBtn.style.display = "none";
-            clearFinishedBtn.addEventListener("click", () => {
-                void dismissEntriesByStatus(false);
-            });
-
-            dismissAllBtn = document.createElement("button");
-            dismissAllBtn.type = "button";
-            dismissAllBtn.className = `${BUTTON_BASE_CLASS} hf-downloader-footer-btn bg-secondary text-foreground hover:bg-accent`;
-            dismissAllBtn.textContent = "Dismiss all";
-            dismissAllBtn.style.display = "none";
-            dismissAllBtn.addEventListener("click", () => {
-                void dismissEntriesByStatus(true);
-            });
-
-            refreshBtn = document.createElement("button");
-            refreshBtn.type = "button";
-            refreshBtn.className = "hf-downloader-refresh hf-downloader-footer-btn bg-primary text-primary-foreground border-0 hover:bg-primary/90";
-            refreshBtn.textContent = "Refresh";
-            refreshBtn.style.display = "none";
-            refreshBtn.addEventListener("click", () => {
-                void handleRefresh();
-            });
-
-            footer.appendChild(clearFinishedBtn);
-            footer.appendChild(dismissAllBtn);
-            footer.appendChild(refreshBtn);
-
-            refreshPromptBanner = document.createElement("div");
-            refreshPromptBanner.className = "hf-downloader-refresh-prompt items-center justify-between gap-2 rounded-md border border-solid border-border/60 bg-secondary/60 px-2 py-1.5 text-xs text-foreground";
-            refreshPromptBanner.style.display = "none";
-            refreshPromptBanner.textContent = "Downloads finished — click Refresh to update ComfyUI node lists.";
-
-            panel.appendChild(header);
-            panel.appendChild(listBody);
-            panel.appendChild(refreshPromptBanner);
-            panel.appendChild(footer);
-            panelWrapper.appendChild(panel);
-
-            updatePanelPosition();
-            return panel;
-        };
-
-        const formatBytes = (value) => {
-            if (value === null || value === undefined) return "--";
-            const units = ["B", "KB", "MB", "GB", "TB"];
-            let size = value;
-            let unitIndex = 0;
-            while (size >= 1024 && unitIndex < units.length - 1) {
-                size /= 1024;
-                unitIndex += 1;
-            }
-            const decimals = size >= 10 || unitIndex === 0 ? 0 : 1;
-            return `${size.toFixed(decimals)} ${units[unitIndex]}`;
+            return resp.json().catch(() => ({}));
         };
 
         const cancelDownload = async (downloadId) => {
             if (!downloadId) return;
             try {
-                await fetch("/cancel_download", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ download_id: downloadId })
-                });
+                await postJson("/cancel_download", { download_id: downloadId });
+                void pollStatus();
             } catch (err) {
                 console.warn("[HF Downloader] Failed to cancel download:", err);
+            }
+        };
+
+        const pauseDownload = async (downloadId) => {
+            if (!downloadId) return;
+            try {
+                await postJson("/pause_download", { download_id: downloadId });
+                void pollStatus();
+            } catch (err) {
+                console.warn("[HF Downloader] Failed to pause download:", err);
+            }
+        };
+
+        const resumeDownload = async (downloadId) => {
+            if (!downloadId) return;
+            try {
+                await postJson("/resume_download", { download_id: downloadId });
+                void pollStatus();
+            } catch (err) {
+                console.warn("[HF Downloader] Failed to resume download:", err);
+            }
+        };
+
+        const cancelBackupTask = async (taskId) => {
+            if (!taskId) return;
+            try {
+                await postJson("/cancel_backup_task", { task_id: taskId });
+                void pollStatus();
+            } catch (err) {
+                console.warn("[HF Downloader] Failed to cancel backup task:", err);
+            }
+        };
+
+        const pauseOrResumeAll = async () => {
+            if (!pauseAllBtn) return;
+            const mode = pauseAllBtn.dataset.mode || "pause";
+            pauseAllBtn.disabled = true;
+            try {
+                if (mode === "resume") {
+                    await postJson("/resume_download", { resume_all: true });
+                } else {
+                    await postJson("/pause_download", { pause_all: true });
+                }
+                await pollStatus();
+            } catch (err) {
+                console.warn(`[HF Downloader] Failed to ${mode} all downloads:`, err);
+            } finally {
+                if (pauseAllBtn) pauseAllBtn.disabled = false;
+            }
+        };
+
+        const cancelAllDownloadsAndBackups = async () => {
+            if (cancelAllBtn) cancelAllBtn.disabled = true;
+            try {
+                await postJson("/cancel_download", { cancel_all: true, include_backups: true });
+                await pollStatus();
+            } catch (err) {
+                console.warn("[HF Downloader] Failed to cancel all items:", err);
+            } finally {
+                if (cancelAllBtn) cancelAllBtn.disabled = false;
             }
         };
 
         const retryDownload = async (payload) => {
             if (!payload || typeof payload !== "object") return null;
             try {
-                const resp = await fetch("/queue_download", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ models: [payload] })
-                });
-                if (!resp.ok) return null;
-                const data = await resp.json();
+                const data = await postJson("/queue_download", { models: [payload] });
                 const queued = Array.isArray(data?.queued) ? data.queued : [];
                 return queued[0] || null;
             } catch (err) {
@@ -772,13 +651,7 @@ app.registerExtension({
         const resumeInterrupted = async (downloadId) => {
             if (!downloadId) return null;
             try {
-                const resp = await fetch("/resume_interrupted", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ download_id: downloadId })
-                });
-                if (!resp.ok) return null;
-                const data = await resp.json();
+                const data = await postJson("/resume_interrupted", { download_id: downloadId });
                 const queued = Array.isArray(data?.queued) ? data.queued : [];
                 return queued[0] || null;
             } catch (err) {
@@ -802,6 +675,151 @@ app.registerExtension({
             }
         };
 
+        const dismissEntriesByStatus = (includeFailed = false) => {
+            const combined = [
+                ...Object.entries(lastRenderedDownloads || {}).map(([id, info]) => ({ id, ...(info || {}) })),
+                ...Object.entries(lastRenderedBackupTasks || {}).map(([id, info]) => ({ id, ...(info || {}) }))
+            ];
+            for (const info of combined) {
+                const status = toUiStatus(info?.status);
+                if (ACTIVE_NON_TERMINAL_STATUSES.has(status)) continue;
+                if (!includeFailed && status === "failed") continue;
+                if (status === "interrupted") {
+                    void dismissInterrupted(info.id);
+                }
+                dismissedEntryIds.add(info.id);
+            }
+            renderList(lastRenderedDownloads, lastRenderedBackupTasks);
+        };
+
+        const setActiveFilter = (nextFilter) => {
+            activeFilter = nextFilter;
+            for (const [key, btn] of Object.entries(filterButtons)) {
+                btn.classList.toggle("active", key === activeFilter);
+            }
+            renderList(lastRenderedDownloads, lastRenderedBackupTasks);
+        };
+
+        const ensurePanel = () => {
+            if (panel && panelWrapper) return panel;
+            ensureStyles();
+
+            panelWrapper = document.createElement("div");
+            panelWrapper.id = WRAPPER_ID;
+            panelWrapper.setAttribute("data-testid", "hf-downloads-overlay");
+            panelWrapper.className = WRAPPER_CLASS;
+            panelWrapper.style.display = "none";
+
+            panel = document.createElement("div");
+            panel.id = PANEL_ID;
+            panel.className = PANEL_CLASS;
+            panel.style.display = "none";
+
+            const header = document.createElement("div");
+            header.className = "hf-queue-header";
+
+            headerTitleEl = document.createElement("div");
+            headerTitleEl.className = "hf-queue-header-title";
+            headerTitleEl.setAttribute("data-testid", "hf-queue-header-title");
+            headerTitleEl.textContent = "Downloads";
+
+            const controls = document.createElement("div");
+            controls.className = "hf-queue-header-controls";
+
+            pauseAllBtn = document.createElement("button");
+            pauseAllBtn.type = "button";
+            pauseAllBtn.setAttribute("data-testid", "hf-queue-pause-all-btn");
+            pauseAllBtn.className = "hf-queue-action-pill hf-queue-pause-all";
+            pauseAllBtn.style.display = "none";
+            pauseAllBtn.addEventListener("click", (event) => {
+                event.stopPropagation();
+                void pauseOrResumeAll();
+            });
+
+            cancelAllBtn = document.createElement("button");
+            cancelAllBtn.type = "button";
+            cancelAllBtn.setAttribute("data-testid", "hf-queue-cancel-all-btn");
+            cancelAllBtn.className = "hf-queue-action-pill hf-queue-cancel-all";
+            cancelAllBtn.title = "Cancel all active downloads & backup tasks";
+            cancelAllBtn.innerHTML =
+                `<i class="icon-[lucide--x-circle] size-3.5 shrink-0"></i><span>Cancel all</span>`;
+            cancelAllBtn.style.display = "none";
+            cancelAllBtn.addEventListener("click", (event) => {
+                event.stopPropagation();
+                void cancelAllDownloadsAndBackups();
+            });
+
+            minimizeBtn = document.createElement("button");
+            minimizeBtn.type = "button";
+            minimizeBtn.setAttribute("data-testid", "hf-downloader-minimize-btn");
+            minimizeBtn.className = `${HEADER_ICON_BTN_CLASS} hf-downloader-minimize`;
+            minimizeBtn.innerHTML = `<i class="icon-[lucide--chevron-up] size-4"></i>`;
+            minimizeBtn.title = "Minimize downloads";
+            minimizeBtn.setAttribute("aria-label", "Minimize downloads");
+            minimizeBtn.addEventListener("click", (event) => {
+                event.stopPropagation();
+                setPanelMinimized(true);
+            });
+
+            controls.appendChild(pauseAllBtn);
+            controls.appendChild(cancelAllBtn);
+            controls.appendChild(minimizeBtn);
+            header.appendChild(headerTitleEl);
+            header.appendChild(controls);
+
+            listBody = document.createElement("div");
+            listBody.className = "hf-downloader-body";
+
+            footer = document.createElement("div");
+            footer.className = "hf-downloader-footer";
+
+            clearFinishedBtn = document.createElement("button");
+            clearFinishedBtn.type = "button";
+            clearFinishedBtn.className = `${BUTTON_BASE_CLASS} hf-downloader-footer-btn bg-secondary text-foreground hover:bg-accent`;
+            clearFinishedBtn.textContent = "Clear finished";
+            clearFinishedBtn.style.display = "none";
+            clearFinishedBtn.addEventListener("click", () => {
+                dismissEntriesByStatus(false);
+            });
+
+            dismissAllBtn = document.createElement("button");
+            dismissAllBtn.type = "button";
+            dismissAllBtn.className = `${BUTTON_BASE_CLASS} hf-downloader-footer-btn bg-secondary text-foreground hover:bg-accent`;
+            dismissAllBtn.textContent = "Dismiss all";
+            dismissAllBtn.style.display = "none";
+            dismissAllBtn.addEventListener("click", () => {
+                dismissEntriesByStatus(true);
+            });
+
+            refreshBtn = document.createElement("button");
+            refreshBtn.type = "button";
+            refreshBtn.className = "hf-downloader-refresh hf-downloader-footer-btn bg-secondary text-foreground hover:bg-accent";
+            refreshBtn.textContent = "Refresh";
+            refreshBtn.style.display = "none";
+            refreshBtn.addEventListener("click", () => {
+                void handleRefresh();
+            });
+
+            footer.appendChild(clearFinishedBtn);
+            footer.appendChild(dismissAllBtn);
+            footer.appendChild(refreshBtn);
+
+            refreshPromptBanner = document.createElement("div");
+            refreshPromptBanner.className =
+                "hf-downloader-refresh-prompt mx-3 mb-2 items-center justify-between gap-2 rounded-md border border-solid border-border/60 bg-secondary/60 px-2.5 py-1.5 text-xs text-foreground";
+            refreshPromptBanner.style.display = "none";
+            refreshPromptBanner.textContent = "Downloads finished — click Refresh to update ComfyUI node lists.";
+
+            panel.appendChild(header);
+            panel.appendChild(listBody);
+            panel.appendChild(refreshPromptBanner);
+            panel.appendChild(footer);
+            panelWrapper.appendChild(panel);
+
+            updatePanelPosition();
+            return panel;
+        };
+
         const isDismissedEntry = (entry) => {
             if (!dismissedEntryIds.has(entry.id)) return false;
             return (
@@ -818,47 +836,84 @@ app.registerExtension({
             );
         };
 
-        const stateIconForStatus = (status) => {
-            switch (status) {
-                case "downloading":
-                case "copying":
-                case "cleaning_cache":
-                case "finalizing":
-                case "cancelling":
-                    return {
-                        key: "loading",
-                        className: "icon-[lucide--loader-circle] size-4 animate-spin text-primary-background"
-                    };
-                case "queued":
-                    return {
-                        key: "queued",
-                        className: "icon-[lucide--loader-circle] size-4 animate-spin text-white"
-                    };
-                case "downloaded":
-                    return {
-                        key: "downloaded",
-                        className: "icon-[lucide--check-check] size-4 text-green-400"
-                    };
-                case "failed":
-                    return {
-                        key: "failed",
-                        className: "icon-[lucide--alert-circle] size-4 text-red-400"
-                    };
-                case "cancelled":
-                    return {
-                        key: "cancelled",
-                        className: "icon-[lucide--x-circle] size-4 text-yellow-400"
-                    };
-                case "interrupted":
-                    return {
-                        key: "interrupted",
-                        className: "icon-[lucide--triangle-alert] size-4 text-warning"
-                    };
-                default:
-                    return {
-                        key: "default",
-                        className: "icon-[lucide--loader-circle] size-4 text-muted-foreground"
-                    };
+        const stateIconForEntry = (entry) => {
+            const status = entry.status;
+            const kind = entry._kind || "download";
+
+            if (status === "downloaded") {
+                return {
+                    key: "downloaded",
+                    className: "icon-[lucide--check-check] size-4 text-green-400"
+                };
+            }
+            if (status === "failed") {
+                return {
+                    key: "failed",
+                    className: "icon-[lucide--alert-circle] size-4 text-red-400"
+                };
+            }
+            if (status === "cancelled") {
+                return {
+                    key: "cancelled",
+                    className: "icon-[lucide--x-circle] size-4 text-muted-foreground"
+                };
+            }
+            if (status === "interrupted") {
+                return {
+                    key: "interrupted",
+                    className: "icon-[lucide--triangle-alert] size-4 text-warning"
+                };
+            }
+            if (status === "paused" || status === "pausing") {
+                return {
+                    key: "paused",
+                    className: "icon-[lucide--pause] size-4 text-warning"
+                };
+            }
+            if (kind === "backup_upload") {
+                return {
+                    key: `backup-up-${status}`,
+                    className: status === "uploading"
+                        ? "icon-[lucide--upload] size-4 text-blue-400"
+                        : "icon-[lucide--upload] size-4 text-muted-foreground"
+                };
+            }
+            if (kind === "backup_download") {
+                return {
+                    key: `backup-dl-${status}`,
+                    className: status === "downloading"
+                        ? "icon-[lucide--download] size-4 text-blue-400"
+                        : "icon-[lucide--download] size-4 text-muted-foreground"
+                };
+            }
+            if (status === "queued") {
+                return {
+                    key: "queued",
+                    className: "icon-[lucide--clock] size-4 text-muted-foreground"
+                };
+            }
+            return {
+                key: `spin-${status}`,
+                className: "pi pi-spinner-dotted pi-spin inline-flex size-4 items-center justify-center text-sm leading-none text-blue-400"
+            };
+        };
+
+        const renderErrorWithLinks = (container, text) => {
+            container.innerHTML = "";
+            if (!text) return;
+            const urlRegex = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g;
+            const parts = text.split(urlRegex);
+            for (const part of parts) {
+                if (urlRegex.test(part)) {
+                    const link = document.createElement("a");
+                    link.href = part;
+                    link.textContent = part;
+                    link.target = "_blank";
+                    link.rel = "noopener noreferrer";
+                    container.appendChild(link);
+                } else {
+                    container.appendChild(document.createTextNode(part));
+                }
             }
         };
 
@@ -866,49 +921,14 @@ app.registerExtension({
             const item = document.createElement("div");
             item.className = ITEM_CLASS;
 
-            const leading = document.createElement("div");
-            leading.className = "relative flex items-center gap-1";
-
-            const iconWrap = document.createElement("div");
-            iconWrap.className = "inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-[6px]";
-
-            const stateIcon = document.createElement("i");
-            stateIcon.className = "hf-downloader-state-icon icon-[lucide--loader-circle] size-4 text-muted-foreground";
-            iconWrap.appendChild(stateIcon);
-            leading.appendChild(iconWrap);
-
             const content = document.createElement("div");
-            content.className = "hf-downloader-content relative min-w-0 flex-1";
+            content.className = "hf-downloader-content";
 
             const name = document.createElement("div");
-            name.className = "hf-downloader-name truncate opacity-90";
+            name.className = "hf-downloader-name";
 
-            content.appendChild(name);
-
-            const cancelBtn = document.createElement("button");
-            cancelBtn.type = "button";
-            cancelBtn.className = `${BUTTON_DESTRUCTIVE_CLASS} hf-downloader-cancel`;
-            cancelBtn.title = "Cancel download";
-            cancelBtn.innerHTML = "<i class=\"icon-[lucide--trash-2] size-4\"></i>";
-            cancelBtn.addEventListener("click", (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                cancelBtn.disabled = true;
-                const downloadId = item.getAttribute("data-download-id");
-                void cancelDownload(downloadId);
-            });
-
-            const meta = document.createElement("div");
-            meta.className = "hf-downloader-meta";
-
-            const sizeText = document.createElement("div");
-            sizeText.className = "hf-downloader-size-text";
-
-            const status = document.createElement("div");
-            status.className = "hf-downloader-status-lower";
-
-            meta.appendChild(sizeText);
-            content.appendChild(meta);
+            const subtitle = document.createElement("div");
+            subtitle.className = "hf-downloader-subtitle";
 
             const error = document.createElement("div");
             error.className = "hf-downloader-error";
@@ -945,107 +965,248 @@ app.registerExtension({
             actions.appendChild(retryBtn);
             actions.appendChild(dismissBtn);
 
+            content.appendChild(name);
+            content.appendChild(subtitle);
+            content.appendChild(error);
+            content.appendChild(actions);
+
+            const rowActions = document.createElement("div");
+            rowActions.className = "hf-downloader-row-actions";
+
+            const pauseResumeBtn = document.createElement("button");
+            pauseResumeBtn.type = "button";
+            pauseResumeBtn.className = ACTION_ICON_BTN_CLASS;
+            pauseResumeBtn.style.display = "none";
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.type = "button";
+            cancelBtn.className = `${ACTION_ICON_BTN_CLASS} hover:text-red-400`;
+            cancelBtn.innerHTML = `<i class="icon-[lucide--x] size-4"></i>`;
+            cancelBtn.style.display = "none";
+
+            rowActions.appendChild(pauseResumeBtn);
+            rowActions.appendChild(cancelBtn);
+
             const progressContainer = document.createElement("div");
             progressContainer.className = "hf-downloader-progress-container";
             const progressBar = document.createElement("div");
             progressBar.className = "hf-downloader-progress-bar";
             progressContainer.appendChild(progressBar);
-            item.appendChild(progressContainer);
 
-            item.appendChild(leading);
             item.appendChild(content);
-            item.appendChild(status);
-            item.appendChild(cancelBtn);
-            content.appendChild(error);
-            content.appendChild(actions);
+            item.appendChild(rowActions);
+            item.appendChild(progressContainer);
 
             return {
                 root: item,
                 name,
+                subtitle,
+                pauseResumeBtn,
                 cancelBtn,
-                stateIcon,
-                sizeText,
-                status,
                 error,
                 actions,
                 agreementHint,
                 repoLink,
                 retryBtn,
                 dismissBtn,
+                progressContainer,
                 progressBar
             };
         };
 
-        const renderErrorWithLinks = (container, text) => {
-            container.innerHTML = "";
-            if (!text) return;
-            const urlRegex = /(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g;
-            const parts = text.split(urlRegex);
-            for (const part of parts) {
-                if (urlRegex.test(part)) {
-                    const link = document.createElement("a");
-                    link.href = part;
-                    link.textContent = part;
-                    link.target = "_blank";
-                    link.rel = "noopener noreferrer";
-                    container.appendChild(link);
-                } else {
-                    container.appendChild(document.createTextNode(part));
-                }
+        const buildSubtitleParts = (info) => {
+            const isBackup = info._kind === "backup_upload" || info._kind === "backup_download";
+            const stText = resolveStatusText(info);
+            const parts = [];
+
+            if (info._kind === "backup_upload") {
+                parts.push("Backup upload");
+                parts.push(stText);
+                return parts.join(" • ");
             }
+
+            if (info._kind === "backup_download") {
+                parts.push("Backup restore");
+                parts.push(stText);
+                if (info.total_files > 0) {
+                    parts.push(`${info.completed_files || 0}/${info.total_files} files`);
+                }
+                return parts.join(" • ");
+            }
+
+            parts.push(stText);
+            const totalBytes = info.total_bytes || 0;
+            const downloadedBytes = info.downloaded_bytes || 0;
+            if (totalBytes && downloadedBytes && (info.status === "downloading" || info.status === "paused" || info.status === "pausing")) {
+                parts.push(`${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`);
+            } else if (totalBytes) {
+                parts.push(formatBytes(totalBytes));
+            } else if (downloadedBytes) {
+                parts.push(formatBytes(downloadedBytes));
+            }
+
+            if (info.status === "downloading") {
+                const spd = formatSpeed(info.speed_bps);
+                if (spd) parts.push(spd);
+            }
+
+            if (isBackup) return parts.join(" • ");
+            return parts.join(" • ");
         };
 
         const updateItemNode = (refs, info) => {
             refs.lastInfo = info;
+            const isBackup = info._kind === "backup_upload" || info._kind === "backup_download";
             refs.root.setAttribute("data-download-id", info.id);
+            refs.root.setAttribute("data-entry-kind", info._kind || "download");
+            refs.root.setAttribute("data-entry-status", info.status || "queued");
 
-            const rawName = String(info.display_name || info.requested_path || info.filename || info.id || "unknown").replace(/\/+$/, "");
+            const rawName = String(info.display_name || info.folder || info.requested_path || info.filename || info.id || "unknown").replace(/\/+$/, "");
             refs.name.textContent = rawName;
             refs.name.title = rawName;
-            if (String(info.download_mode || "").toLowerCase() === "folder") {
+            if (String(info.download_mode || "").toLowerCase() === "folder" && !isBackup) {
                 refs.name.style.color = "#f5b14c";
             } else {
-                refs.name.style.color = "var(--input-text, #e3e5ea)";
+                refs.name.style.color = "";
             }
 
+            const isActivelyRunning =
+                info.status === "downloading" ||
+                info.status === "uploading" ||
+                info.status === "copying" ||
+                info.status === "cleaning_cache" ||
+                info.status === "finalizing" ||
+                info.status === "verifying";
+            refs.root.classList.toggle("is-active-row", isActivelyRunning);
+
+            refs.subtitle.textContent = buildSubtitleParts(info);
+            refs.subtitle.style.color =
+                info.status === "failed" || info.status === "paused" || info.status === "pausing"
+                    ? statusColor(info.status)
+                    : "";
+
+            // Pause / Resume button (for model downloads)
+            if (!isBackup && PAUSABLE_STATUSES.has(info.status)) {
+                refs.pauseResumeBtn.style.display = "inline-flex";
+                refs.pauseResumeBtn.setAttribute("data-testid", "hf-item-pause-btn");
+                refs.pauseResumeBtn.title = "Pause download";
+                refs.pauseResumeBtn.setAttribute("aria-label", "Pause download");
+                refs.pauseResumeBtn.innerHTML = `<i class="icon-[lucide--pause] size-3.5"></i>`;
+                refs.pauseResumeBtn.disabled = false;
+                refs.pauseResumeBtn.onclick = (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    refs.pauseResumeBtn.disabled = true;
+                    void pauseDownload(info.id);
+                };
+            } else if (!isBackup && info.status === "paused") {
+                refs.pauseResumeBtn.style.display = "inline-flex";
+                refs.pauseResumeBtn.setAttribute("data-testid", "hf-item-resume-btn");
+                refs.pauseResumeBtn.title = "Resume download";
+                refs.pauseResumeBtn.setAttribute("aria-label", "Resume download");
+                refs.pauseResumeBtn.innerHTML = `<i class="icon-[lucide--play] size-3.5 text-green-400"></i>`;
+                refs.pauseResumeBtn.disabled = false;
+                refs.pauseResumeBtn.onclick = (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    refs.pauseResumeBtn.disabled = true;
+                    void resumeDownload(info.id);
+                };
+            } else {
+                refs.pauseResumeBtn.style.display = "none";
+                refs.pauseResumeBtn.removeAttribute("data-testid");
+                refs.pauseResumeBtn.onclick = null;
+            }
+
+            // Cancel button (model downloads + backup uploads/downloads)
             const canCancel = CAN_CANCEL_STATUSES.has(info.status);
-            refs.root.classList.toggle("can-cancel", canCancel);
-            refs.cancelBtn.style.display = canCancel ? "inline-flex" : "none";
-            if (!canCancel) {
+            if (canCancel) {
+                refs.cancelBtn.style.display = "inline-flex";
+                refs.cancelBtn.setAttribute(
+                    "data-testid",
+                    isBackup ? "hf-backup-item-cancel-btn" : "hf-item-cancel-btn"
+                );
+                refs.cancelBtn.title = isBackup ? "Cancel backup task" : "Cancel download";
+                refs.cancelBtn.setAttribute("aria-label", isBackup ? "Cancel backup task" : "Cancel download");
+                refs.cancelBtn.disabled = info.status === "cancelling";
+                refs.cancelBtn.onclick = (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    refs.cancelBtn.disabled = true;
+                    if (isBackup) {
+                        void cancelBackupTask(info.id);
+                    } else {
+                        void cancelDownload(info.id);
+                    }
+                };
+            } else {
+                refs.cancelBtn.style.display = "none";
+                refs.cancelBtn.removeAttribute("data-testid");
                 refs.cancelBtn.disabled = false;
+                refs.cancelBtn.onclick = null;
             }
 
-            const totalBytes = info.total_bytes || 0;
-            const downloadedBytes = info.downloaded_bytes || 0;
-            refs.sizeText.textContent = totalBytes
-                ? formatBytes(totalBytes)
-                : (downloadedBytes ? formatBytes(downloadedBytes) : "");
-
+            // Progress bar
             let pct = 0;
-            if (SUCCESS_STATUSES.has(info.status)) {
-                pct = 100;
-            } else if (info.status === "downloading" || info.status === "copying" || info.status === "finalizing") {
-                pct = totalBytes ? Math.min(100, Math.max(0, (downloadedBytes / totalBytes) * 100)) : 0;
+            let indeterminate = false;
+            if (info._kind === "backup_upload") {
+                if (info.status === "uploading" || info.status === "cancelling") {
+                    indeterminate = true;
+                } else if (SUCCESS_STATUSES.has(info.status)) {
+                    pct = 100;
+                }
+            } else if (info._kind === "backup_download") {
+                if (info.status === "downloading") {
+                    const tot = info.total_files || 0;
+                    const done = info.completed_files || 0;
+                    if (tot > 0) {
+                        pct = Math.min(100, Math.max(4, (done / tot) * 100));
+                    } else {
+                        indeterminate = true;
+                    }
+                } else if (SUCCESS_STATUSES.has(info.status)) {
+                    pct = 100;
+                }
+            } else {
+                const totalBytes = info.total_bytes || 0;
+                const downloadedBytes = info.downloaded_bytes || 0;
+                if (SUCCESS_STATUSES.has(info.status)) {
+                    pct = 100;
+                } else if (
+                    info.status === "downloading" ||
+                    info.status === "paused" ||
+                    info.status === "pausing" ||
+                    info.status === "copying" ||
+                    info.status === "finalizing"
+                ) {
+                    pct = totalBytes ? Math.min(100, Math.max(0, (downloadedBytes / totalBytes) * 100)) : 0;
+                }
             }
+
+            const showProgress =
+                isActivelyRunning ||
+                info.status === "paused" ||
+                info.status === "pausing";
+            refs.progressContainer.style.display = showProgress ? "block" : "none";
             if (refs.progressBar) {
-                refs.progressBar.style.width = `${pct}%`;
+                refs.progressBar.classList.toggle("indeterminate", indeterminate);
+                if (!indeterminate) {
+                    refs.progressBar.style.width = `${pct}%`;
+                }
                 refs.progressBar.style.backgroundColor = statusColor(info.status);
             }
-
-            const iconMeta = stateIconForStatus(info.status);
-            if (refs.stateIcon.dataset.iconKey !== iconMeta.key) {
-                refs.stateIcon.className = `hf-downloader-state-icon ${iconMeta.className}`;
-                refs.stateIcon.dataset.iconKey = iconMeta.key;
-            }
-
-            refs.status.textContent = resolveStatusText(info);
-            refs.status.style.color = statusColor(info.status);
 
             const errorCode = String(info.error_code || "").trim();
             const errorText = String(info.error || "").trim();
             const isFailed = info.status === "failed";
-            const hasGatedMarkers = /gated|accept (its|the|model) terms|acceptance of its conditions|request access|ask for access|authorized list|restricted|agreement|agree to the license|license agreement|403/i.test(errorText);
-            const isGated = isFailed && (errorCode === "gated_repo" || errorCode === "hf_forbidden" || hasGatedMarkers);
+            const hasGatedMarkers =
+                /gated|accept (its|the|model) terms|acceptance of its conditions|request access|ask for access|authorized list|restricted|agreement|agree to the license|license agreement|403/i.test(
+                    errorText
+                );
+            const isGated =
+                !isBackup &&
+                isFailed &&
+                (errorCode === "gated_repo" || errorCode === "hf_forbidden" || hasGatedMarkers);
             let repoUrl = String(info.repo_url || "").trim();
             if (!repoUrl && info.repo_id) {
                 repoUrl = `https://huggingface.co/${info.repo_id}`;
@@ -1057,7 +1218,8 @@ app.registerExtension({
                 }
             }
             const actionMessage = String(info.action_message || "").trim();
-            const retryPayload = info.retry_payload && typeof info.retry_payload === "object" ? info.retry_payload : null;
+            const retryPayload =
+                info.retry_payload && typeof info.retry_payload === "object" ? info.retry_payload : null;
 
             if (isFailed && errorText) {
                 renderErrorWithLinks(refs.error, errorText);
@@ -1069,11 +1231,12 @@ app.registerExtension({
                 refs.error.style.display = "none";
             }
 
-            const isInterrupted = info.status === "interrupted";
+            const isInterrupted = !isBackup && info.status === "interrupted";
 
-            refs.root.classList.toggle("has-detail", (isFailed && !!errorText) || isInterrupted);
+            refs.root.classList.toggle("has-detail", (isFailed && !!errorText) || isInterrupted || isGated);
             refs.actions.classList.toggle("visible", isGated || isInterrupted);
-            refs.agreementHint.textContent = actionMessage || "Agree to the license on Hugging Face, then retry download.";
+            refs.agreementHint.textContent =
+                actionMessage || "Agree to the license on Hugging Face, then retry download.";
             refs.agreementHint.style.display = isGated ? "inline" : "none";
 
             if (isGated && repoUrl) {
@@ -1150,8 +1313,6 @@ app.registerExtension({
             }
         };
 
-
-
         const handleRefresh = async () => {
             if (refreshBusy || !refreshBtn) return;
             refreshBusy = true;
@@ -1168,10 +1329,11 @@ app.registerExtension({
                 const cards = listBody.querySelectorAll("[data-download-id]");
                 for (const card of cards) {
                     const id = card.getAttribute("data-download-id");
+                    const kind = card.getAttribute("data-entry-kind") || "download";
                     if (id) {
                         justCompletedIds.push(id);
                         const refs = itemNodes.get(id);
-                        if (refs && refs.lastInfo) {
+                        if (refs && refs.lastInfo && kind === "download") {
                             if (refs.lastInfo.path) completedPaths.push(refs.lastInfo.path);
                             if (refs.lastInfo.filename) completedPaths.push(refs.lastInfo.filename);
                         }
@@ -1190,9 +1352,12 @@ app.registerExtension({
             applyPanelVisibility();
             publishPanelState();
 
-            let refreshSucceeded = false;
             try {
-                if (window.hfDownloader && typeof window.hfDownloader.clearCompletedModelsFromStore === "function" && completedPaths.length > 0) {
+                if (
+                    window.hfDownloader &&
+                    typeof window.hfDownloader.clearCompletedModelsFromStore === "function" &&
+                    completedPaths.length > 0
+                ) {
                     try {
                         await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
                     } catch (e) {
@@ -1200,7 +1365,10 @@ app.registerExtension({
                     }
                 }
 
-                if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
+                if (
+                    window.hfDownloader &&
+                    typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function"
+                ) {
                     try {
                         await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
                     } catch (e) {
@@ -1208,32 +1376,12 @@ app.registerExtension({
                     }
                 }
 
-                // Run native refresh to re-scan models, clear native error log and update subgraphs
                 const runNativeRefreshMissingModels = async () => {
                     try {
-                        const appEl = document.querySelector('#app') || document.querySelector('#root') || document.body;
-                        if (appEl) {
-                            const vueApp = appEl.__vue_app__;
-                            if (vueApp && vueApp._context?.provides) {
-                                let pinia = null;
-                                const symbols = Object.getOwnPropertySymbols(vueApp._context.provides);
-                                for (const sym of symbols) {
-                                    if (sym.toString().includes("pinia") || sym.description === "pinia") {
-                                        pinia = vueApp._context.provides[sym];
-                                        break;
-                                    }
-                                }
-                                if (pinia) {
-                                    const storeMap = pinia._s || pinia.stores;
-                                    if (storeMap && typeof storeMap.get === "function" && storeMap.has("missingModel")) {
-                                        const missingModelStore = storeMap.get("missingModel");
-                                        if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
-                                            await missingModelStore.refreshMissingModels();
-                                            return;
-                                        }
-                                    }
-                                }
-                            }
+                        const missingModelStore = await resolveMissingModelStore();
+                        if (missingModelStore && typeof missingModelStore.refreshMissingModels === "function") {
+                            await missingModelStore.refreshMissingModels();
+                            return;
                         }
                     } catch (_) {}
 
@@ -1254,11 +1402,12 @@ app.registerExtension({
                 }
 
                 const clickNativeRefreshButton = () => {
-                    const btn = document.querySelector('#comfy-refresh-button') ||
-                                document.querySelector('button[title*="Refresh"]') ||
-                                document.querySelector('button[aria-label*="Refresh"]') ||
-                                document.querySelector('button .pi-refresh')?.closest('button') ||
-                                document.querySelector('button.pi-refresh');
+                    const btn =
+                        document.querySelector("#comfy-refresh-button") ||
+                        document.querySelector('button[title*="Refresh"]') ||
+                        document.querySelector('button[aria-label*="Refresh"]') ||
+                        document.querySelector("button .pi-refresh")?.closest("button") ||
+                        document.querySelector("button.pi-refresh");
                     if (btn) {
                         try {
                             btn.click();
@@ -1273,8 +1422,6 @@ app.registerExtension({
                 if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
                     app.graph.setDirtyCanvas(true, true);
                 }
-
-                refreshSucceeded = true;
             } catch (err) {
                 console.warn("[HF Downloader] Comfy refresh hook failed:", err);
             } finally {
@@ -1286,13 +1433,36 @@ app.registerExtension({
             }
         };
 
-        const renderList = (downloads) => {
+        const matchesActiveFilter = (entry) => {
+            if (activeFilter === "active") {
+                return ACTIVE_NON_TERMINAL_STATUSES.has(entry.status);
+            }
+            if (activeFilter === "completed") {
+                return SUCCESS_STATUSES.has(entry.status);
+            }
+            if (activeFilter === "failed") {
+                return entry.status === "failed" || entry.status === "interrupted" || entry.status === "cancelled";
+            }
+            return true;
+        };
+
+        const renderList = (downloads, backupTasks = {}) => {
             lastRenderedDownloads = downloads || {};
+            lastRenderedBackupTasks = backupTasks || {};
             const now = Date.now();
-            const rawEntries = Object.entries(downloads || {}).map(([id, info]) => ({
-                id,
-                ...(info || {})
-            }));
+
+            const rawEntries = [
+                ...Object.entries(downloads || {}).map(([id, info]) => ({
+                    id,
+                    _kind: "download",
+                    ...(info || {})
+                })),
+                ...Object.entries(backupTasks || {}).map(([id, info]) => ({
+                    id,
+                    _kind: info?.kind || "backup_upload",
+                    ...(info || {})
+                }))
+            ];
 
             for (const entry of rawEntries) {
                 entry.status = toUiStatus(entry.status);
@@ -1315,7 +1485,7 @@ app.registerExtension({
 
             if (!bootstrapDone) {
                 const hasActiveOrFailed = rawEntries.some(
-                    (entry) => RUNNING_STATUSES.has(entry.status) || entry.status === "failed"
+                    (entry) => ACTIVE_NON_TERMINAL_STATUSES.has(entry.status) || entry.status === "failed"
                 );
                 if (!hasActiveOrFailed) {
                     for (const entry of rawEntries) {
@@ -1344,21 +1514,66 @@ app.registerExtension({
             updatePanelPosition();
 
             const runningCount = entries.filter((entry) => RUNNING_STATUSES.has(entry.status)).length;
-            if (countBadge) {
-                countBadge.textContent = `Active: ${runningCount}`;
+            const pausedCount = entries.filter((entry) => entry.status === "paused").length;
+            const pausableCount = entries.filter(
+                (entry) => entry._kind === "download" && PAUSABLE_STATUSES.has(entry.status)
+            ).length;
+            const cancelableCount = entries.filter((entry) => CAN_CANCEL_STATUSES.has(entry.status)).length;
+            const downloadingCount = entries.filter(
+                (entry) => entry.status === "downloading" || entry.status === "uploading"
+            ).length;
+
+            if (headerTitleEl) {
+                if (runningCount > 0) {
+                    headerTitleEl.textContent =
+                        runningCount === 1 && downloadingCount === 1
+                            ? "1 downloading"
+                            : `${runningCount} active`;
+                } else if (pausedCount > 0) {
+                    headerTitleEl.textContent = `${pausedCount} paused`;
+                } else {
+                    const failedCount = entries.filter((entry) => entry.status === "failed").length;
+                    headerTitleEl.textContent = failedCount > 0 ? `${failedCount} failed` : `${entries.length} completed`;
+                }
+            }
+
+            if (pauseAllBtn) {
+                if (pausableCount > 0) {
+                    pauseAllBtn.style.display = "inline-flex";
+                    pauseAllBtn.dataset.mode = "pause";
+                    pauseAllBtn.title = "Pause all downloads";
+                    pauseAllBtn.innerHTML = `<i class="icon-[lucide--pause] size-3.5 shrink-0"></i><span>Pause all</span>`;
+                } else if (pausedCount > 0) {
+                    pauseAllBtn.style.display = "inline-flex";
+                    pauseAllBtn.dataset.mode = "resume";
+                    pauseAllBtn.title = "Resume all paused downloads";
+                    pauseAllBtn.innerHTML = `<i class="icon-[lucide--play] size-3.5 shrink-0"></i><span>Resume all</span>`;
+                } else {
+                    pauseAllBtn.style.display = "none";
+                }
+            }
+
+            if (cancelAllBtn) {
+                cancelAllBtn.style.display = cancelableCount > 0 ? "inline-flex" : "none";
             }
 
             const hasFailed = entries.some((entry) => entry.status === "failed");
             const hasRunning = runningCount > 0;
-            const hasSuccess = entries.some((entry) => SUCCESS_STATUSES.has(entry.status));
-            const hasNonRunning = entries.some((entry) => !RUNNING_STATUSES.has(entry.status));
-            const hasClearableFinished = entries.some(
-                (entry) => !RUNNING_STATUSES.has(entry.status) && entry.status !== "failed"
+            const hasPaused = pausedCount > 0;
+            const hasAnyActiveOrPaused = hasRunning || hasPaused;
+            const hasModelSuccess = entries.some(
+                (entry) => entry._kind === "download" && SUCCESS_STATUSES.has(entry.status)
             );
-            const showRefresh = !hasRunning && !hasFailed && hasSuccess;
-            if (hasRunning) {
+            const hasAnySuccess = entries.some((entry) => SUCCESS_STATUSES.has(entry.status));
+            const hasNonActive = entries.some((entry) => !ACTIVE_NON_TERMINAL_STATUSES.has(entry.status));
+            const hasClearableFinished = entries.some(
+                (entry) => !ACTIVE_NON_TERMINAL_STATUSES.has(entry.status) && entry.status !== "failed"
+            );
+
+            const showRefresh = !hasAnyActiveOrPaused && !hasFailed && hasModelSuccess;
+            if (hasAnyActiveOrPaused) {
                 refreshPromptShownForBatch = false;
-            } else if (prevHasRunning && !hasFailed && hasSuccess && !refreshPromptShownForBatch) {
+            } else if (prevHasRunning && !hasFailed && hasModelSuccess && !refreshPromptShownForBatch) {
                 refreshPromptShownForBatch = true;
                 try {
                     app?.extensionManager?.toast?.add?.({
@@ -1369,10 +1584,10 @@ app.registerExtension({
                     });
                 } catch (_) {}
             }
-            prevHasRunning = hasRunning;
+            prevHasRunning = hasAnyActiveOrPaused;
 
             const showClearFinished = !showRefresh && hasClearableFinished;
-            const showDismissAll = !showRefresh && hasNonRunning && (hasFailed || !hasClearableFinished);
+            const showDismissAll = !showRefresh && hasNonActive && (hasFailed || !hasClearableFinished);
 
             if (clearFinishedBtn) {
                 clearFinishedBtn.style.display = showClearFinished ? "inline-flex" : "none";
@@ -1391,21 +1606,25 @@ app.registerExtension({
             if (refreshPromptBanner) {
                 refreshPromptBanner.style.display = showRefresh && refreshPromptShownForBatch ? "flex" : "none";
             }
-            footer?.classList.toggle("visible", showClearFinished || showDismissAll || showRefresh);
+            footer?.classList.toggle("visible", showClearFinished || showDismissAll || showRefresh || hasAnySuccess && !hasAnyActiveOrPaused && !hasFailed);
 
             const order = {
                 failed: 0,
                 downloading: 1,
+                uploading: 1,
                 copying: 2,
                 cleaning_cache: 3,
                 finalizing: 4,
-                queued: 5,
-                cancelling: 6,
-                downloaded: 7,
-                cancelled: 8
+                pausing: 5,
+                paused: 6,
+                queued: 7,
+                cancelling: 8,
+                downloaded: 9,
+                cancelled: 10
             };
 
-            entries.sort((a, b) => {
+            const filteredEntries = [...entries];
+            filteredEntries.sort((a, b) => {
                 const aOrder = order[a.status] ?? 99;
                 const bOrder = order[b.status] ?? 99;
                 if (aOrder !== bOrder) return aOrder - bOrder;
@@ -1414,7 +1633,7 @@ app.registerExtension({
                 return aTime - bTime;
             });
 
-            const idsInOrder = entries.map((entry) => entry.id);
+            const idsInOrder = filteredEntries.map((entry) => entry.id);
             const idsSet = new Set(idsInOrder);
 
             for (const [id, refs] of itemNodes.entries()) {
@@ -1424,7 +1643,7 @@ app.registerExtension({
                 }
             }
 
-            for (const info of entries) {
+            for (const info of filteredEntries) {
                 let refs = itemNodes.get(info.id);
                 if (!refs) {
                     refs = createItemNode();
@@ -1456,81 +1675,112 @@ app.registerExtension({
             }
 
             lastVisibleCount = entries.length;
-            lastHasRunning = hasRunning;
+            lastHasRunning = hasAnyActiveOrPaused;
             applyPanelVisibility();
             publishPanelState();
         };
 
         let hasCompletedInitialPoll = false;
+        let lastWsStatusAt = 0;
+        let activeWatchdogTimer = null;
+
+        const stopWatchdog = () => {
+            if (activeWatchdogTimer) {
+                clearInterval(activeWatchdogTimer);
+                activeWatchdogTimer = null;
+            }
+        };
+
+        const syncWatchdogForActivity = (hasActive) => {
+            if (!hasActive) {
+                stopWatchdog();
+                return;
+            }
+            if (!activeWatchdogTimer) {
+                activeWatchdogTimer = setInterval(() => {
+                    if (!lastHasRunning) {
+                        stopWatchdog();
+                        return;
+                    }
+                    if (Date.now() - lastWsStatusAt > WS_STALE_THRESHOLD_MS) {
+                        void pollStatus();
+                    }
+                }, WATCHDOG_INTERVAL_MS);
+            }
+        };
+
+        const applyStatusSnapshot = async (data) => {
+            if (!data || typeof data !== "object") return;
+            const downloads = data.downloads || {};
+            const backupTasks = data.backup_tasks || {};
+            const completedPaths = [];
+            for (const [id, info] of Object.entries(downloads)) {
+                if (info && SUCCESS_STATUSES.has(info.status) && !processedDownloadIds.has(id)) {
+                    processedDownloadIds.add(id);
+                    if (hasCompletedInitialPoll) {
+                        if (info.path) completedPaths.push(info.path);
+                        if (info.filename) completedPaths.push(info.filename);
+                    }
+                }
+            }
+            hasCompletedInitialPoll = true;
+
+            const currentIds = new Set(Object.keys(downloads));
+            for (const id of processedDownloadIds) {
+                if (!currentIds.has(id)) {
+                    processedDownloadIds.delete(id);
+                }
+            }
+
+            if (completedPaths.length > 0) {
+                try {
+                    if (window.hfDownloader && typeof window.hfDownloader.refreshAfterModelDownload === "function") {
+                        await window.hfDownloader.refreshAfterModelDownload(completedPaths);
+                    } else {
+                        if (window.hfDownloader && typeof window.hfDownloader.clearCompletedModelsFromStore === "function") {
+                            await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
+                        }
+                        if (
+                            window.hfDownloader &&
+                            typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function"
+                        ) {
+                            await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
+                        }
+                        if (typeof app?.refreshComboInNodes === "function") {
+                            await app.refreshComboInNodes();
+                        }
+                        if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
+                            app.graph.setDirtyCanvas(true, true);
+                        }
+                    }
+                } catch (e) {
+                    console.warn("[HF Downloader] Failed to auto-clear completed models during status update:", e);
+                }
+            }
+
+            renderList(downloads, backupTasks);
+            syncWatchdogForActivity(lastHasRunning);
+        };
+
         const pollStatus = async () => {
             try {
                 const resp = await fetch("/download_status");
                 if (resp.status !== 200) return;
                 const data = await resp.json();
-                
-                const downloads = data.downloads || {};
-                const completedPaths = [];
-                for (const [id, info] of Object.entries(downloads)) {
-                    if (info && SUCCESS_STATUSES.has(info.status) && !processedDownloadIds.has(id)) {
-                        processedDownloadIds.add(id);
-                        if (hasCompletedInitialPoll) {
-                            if (info.path) completedPaths.push(info.path);
-                            if (info.filename) completedPaths.push(info.filename);
-                        }
-                    }
-                }
-                hasCompletedInitialPoll = true;
-                
-                // Clean up old processed IDs that are no longer in the active status list
-                const currentIds = new Set(Object.keys(downloads));
-                for (const id of processedDownloadIds) {
-                    if (!currentIds.has(id)) {
-                        processedDownloadIds.delete(id);
-                    }
-                }
-                
-                if (completedPaths.length > 0) {
-                    try {
-                        if (window.hfDownloader && typeof window.hfDownloader.refreshAfterModelDownload === "function") {
-                            await window.hfDownloader.refreshAfterModelDownload(completedPaths);
-                        } else {
-                            if (window.hfDownloader && typeof window.hfDownloader.clearCompletedModelsFromStore === "function") {
-                                await window.hfDownloader.clearCompletedModelsFromStore(completedPaths);
-                            }
-                            if (window.hfDownloader && typeof window.hfDownloader.clearModelValidationErrorsFromFrontendState === "function") {
-                                await window.hfDownloader.clearModelValidationErrorsFromFrontendState();
-                            }
-                            if (typeof app?.refreshComboInNodes === "function") {
-                                await app.refreshComboInNodes();
-                            }
-                            if (app?.graph && typeof app.graph.setDirtyCanvas === "function") {
-                                app.graph.setDirtyCanvas(true, true);
-                            }
-                        }
-                    } catch (e) {
-                        console.warn("[HF Downloader] Failed to auto-clear completed models during status poll:", e);
-                    }
-                }
-
-                renderList(downloads);
+                await applyStatusSnapshot(data);
             } catch (err) {
                 console.warn("[HF Downloader] Failed to fetch download status:", err);
             }
         };
 
         publishPanelState();
-        pollStatus();
-        setInterval(pollStatus, POLL_INTERVAL_MS);
-        window.addEventListener("resize", updatePanelPosition, { passive: true });
-        window.addEventListener("scroll", updatePanelPosition, { passive: true });
+        void pollStatus();
 
-        if (typeof MutationObserver !== "undefined") {
-            const bodyObserver = new MutationObserver(() => {
-                if (panelWrapper && panel && panel.style.display !== "none") {
-                    updatePanelPosition();
-                }
+        if (api && typeof api.addEventListener === "function") {
+            api.addEventListener("hf_download_status", (event) => {
+                lastWsStatusAt = Date.now();
+                void applyStatusSnapshot(event?.detail);
             });
-            bodyObserver.observe(document.body, { childList: true, subtree: true });
         }
     }
 });

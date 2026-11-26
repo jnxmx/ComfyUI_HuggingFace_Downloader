@@ -1,4 +1,5 @@
 import { app } from "../../../scripts/app.js";
+import { setNativeStackPanelVisible, unmountFromNativeStack } from "./native_stack.js";
 
 app.registerExtension({
     name: "backupToHuggingFace",
@@ -953,8 +954,6 @@ app.registerExtension({
         let opStatusHasEntries = false;
         let opStatusHasRunning = false;
         let opStatusMode = "upload";
-        let opStatusPositionHandlersAttached = false;
-        let opStatusBodyObserver = null;
         let opPanelWrapper = null;
         let opPanel = null;
         let opCollapseBtn = null;
@@ -987,146 +986,14 @@ app.registerExtension({
             }
         };
 
-        const getOperationRightOffset = () => {
-            const overlayContainer = document.querySelector(".pointer-events-none.flex.w-full.justify-end");
-            if (overlayContainer && overlayContainer.offsetParent !== null) {
-                const rect = overlayContainer.getBoundingClientRect();
-                if (rect.width > 0 && rect.right < window.innerWidth) {
-                    const offset = window.innerWidth - rect.right + 12;
-                    if (offset > 12 && offset < window.innerWidth * 0.7) {
-                        return Math.round(offset);
-                    }
-                }
-            }
-
-            const canvas = document.querySelector(".graph-canvas-container");
-            if (canvas) {
-                const rect = canvas.getBoundingClientRect();
-                const offset = window.innerWidth - rect.right + 12;
-                if (offset > 12 && offset < window.innerWidth * 0.7) {
-                    return Math.round(offset);
-                }
-            }
-
-            const sidebars = document.querySelectorAll(`
-                .comfyui-body-right,
-                [data-testid="sidebar-right"],
-                [class*="sidebar"][class*="right"],
-                [class*="side-bar"][class*="right"],
-                aside
-            `);
-            for (const sb of sidebars) {
-                if (!sb || sb.closest(`#${OP_PANEL_ID}`)) continue;
-                const style = window.getComputedStyle(sb);
-                if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
-                const rect = sb.getBoundingClientRect();
-                if (rect.width > 80 && rect.left < window.innerWidth) {
-                    const offset = window.innerWidth - rect.left + 12;
-                    if (offset > 12 && offset < window.innerWidth * 0.7) {
-                        return Math.round(offset);
-                    }
-                }
-            }
-            return 16;
-        };
-
-        const findNativeStackRefs = () => {
-            const errorOverlayEl = document.querySelector('[data-testid="error-overlay"]');
-            const errorOverlayWrapper = errorOverlayEl?.parentElement || null;
-            const downloadsWrapper = document.getElementById("hf-downloader-panel-wrapper");
-            const autoDownloadEl = document.getElementById("auto-download-dialog");
-            const actionbarsEl = document.querySelector('[data-testid="top-menu-actionbars"]');
-            const autoDownloadParent =
-                autoDownloadEl?.parentElement &&
-                autoDownloadEl.parentElement !== document.body &&
-                autoDownloadEl.parentElement.classList.contains("flex-col")
-                    ? autoDownloadEl.parentElement
-                    : null;
-            const downloadsParent =
-                downloadsWrapper?.parentElement &&
-                downloadsWrapper.parentElement !== document.body &&
-                downloadsWrapper.parentElement.classList.contains("flex-col")
-                    ? downloadsWrapper.parentElement
-                    : null;
-            const stackContainer =
-                errorOverlayWrapper?.parentElement ||
-                actionbarsEl?.parentElement ||
-                downloadsParent ||
-                autoDownloadParent ||
-                null;
-            return { errorOverlayWrapper, downloadsWrapper, autoDownloadEl, actionbarsEl, stackContainer };
-        };
-
         const updateOperationPanelPosition = () => {
             if (!opPanel || !opPanelWrapper) return;
-            const { errorOverlayWrapper, downloadsWrapper, autoDownloadEl, actionbarsEl, stackContainer } = findNativeStackRefs();
-
-            if (stackContainer) {
-                Object.assign(opPanelWrapper.style, {
-                    position: "",
-                    top: "",
-                    right: "",
-                    bottom: "",
-                    left: "",
-                    zIndex: "",
-                    width: "",
-                });
-
-                if (downloadsWrapper && downloadsWrapper.parentElement === stackContainer) {
-                    if (autoDownloadEl && autoDownloadEl.parentElement === stackContainer) {
-                        if (downloadsWrapper.previousElementSibling !== opPanelWrapper) {
-                            downloadsWrapper.insertAdjacentElement("beforebegin", opPanelWrapper);
-                        }
-                    } else if (downloadsWrapper.nextElementSibling !== opPanelWrapper) {
-                        downloadsWrapper.insertAdjacentElement("afterend", opPanelWrapper);
-                    }
-                    return;
-                }
-                if (autoDownloadEl && autoDownloadEl.parentElement === stackContainer) {
-                    if (autoDownloadEl.previousElementSibling !== opPanelWrapper) {
-                        autoDownloadEl.insertAdjacentElement("beforebegin", opPanelWrapper);
-                    }
-                    return;
-                }
-                if (errorOverlayWrapper && errorOverlayWrapper.parentElement === stackContainer) {
-                    if (errorOverlayWrapper.nextElementSibling !== opPanelWrapper) {
-                        errorOverlayWrapper.insertAdjacentElement("afterend", opPanelWrapper);
-                    }
-                    return;
-                }
-                if (actionbarsEl && actionbarsEl.parentElement === stackContainer) {
-                    if (opPanelWrapper.parentElement !== stackContainer || actionbarsEl.nextElementSibling !== opPanelWrapper) {
-                        actionbarsEl.insertAdjacentElement("afterend", opPanelWrapper);
-                    }
-                    return;
-                }
-                if (opPanelWrapper.parentElement !== stackContainer) {
-                    stackContainer.appendChild(opPanelWrapper);
-                }
-                return;
+            const visible = Boolean(opStatusHasEntries && !opStatusPanelMinimized);
+            if (visible) {
+                setNativeStackPanelVisible(opPanelWrapper, true, { id: OP_WRAPPER_ID, priority: 15 });
+            } else {
+                setNativeStackPanelVisible(OP_WRAPPER_ID, false);
             }
-
-            if (opPanelWrapper.parentElement !== document.body) {
-                document.body.appendChild(opPanelWrapper);
-            }
-            const right = getOperationRightOffset();
-            let top = 56;
-            const downloadsPanel = document.getElementById("hf-downloader-panel");
-            if (downloadsPanel && downloadsPanel.style.display !== "none") {
-                const dlRect = downloadsPanel.getBoundingClientRect();
-                if (dlRect.height > 0 && Number.isFinite(dlRect.bottom)) {
-                    top = Math.max(56, Math.round(dlRect.bottom + 8));
-                }
-            }
-            Object.assign(opPanelWrapper.style, {
-                position: "fixed",
-                top: `${top}px`,
-                right: `${right}px`,
-                bottom: "auto",
-                left: "auto",
-                zIndex: "9999",
-                width: "auto",
-            });
         };
 
         const applyOperationPanelVisibility = () => {
@@ -1134,6 +1001,7 @@ app.registerExtension({
             if (!opStatusHasEntries || opStatusPanelMinimized) {
                 opPanel.style.display = "none";
                 opPanelWrapper.style.display = "none";
+                setNativeStackPanelVisible(OP_WRAPPER_ID, false);
             } else {
                 opPanelWrapper.style.display = "flex";
                 opPanel.style.display = "flex";
@@ -1204,6 +1072,9 @@ app.registerExtension({
         const ensureOperationStatusPanel = () => {
             ensureTreeStyles();
             if (!opPanel || !opPanelWrapper || !opPanelWrapper.isConnected) {
+                if (opPanelWrapper) {
+                    unmountFromNativeStack(opPanelWrapper, OP_WRAPPER_ID);
+                }
                 const existingWrapper = document.getElementById(OP_WRAPPER_ID);
                 if (existingWrapper) existingWrapper.remove();
                 const existingPanel = document.getElementById(OP_PANEL_ID);
@@ -1297,7 +1168,7 @@ app.registerExtension({
                 iconWrap.className = "inline-flex h-6 w-6 items-center justify-center overflow-hidden rounded-[6px]";
 
                 const stateIcon = document.createElement("i");
-                stateIcon.className = "hf-backup-op-state-icon icon-[lucide--loader-circle] size-4 animate-spin text-primary-background";
+                stateIcon.className = "hf-backup-op-state-icon pi pi-spinner-dotted pi-spin inline-flex size-4 items-center justify-center text-sm leading-none text-primary-background";
                 iconWrap.appendChild(stateIcon);
                 leading.appendChild(iconWrap);
 
@@ -1382,20 +1253,6 @@ app.registerExtension({
                 opPanelWrapper.appendChild(opPanel);
 
                 updateOperationPanelPosition();
-
-                if (!opStatusPositionHandlersAttached) {
-                    window.addEventListener("resize", updateOperationPanelPosition, { passive: true });
-                    window.addEventListener("scroll", updateOperationPanelPosition, { passive: true });
-                    if (typeof MutationObserver !== "undefined" && !opStatusBodyObserver) {
-                        opStatusBodyObserver = new MutationObserver(() => {
-                            if (opPanelWrapper && opPanel && opPanel.style.display !== "none") {
-                                updateOperationPanelPosition();
-                            }
-                        });
-                        opStatusBodyObserver.observe(document.body, { childList: true, subtree: true });
-                    }
-                    opStatusPositionHandlersAttached = true;
-                }
             }
 
             updateOperationPanelPosition();
@@ -1495,7 +1352,7 @@ app.registerExtension({
                 refs.title.title = refs.title.textContent;
             }
             if (refs.stateIcon) {
-                refs.stateIcon.className = "hf-backup-op-state-icon icon-[lucide--loader-circle] size-4 animate-spin text-primary-background";
+                refs.stateIcon.className = "hf-backup-op-state-icon pi pi-spinner-dotted pi-spin inline-flex size-4 items-center justify-center text-sm leading-none text-primary-background";
             }
             if (refs.statusLower) {
                 refs.statusLower.textContent = resolvedMode === "restore" ? "DOWNLOADING" : "UPLOADING";

@@ -8,6 +8,10 @@ import configparser
 import copy
 import re
 import sys
+import threading
+import uuid
+import concurrent.futures
+from collections import OrderedDict
 from importlib import metadata
 from huggingface_hub import HfApi
 from .parse_link import parse_link
@@ -22,6 +26,151 @@ REPO_SUBGRAPH_PATHS = tuple(f"ComfyUI/{p}" for p in LOCAL_SUBGRAPH_PATHS)
 CUSTOM_NODES_SNAPSHOT_PATH = "ComfyUI/custom_nodes_snapshot.yaml"
 CUSTOM_NODES_SNAPSHOT_MAX_ATTEMPTS = 4
 CUSTOM_NODES_SNAPSHOT_RETRY_DELAY_SECONDS = 5
+
+_BACKUP_TASK_RETENTION_SECONDS = 300
+_BACKUP_TERMINAL_STATUSES = {"completed", "cancelled", "failed"}
+_backup_tasks = {}
+_backup_cancel_events = {}
+_backup_tasks_lock = threading.Lock()
+_backup_status_notifier = None
+
+
+def set_backup_status_notifier(callback) -> None:
+    global _backup_status_notifier
+    _backup_status_notifier = callback if callable(callback) else None
+
+
+def _notify_backup_status_change(force: bool = False) -> None:
+    notifier = _backup_status_notifier
+    if callable(notifier):
+        try:
+            notifier(force=force)
+        except Exception:
+            pass
+
+
+class BackupCancelledError(Exception):
+    """Raised when a background backup upload or download task is cancelled."""
+
+
+def _prune_old_backup_tasks_locked(now: float) -> None:
+    to_delete = []
+    for task_id, info in _backup_tasks.items():
+        status = str(info.get("status") or "").strip().lower()
+        finished_at = info.get("finished_at")
+        if status in _BACKUP_TERMINAL_STATUSES and finished_at and (now - finished_at) > _BACKUP_TASK_RETENTION_SECONDS:
+            to_delete.append(task_id)
+    for task_id in to_delete:
+        _backup_tasks.pop(task_id, None)
+        _backup_cancel_events.pop(task_id, None)
+
+
+def _register_backup_task(kind: str, folder: str, repo_name: str, total_files: int = 0) -> tuple[str, threading.Event]:
+    now = time.time()
+    prefix = "up" if kind == "backup_upload" else "dl"
+    task_id = f"bkp_{prefix}_{int(now * 1000)}_{uuid.uuid4().hex[:6]}"
+    ev = threading.Event()
+    folder_label = str(folder or "").strip().replace("\\", "/") or "backup"
+    with _backup_tasks_lock:
+        _prune_old_backup_tasks_locked(now)
+        _backup_tasks[task_id] = {
+            "id": task_id,
+            "kind": kind,
+            "folder": folder_label,
+            "display_name": folder_label,
+            "repo_name": str(repo_name or "").strip(),
+            "status": "queued",
+            "phase": "queued",
+            "completed_files": 0,
+            "total_files": int(total_files or 0),
+            "error": None,
+            "queued_at": now,
+            "started_at": None,
+            "updated_at": now,
+            "finished_at": None,
+        }
+        _backup_cancel_events[task_id] = ev
+    _notify_backup_status_change(force=True)
+    return task_id, ev
+
+
+def _update_backup_task(task_id: str, fields: dict) -> None:
+    if not task_id or not isinstance(fields, dict):
+        return
+    now = time.time()
+    status_changed = False
+    with _backup_tasks_lock:
+        existing = _backup_tasks.get(task_id)
+        if not existing:
+            return
+        prev_status = existing.get("status")
+        for key, value in fields.items():
+            if value is not None:
+                existing[key] = value
+        existing["updated_at"] = now
+        status_changed = ("status" in fields and fields.get("status") != prev_status)
+    _notify_backup_status_change(force=status_changed)
+
+
+def get_backup_tasks_snapshot() -> dict:
+    now = time.time()
+    with _backup_tasks_lock:
+        _prune_old_backup_tasks_locked(now)
+        return {task_id: dict(info) for task_id, info in _backup_tasks.items()}
+
+
+def cancel_backup_task(task_id: str = "", cancel_all: bool = False) -> list[str]:
+    now = time.time()
+    cancelled_ids = []
+    abort_transfer_needed = False
+    target_id = str(task_id or "").strip()
+
+    with _backup_tasks_lock:
+        target_ids = list(_backup_tasks.keys()) if cancel_all else ([target_id] if target_id in _backup_tasks else [])
+        for tid in target_ids:
+            info = _backup_tasks.get(tid)
+            if not info:
+                continue
+            status = str(info.get("status") or "").strip().lower()
+            if status in _BACKUP_TERMINAL_STATUSES:
+                continue
+            ev = _backup_cancel_events.get(tid)
+            if ev:
+                ev.set()
+            if status == "queued":
+                info["status"] = "cancelled"
+                info["phase"] = "cancelled"
+                info["finished_at"] = now
+            else:
+                info["status"] = "cancelling"
+                info["phase"] = "cancelling"
+                abort_transfer_needed = True
+            info["updated_at"] = now
+            cancelled_ids.append(tid)
+
+    if abort_transfer_needed:
+        try:
+            from .downloader import abort_hf_transfer
+            abort_hf_transfer()
+        except Exception:
+            pass
+
+    if cancelled_ids:
+        _notify_backup_status_change(force=True)
+
+    return cancelled_ids
+
+
+def _backup_folder_group_for_repo_file(repo_file: str) -> str:
+    raw = str(repo_file or "").replace("\\", "/").strip()
+    if raw.startswith("ComfyUI/"):
+        raw = raw.split("ComfyUI/", 1)[1]
+    parts = [p for p in raw.split("/") if p]
+    if not parts:
+        return "backup"
+    if parts[0] == "models" and len(parts) >= 2:
+        return f"models/{parts[1]}"
+    return parts[0]
 
 
 def _normalize_local_path(path: str) -> str:
@@ -582,12 +731,14 @@ def _restore_big_files(moved):
         except Exception:
             pass
 
-def _retry_upload(api, upload_path, repo_name, token, path_in_repo, ignore_patterns=None, max_retries=3, initial_delay=1):
+def _retry_upload(api, upload_path, repo_name, token, path_in_repo, ignore_patterns=None, max_retries=3, initial_delay=1, cancel_check=None):
     """Helper function to retry uploads with exponential backoff"""
     delay = initial_delay
     last_error = None
     
     for attempt in range(max_retries):
+        if cancel_check and cancel_check():
+            raise BackupCancelledError("Backup upload cancelled")
         try:
             # Handle single file vs directory upload differently
             if os.path.isfile(upload_path):
@@ -607,13 +758,23 @@ def _retry_upload(api, upload_path, repo_name, token, path_in_repo, ignore_patte
                 if ignore_patterns:
                     kwargs["ignore_patterns"] = ignore_patterns
                 api.upload_folder(**kwargs)
+            if cancel_check and cancel_check():
+                raise BackupCancelledError("Backup upload cancelled")
             return True
+        except BackupCancelledError:
+            raise
         except Exception as e:
+            if cancel_check and cancel_check():
+                raise BackupCancelledError("Backup upload cancelled")
             last_error = e
             if attempt < max_retries - 1:
                 print(f"[WARNING] Upload attempt {attempt + 1} failed: {str(e)}")
                 print(f"[INFO] Retrying in {delay} seconds...")
-                time.sleep(delay)
+                sleep_end = time.time() + delay
+                while time.time() < sleep_end:
+                    if cancel_check and cancel_check():
+                        raise BackupCancelledError("Backup upload cancelled")
+                    time.sleep(min(0.2, max(0.0, sleep_end - time.time())))
                 delay *= 2
             
     raise RuntimeError(f"Upload failed after {max_retries} attempts. Last error: {str(last_error)}")
@@ -912,14 +1073,45 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
 
     temp_dirs = []
     moved_big_files = []
+    registered_tasks = []
+    for folder_raw in folders or []:
+        folder_candidate = str(folder_raw or "").strip()
+        if not folder_candidate or not os.path.exists(folder_candidate):
+            continue
+        norm_folder = os.path.normpath(folder_candidate)
+        if os.path.isabs(norm_folder):
+            try:
+                display_rel = os.path.relpath(norm_folder, os.getcwd())
+            except ValueError:
+                path_parts = norm_folder.strip(os.sep).split(os.sep)
+                if "models" in path_parts:
+                    models_idx = path_parts.index("models")
+                    display_rel = os.path.join(*path_parts[models_idx:])
+                else:
+                    display_rel = os.path.basename(norm_folder)
+        else:
+            display_rel = norm_folder
+        display_label = _normalize_local_path(display_rel) or os.path.basename(norm_folder) or "backup"
+        task_id, cancel_event = _register_backup_task("backup_upload", display_label, repo_name)
+        registered_tasks.append((norm_folder, display_rel, task_id, cancel_event))
+
     try:
-        total_folders = len([f for f in folders if f and os.path.exists(f.strip())])
-        for i, folder in enumerate(folders, 1):
-            folder = folder.strip()
-            if not folder or not os.path.exists(folder):
+        total_folders = len(registered_tasks)
+        for i, (folder, path_in_repo, task_id, cancel_event) in enumerate(registered_tasks, 1):
+            if cancel_event.is_set():
+                _update_backup_task(task_id, {
+                    "status": "cancelled",
+                    "phase": "cancelled",
+                    "finished_at": time.time(),
+                })
                 continue
-            
-            folder = os.path.normpath(folder)
+
+            _update_backup_task(task_id, {
+                "status": "uploading",
+                "phase": "uploading",
+                "started_at": time.time(),
+            })
+
             normalized_folder = _normalize_local_path(folder)
             is_user_dir = os.path.isdir(folder) and (
                 folder == "user" or folder.startswith("user" + os.sep)
@@ -947,39 +1139,43 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
                     print("[WARNING] Falling back to uploading the raw 'custom_nodes' folder.")
                 else:
                     temp_dirs.append(temp_dir)
-                    path_in_repo = CUSTOM_NODES_SNAPSHOT_PATH
                     print(f"[INFO] Created nodes snapshot at '{snapshot_file}'")
-                    _retry_upload(
-                        api=api,
-                        upload_path=snapshot_file,
-                        repo_name=repo_name,
-                        token=token,
-                        path_in_repo=path_in_repo
-                    )
-                    print(f"[INFO] Upload of nodes snapshot complete.")
+                    try:
+                        _retry_upload(
+                            api=api,
+                            upload_path=snapshot_file,
+                            repo_name=repo_name,
+                            token=token,
+                            path_in_repo=CUSTOM_NODES_SNAPSHOT_PATH,
+                            cancel_check=cancel_event.is_set,
+                        )
+                        _update_backup_task(task_id, {
+                            "status": "completed",
+                            "phase": "completed",
+                            "finished_at": time.time(),
+                        })
+                        print(f"[INFO] Upload of nodes snapshot complete.")
+                    except BackupCancelledError:
+                        _update_backup_task(task_id, {
+                            "status": "cancelled",
+                            "phase": "cancelled",
+                            "finished_at": time.time(),
+                        })
+                        print(f"[INFO] Cancelled upload of custom_nodes snapshot.")
+                    except Exception as e:
+                        _update_backup_task(task_id, {
+                            "status": "failed",
+                            "phase": "failed",
+                            "error": str(e),
+                            "finished_at": time.time(),
+                        })
+                        raise
                     continue
             elif is_settings_file:
                 temp_dir = tempfile.mkdtemp(prefix="comfyui_settings_strip_")
                 upload_path = _copy_settings_without_token(folder, temp_dir)
                 temp_dirs.append(temp_dir)
                 print(f"[INFO] Created sanitized settings copy at '{upload_path}' for upload.")
-
-            # Preserve the full path structure, especially for models/
-            if os.path.isabs(folder):
-                try:
-                    # Get relative path from ComfyUI root
-                    path_in_repo = os.path.relpath(folder, os.getcwd())
-                except ValueError:
-                    # If not under ComfyUI root, use the full path structure
-                    path_parts = folder.strip(os.sep).split(os.sep)
-                    if "models" in path_parts:
-                        # Keep everything from models/ onwards
-                        models_idx = path_parts.index("models")
-                        path_in_repo = os.path.join(*path_parts[models_idx:])
-                    else:
-                        path_in_repo = os.path.basename(folder)
-            else:
-                path_in_repo = folder  # Use the relative path as is
 
             print(f"[INFO] Uploading '{upload_path}' to repo '{repo_name}' with path '{path_in_repo}'...")
             print(f"[INFO] Upload started. File size limit: {size_limit_gb} GB. Check the console for status updates.")
@@ -991,7 +1187,8 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
                     print(f"[WARNING] Progress callback failed: {e}")
 
             # Move big files to .skipbigtmp folders
-            moved_big_files.extend(_move_big_files(upload_path, size_limit_gb))
+            folder_moved = _move_big_files(upload_path, size_limit_gb)
+            moved_big_files.extend(folder_moved)
 
             try:
                 _retry_upload(
@@ -1000,10 +1197,30 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
                     repo_name=repo_name,
                     token=token,
                     path_in_repo=os.path.join("ComfyUI", path_in_repo),
-                    ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*", "**/.skipbigtmp/**", ".skipbigtmp/"]
+                    ignore_patterns=["**/.cache/**", "**/.cache*", ".cache", ".cache*", "**/.skipbigtmp/**", ".skipbigtmp/"],
+                    cancel_check=cancel_event.is_set,
                 )
+                _update_backup_task(task_id, {
+                    "status": "completed",
+                    "phase": "completed",
+                    "finished_at": time.time(),
+                })
                 print(f"[INFO] Upload of '{upload_path}' complete.")
+            except BackupCancelledError:
+                _update_backup_task(task_id, {
+                    "status": "cancelled",
+                    "phase": "cancelled",
+                    "finished_at": time.time(),
+                })
+                print(f"[INFO] Upload cancelled for '{path_in_repo}'.")
+                continue
             except Exception as e:
+                _update_backup_task(task_id, {
+                    "status": "failed",
+                    "phase": "failed",
+                    "error": str(e),
+                    "finished_at": time.time(),
+                })
                 print(f"[ERROR] Upload failed for '{upload_path}': {str(e)}")
                 if "Stream" in str(e) and "reset by remote peer" in str(e):
                     print("[INFO] This appears to be a connection issue. You may want to:")
@@ -1012,6 +1229,16 @@ def backup_to_huggingface(repo_name_or_link, folders, size_limit_gb=None, on_bac
                     print("3. Ensure you have sufficient permissions on Hugging Face")
                 raise
     except Exception as e:
+        now = time.time()
+        for _, _, tid, _ in registered_tasks:
+            snap = get_backup_tasks_snapshot().get(tid, {})
+            if snap.get("status") in ("queued", "uploading", "cancelling"):
+                _update_backup_task(tid, {
+                    "status": "failed",
+                    "phase": "failed",
+                    "error": str(e),
+                    "finished_at": now,
+                })
         print(f"[ERROR] Backup failed: {e}")
         raise
     finally:
@@ -1147,128 +1374,76 @@ def restore_from_huggingface(repo_name_or_link, target_dir=None):
         print_structure(folder_structure)
 
         # Check for nodes snapshot first
+        snapshot_task_id = None
+        snapshot_cancel_event = None
         if any(f.endswith("custom_nodes_snapshot.yaml") for f in comfy_files):
-            # Download and process nodes snapshot
-            print("\n[INFO] Found nodes snapshot, restoring custom nodes...")
-            snapshot_file = hf_hub_download(
-                repo_id=repo_name,
-                filename="ComfyUI/custom_nodes_snapshot.yaml",
-                token=token
+            snapshot_task_id, snapshot_cancel_event = _register_backup_task(
+                "backup_download",
+                "custom_nodes",
+                repo_name,
+                total_files=1,
             )
-            print(f"[DEBUG] Downloaded snapshot file location: {snapshot_file}")
-            try:
-                with open(snapshot_file, 'r') as f:
-                    snapshot_content = f.read()
-                print(f"[DEBUG] Content of downloaded snapshot file:\n{snapshot_content}")
-            except Exception as e:
-                print(f"[ERROR] Failed to read downloaded snapshot file: {e}")
-            _restore_custom_nodes_from_snapshot(snapshot_file)
-            print("[INFO] Custom nodes restoration complete")
+            if snapshot_cancel_event.is_set():
+                _update_backup_task(snapshot_task_id, {
+                    "status": "cancelled",
+                    "phase": "cancelled",
+                    "finished_at": time.time(),
+                })
+            else:
+                _update_backup_task(snapshot_task_id, {
+                    "status": "downloading",
+                    "phase": "downloading",
+                    "started_at": time.time(),
+                })
+                try:
+                    # Download and process nodes snapshot
+                    print("\n[INFO] Found nodes snapshot, restoring custom nodes...")
+                    snapshot_file = hf_hub_download(
+                        repo_id=repo_name,
+                        filename="ComfyUI/custom_nodes_snapshot.yaml",
+                        token=token
+                    )
+                    print(f"[DEBUG] Downloaded snapshot file location: {snapshot_file}")
+                    try:
+                        with open(snapshot_file, 'r') as f:
+                            snapshot_content = f.read()
+                        print(f"[DEBUG] Content of downloaded snapshot file:\n{snapshot_content}")
+                    except Exception as e:
+                        print(f"[ERROR] Failed to read downloaded snapshot file: {e}")
+                    if snapshot_cancel_event.is_set():
+                        _update_backup_task(snapshot_task_id, {
+                            "status": "cancelled",
+                            "phase": "cancelled",
+                            "finished_at": time.time(),
+                        })
+                    else:
+                        _restore_custom_nodes_from_snapshot(snapshot_file)
+                        _update_backup_task(snapshot_task_id, {
+                            "status": "completed",
+                            "phase": "completed",
+                            "completed_files": 1,
+                            "finished_at": time.time(),
+                        })
+                        print("[INFO] Custom nodes restoration complete")
+                except Exception as e:
+                    _update_backup_task(snapshot_task_id, {
+                        "status": "failed",
+                        "phase": "failed",
+                        "error": str(e),
+                        "finished_at": time.time(),
+                    })
+                    raise
         
-        # Download the rest of the files
+        # Download the rest of the files grouped by backup folder so each folder can be tracked & cancelled
         print("\n[INFO] Downloading model folders and other files...")
-        comfy_temp = os.path.join(os.getcwd(), "temp")
-        os.makedirs(comfy_temp, exist_ok=True)
-        temp_dir = tempfile.mkdtemp(prefix="hf_dl_", dir=comfy_temp)
-
-        try:
-            # Download all files in parallel using snapshot_download
-            print(f"[INFO] Starting parallel download to {temp_dir}")
-            downloaded_folder = snapshot_download(
-                repo_id=repo_name,
-                token=token,
-                local_dir=temp_dir,
-                allow_patterns=["ComfyUI/*"],
-                ignore_patterns=["ComfyUI/custom_nodes_snapshot.yaml"],  # Skip snapshot since we handled it
-                local_dir_use_symlinks=False,
-                max_workers=4  # Adjust based on system capabilities
-            )
-            print(f"[INFO] Download completed to {downloaded_folder}")
-
-            # Move files from snapshot to target directory
-            source_dir = os.path.join(downloaded_folder, "ComfyUI")
-            if os.path.exists(source_dir):
-                print("\n[INFO] Moving downloaded files to target directory...")
-                
-                def process_structure(struct, current_path=""):
-                    # Process files in current directory
-                    if "files" in struct:
-                        for f in struct["files"]:
-                            raw_rel = f.split("ComfyUI/", 1)[1]
-                            rel_path = sanitize_rel_folder(raw_rel)
-                            if not rel_path or rel_path == "custom_nodes_snapshot.yaml":
-                                continue
-
-                            # Remap legacy ComfyUI-Manager path to new path
-                            # user/default/ComfyUI-Manager/... -> user/__manager/...
-                            if "user/default/ComfyUI-Manager/" in raw_rel:
-                                new_rel_path = rel_path.replace("user/default/ComfyUI-Manager/", "user/__manager/")
-                                print(f"[INFO] in-flight migration: {rel_path} -> {new_rel_path}")
-                                rel_path = new_rel_path
-
-                            src_file = os.path.join(source_dir, raw_rel)
-                            real_target = os.path.realpath(os.path.abspath(target_dir))
-                            dst_file = os.path.realpath(os.path.abspath(os.path.join(real_target, rel_path)))
-                            if os.path.commonpath([real_target, dst_file]) != real_target:
-                                print(f"[SECURITY] Skipping path traversal item: {f}")
-                                continue
-
-                            # Create parent directory if needed
-                            os.makedirs(os.path.dirname(dst_file), exist_ok=True)
-                            
-                            # Always copy file even if folder exists
-                            try:
-                                # Handle special cases
-                                if rel_path == os.path.normpath("user/default/comfy.settings.json"):
-                                    try:
-                                        existing_settings = {}
-                                        if os.path.exists(dst_file):
-                                            with open(dst_file, "r", encoding="utf-8") as f:
-                                                existing_settings = json.load(f)
-                                        
-                                        with open(src_file, "r", encoding="utf-8") as f:
-                                            new_settings = json.load(f)
-                                        
-                                        # Preserve token
-                                        if "downloader.hf_token" in existing_settings:
-                                            new_settings["downloader.hf_token"] = existing_settings["downloader.hf_token"]
-                                        else:
-                                            new_settings["downloader.hf_token"] = token
-                                        
-                                        with open(dst_file, "w", encoding="utf-8") as f:
-                                            json.dump(new_settings, f, indent=2)
-                                        print(f"[INFO] Updated settings file: {rel_path}")
-                                    except Exception as e:
-                                        print(f"[WARNING] Error handling settings file: {e}")
-                                else:
-                                    # Copy regular file
-                                    if os.path.exists(dst_file):
-                                        print(f"[INFO] Updating file: {rel_path}")
-                                    else:
-                                        print(f"[INFO] Copying new file: {rel_path}")
-                                    shutil.copy2(src_file, dst_file)
-                                    print(f"[DEBUG] Successfully copied {rel_path}")
-                            except Exception as e:
-                                print(f"[ERROR] Failed to copy file {rel_path}: {e}")
-
-                    # Process subdirectories
-                    for key, value in struct.items():
-                        if key != "files":
-                            new_path = os.path.join(current_path, key)
-                            # process_structure will handle individual files, so we don't strictly need to create dirs here
-                            # but keeping the recursion structure
-                            process_structure(value, new_path)
-
-                process_structure(folder_structure)
-
-            # Clean up
-            clear_cache_for_path(downloaded_folder)
-            print(f"\n[SUCCESS] Successfully restored backup to {target_dir}")
-            return target_dir
-
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            print("[INFO] Cleaned up temporary files")
+        files_to_restore = sorted([
+            f for f in comfy_files
+            if not f.endswith("custom_nodes_snapshot.yaml")
+        ])
+        if files_to_restore:
+            _restore_backup_file_groups(repo_name, token, files_to_restore, target_dir)
+        print(f"\n[SUCCESS] Successfully restored backup to {target_dir}")
+        return target_dir
 
     except Exception as e:
         print(f"[ERROR] Failed to restore: {e}")
@@ -1802,6 +1977,110 @@ def _copy_repo_file_to_target(src_file: str, repo_file: str, target_dir: str, to
     shutil.copy2(src_file, dst_file)
 
 
+def _restore_backup_file_groups(repo_name: str, token: str, sorted_files: list, target_dir: str) -> tuple[int, bool]:
+    """Download backup files grouped by folder so each folder can be tracked and cancelled independently."""
+    os.environ["HF_HUB_ENABLE_HF_XET"] = "0"
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    from huggingface_hub import hf_hub_download
+
+    grouped_files = OrderedDict()
+    for repo_file in sorted_files or []:
+        group = _backup_folder_group_for_repo_file(repo_file)
+        grouped_files.setdefault(group, []).append(repo_file)
+
+    registered_groups = []
+    for group_name, group_list in grouped_files.items():
+        task_id, cancel_event = _register_backup_task(
+            "backup_download",
+            group_name,
+            repo_name,
+            total_files=len(group_list),
+        )
+        registered_groups.append((group_name, group_list, task_id, cancel_event))
+
+    restored_files = 0
+    restart_required = False
+    max_workers = min(16, max(4, os.cpu_count() or 4))
+
+    for group_name, group_list, task_id, cancel_event in registered_groups:
+        if cancel_event.is_set():
+            _update_backup_task(task_id, {
+                "status": "cancelled",
+                "phase": "cancelled",
+                "finished_at": time.time(),
+            })
+            continue
+
+        _update_backup_task(task_id, {
+            "status": "downloading",
+            "phase": "downloading",
+            "started_at": time.time(),
+        })
+        group_total = len(group_list)
+        group_completed = 0
+        group_lock = threading.Lock()
+        group_errors = []
+
+        print(f"[restore] Downloading {group_total} file(s) for '{group_name}' from backup '{repo_name}'...")
+
+        def _download_worker(repo_file, _ev=cancel_event, _tid=task_id):
+            nonlocal group_completed, restored_files, restart_required
+            if _ev.is_set():
+                return
+            try:
+                cached_file = hf_hub_download(
+                    repo_id=repo_name,
+                    filename=repo_file,
+                    token=token
+                )
+                if _ev.is_set():
+                    return
+                _copy_repo_file_to_target(cached_file, repo_file, target_dir, token)
+                with group_lock:
+                    group_completed += 1
+                    restored_files += 1
+                    cur = group_completed
+                    if repo_file.startswith("ComfyUI/custom_nodes/"):
+                        restart_required = True
+                _update_backup_task(_tid, {
+                    "completed_files": cur,
+                    "total_files": group_total,
+                })
+                print(f"[restore] [{group_name}] [{cur}/{group_total}] {repo_file}")
+            except Exception as e:
+                if _ev.is_set():
+                    return
+                with group_lock:
+                    group_errors.append(str(e))
+                print(f"[restore][error] Failed to restore {repo_file}: {e}")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            list(executor.map(_download_worker, group_list))
+
+        if cancel_event.is_set():
+            _update_backup_task(task_id, {
+                "status": "cancelled",
+                "phase": "cancelled",
+                "finished_at": time.time(),
+            })
+        elif group_errors and group_completed == 0:
+            _update_backup_task(task_id, {
+                "status": "failed",
+                "phase": "failed",
+                "error": group_errors[0],
+                "finished_at": time.time(),
+            })
+        else:
+            _update_backup_task(task_id, {
+                "status": "completed",
+                "phase": "completed",
+                "completed_files": group_completed,
+                "finished_at": time.time(),
+            })
+
+    return restored_files, restart_required
+
+
 def restore_selected_from_huggingface(repo_name_or_link: str, selections: list, target_dir=None) -> dict:
     from huggingface_hub import hf_hub_download
 
@@ -1854,29 +2133,70 @@ def restore_selected_from_huggingface(repo_name_or_link: str, selections: list, 
     restart_required = False
 
     if (restore_all_custom_nodes or snapshot_entries) and CUSTOM_NODES_SNAPSHOT_PATH in comfy_set:
-        snapshot_file = hf_hub_download(
-            repo_id=repo_name,
-            filename=CUSTOM_NODES_SNAPSHOT_PATH,
-            token=token
+        snap_task_id, snap_cancel_event = _register_backup_task(
+            "backup_download",
+            "custom_nodes",
+            repo_name,
+            total_files=1,
         )
-        snapshot_data = _safe_yaml_load(snapshot_file)
-        if restore_all_custom_nodes:
-            _restore_custom_nodes_from_snapshot(snapshot_file)
-            restored_custom_nodes = len(_extract_snapshot_entries(snapshot_data))
-            restart_required = restart_required or restored_custom_nodes > 0
-        elif snapshot_entries:
-            filtered = _filter_snapshot_entries(snapshot_data, snapshot_entries)
-            if _snapshot_has_entries(filtered):
-                temp_dir = tempfile.mkdtemp(prefix="hf_restore_custom_nodes_")
-                try:
-                    filtered_file = os.path.join(temp_dir, "custom_nodes_snapshot.yaml")
-                    with open(filtered_file, "w", encoding="utf-8") as handle:
-                        yaml.safe_dump(filtered, handle, sort_keys=False, allow_unicode=True, default_flow_style=False)
-                    _restore_custom_nodes_from_snapshot(filtered_file)
-                    restored_custom_nodes = len(_extract_snapshot_entries(filtered))
-                    restart_required = restart_required or restored_custom_nodes > 0
-                finally:
-                    shutil.rmtree(temp_dir, ignore_errors=True)
+        if snap_cancel_event.is_set():
+            _update_backup_task(snap_task_id, {
+                "status": "cancelled",
+                "phase": "cancelled",
+                "finished_at": time.time(),
+            })
+        else:
+            _update_backup_task(snap_task_id, {
+                "status": "downloading",
+                "phase": "downloading",
+                "started_at": time.time(),
+            })
+            try:
+                snapshot_file = hf_hub_download(
+                    repo_id=repo_name,
+                    filename=CUSTOM_NODES_SNAPSHOT_PATH,
+                    token=token
+                )
+                snapshot_data = _safe_yaml_load(snapshot_file)
+                if not snap_cancel_event.is_set():
+                    if restore_all_custom_nodes:
+                        _restore_custom_nodes_from_snapshot(snapshot_file)
+                        restored_custom_nodes = len(_extract_snapshot_entries(snapshot_data))
+                        restart_required = restart_required or restored_custom_nodes > 0
+                    elif snapshot_entries:
+                        filtered = _filter_snapshot_entries(snapshot_data, snapshot_entries)
+                        if _snapshot_has_entries(filtered):
+                            temp_dir = tempfile.mkdtemp(prefix="hf_restore_custom_nodes_")
+                            try:
+                                filtered_file = os.path.join(temp_dir, "custom_nodes_snapshot.yaml")
+                                with open(filtered_file, "w", encoding="utf-8") as handle:
+                                    yaml.safe_dump(filtered, handle, sort_keys=False, allow_unicode=True, default_flow_style=False)
+                                _restore_custom_nodes_from_snapshot(filtered_file)
+                                restored_custom_nodes = len(_extract_snapshot_entries(filtered))
+                                restart_required = restart_required or restored_custom_nodes > 0
+                            finally:
+                                shutil.rmtree(temp_dir, ignore_errors=True)
+                if snap_cancel_event.is_set():
+                    _update_backup_task(snap_task_id, {
+                        "status": "cancelled",
+                        "phase": "cancelled",
+                        "finished_at": time.time(),
+                    })
+                else:
+                    _update_backup_task(snap_task_id, {
+                        "status": "completed",
+                        "phase": "completed",
+                        "completed_files": 1,
+                        "finished_at": time.time(),
+                    })
+            except Exception as e:
+                _update_backup_task(snap_task_id, {
+                    "status": "failed",
+                    "phase": "failed",
+                    "error": str(e),
+                    "finished_at": time.time(),
+                })
+                raise
 
     files_to_restore.discard(CUSTOM_NODES_SNAPSHOT_PATH)
     sorted_files = sorted(files_to_restore)
@@ -1884,35 +2204,8 @@ def restore_selected_from_huggingface(repo_name_or_link: str, selections: list, 
     restored_files = 0
 
     if total_files > 0:
-        print(f"[restore] Downloading {total_files} file(s) from backup '{repo_name}' in parallel...")
-        import concurrent.futures
-        import threading
-
-        lock = threading.Lock()
-        completed_count = 0
-
-        def _download_worker(repo_file):
-            nonlocal completed_count, restored_files, restart_required
-            try:
-                cached_file = hf_hub_download(
-                    repo_id=repo_name,
-                    filename=repo_file,
-                    token=token
-                )
-                _copy_repo_file_to_target(cached_file, repo_file, target_dir, token)
-                with lock:
-                    restored_files += 1
-                    completed_count += 1
-                    cur = completed_count
-                    if repo_file.startswith("ComfyUI/custom_nodes/"):
-                        restart_required = True
-                print(f"[restore] [{cur}/{total_files}] {repo_file}")
-            except Exception as e:
-                print(f"[restore][error] Failed to restore {repo_file}: {e}")
-
-        max_workers = min(16, max(4, os.cpu_count() or 4))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            list(executor.map(_download_worker, sorted_files))
+        restored_files, group_restart = _restore_backup_file_groups(repo_name, token, sorted_files, target_dir)
+        restart_required = restart_required or group_restart
 
     return {
         "restored_files": restored_files,

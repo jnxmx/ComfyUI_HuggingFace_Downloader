@@ -768,13 +768,18 @@ def _scan_custom_node_widget_schemas() -> dict[str, list[dict[str, Any]]]:
         return {}
 
     hints: dict[str, list[dict[str, Any]]] = {}
-    skip_dirs = {".git", "__pycache__", "venv", ".venv", "node_modules"}
+    skip_dirs = {".git", "__pycache__", "venv", ".venv", "node_modules", "tests", "metadata"}
+    files_processed = 0
 
     for root, dirs, files in os.walk(custom_nodes_dir, followlinks=True):
         dirs[:] = [d for d in dirs if d not in skip_dirs]
         for filename in files:
             if not filename.endswith(".py"):
                 continue
+
+            files_processed += 1
+            if files_processed % 25 == 0:
+                time.sleep(0)
 
             path = os.path.join(root, filename)
             try:
@@ -822,19 +827,41 @@ _BUILTIN_NODE_WIDGET_SCHEMA_HINTS: dict[str, list[dict[str, Any]]] = {
     ],
 }
 
+_node_widget_schema_hints_lock = threading.Lock()
+_widget_schema_prewarm_started = False
+
+
 def get_node_widget_schema_hints() -> dict[str, list[dict[str, Any]]]:
     global _node_widget_schema_hints_cache
-    if _node_widget_schema_hints_cache is None:
-        try:
-            scanned = _scan_custom_node_widget_schemas()
-            for k, v in _BUILTIN_NODE_WIDGET_SCHEMA_HINTS.items():
-                scanned.setdefault(k, v)
-            _node_widget_schema_hints_cache = scanned
-            print(f"[DEBUG] Scanned widget schema hints for {len(_node_widget_schema_hints_cache)} node classes")
-        except Exception as e:
-            print(f"[DEBUG] Failed to scan custom node widget schemas: {e}")
-            _node_widget_schema_hints_cache = dict(_BUILTIN_NODE_WIDGET_SCHEMA_HINTS)
+    if _node_widget_schema_hints_cache is not None:
+        return _node_widget_schema_hints_cache
+    with _node_widget_schema_hints_lock:
+        if _node_widget_schema_hints_cache is None:
+            try:
+                scanned = _scan_custom_node_widget_schemas()
+                for k, v in _BUILTIN_NODE_WIDGET_SCHEMA_HINTS.items():
+                    scanned.setdefault(k, v)
+                _node_widget_schema_hints_cache = scanned
+                print(f"[DEBUG] Scanned widget schema hints for {len(_node_widget_schema_hints_cache)} node classes")
+            except Exception as e:
+                print(f"[DEBUG] Failed to scan custom node widget schemas: {e}")
+                _node_widget_schema_hints_cache = dict(_BUILTIN_NODE_WIDGET_SCHEMA_HINTS)
     return _node_widget_schema_hints_cache
+
+
+def start_background_widget_schema_prewarm() -> None:
+    global _widget_schema_prewarm_started
+    if _widget_schema_prewarm_started or _node_widget_schema_hints_cache is not None:
+        return
+    _widget_schema_prewarm_started = True
+
+    def _worker():
+        try:
+            get_node_widget_schema_hints()
+        except Exception:
+            pass
+
+    threading.Thread(target=_worker, name="hf-downloader-schema-prewarm", daemon=True).start()
 
 def _lookup_known_directory_for_filename(filename: str | None) -> str | None:
     if not filename:

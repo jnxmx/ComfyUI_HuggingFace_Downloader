@@ -20,6 +20,9 @@ from .backup import (
     restore_selected_from_huggingface,
     delete_selected_from_huggingface,
     create_hf_backup_repo,
+    get_backup_tasks_snapshot,
+    cancel_backup_task,
+    set_backup_status_notifier,
 )
 from .file_manager import (
     get_model_subfolders,
@@ -56,6 +59,19 @@ pending_verifications = []
 pending_verifications_lock = threading.Lock()
 cancel_requests = set()
 cancel_requests_lock = threading.Lock()
+paused_downloads = {}
+pause_requests = set()
+pause_requests_lock = threading.Lock()
+_ws_broadcast_lock = threading.Lock()
+_ws_last_sent_at: dict[str, float] = {}
+_folder_structure_cache_lock = threading.Lock()
+_folder_structure_cache: dict = {"timestamp": 0.0, "folders": None}
+_FOLDER_STRUCTURE_CACHE_TTL_SECONDS = 5.0
+_persist_state_lock = threading.Lock()
+_persist_state_pending = False
+_setup_targets_lock = threading.Lock()
+_setup_registered_target_ids: set[int] = set()
+_startup_recovery_started = False
 SETTINGS_REL_PATH = os.path.join("user", "default", "comfy.settings.json")
 MODEL_LIBRARY_CLOUD_CATALOG_PATH_CANDIDATES = [
     os.path.join(
@@ -709,6 +725,35 @@ def _clear_cancel_request(download_id: str):
     with cancel_requests_lock:
         cancel_requests.discard(download_id)
 
+def _request_pause(download_id: str):
+    with pause_requests_lock:
+        pause_requests.add(download_id)
+
+def _is_pause_requested(download_id: str) -> bool:
+    with pause_requests_lock:
+        return download_id in pause_requests
+
+def _clear_pause_request(download_id: str):
+    with pause_requests_lock:
+        pause_requests.discard(download_id)
+
+def _should_stop_download(download_id: str) -> bool:
+    return _is_cancel_requested(download_id) or _is_pause_requested(download_id)
+
+def _mark_download_paused(download_id: str, item: dict):
+    if item and isinstance(item, dict):
+        with download_queue_lock:
+            paused_downloads[download_id] = dict(item)
+    _set_download_status(download_id, {
+        "status": "paused",
+        "phase": "paused",
+        "speed_bps": 0,
+        "eta_seconds": None,
+        "message": "Paused",
+        "updated_at": time.time(),
+    })
+    _clear_pause_request(download_id)
+
 def _is_huggingface_url(url: str | None) -> bool:
     if not isinstance(url, str):
         return False
@@ -867,7 +912,76 @@ def _build_parsed_folder_download_info(model: dict) -> dict:
         "display_name": f"{last_segment}",
     }
 
+_DOWNLOAD_TRANSITION_STATUSES = {
+    "queued", "downloading", "downloaded", "completed", "failed",
+    "cancelled", "cancelling", "paused", "pausing", "verifying", "interrupted",
+}
+
+
+def _broadcast_ws_event(event_name: str, payload: dict, min_interval_sec: float = 0.25, force: bool = False) -> None:
+    if not force and min_interval_sec > 0:
+        now = time.monotonic()
+        with _ws_broadcast_lock:
+            last_ts = _ws_last_sent_at.get(event_name, 0.0)
+            if (now - last_ts) < min_interval_sec:
+                return
+            _ws_last_sent_at[event_name] = now
+    elif min_interval_sec >= 0:
+        with _ws_broadcast_lock:
+            _ws_last_sent_at[event_name] = time.monotonic()
+    try:
+        import server
+        prompt_instance = getattr(server.PromptServer, "instance", None)
+        if prompt_instance is not None and hasattr(prompt_instance, "send_sync"):
+            prompt_instance.send_sync(event_name, payload)
+    except Exception:
+        pass
+
+
+def _broadcast_download_status_ws(force: bool = False) -> None:
+    if not force:
+        now = time.monotonic()
+        with _ws_broadcast_lock:
+            last_ts = _ws_last_sent_at.get("hf_download_status", 0.0)
+            if (now - last_ts) < 0.25:
+                return
+            _ws_last_sent_at["hf_download_status"] = now
+    else:
+        with _ws_broadcast_lock:
+            _ws_last_sent_at["hf_download_status"] = time.monotonic()
+    try:
+        with download_status_lock:
+            downloads_snapshot = {k: dict(v) for k, v in download_status.items()}
+        backup_tasks = get_backup_tasks_snapshot()
+        _broadcast_ws_event(
+            "hf_download_status",
+            {"downloads": downloads_snapshot, "backup_tasks": backup_tasks},
+            min_interval_sec=0.0,
+            force=True,
+        )
+    except Exception:
+        pass
+
+
+def _schedule_persist_download_state() -> None:
+    global _persist_state_pending
+    with _persist_state_lock:
+        if _persist_state_pending:
+            return
+        _persist_state_pending = True
+
+    def _writer():
+        global _persist_state_pending
+        time.sleep(0.05)
+        with _persist_state_lock:
+            _persist_state_pending = False
+        _persist_download_state()
+
+    threading.Thread(target=_writer, name="hf-dl-state-persist", daemon=True).start()
+
+
 def _set_download_status(download_id: str, fields: dict):
+    status_changed = False
     with download_status_lock:
         existing = download_status.get(download_id, {})
         existing_status = str(existing.get("status") or "").strip().lower()
@@ -884,16 +998,17 @@ def _set_download_status(download_id: str, fields: dict):
             elif existing_status == "cancelled" and incoming_status and incoming_status != "cancelled":
                 fields = dict(fields)
                 fields.pop("status", None)
+        final_incoming = str(fields.get("status") or "").strip().lower()
+        status_changed = bool(final_incoming and final_incoming != existing_status)
         existing.update(fields)
         download_status[download_id] = existing
 
-    # Persist state to disk on meaningful transitions for crash recovery
     _incoming = str(fields.get("status") or "").strip().lower()
     if _incoming in ("queued", "downloading", "completed", "failed", "cancelled", "downloaded", "interrupted"):
-        try:
-            _persist_download_state()
-        except Exception:
-            pass
+        _schedule_persist_download_state()
+
+    _broadcast_download_status_ws(force=status_changed or _incoming in _DOWNLOAD_TRANSITION_STATUSES)
+
 
 def _set_search_status(request_id: str, fields: dict):
     if not request_id:
@@ -902,7 +1017,15 @@ def _set_search_status(request_id: str, fields: dict):
         existing = search_status.get(request_id, {})
         existing.update(fields)
         existing["updated_at"] = time.time()
+        snapshot = dict(existing)
         search_status[request_id] = existing
+    source = str(snapshot.get("source") or "").strip().lower()
+    _broadcast_ws_event(
+        "hf_search_status",
+        {"request_id": request_id, "status": snapshot},
+        min_interval_sec=0.15,
+        force=source in ("workflow", "complete", "cancelled"),
+    )
 
 def _coerce_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
@@ -1995,6 +2118,9 @@ def _download_worker():
             })
             _clear_cancel_request(download_id)
             continue
+        if _is_pause_requested(download_id):
+            _mark_download_paused(download_id, item)
+            continue
         _set_download_status(download_id, {"status": "downloading", "started_at": time.time()})
 
         stop_event = None
@@ -2003,6 +2129,8 @@ def _download_worker():
             if download_mode == "folder":
                 folder_info = _build_parsed_folder_download_info(item)
                 def folder_status_cb(phase_text: str):
+                    if _should_stop_download(download_id):
+                        return
                     phase_value = str(phase_text or "").strip()
                     _set_download_status(download_id, {
                         "status": "downloading",
@@ -2016,8 +2144,12 @@ def _download_worker():
                     last_segment=folder_info["last_segment"],
                     sync=True,
                     status_cb=folder_status_cb,
-                    cancel_check=lambda: _is_cancel_requested(download_id),
+                    cancel_check=lambda: _should_stop_download(download_id),
                 )
+                if _is_pause_requested(download_id) and not _is_cancel_requested(download_id):
+                    _mark_download_paused(download_id, item)
+                    _touch_queue_activity()
+                    continue
                 if _is_cancel_requested(download_id):
                     _set_download_status(download_id, {
                         "status": "cancelled",
@@ -2056,7 +2188,7 @@ def _download_worker():
                 })
 
                 def direct_status_cb(phase: str):
-                    if _is_cancel_requested(download_id):
+                    if _should_stop_download(download_id):
                         return
                     phase_text = str(phase or "").strip()
                     phase_lower = phase_text.lower()
@@ -2070,7 +2202,7 @@ def _download_worker():
                     })
 
                 def direct_progress_cb(payload: dict):
-                    if _is_cancel_requested(download_id):
+                    if _should_stop_download(download_id):
                         return
                     data = payload if isinstance(payload, dict) else {}
                     phase_text = str(data.get("phase") or "downloading").strip()
@@ -2094,8 +2226,12 @@ def _download_worker():
                     target_filename=item.get("target_filename"),
                     status_cb=direct_status_cb,
                     progress_cb=direct_progress_cb,
-                    cancel_check=lambda: _is_cancel_requested(download_id),
+                    cancel_check=lambda: _should_stop_download(download_id),
                 )
+                if _is_pause_requested(download_id) and not _is_cancel_requested(download_id):
+                    _mark_download_paused(download_id, item)
+                    _touch_queue_activity()
+                    continue
                 if _is_cancel_requested(download_id):
                     try:
                         if path and os.path.exists(path):
@@ -2149,7 +2285,7 @@ def _download_worker():
                 waiting_logged = False
                 try:
                     while not stop_event.is_set():
-                        if _is_cancel_requested(download_id):
+                        if _should_stop_download(download_id):
                             return
                         bytes_now = None
                         used_incomplete_path = incomplete_path
@@ -2282,7 +2418,7 @@ def _download_worker():
                 ).start()
 
             def status_cb(phase: str):
-                if _is_cancel_requested(download_id):
+                if _should_stop_download(download_id):
                     return
                 _set_download_status(download_id, {
                     "status": phase,
@@ -2299,8 +2435,12 @@ def _download_worker():
                     return_info=True,
                     target_filename=item.get("target_filename"),
                     status_cb=status_cb,
-                    cancel_check=lambda: _is_cancel_requested(download_id),
+                    cancel_check=lambda: _should_stop_download(download_id),
                 )
+                if _is_pause_requested(download_id) and not _is_cancel_requested(download_id):
+                    _mark_download_paused(download_id, item)
+                    _touch_queue_activity()
+                    continue
                 if _is_cancel_requested(download_id):
                     try:
                         if path and os.path.exists(path):
@@ -2340,8 +2480,12 @@ def _download_worker():
                     overwrite=overwrite,
                     target_filename=item.get("target_filename"),
                     status_cb=status_cb,
-                    cancel_check=lambda: _is_cancel_requested(download_id),
+                    cancel_check=lambda: _should_stop_download(download_id),
                 )
+                if _is_pause_requested(download_id) and not _is_cancel_requested(download_id):
+                    _mark_download_paused(download_id, item)
+                    _touch_queue_activity()
+                    continue
                 if _is_cancel_requested(download_id):
                     try:
                         if path and os.path.exists(path):
@@ -2364,6 +2508,10 @@ def _download_worker():
                 })
                 _touch_queue_activity()
         except Exception as e:
+            if _is_pause_requested(download_id) and not _is_cancel_requested(download_id):
+                _mark_download_paused(download_id, item)
+                _touch_queue_activity()
+                continue
             if _is_cancel_requested(download_id):
                 _set_download_status(download_id, {
                     "status": "cancelled",
@@ -2393,10 +2541,23 @@ def _start_download_worker():
     download_worker_running = True
     threading.Thread(target=_download_worker, daemon=True).start()
 
+def _get_cached_model_subfolders() -> list:
+    now = time.time()
+    with _folder_structure_cache_lock:
+        cached_folders = _folder_structure_cache.get("folders")
+        if cached_folders is not None and (now - float(_folder_structure_cache.get("timestamp", 0.0))) <= _FOLDER_STRUCTURE_CACHE_TTL_SECONDS:
+            return list(cached_folders)
+    folders = get_model_subfolders()
+    with _folder_structure_cache_lock:
+        _folder_structure_cache["timestamp"] = time.time()
+        _folder_structure_cache["folders"] = list(folders)
+    return folders
+
+
 async def folder_structure(request):
-    """Return the list of model subfolders"""
+    """Return the list of model subfolders without blocking the aiohttp event loop."""
     try:
-        folders = get_model_subfolders()
+        folders = await asyncio.to_thread(_get_cached_model_subfolders)
         return web.json_response(folders)
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
@@ -2405,6 +2566,8 @@ async def folder_structure(request):
 _IN_PROGRESS_DOWNLOAD_STATUSES = {
     "queued",
     "downloading",
+    "pausing",
+    "paused",
     "copying",
     "verifying",
     "cleaning_cache",
@@ -2482,12 +2645,8 @@ async def check_missing_models(request):
     Analyzes the workflow JSON to find missing models.
     Returns: { "missing": [...], "found": [...] }
     """
+    request_id = ""
     try:
-        try:
-            from .model_discovery import patch_lora_stack_nodes
-            patch_lora_stack_nodes()
-        except Exception:
-            pass
         print("[DEBUG] check_missing_models called")
         data = await request.json()
         request_id = data.get("request_id") or uuid.uuid4().hex
@@ -2518,6 +2677,7 @@ async def check_missing_models(request):
     except Exception as e:
         print(f"[ERROR] check_missing_models failed: {e}")
         print(f"[ERROR] Traceback: {traceback.format_exc()}")
+        return web.json_response({"error": str(e)}, status=500)
 async def cancel_search_endpoint(request):
     try:
         data = await request.json()
@@ -2612,39 +2772,31 @@ def _invalidate_model_library_local_cache() -> None:
         model_library_local_cache = {"timestamp": 0.0, "entries": [], "name_map": {}}
     with model_explorer_local_cache_lock:
         model_explorer_local_cache = {}
+    with _folder_structure_cache_lock:
+        _folder_structure_cache["timestamp"] = 0.0
+        _folder_structure_cache["folders"] = None
 
 
-async def relocate_model_file(request):
-    """Move an already-downloaded model into the requested path under the suggested model folder root."""
-    try:
-        data = await request.json()
-    except Exception:
-        data = {}
-
-    found_path_raw = str(data.get("found_path") or "").strip()
-    requested_path_raw = str(data.get("requested_path") or data.get("filename") or "").strip()
-    suggested_folder = str(data.get("suggested_folder") or "checkpoints").strip() or "checkpoints"
-
+def _sync_relocate_model_file(found_path_raw: str, requested_path_raw: str, suggested_folder: str) -> tuple[dict, int]:
     if not found_path_raw:
-        return web.json_response({"error": "Missing found_path."}, status=400)
+        return {"error": "Missing found_path."}, 400
 
     source_path = os.path.abspath(found_path_raw)
     if not os.path.exists(source_path):
-        return web.json_response({"error": f"Source not found: {source_path}"}, status=404)
+        return {"error": f"Source not found: {source_path}"}, 404
 
-    # Security check: Ensure source_path is strictly within registered model roots
     if not is_path_within_allowed_roots(source_path):
-        return web.json_response({"error": "Refusing to relocate file outside registered model directories."}, status=400)
+        return {"error": "Refusing to relocate file outside registered model directories."}, 400
 
     requested_path = _normalize_rel_path(requested_path_raw)
     if not requested_path:
         requested_path = _normalize_rel_path(os.path.basename(source_path))
     if not requested_path:
-        return web.json_response({"error": "Could not determine destination filename/path."}, status=400)
+        return {"error": "Could not determine destination filename/path."}, 400
 
     search_roots = _resolve_model_search_paths(suggested_folder)
     if not search_roots:
-        return web.json_response({"error": "Could not resolve destination search paths."}, status=500)
+        return {"error": "Could not resolve destination search paths."}, 500
 
     preferred_root = None
     for root in search_roots:
@@ -2672,92 +2824,114 @@ async def relocate_model_file(request):
         break
 
     if not destination_path or not destination_root:
-        return web.json_response({"error": "Could not resolve a safe destination path."}, status=400)
+        return {"error": "Could not resolve a safe destination path."}, 400
 
     if os.path.abspath(destination_path) == source_path:
         clean_path = _normalize_rel_path(os.path.relpath(source_path, destination_root))
-        return web.json_response({
+        return {
             "status": "already_in_place",
             "from": source_path,
             "to": source_path,
             "clean_path": clean_path,
-        })
+        }, 200
 
     if os.path.exists(destination_path):
-        return web.json_response({
+        return {
             "error": f"Destination already exists: {destination_path}",
             "status": "destination_exists",
-        }, status=409)
+        }, 409
 
     os.makedirs(os.path.dirname(destination_path), exist_ok=True)
     shutil.move(source_path, destination_path)
     _invalidate_model_library_local_cache()
 
     clean_path = _normalize_rel_path(os.path.relpath(destination_path, destination_root))
-    return web.json_response({
+    return {
         "status": "moved",
         "from": source_path,
         "to": destination_path,
         "clean_path": clean_path,
-    })
+    }, 200
+
+
+async def relocate_model_file(request):
+    """Move an already-downloaded model into the requested path under the suggested model folder root."""
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    found_path_raw = str(data.get("found_path") or "").strip()
+    requested_path_raw = str(data.get("requested_path") or data.get("filename") or "").strip()
+    suggested_folder = str(data.get("suggested_folder") or "checkpoints").strip() or "checkpoints"
+    payload, status = await asyncio.to_thread(
+        _sync_relocate_model_file,
+        found_path_raw,
+        requested_path_raw,
+        suggested_folder,
+    )
+    return web.json_response(payload, status=status)
+
+
+def _sync_install_models(models_to_install: list) -> list:
+    results = []
+    for model in models_to_install:
+        url = model.get("url")
+        filename = model.get("filename")
+        target_filename = _sanitize_filename_hint(model.get("target_filename")) or _sanitize_filename_hint(filename)
+        folder_locked = bool(model.get("folder_locked"))
+        locked_folder = str(model.get("locked_folder") or "").strip()
+        folder_raw = locked_folder if folder_locked and locked_folder else model.get("folder", "checkpoints")
+        folder = sanitize_rel_folder(folder_raw) or "checkpoints"
+
+        if not url and not (model.get("hf_repo") and model.get("hf_path")):
+            results.append({"filename": filename, "status": "failed", "error": "No URL provided"})
+            continue
+
+        try:
+            has_hf_repo_path = bool(model.get("hf_repo") and model.get("hf_path"))
+            is_hf_url = _is_supported_hf_link(url) if url else False
+            overwrite = bool(model.get("overwrite"))
+
+            if has_hf_repo_path or is_hf_url:
+                parsed = _build_parsed_download_info(model)
+                msg, path = run_download(
+                    parsed,
+                    folder,
+                    sync=True,
+                    overwrite=overwrite,
+                    target_filename=target_filename,
+                )
+            else:
+                if not _is_direct_http_url(url):
+                    raise ValueError("URL must be a valid http(s) link or Hugging Face file link.")
+                msg, path = run_download_url(
+                    url,
+                    folder,
+                    sync=True,
+                    overwrite=overwrite,
+                    target_filename=target_filename,
+                )
+            results.append({"filename": filename, "status": "success", "path": path, "message": msg})
+        except Exception as e:
+            print(f"[ERROR] Failed to download {filename}: {e}")
+            results.append({"filename": filename, "status": "failed", "error": str(e)})
+    return results
+
 
 async def install_models(request):
     """
-    Downloads a list of models.
+    Downloads a list of models off the event loop.
     Expects JSON: { "models": [ { "url": "...", "filename": "...", "folder": "..." }, ... ] }
     """
     try:
         print("[DEBUG] install_models called")
         data = await request.json()
         models_to_install = data.get("models", [])
-        
-        results = []
-        for model in models_to_install:
-            url = model.get("url")
-            filename = model.get("filename")
-            target_filename = _sanitize_filename_hint(model.get("target_filename")) or _sanitize_filename_hint(filename)
-            folder_locked = bool(model.get("folder_locked"))
-            folder_raw = locked_folder if folder_locked and locked_folder else model.get("folder", "checkpoints") # Default to checkpoints
-            folder = sanitize_rel_folder(folder_raw) or "checkpoints"
-            
-            if not url and not (model.get("hf_repo") and model.get("hf_path")):
-                results.append({"filename": filename, "status": "failed", "error": "No URL provided"})
-                continue
-                
-            try:
-                has_hf_repo_path = bool(model.get("hf_repo") and model.get("hf_path"))
-                is_hf_url = _is_supported_hf_link(url) if url else False
-                overwrite = bool(model.get("overwrite"))
-
-                if has_hf_repo_path or is_hf_url:
-                    parsed = _build_parsed_download_info(model)
-                    msg, path = run_download(
-                        parsed,
-                        folder,
-                        sync=True,
-                        overwrite=overwrite,
-                        target_filename=target_filename,
-                    )
-                else:
-                    if not _is_direct_http_url(url):
-                        raise ValueError("URL must be a valid http(s) link or Hugging Face file link.")
-                    msg, path = run_download_url(
-                        url,
-                        folder,
-                        sync=True,
-                        overwrite=overwrite,
-                        target_filename=target_filename,
-                    )
-                results.append({"filename": filename, "status": "success", "path": path, "message": msg})
-                
-            except Exception as e:
-                print(f"[ERROR] Failed to download {filename}: {e}")
-                results.append({"filename": filename, "status": "failed", "error": str(e)})
-        
+        results = await asyncio.to_thread(_sync_install_models, models_to_install)
         return web.json_response({"results": results})
-        
     except Exception as e:
-         return web.json_response({"error": str(e)}, status=500)
+        return web.json_response({"error": str(e)}, status=500)
 
 def _read_backup_repo_name() -> str:
     try:
@@ -2783,7 +2957,7 @@ async def create_hf_backup_repo_endpoint(request):
     if not repo_name:
         return web.json_response({"status": "error", "message": "Repository name cannot be empty."}, status=400)
     try:
-        new_repo_id = create_hf_backup_repo(repo_name)
+        new_repo_id = await asyncio.to_thread(create_hf_backup_repo, repo_name)
         return web.json_response({"status": "ok", "repo_name": new_repo_id})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
@@ -2791,9 +2965,9 @@ async def create_hf_backup_repo_endpoint(request):
 
 async def backup_browser_tree(request):
     query_repo = request.rel_url.query.get("repo_name", "").strip()
-    repo_name = query_repo or _read_backup_repo_name()
+    repo_name = query_repo or await asyncio.to_thread(_read_backup_repo_name)
     try:
-        payload = get_backup_browser_tree(repo_name)
+        payload = await asyncio.to_thread(get_backup_browser_tree, repo_name)
         
         # Check if running on RunPod
         runpod_id = os.getenv("RUNPOD_POD_ID", "").strip()
@@ -2816,7 +2990,7 @@ async def backup_to_hf(request):
     if not repo_name:
         return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
     try:
-        backup_to_huggingface(repo_name, folders, size_limit_gb=size_limit_gb)
+        await asyncio.to_thread(backup_to_huggingface, repo_name, folders, size_limit_gb=size_limit_gb)
         return web.json_response({"status": "ok"})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
@@ -2833,7 +3007,12 @@ async def backup_selected_to_hf_endpoint(request):
     if not repo_name:
         return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
     try:
-        result = backup_selected_to_huggingface(repo_name, selections, size_limit_gb=size_limit_gb)
+        result = await asyncio.to_thread(
+            backup_selected_to_huggingface,
+            repo_name,
+            selections,
+            size_limit_gb=size_limit_gb,
+        )
         return web.json_response({"status": "ok", **result})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
@@ -2844,7 +3023,7 @@ async def restore_from_hf(request):
     if not repo_name:
         return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
     try:
-        restore_from_huggingface(repo_name)
+        await asyncio.to_thread(restore_from_huggingface, repo_name)
         return web.json_response({"status": "ok", "restart_required": True})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
@@ -2860,7 +3039,7 @@ async def restore_selected_from_hf_endpoint(request):
     if not repo_name:
         return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
     try:
-        result = restore_selected_from_huggingface(repo_name, selections)
+        result = await asyncio.to_thread(restore_selected_from_huggingface, repo_name, selections)
         return web.json_response({"status": "ok", **result})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
@@ -2872,29 +3051,74 @@ async def delete_from_hf_backup_endpoint(request):
     except Exception:
         data = {}
     selections = data.get("items", [])
-    repo_name = _read_backup_repo_name()
+    repo_name = await asyncio.to_thread(_read_backup_repo_name)
     if not repo_name:
         return web.json_response({"status": "error", "message": "No repo name set in settings."}, status=400)
     try:
-        result = delete_selected_from_huggingface(repo_name, selections)
+        result = await asyncio.to_thread(delete_selected_from_huggingface, repo_name, selections)
         return web.json_response({"status": "ok", **result})
     except Exception as e:
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
+
+def _sync_get_disk_space() -> dict:
+    path = _get_models_root()
+    if not os.path.exists(path):
+        from .file_manager import get_comfy_root
+        path = get_comfy_root()
+    total, used, free = shutil.disk_usage(path)
+    return {
+        "total": total,
+        "used": used,
+        "free": free,
+    }
+
+
 async def get_disk_space(request):
     try:
-        path = _get_models_root()
-        if not os.path.exists(path):
-            from .file_manager import get_comfy_root
-            path = get_comfy_root()
-        total, used, free = shutil.disk_usage(path)
-        return web.json_response({
-            "total": total,
-            "used": used,
-            "free": free
-        })
+        payload = await asyncio.to_thread(_sync_get_disk_space)
+        return web.json_response(payload)
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
+
+
+def _sync_write_upload_chunk(upload_id: str, filename: str, folder: str, chunk_index: int, total_chunks: int, chunk_data: bytes) -> tuple[dict, int]:
+    folder = sanitize_rel_folder(folder) or "loras"
+    roots = _resolve_model_search_paths(folder)
+    if not roots:
+        return {"error": f"Invalid folder category: {folder}"}, 400
+
+    target_dir = roots[0]
+    if not is_path_within_allowed_roots(target_dir):
+        return {"error": "Target directory outside allowed model roots"}, 400
+    os.makedirs(target_dir, exist_ok=True)
+
+    clean_filename = os.path.basename(filename)
+    temp_file_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, f".upload-{upload_id}.tmp")))
+    if not is_path_within_allowed_roots(temp_file_path):
+        return {"error": "Temporary file path outside allowed model roots"}, 400
+
+    mode = "wb" if chunk_index == 0 else "ab"
+    with open(temp_file_path, mode) as f:
+        f.write(chunk_data)
+
+    if chunk_index + 1 == total_chunks:
+        final_file_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, clean_filename)))
+        if not is_path_within_allowed_roots(final_file_path):
+            try:
+                os.remove(temp_file_path)
+            except Exception:
+                pass
+            return {"error": "Final file path outside allowed model roots"}, 400
+        if os.path.exists(final_file_path):
+            try:
+                os.remove(final_file_path)
+            except Exception:
+                pass
+        os.rename(temp_file_path, final_file_path)
+        _invalidate_model_library_local_cache()
+
+    return {"status": "ok", "chunk_index": chunk_index}, 200
 
 
 async def upload_chunk(request):
@@ -2927,42 +3151,16 @@ async def upload_chunk(request):
         if not upload_id or not filename or not folder or chunk_index is None or not total_chunks or chunk_data is None:
             return web.json_response({"error": "Missing required chunk upload fields"}, status=400)
 
-        folder = sanitize_rel_folder(folder) or "loras"
-        roots = _resolve_model_search_paths(folder)
-        if not roots:
-            return web.json_response({"error": f"Invalid folder category: {folder}"}, status=400)
-
-        target_dir = roots[0]
-        if not is_path_within_allowed_roots(target_dir):
-            return web.json_response({"error": "Target directory outside allowed model roots"}, status=400)
-        os.makedirs(target_dir, exist_ok=True)
-
-        clean_filename = os.path.basename(filename)
-        temp_file_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, f".upload-{upload_id}.tmp")))
-        if not is_path_within_allowed_roots(temp_file_path):
-            return web.json_response({"error": "Temporary file path outside allowed model roots"}, status=400)
-
-        mode = "wb" if chunk_index == 0 else "ab"
-        with open(temp_file_path, mode) as f:
-            f.write(chunk_data)
-
-        if chunk_index + 1 == total_chunks:
-            final_file_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, clean_filename)))
-            if not is_path_within_allowed_roots(final_file_path):
-                try:
-                    os.remove(temp_file_path)
-                except Exception:
-                    pass
-                return web.json_response({"error": "Final file path outside allowed model roots"}, status=400)
-            if os.path.exists(final_file_path):
-                try:
-                    os.remove(final_file_path)
-                except Exception:
-                    pass
-            os.rename(temp_file_path, final_file_path)
-            _invalidate_model_library_local_cache()
-
-        return web.json_response({"status": "ok", "chunk_index": chunk_index})
+        payload, status = await asyncio.to_thread(
+            _sync_write_upload_chunk,
+            upload_id,
+            filename,
+            folder,
+            chunk_index,
+            total_chunks,
+            chunk_data,
+        )
+        return web.json_response(payload, status=status)
     except Exception as e:
         print(f"[ERROR] upload_chunk failed: {e}")
         return web.json_response({"error": str(e)}, status=500)
@@ -3068,7 +3266,7 @@ def _persist_download_state():
             active_items = []
             for did, info in download_status.items():
                 status = str(info.get("status") or "").strip().lower()
-                if status in ("queued", "downloading", "copying", "cleaning_cache", "finalizing"):
+                if status in ("queued", "downloading", "paused", "pausing", "copying", "cleaning_cache", "finalizing"):
                     active_items.append({
                         "download_id": did,
                         "retry_payload": info.get("retry_payload"),
@@ -3138,15 +3336,30 @@ def _load_interrupted_downloads():
             pass
 
 
-def setup(app_or_server):
-    try:
-        from .model_discovery import patch_lora_stack_nodes
-        patch_lora_stack_nodes()
-    except Exception:
-        pass
-    # --- Download crash protection: startup recovery ---
+def _run_startup_recovery():
+    global _startup_recovery_started
+    if _startup_recovery_started:
+        return
+    _startup_recovery_started = True
     _cleanup_orphaned_download_files()
     _load_interrupted_downloads()
+
+
+def setup(app_or_server):
+    if app_or_server is None:
+        return
+    with _setup_targets_lock:
+        target_id = id(app_or_server)
+        if target_id in _setup_registered_target_ids:
+            return
+        _setup_registered_target_ids.add(target_id)
+
+    set_backup_status_notifier(_broadcast_download_status_ws)
+    threading.Thread(
+        target=_run_startup_recovery,
+        name="hf-dl-startup-recovery",
+        daemon=True,
+    ).start()
 
     def _safe_add_route(method: str, path: str, handler):
         try:
@@ -3196,139 +3409,131 @@ def setup(app_or_server):
     _safe_add_route("POST", "/relocate_model_file", relocate_model_file)
     _safe_add_route("POST", "/install_models", install_models)
 
+    def _sync_queue_download(models: list) -> tuple[list, list]:
+        queued = []
+        rejected = []
+        for model in models:
+            filename = model.get("filename")
+            url = model.get("url")
+            download_mode = str(model.get("download_mode") or "").strip().lower()
+            folder_locked = bool(model.get("folder_locked"))
+            locked_folder = str(model.get("locked_folder") or "").strip()
+            is_hf_file_download = False
+
+            if download_mode == "folder":
+                folder = (
+                    locked_folder
+                    if folder_locked and locked_folder
+                    else str(model.get("folder", "") or "")
+                ).replace("\\", "/").strip().strip("/")
+                if not url:
+                    rejected.append({
+                        "filename": filename or "",
+                        "error": "Missing URL",
+                    })
+                    continue
+                try:
+                    folder_info = _build_parsed_folder_download_info(model)
+                except Exception as e:
+                    rejected.append({
+                        "filename": filename or "",
+                        "error": str(e),
+                    })
+                    continue
+                if not filename:
+                    filename = folder_info.get("display_name") or ""
+            else:
+                download_mode = "file"
+                folder_raw = locked_folder if folder_locked and locked_folder else model.get("folder", "checkpoints")
+                folder = sanitize_rel_folder(folder_raw) or "checkpoints"
+                has_hf_repo_path = bool(model.get("hf_repo") and model.get("hf_path"))
+                is_hf_file_download = has_hf_repo_path or (url and _is_supported_hf_link(url))
+                if not url and not has_hf_repo_path:
+                    rejected.append({
+                        "filename": filename or "",
+                        "error": "Missing URL",
+                    })
+                    continue
+                if url and not (_is_supported_hf_link(url) or _is_direct_http_url(url)):
+                    rejected.append({
+                        "filename": filename or "",
+                        "error": "URL must be a valid http(s) link or Hugging Face file link.",
+                    })
+                    continue
+                filename = _derive_file_display_name(model) or "download"
+
+            download_id = f"dl_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+            item = dict(model)
+            requested_filename = _sanitize_filename_hint(model.get("target_filename"))
+            if not requested_filename and download_mode == "file" and is_hf_file_download:
+                requested_filename = _sanitize_filename_hint(model.get("filename"))
+            if not requested_filename and download_mode == "file":
+                requested_filename = _sanitize_filename_hint(model.get("hf_path"))
+            item["download_id"] = download_id
+            item["filename"] = filename
+            item["display_name"] = _normalize_display_name(model.get("display_name")) or filename
+            item["requested_path"] = _normalize_display_name(model.get("requested_path")) or None
+            item["target_filename"] = requested_filename or None
+            item["folder"] = folder
+            item["download_mode"] = download_mode
+            destination_key = _download_destination_key(item)
+            existing_active = _find_existing_active_download(destination_key)
+            if existing_active:
+                queued.append({
+                    "download_id": existing_active["download_id"],
+                    "filename": existing_active.get("filename") or filename,
+                    "deduplicated": True,
+                })
+                continue
+            item["destination_key"] = destination_key
+            retry_payload = _build_retry_payload(item)
+
+            if download_mode == "file":
+                try:
+                    target_dir = resolve_target_dir(folder)
+                    os.makedirs(target_dir, exist_ok=True)
+                    dest_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, os.path.basename(requested_filename or filename))))
+                    if is_path_within_allowed_roots(dest_path) and not os.path.exists(dest_path):
+                        open(dest_path, 'a').close()
+                except Exception as e:
+                    print(f"[DEBUG] Failed to create empty placeholder file for {filename}: {e}")
+
+            with download_queue_lock:
+                download_queue.append(item)
+            _set_download_status(download_id, {
+                "status": "queued",
+                "filename": filename,
+                "display_name": item.get("display_name") or filename,
+                "requested_path": item.get("requested_path"),
+                "folder": folder,
+                "download_mode": download_mode,
+                "destination_key": destination_key,
+                "retry_payload": retry_payload,
+                "queued_at": time.time()
+            })
+            queued.append({"download_id": download_id, "filename": filename})
+
+        if queued:
+            _touch_queue_activity()
+        _start_download_worker()
+        return queued, rejected
+
     async def queue_download(request):
-        """Queue background downloads with status tracking."""
+        """Queue background downloads with status tracking (off event loop)."""
         try:
             data = await request.json()
             models = data.get("models", [])
-            queued = []
-            rejected = []
-            for model in models:
-                filename = model.get("filename")
-                url = model.get("url")
-                download_mode = str(model.get("download_mode") or "").strip().lower()
-                folder_locked = bool(model.get("folder_locked"))
-                locked_folder = str(model.get("locked_folder") or "").strip()
-                is_hf_file_download = False
-
-                if download_mode == "folder":
-                    folder = (
-                        locked_folder
-                        if folder_locked and locked_folder
-                        else str(model.get("folder", "") or "")
-                    ).replace("\\", "/").strip().strip("/")
-                    if not url:
-                        rejected.append({
-                            "filename": filename or "",
-                            "error": "Missing URL",
-                        })
-                        continue
-                    try:
-                        folder_info = _build_parsed_folder_download_info(model)
-                    except Exception as e:
-                        rejected.append({
-                            "filename": filename or "",
-                            "error": str(e),
-                        })
-                        continue
-                    if not filename:
-                        filename = folder_info.get("display_name") or ""
-                else:
-                    download_mode = "file"
-                    folder_raw = locked_folder if folder_locked and locked_folder else model.get("folder", "checkpoints")
-                    folder = sanitize_rel_folder(folder_raw) or "checkpoints"
-                    has_hf_repo_path = bool(model.get("hf_repo") and model.get("hf_path"))
-                    is_hf_file_download = has_hf_repo_path or (url and _is_supported_hf_link(url))
-                    if not url and not has_hf_repo_path:
-                        rejected.append({
-                            "filename": filename or "",
-                            "error": "Missing URL",
-                        })
-                        continue
-                    if url and not (_is_supported_hf_link(url) or _is_direct_http_url(url)):
-                        rejected.append({
-                            "filename": filename or "",
-                            "error": "URL must be a valid http(s) link or Hugging Face file link.",
-                        })
-                        continue
-                    filename = _derive_file_display_name(model) or "download"
-
-                download_id = f"dl_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
-                item = dict(model)
-                requested_filename = _sanitize_filename_hint(model.get("target_filename"))
-                if not requested_filename and download_mode == "file" and is_hf_file_download:
-                    requested_filename = _sanitize_filename_hint(model.get("filename"))
-                if not requested_filename and download_mode == "file":
-                    requested_filename = _sanitize_filename_hint(model.get("hf_path"))
-                item["download_id"] = download_id
-                item["filename"] = filename
-                item["display_name"] = _normalize_display_name(model.get("display_name")) or filename
-                item["requested_path"] = _normalize_display_name(model.get("requested_path")) or None
-                item["target_filename"] = requested_filename or None
-                item["folder"] = folder
-                item["download_mode"] = download_mode
-                destination_key = _download_destination_key(item)
-                existing_active = _find_existing_active_download(destination_key)
-                if existing_active:
-                    queued.append({
-                        "download_id": existing_active["download_id"],
-                        "filename": existing_active.get("filename") or filename,
-                        "deduplicated": True,
-                    })
-                    continue
-                item["destination_key"] = destination_key
-                retry_payload = _build_retry_payload(item)
-                
-                if download_mode == "file":
-                    try:
-                        target_dir = resolve_target_dir(folder)
-                        os.makedirs(target_dir, exist_ok=True)
-                        dest_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, os.path.basename(requested_filename or filename))))
-                        if is_path_within_allowed_roots(dest_path) and not os.path.exists(dest_path):
-                            open(dest_path, 'a').close()
-                    except Exception as e:
-                        print(f"[DEBUG] Failed to create empty placeholder file for {filename}: {e}")
-                
-                with download_queue_lock:
-                    download_queue.append(item)
-                _set_download_status(download_id, {
-                    "status": "queued",
-                    "filename": filename,
-                    "display_name": item.get("display_name") or filename,
-                    "requested_path": item.get("requested_path"),
-                    "folder": folder,
-                    "download_mode": download_mode,
-                    "destination_key": destination_key,
-                    "retry_payload": retry_payload,
-                    "queued_at": time.time()
-                })
-                queued.append({"download_id": download_id, "filename": filename})
-
-            if queued:
-                _touch_queue_activity()
-            _start_download_worker()
+            queued, rejected = await asyncio.to_thread(_sync_queue_download, models)
             return web.json_response({"queued": queued, "rejected": rejected})
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
 
-    async def cancel_download(request):
-        """Cancel a queued download or request cancellation for an active one."""
-        try:
-            data = await request.json()
-        except Exception:
-            data = {}
-        download_id = (data.get("download_id") or "").strip()
-        if not download_id:
-            return web.json_response({"error": "download_id is required"}, status=400)
-
+    def _cancel_single_download(download_id: str) -> str:
+        _clear_pause_request(download_id)
         _request_cancel(download_id)
-        try:
-            from .downloader import abort_hf_transfer
-            abort_hf_transfer()
-        except Exception:
-            pass
 
         removed_from_queue = False
+        removed_from_paused = False
         with download_queue_lock:
             if download_queue:
                 kept = []
@@ -3339,15 +3544,19 @@ def setup(app_or_server):
                     kept.append(item)
                 if removed_from_queue:
                     download_queue[:] = kept
+            if download_id in paused_downloads:
+                paused_downloads.pop(download_id, None)
+                removed_from_paused = True
 
-        if removed_from_queue:
+        if removed_from_queue or removed_from_paused:
             _set_download_status(download_id, {
                 "status": "cancelled",
-                "message": "Cancelled before download started",
+                "phase": "cancelled",
+                "message": "Cancelled",
                 "finished_at": time.time()
             })
             _clear_cancel_request(download_id)
-            return web.json_response({"status": "cancelled", "download_id": download_id})
+            return "cancelled"
 
         with pending_verifications_lock:
             before = len(pending_verifications)
@@ -3359,41 +3568,262 @@ def setup(app_or_server):
         if removed_from_verify:
             _set_download_status(download_id, {
                 "status": "cancelled",
+                "phase": "cancelled",
                 "message": "Cancelled before verification",
                 "finished_at": time.time()
             })
             _clear_cancel_request(download_id)
-            return web.json_response({"status": "cancelled", "download_id": download_id})
+            return "cancelled"
 
         with download_status_lock:
             current = dict(download_status.get(download_id, {}))
         current_status = current.get("status")
         if current_status in ("cancelled", "failed", "completed"):
             _clear_cancel_request(download_id)
-            return web.json_response({"status": current_status, "download_id": download_id})
+            return str(current_status)
 
         if current_status == "cancelling":
-            return web.json_response({"status": "cancelling", "download_id": download_id})
+            return "cancelling"
 
-        if current_status in ("downloading", "copying", "cleaning_cache", "finalizing", "verifying", "downloaded"):
+        if current_status in ("downloading", "pausing", "copying", "cleaning_cache", "finalizing", "verifying", "downloaded"):
             _set_download_status(download_id, {
                 "status": "cancelling",
                 "phase": "cancelling",
                 "updated_at": time.time()
             })
-            return web.json_response({"status": "cancelling", "download_id": download_id})
+            try:
+                from .downloader import abort_hf_transfer
+                abort_hf_transfer()
+            except Exception:
+                pass
+            return "cancelling"
+
+        if current_status == "paused":
+            _set_download_status(download_id, {
+                "status": "cancelled",
+                "phase": "cancelled",
+                "message": "Cancelled",
+                "finished_at": time.time()
+            })
+            _clear_cancel_request(download_id)
+            return "cancelled"
 
         # Fallback when status entry is missing or still queued in race window.
         _set_download_status(download_id, {
             "status": "cancelled",
+            "phase": "cancelled",
             "message": "Cancelled",
             "finished_at": time.time()
         })
         _clear_cancel_request(download_id)
-        return web.json_response({"status": "cancelled", "download_id": download_id})
+        return "cancelled"
+
+    async def cancel_download(request):
+        """Cancel one or all downloads (and optionally active backup tasks)."""
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        cancel_all = bool(data.get("cancel_all", False))
+        include_backups = bool(data.get("include_backups", True))
+
+        if cancel_all:
+            with download_status_lock:
+                candidate_ids = [
+                    did for did, info in download_status.items()
+                    if str((info or {}).get("status") or "").strip().lower() not in ("completed", "failed", "cancelled")
+                ]
+            with download_queue_lock:
+                for item in download_queue:
+                    did = item.get("download_id")
+                    if did and did not in candidate_ids:
+                        candidate_ids.append(did)
+                for did in paused_downloads.keys():
+                    if did and did not in candidate_ids:
+                        candidate_ids.append(did)
+
+            cancelled = []
+            cancelling = []
+            for did in candidate_ids:
+                res_status = _cancel_single_download(did)
+                if res_status == "cancelling":
+                    cancelling.append(did)
+                else:
+                    cancelled.append(did)
+
+            cancelled_backups = cancel_backup_task(cancel_all=True) if include_backups else []
+            return web.json_response({
+                "status": "cancelled",
+                "cancelled": cancelled,
+                "cancelling": cancelling,
+                "cancelled_backups": cancelled_backups,
+            })
+
+        download_id = (data.get("download_id") or "").strip()
+        if not download_id:
+            return web.json_response({"error": "download_id is required"}, status=400)
+        res_status = _cancel_single_download(download_id)
+        return web.json_response({"status": res_status, "download_id": download_id})
+
+    async def pause_download(request):
+        """Pause a queued/active download or all active/queued downloads."""
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        pause_all = bool(data.get("pause_all", False))
+        download_id = (data.get("download_id") or "").strip()
+        if not pause_all and not download_id:
+            return web.json_response({"error": "download_id is required"}, status=400)
+
+        target_ids = []
+        if pause_all:
+            with download_status_lock:
+                target_ids = [
+                    did for did, info in download_status.items()
+                    if str((info or {}).get("status") or "").strip().lower() in (
+                        "queued", "downloading", "copying", "cleaning_cache", "finalizing", "verifying"
+                    )
+                ]
+            with download_queue_lock:
+                for item in download_queue:
+                    did = item.get("download_id")
+                    if did and did not in target_ids:
+                        target_ids.append(did)
+        else:
+            target_ids = [download_id]
+
+        paused_ids = []
+        pausing_ids = []
+        need_abort = False
+
+        for did in target_ids:
+            queued_item = None
+            with download_queue_lock:
+                kept = []
+                for item in download_queue:
+                    if item.get("download_id") == did and queued_item is None:
+                        queued_item = item
+                    else:
+                        kept.append(item)
+                if queued_item is not None:
+                    download_queue[:] = kept
+
+            if queued_item is not None:
+                _mark_download_paused(did, queued_item)
+                paused_ids.append(did)
+                continue
+
+            with download_status_lock:
+                current = dict(download_status.get(did, {}))
+            current_status = str(current.get("status") or "").strip().lower()
+            if current_status == "paused":
+                paused_ids.append(did)
+                continue
+            if current_status in ("downloading", "copying", "cleaning_cache", "finalizing", "verifying"):
+                _request_pause(did)
+                _set_download_status(did, {
+                    "status": "pausing",
+                    "phase": "pausing",
+                    "speed_bps": 0,
+                    "eta_seconds": None,
+                    "updated_at": time.time(),
+                })
+                pausing_ids.append(did)
+                need_abort = True
+            elif current_status == "pausing":
+                pausing_ids.append(did)
+
+        if need_abort:
+            try:
+                from .downloader import abort_hf_transfer
+                abort_hf_transfer()
+            except Exception:
+                pass
+
+        return web.json_response({"paused": paused_ids, "pausing": pausing_ids})
+
+    async def resume_download(request):
+        """Resume a paused download or all paused downloads."""
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        resume_all = bool(data.get("resume_all", False))
+        download_id = (data.get("download_id") or "").strip()
+        if not resume_all and not download_id:
+            return web.json_response({"error": "download_id is required"}, status=400)
+
+        with download_status_lock:
+            status_snapshot = {k: dict(v) for k, v in download_status.items()}
+
+        if resume_all:
+            target_ids = [
+                did for did, info in status_snapshot.items()
+                if str((info or {}).get("status") or "").strip().lower() in ("paused", "pausing")
+            ]
+        else:
+            target_ids = [download_id]
+
+        resumed_ids = []
+        for did in target_ids:
+            info = status_snapshot.get(did) or {}
+            st = str(info.get("status") or "").strip().lower()
+            if st not in ("paused", "pausing"):
+                continue
+            _clear_pause_request(did)
+            _clear_cancel_request(did)
+
+            item = None
+            with download_queue_lock:
+                item = paused_downloads.pop(did, None)
+                if item is None:
+                    payload = info.get("retry_payload")
+                    if isinstance(payload, dict):
+                        item = dict(payload)
+                        item["download_id"] = did
+                        item["filename"] = item.get("filename") or info.get("filename") or "download"
+                        item["display_name"] = item.get("display_name") or info.get("display_name") or item["filename"]
+                        item["folder"] = item.get("folder") or info.get("folder") or "checkpoints"
+                        item["download_mode"] = item.get("download_mode") or info.get("download_mode") or "file"
+                        item["destination_key"] = info.get("destination_key") or _download_destination_key(item)
+                if item is not None:
+                    already_queued = any(q.get("download_id") == did for q in download_queue)
+                    if not already_queued:
+                        download_queue.append(item)
+
+            if item is not None:
+                _set_download_status(did, {
+                    "status": "queued",
+                    "phase": "queued",
+                    "message": "Resumed",
+                    "speed_bps": 0,
+                    "eta_seconds": None,
+                    "updated_at": time.time(),
+                })
+                resumed_ids.append(did)
+
+        if resumed_ids:
+            _touch_queue_activity()
+            _start_download_worker()
+
+        return web.json_response({"resumed": resumed_ids})
+
+    async def cancel_backup_task_endpoint(request):
+        """Cancel one or all active/queued backup upload or restore tasks."""
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        cancel_all = bool(data.get("cancel_all", False))
+        task_id = str(data.get("task_id") or "").strip()
+        if not cancel_all and not task_id:
+            return web.json_response({"error": "task_id or cancel_all is required"}, status=400)
+        cancelled = cancel_backup_task(task_id=task_id, cancel_all=cancel_all)
+        return web.json_response({"cancelled": cancelled})
 
     async def download_status_endpoint(request):
-        """Get current status of downloads."""
+        """Get current status of downloads and background backup tasks."""
         ids_param = request.query.get("ids", "")
         ids = [x for x in ids_param.split(",") if x]
         with download_status_lock:
@@ -3401,7 +3831,8 @@ def setup(app_or_server):
                 filtered = {i: download_status.get(i) for i in ids if i in download_status}
             else:
                 filtered = dict(download_status)
-        return web.json_response({"downloads": filtered})
+        backup_tasks = get_backup_tasks_snapshot()
+        return web.json_response({"downloads": filtered, "backup_tasks": backup_tasks})
 
     async def search_status_endpoint(request):
         request_id = request.query.get("request_id", "")
@@ -3820,7 +4251,8 @@ def setup(app_or_server):
         remote_filename = parsed["file"]
         if parsed.get("subfolder"):
             remote_filename = f"{parsed['subfolder'].strip('/')}/{parsed['file']}"
-        size, _, _ = get_remote_file_metadata(
+        size, _, _ = await asyncio.to_thread(
+            get_remote_file_metadata,
             parsed["repo"],
             remote_filename,
             revision=parsed.get("revision"),
@@ -3885,7 +4317,7 @@ def setup(app_or_server):
 
         try:
             parsed = _build_parsed_download_info(model_payload)
-            _, path = run_download(parsed, category, sync=True, overwrite=False)
+            _, path = await asyncio.to_thread(run_download, parsed, category, sync=True, overwrite=False)
         except Exception as e:
             message = str(e) or "Download failed."
             if "Invalid credentials" in message or "401" in message:
@@ -3971,10 +4403,8 @@ def setup(app_or_server):
                 download_status.pop(did, None)
                 dismissed.append(did)
         # Clean up the state file if no interrupted items remain
-        try:
-            _persist_download_state()
-        except Exception:
-            pass
+        _schedule_persist_download_state()
+        _broadcast_download_status_ws(force=True)
         return web.json_response({"dismissed": dismissed})
 
     async def resume_interrupted(request):
@@ -4037,6 +4467,9 @@ def setup(app_or_server):
     _safe_add_route("POST", "/api/model_explorer/download", model_explorer_download_proxy)
     _safe_add_route("POST", "/api/hf_downloader/model_explorer/download", model_explorer_download_proxy)
     _safe_add_route("POST", "/cancel_download", cancel_download)
+    _safe_add_route("POST", "/pause_download", pause_download)
+    _safe_add_route("POST", "/resume_download", resume_download)
+    _safe_add_route("POST", "/cancel_backup_task", cancel_backup_task_endpoint)
     _safe_add_route("POST", "/dismiss_interrupted", dismiss_interrupted)
     _safe_add_route("POST", "/resume_interrupted", resume_interrupted)
     _safe_add_route("GET", "/download_status", download_status_endpoint)
@@ -4050,37 +4483,11 @@ def setup(app_or_server):
     _safe_add_route("POST", f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_add_tags)
     _safe_add_route("DELETE", f"{MODEL_LIBRARY_ASSET_ROUTE_BASE}/{{asset_id}}/tags", hf_model_library_asset_remove_tags)
 
-    # --- Model Explorer Routes ---
+    # --- Model Explorer Extra Routes (non-duplicate endpoints) ---
     _safe_add_route("GET", "/hf_downloader_model_explorer_v2/disk_space", get_disk_space)
     _safe_add_route("POST", "/hf_downloader_model_explorer_v2/upload_chunk", upload_chunk)
-    _safe_add_route("GET", "/hf_downloader_model_explorer_v2/categories", model_explorer_list_categories)
-    _safe_add_route("GET", "/hf_downloader_model_explorer_v2/filters", model_explorer_get_filters)
-    _safe_add_route("GET", "/hf_downloader_model_explorer_v2/groups", model_explorer_list_groups)
-    _safe_add_route("GET", "/hf_downloader_model_explorer_v2/hf_search", model_explorer_hf_search)
-    _safe_add_route("POST", "/hf_downloader_model_explorer_v2/use", model_explorer_use)
-    _safe_add_route("POST", "/hf_downloader_model_explorer_v2/delete", model_explorer_delete)
     _safe_add_route("POST", "/hf_downloader_model_explorer_v2/download", model_explorer_download_proxy)
-
-    _safe_add_route("GET", "/hf_model_explorer/categories", model_explorer_list_categories)
-    _safe_add_route("GET", "/hf_model_explorer/filters", model_explorer_get_filters)
-    _safe_add_route("GET", "/hf_model_explorer/groups", model_explorer_list_groups)
-    _safe_add_route("GET", "/hf_model_explorer/hf_search", model_explorer_hf_search)
-    _safe_add_route("POST", "/hf_model_explorer/use", model_explorer_use)
-    _safe_add_route("POST", "/hf_model_explorer/delete", model_explorer_delete)
     _safe_add_route("POST", "/hf_model_explorer/download", model_explorer_download_proxy)
-
-    _safe_add_route("GET", "/api/model_explorer/categories", model_explorer_list_categories)
-    _safe_add_route("GET", "/api/model_explorer/filters", model_explorer_get_filters)
-    _safe_add_route("GET", "/api/model_explorer/groups", model_explorer_list_groups)
-    _safe_add_route("GET", "/api/model_explorer/hf_search", model_explorer_hf_search)
-    _safe_add_route("POST", "/api/model_explorer/use", model_explorer_use)
-    _safe_add_route("POST", "/api/model_explorer/delete", model_explorer_delete)
-    _safe_add_route("GET", "/api/hf_downloader/model_explorer/categories", model_explorer_list_categories)
-    _safe_add_route("GET", "/api/hf_downloader/model_explorer/filters", model_explorer_get_filters)
-    _safe_add_route("GET", "/api/hf_downloader/model_explorer/groups", model_explorer_list_groups)
-    _safe_add_route("GET", "/api/hf_downloader/model_explorer/hf_search", model_explorer_hf_search)
-    _safe_add_route("POST", "/api/hf_downloader/model_explorer/use", model_explorer_use)
-    _safe_add_route("POST", "/api/hf_downloader/model_explorer/delete", model_explorer_delete)
 
 
 def _model_explorer_normalize_text(value: str) -> str:
@@ -4370,64 +4777,191 @@ def _model_explorer_find_row(filename: str, category: str = "") -> dict | None:
     return None
 
 
+def _sync_model_explorer_list_categories() -> dict:
+    rows = _model_explorer_collect_rows()
+    counts = Counter()
+    for row in rows:
+        category = str(row.get("explorer_category") or "").strip()
+        if category:
+            counts[category] += 1
+    local_entries, _ = _scan_local_models_for_explorer("")
+    for record in local_entries:
+        category = _model_explorer_category_from_local_record(record)
+        if category:
+            counts[category] += 1
+    categories = [
+        {"id": category, "count": int(count)}
+        for category, count in sorted(counts.items(), key=lambda item: item[0])
+    ]
+    return {"categories": categories}
+
+
 async def model_explorer_list_categories(request):
     try:
-        rows = _model_explorer_collect_rows()
-        counts = Counter()
-        for row in rows:
-            category = str(row.get("explorer_category") or "").strip()
-            if category:
-                counts[category] += 1
-        local_entries, _ = _scan_local_models_for_explorer("")
-        for record in local_entries:
-            category = _model_explorer_category_from_local_record(record)
-            if category:
-                counts[category] += 1
-        categories = [
-            {"id": category, "count": int(count)}
-            for category, count in sorted(counts.items(), key=lambda item: item[0])
-        ]
-        return web.json_response({"categories": categories})
+        payload = await asyncio.to_thread(_sync_model_explorer_list_categories)
+        return web.json_response(payload)
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
+
+
+def _sync_model_explorer_get_filters(category_filter: str, installed_only: bool) -> dict:
+    rows = _model_explorer_collect_rows()
+    precisions = set()
+    bases = set()
+    local_entries, local_name_map = _scan_local_models_for_explorer(category_filter)
+    local_only_rows = _model_explorer_collect_local_only_rows(rows, local_entries, local_name_map, category_filter)
+    rows_for_filters = rows + local_only_rows
+
+    for row in rows_for_filters:
+        category = str(row.get("explorer_category") or "").strip()
+        if category_filter and category != category_filter:
+            continue
+        if installed_only:
+            installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
+            if not installed_info.get("installed"):
+                continue
+        precisions.add(_model_explorer_precision(str(row.get("filename") or "")))
+        if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES:
+            base_value = _canonical_model_explorer_base(str(row.get("explorer_base") or "").strip()) or "unknown"
+            bases.add(base_value)
+
+    known_precisions = sorted([x for x in precisions if x and x != "unknown"])
+    precision_values = known_precisions[:]
+    if known_precisions and "unknown" in precisions:
+        precision_values.append("unknown")
+
+    return {
+        "precisions": precision_values,
+        "bases": sorted(bases) if category_filter in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES else [],
+    }
 
 
 async def model_explorer_get_filters(request):
     try:
         category_filter = str(request.query.get("category") or "").strip()
-        rows = _model_explorer_collect_rows()
-        precisions = set()
-        bases = set()
         installed_only = _coerce_bool(request.query.get("installed_only"), default=False)
-        local_entries, local_name_map = _scan_local_models_for_explorer(category_filter)
-        local_only_rows = _model_explorer_collect_local_only_rows(rows, local_entries, local_name_map, category_filter)
-        rows_for_filters = rows + local_only_rows
-
-        for row in rows_for_filters:
-            category = str(row.get("explorer_category") or "").strip()
-            if category_filter and category != category_filter:
-                continue
-            if installed_only:
-                installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
-                if not installed_info.get("installed"):
-                    continue
-            precisions.add(_model_explorer_precision(str(row.get("filename") or "")))
-            if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES:
-                base_value = _canonical_model_explorer_base(str(row.get("explorer_base") or "").strip()) or "unknown"
-                bases.add(base_value)
-
-        known_precisions = sorted([x for x in precisions if x and x != "unknown"])
-        precision_values = known_precisions[:]
-        if known_precisions and "unknown" in precisions:
-            precision_values.append("unknown")
-
-        payload = {
-            "precisions": precision_values,
-            "bases": sorted(bases) if category_filter in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES else [],
-        }
+        payload = await asyncio.to_thread(_sync_model_explorer_get_filters, category_filter, installed_only)
         return web.json_response(payload)
     except Exception as e:
         return web.json_response({"error": str(e)}, status=500)
+
+
+def _sync_model_explorer_list_groups(
+    category_filter: str,
+    base_filter: str,
+    precision_filter: str,
+    installed_only: bool,
+    search_query: str,
+    offset: int,
+    limit: int,
+    installed_first: bool,
+) -> dict:
+    rows = _model_explorer_collect_rows()
+    local_entries, local_name_map = _scan_local_models_for_explorer(category_filter)
+    local_only_rows = _model_explorer_collect_local_only_rows(rows, local_entries, local_name_map, category_filter)
+    all_rows = rows + local_only_rows
+
+    grouped: dict[str, dict] = {}
+    for row in all_rows:
+        filename = str(row.get("filename") or "").strip()
+        if not filename:
+            continue
+
+        category = str(row.get("explorer_category") or "").strip()
+        if category_filter and category != category_filter:
+            continue
+
+        base_value = _canonical_model_explorer_base(str(row.get("explorer_base") or "").strip()) or (
+            "unknown" if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES else ""
+        )
+        if base_filter and category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES and base_value != base_filter:
+            continue
+
+        precision = _model_explorer_precision(filename)
+        if precision_filter and precision_filter != "any" and precision != precision_filter:
+            continue
+
+        if search_query and not _model_explorer_search_matches(
+            search_query,
+            [
+                filename,
+                base_value,
+                category,
+                str(row.get("provider") or ""),
+                str(row.get("repo_id") or ""),
+                str(row.get("directory") or ""),
+            ],
+        ):
+            continue
+
+        installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
+        if installed_only and not installed_info.get("installed"):
+            continue
+        stem = _model_explorer_group_stem(row)
+        group_key = f"{stem}|{category}|{base_value}"
+        group_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"model-explorer|{group_key}"))
+
+        if group_key not in grouped:
+            grouped[group_key] = {
+                "group_id": group_id,
+                "group_name": stem,
+                "category": category,
+                "base": base_value if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES else None,
+                "installed": False,
+                "variants": [],
+            }
+
+        variant = {
+            "filename": filename,
+            "url": row.get("url"),
+            "precision": precision,
+            "source": row.get("source"),
+            "provider": row.get("provider"),
+            "preview_url": row.get("preview_url"),
+            "content_length": row.get("content_length"),
+            "size_bytes": installed_info.get("size_bytes") if installed_info.get("installed") else row.get("content_length"),
+            "repo_id": row.get("repo_id"),
+            "directory": row.get("directory"),
+            "local_only": bool(row.get("local_only")),
+            "installed": bool(installed_info.get("installed")),
+            "model_path": installed_info.get("widget_path"),
+        }
+        grouped[group_key]["variants"].append(variant)
+        if variant["installed"]:
+            grouped[group_key]["installed"] = True
+
+    groups = list(grouped.values())
+    for group in groups:
+        group["variants"].sort(
+            key=lambda item: (
+                0 if item.get("installed") else 1,
+                _model_explorer_variant_format_rank(str(item.get("filename") or "")),
+                _model_explorer_variant_precision_rank(str(item.get("precision") or "")),
+                str(item.get("filename") or "").lower(),
+            )
+        )
+        first_name = str(group["variants"][0].get("filename") or "").strip() if group["variants"] else ""
+        if first_name:
+            group["group_name"] = first_name
+
+    groups.sort(
+        key=lambda group: (
+            0 if (installed_first and group.get("installed")) else 1,
+            str(group.get("group_name") or "").lower(),
+        )
+    )
+
+    total = len(groups)
+    page = groups[offset : offset + limit]
+    has_more = offset + len(page) < total
+
+    return {
+        "groups": page,
+        "offset": offset,
+        "limit": limit,
+        "total_groups": total,
+        "has_more": has_more,
+    }
 
 
 async def model_explorer_list_groups(request):
@@ -4441,115 +4975,57 @@ async def model_explorer_list_groups(request):
         limit = _safe_int(request.query.get("limit"), default=150, minimum=1, maximum=2000)
         installed_first = _coerce_bool(request.query.get("installed_first"), default=True)
 
-        rows = _model_explorer_collect_rows()
-        local_entries, local_name_map = _scan_local_models_for_explorer(category_filter)
-        local_only_rows = _model_explorer_collect_local_only_rows(rows, local_entries, local_name_map, category_filter)
-        all_rows = rows + local_only_rows
-
-        grouped: dict[str, dict] = {}
-        for row in all_rows:
-            filename = str(row.get("filename") or "").strip()
-            if not filename:
-                continue
-
-            category = str(row.get("explorer_category") or "").strip()
-            if category_filter and category != category_filter:
-                continue
-
-            base_value = _canonical_model_explorer_base(str(row.get("explorer_base") or "").strip()) or (
-                "unknown" if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES else ""
-            )
-            if base_filter and category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES and base_value != base_filter:
-                continue
-
-            precision = _model_explorer_precision(filename)
-            if precision_filter and precision_filter != "any" and precision != precision_filter:
-                continue
-
-            if search_query and not _model_explorer_search_matches(
-                search_query,
-                [
-                    filename,
-                    base_value,
-                    category,
-                    str(row.get("provider") or ""),
-                    str(row.get("repo_id") or ""),
-                    str(row.get("directory") or ""),
-                ],
-            ):
-                continue
-
-            installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
-            if installed_only and not installed_info.get("installed"):
-                continue
-            stem = _model_explorer_group_stem(row)
-            group_key = f"{stem}|{category}|{base_value}"
-            group_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"model-explorer|{group_key}"))
-
-            if group_key not in grouped:
-                grouped[group_key] = {
-                    "group_id": group_id,
-                    "group_name": stem,
-                    "category": category,
-                    "base": base_value if category in MODEL_EXPLORER_BASE_APPLICABLE_CATEGORIES else None,
-                    "installed": False,
-                    "variants": [],
-                }
-
-            variant = {
-                "filename": filename,
-                "url": row.get("url"),
-                "precision": precision,
-                "source": row.get("source"),
-                "provider": row.get("provider"),
-                "preview_url": row.get("preview_url"),
-                "content_length": row.get("content_length"),
-                "size_bytes": installed_info.get("size_bytes") if installed_info.get("installed") else row.get("content_length"),
-                "repo_id": row.get("repo_id"),
-                "directory": row.get("directory"),
-                "local_only": bool(row.get("local_only")),
-                "installed": bool(installed_info.get("installed")),
-                "model_path": installed_info.get("widget_path"),
-            }
-            grouped[group_key]["variants"].append(variant)
-            if variant["installed"]:
-                grouped[group_key]["installed"] = True
-
-        groups = list(grouped.values())
-        for group in groups:
-            group["variants"].sort(
-                key=lambda item: (
-                    0 if item.get("installed") else 1,
-                    _model_explorer_variant_format_rank(str(item.get("filename") or "")),
-                    _model_explorer_variant_precision_rank(str(item.get("precision") or "")),
-                    str(item.get("filename") or "").lower(),
-                )
-            )
-            first_name = str(group["variants"][0].get("filename") or "").strip() if group["variants"] else ""
-            if first_name:
-                group["group_name"] = first_name
-
-        groups.sort(
-            key=lambda group: (
-                0 if (installed_first and group.get("installed")) else 1,
-                str(group.get("group_name") or "").lower(),
-            )
+        payload = await asyncio.to_thread(
+            _sync_model_explorer_list_groups,
+            category_filter,
+            base_filter,
+            precision_filter,
+            installed_only,
+            search_query,
+            offset,
+            limit,
+            installed_first,
         )
-
-        total = len(groups)
-        page = groups[offset : offset + limit]
-        has_more = offset + len(page) < total
-
-        return web.json_response({
-            "groups": page,
-            "offset": offset,
-            "limit": limit,
-            "total_groups": total,
-            "has_more": has_more,
-        })
+        return web.json_response(payload)
     except Exception as e:
         traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)
+
+
+def _sync_model_explorer_use(filename: str, category: str) -> tuple[dict, int]:
+    row = _model_explorer_find_row(filename, category=category)
+    _, local_name_map = _scan_local_models_for_explorer(category)
+    if not row:
+        row = {
+            "filename": filename,
+            "explorer_category": category,
+            "directory": category,
+            "local_only": True,
+        }
+    installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
+    if not installed_info.get("installed"):
+        return {"error": "Model is not installed locally."}, 400
+    model_filename = str(row.get("filename") or filename or "").strip()
+    type_value = str(row.get("type") or "").strip().lower()
+    manager_type_value = str(row.get("manager_type") or "").strip().lower()
+    is_gguf = (
+        model_filename.lower().endswith(".gguf")
+        or type_value in {"gguf", "gguf_model"}
+        or manager_type_value == "gguf"
+    )
+
+    return {
+        "status": "ok",
+        "filename": filename,
+        "category": row.get("explorer_category"),
+        "model_path": installed_info.get("widget_path"),
+        "node_hint": {
+            "category": row.get("explorer_category"),
+            "is_gguf": bool(is_gguf),
+            "type": row.get("type"),
+            "manager_type": row.get("manager_type"),
+        },
+    }, 200
 
 
 async def model_explorer_use(request):
@@ -4563,53 +5039,11 @@ async def model_explorer_use(request):
     if not filename:
         return web.json_response({"error": "Missing filename."}, status=400)
 
-    row = _model_explorer_find_row(filename, category=category)
-    _, local_name_map = _scan_local_models_for_explorer(category)
-    if not row:
-        row = {
-            "filename": filename,
-            "explorer_category": category,
-            "directory": category,
-            "local_only": True,
-        }
-    installed_info = _model_explorer_resolve_installed_info(row, local_name_map)
-    if not installed_info.get("installed"):
-        return web.json_response({"error": "Model is not installed locally."}, status=400)
-    model_filename = str(row.get("filename") or filename or "").strip()
-    type_value = str(row.get("type") or "").strip().lower()
-    manager_type_value = str(row.get("manager_type") or "").strip().lower()
-    is_gguf = (
-        model_filename.lower().endswith(".gguf")
-        or type_value in {"gguf", "gguf_model"}
-        or manager_type_value == "gguf"
-    )
-
-    return web.json_response({
-        "status": "ok",
-        "filename": filename,
-        "category": row.get("explorer_category"),
-        "model_path": installed_info.get("widget_path"),
-        "node_hint": {
-            "category": row.get("explorer_category"),
-            "is_gguf": bool(is_gguf),
-            "type": row.get("type"),
-            "manager_type": row.get("manager_type"),
-        },
-    })
+    payload, status = await asyncio.to_thread(_sync_model_explorer_use, filename, category)
+    return web.json_response(payload, status=status)
 
 
-async def model_explorer_delete(request):
-    try:
-        data = await request.json()
-    except Exception:
-        data = {}
-
-    filename = str(data.get("filename") or "").strip()
-    category = str(data.get("category") or "").strip()
-    requested_model_path = _normalize_rel_path(str(data.get("model_path") or "").strip())
-    if not filename:
-        return web.json_response({"error": "Missing filename."}, status=400)
-
+def _sync_model_explorer_delete(filename: str, category: str, requested_model_path: str) -> tuple[dict, int]:
     _, local_name_map = _scan_local_models_for_explorer(category)
     filename_norm = _normalize_rel_path(filename)
     basename = os.path.basename(filename_norm).strip() or filename_norm
@@ -4623,7 +5057,7 @@ async def model_explorer_delete(request):
     if not candidates and basename:
         candidates = list(local_name_map.get(basename.lower()) or [])
     if not candidates:
-        return web.json_response({"error": "Model file not found locally."}, status=404)
+        return {"error": "Model file not found locally."}, 404
 
     chosen = None
     preferred = []
@@ -4649,12 +5083,12 @@ async def model_explorer_delete(request):
         chosen = fallback[0]
 
     if chosen is None:
-        return web.json_response({"error": "No matching installed model path found."}, status=404)
+        return {"error": "No matching installed model path found."}, 404
 
     candidate, rel_path, widget_path = chosen
     absolute_path = os.path.abspath(str(candidate.get("absolute_path") or ""))
     if not absolute_path or not os.path.isfile(absolute_path):
-        return web.json_response({"error": "Resolved model path is not a file."}, status=404)
+        return {"error": "Resolved model path is not a file."}, 404
     try:
         import folder_paths
     except ImportError:
@@ -4671,7 +5105,6 @@ async def model_explorer_delete(request):
                 except Exception:
                     pass
 
-    # Always fallback/include default models_root
     search_paths.append(_get_models_root())
 
     for root_path in search_paths:
@@ -4680,20 +5113,36 @@ async def model_explorer_delete(request):
             break
 
     if not allowed:
-        return web.json_response({"error": "Refusing to delete path outside registered model paths."}, status=400)
+        return {"error": "Refusing to delete path outside registered model paths."}, 400
 
     try:
         os.remove(absolute_path)
     except Exception as e:
-        return web.json_response({"error": f"Delete failed: {e}"}, status=500)
+        return {"error": f"Delete failed: {e}"}, 500
 
     _invalidate_model_library_local_cache()
-    return web.json_response({
+    return {
         "status": "deleted",
         "filename": filename,
         "rel_path": rel_path,
         "model_path": widget_path,
-    })
+    }, 200
+
+
+async def model_explorer_delete(request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    filename = str(data.get("filename") or "").strip()
+    category = str(data.get("category") or "").strip()
+    requested_model_path = _normalize_rel_path(str(data.get("model_path") or "").strip())
+    if not filename:
+        return web.json_response({"error": "Missing filename."}, status=400)
+
+    payload, status = await asyncio.to_thread(_sync_model_explorer_delete, filename, category, requested_model_path)
+    return web.json_response(payload, status=status)
 
 
 async def model_explorer_hf_search(request):

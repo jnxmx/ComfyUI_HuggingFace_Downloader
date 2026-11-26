@@ -63,19 +63,16 @@ try:
         with _web_api_register_lock:
             if _web_api_registered:
                 return True
-            try:
-                from .model_discovery import patch_lora_stack_nodes
-                patch_lora_stack_nodes()
-            except Exception:
-                pass
             prompt_instance = getattr(server.PromptServer, "instance", None)
             if prompt_instance is None:
                 return False
             try:
-                # Primary path (aiohttp app router)
-                web_api.setup(getattr(prompt_instance, "app", None))
-                # Fallback path for environments that expose route table differently
                 web_api.setup(prompt_instance)
+                try:
+                    from .model_discovery import patch_lora_stack_nodes
+                    patch_lora_stack_nodes()
+                except Exception:
+                    pass
                 _web_api_registered = True
                 print("[ComfyUI_HuggingFace_Downloader] Web API routes registered.")
                 return True
@@ -86,11 +83,6 @@ try:
     def _register_web_api_with_retry():
         # PromptServer.instance can be unavailable at extension import time.
         for _ in range(120):  # up to ~60s
-            try:
-                from .model_discovery import patch_lora_stack_nodes
-                patch_lora_stack_nodes()
-            except Exception:
-                pass
             if _try_register_web_api_once():
                 return
             time.sleep(0.5)
@@ -101,7 +93,13 @@ try:
 except Exception as e:
     print(f"[ComfyUI_HuggingFace_Downloader] Web API not loaded: {e}")
 
-# Check GitHub for newer model database on startup (non-blocking daemon thread)
+# Pre-warm widget schema hints & check GitHub DB in background threads (non-blocking)
+try:
+    from .model_discovery import start_background_widget_schema_prewarm
+    start_background_widget_schema_prewarm()
+except Exception:
+    pass
+
 try:
     from .db_updater import start_background_db_update_check
     start_background_db_update_check()

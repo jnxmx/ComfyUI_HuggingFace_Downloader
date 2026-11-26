@@ -1,5 +1,6 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
+import { showUnifiedImportModelDialog } from "./import_model_dialog.js";
 const MODEL_EXPLORER_API_BASE = "/hf_downloader_model_explorer_v2";
 const MODEL_TO_NODE_STORE_IMPORT_CANDIDATES = [
     "../../../stores/modelToNodeStore.js",
@@ -110,11 +111,11 @@ const applyNativeScrollbarClasses = (el) => {
 };
 
 const TEMPLATE_DIALOG_TOKENS = Object.freeze({
-    surface: "var(--base-background, var(--interface-panel-surface, var(--comfy-menu-bg, #1f2128)))",
-    panel: "var(--modal-panel-background, var(--base-background, var(--comfy-menu-bg, #1f2128)))",
-    border: "var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)))",
-    text: "var(--input-text, var(--text-color, var(--p-text-color, #e5e7eb)))",
-    shadow: "var(--shadow-interface, 0 12px 28px rgba(0, 0, 0, 0.45))",
+    surface: "var(--background, #171718)",
+    panel: "var(--card, #262729)",
+    border: "var(--border, #494a50)",
+    text: "var(--foreground, #ffffff)",
+    shadow: "0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5)",
 });
 
 const applyTemplateDialogOverlayStyle = (overlay, zIndex = 9100) => {
@@ -126,7 +127,7 @@ const applyTemplateDialogOverlayStyle = (overlay, zIndex = 9100) => {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "rgba(0, 0, 0, 0.5)",
+        background: "rgba(0, 0, 0, 0.45)",
         zIndex: String(zIndex),
         padding: "16px",
         boxSizing: "border-box",
@@ -145,7 +146,7 @@ const applyTemplateDialogPanelStyle = (panel, sizeStyle = {}) => {
         flexDirection: "column",
         gap: "0",
         overflow: "hidden",
-        fontFamily: "var(--font-inter, Inter, sans-serif)",
+        fontFamily: 'var(--font-inter, "Inter", sans-serif)',
         ...sizeStyle,
     });
 };
@@ -184,8 +185,8 @@ const ensureManualToggleStyles = () => {
             width: 100%;
             height: 100%;
             border-radius: 999px;
-            border: 1px solid var(--border-default, #4b5563);
-            background: var(--comfy-input-bg, #2b3242);
+            border: 1px solid var(--border, #494a50);
+            background: var(--secondary, #262729);
             box-sizing: border-box;
             transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
         }
@@ -198,20 +199,20 @@ const ensureManualToggleStyles = () => {
             height: 24px;
             border-radius: 999px;
             transform: translateY(-50%);
-            background: var(--secondary-background, #3a4458);
+            background: var(--muted, #3c3d42);
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
             transition: transform 140ms ease, background-color 140ms ease;
         }
         .hf-manual-toggle.p-toggleswitch-checked .p-toggleswitch-slider {
-            background: var(--primary-background, #2786e5);
-            border-color: var(--primary-background, #2786e5);
+            background: var(--primary, #0b8ce9);
+            border-color: var(--primary, #0b8ce9);
         }
         .hf-manual-toggle.p-toggleswitch-checked .p-toggleswitch-slider::before {
             transform: translate(20px, -50%);
-            background: var(--base-foreground, #e5e7eb);
+            background: var(--foreground, #ffffff);
         }
         .hf-manual-toggle.p-focus .p-toggleswitch-slider {
-            box-shadow: 0 0 0 2px rgba(39, 134, 229, 0.3);
+            box-shadow: 0 0 0 1px var(--ring, #8a8a8a);
         }
     `;
     document.head.appendChild(style);
@@ -563,6 +564,21 @@ class ModelExplorerDialog {
         const style = document.createElement("style");
         style.id = styleId;
         style.textContent = `
+            #hf-me-panel {
+                width: min(90vw, 1280px);
+                height: 80vh;
+                max-height: 1026px;
+                min-height: 520px;
+                border-radius: 16px;
+                border: 1px solid var(--border, #494a50);
+                background: var(--background, #171718);
+                color: var(--foreground, #ffffff);
+            }
+            @media (min-width: 1450px) {
+                #hf-me-panel {
+                    width: min(90vw, 1724px);
+                }
+            }
             #hf-model-explorer-dialog .hf-me-shell {
                 display: grid;
                 grid-template-columns: 14rem minmax(0, 1fr);
@@ -571,30 +587,37 @@ class ModelExplorerDialog {
                 overflow: hidden;
             }
             #hf-model-explorer-dialog .hf-me-left-panel {
-                background: var(--modal-panel-background, var(--comfy-menu-bg, #1f2128));
+                background: var(--card, #262729);
                 display: flex;
                 flex-direction: column;
                 height: 100%;
                 overflow: hidden;
-                border-right: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
+                border-right: none;
             }
             #hf-model-explorer-dialog .hf-me-left-header {
                 display: flex;
                 width: 100%;
                 height: 72px;
                 flex-shrink: 0;
-                padding-left: 24px;
-                padding-right: 24px;
+                padding: 0 12px 0 24px;
+                gap: 8px;
                 align-items: center;
+                box-sizing: border-box;
+            }
+            #hf-model-explorer-dialog .hf-me-left-title-icon {
+                font-size: 16px;
+                color: var(--foreground, #ffffff);
+                flex-shrink: 0;
             }
             #hf-model-explorer-dialog .hf-me-left-title {
+                margin: 0;
                 flex: 1 1 auto;
                 user-select: none;
-                font-family: var(--font-inter, Inter, sans-serif);
+                font-family: var(--font-inter, "Inter", sans-serif);
                 font-size: 16px;
-                font-weight: 700;
-                line-height: 1.2;
-                color: var(--base-foreground, var(--input-text, #e5e7eb));
+                font-weight: 600;
+                line-height: 24px;
+                color: var(--foreground, #ffffff);
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
@@ -605,29 +628,42 @@ class ModelExplorerDialog {
                 flex: 1 1 auto;
                 min-height: 0;
                 overflow-y: auto;
-                scrollbar-gutter: stable;
-                gap: 0.25rem;
+                scrollbar-width: none;
+                gap: 4px;
                 flex-direction: column;
-                background: var(--modal-panel-background, var(--comfy-menu-bg, #1f2128));
-                padding: 0 0.75rem 0.75rem 0.75rem;
+                background: var(--card, #262729);
+                padding: 0 12px 12px;
+                box-sizing: border-box;
+            }
+            #hf-model-explorer-dialog .hf-me-left-scroll::-webkit-scrollbar {
+                width: 1px;
+                display: none;
+            }
+            #hf-model-explorer-dialog .hf-me-left-scroll::-webkit-scrollbar-thumb {
+                background-color: transparent;
             }
             #hf-model-explorer-dialog .hf-me-nav-title {
                 display: flex;
                 align-items: center;
+                justify-content: space-between;
                 margin: 0;
-                padding: 1.25rem 0.75rem 0.25rem;
+                padding: 20px 12px 0;
+                height: 36px;
+                box-sizing: border-box;
+                flex-shrink: 0;
             }
             #hf-model-explorer-dialog .hf-me-nav-title-text {
-                font-size: 0.75rem;
+                margin: 0;
+                font-size: 12px;
+                line-height: 16px;
                 font-weight: 700;
                 text-transform: uppercase;
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
-                letter-spacing: 0.04em;
+                color: var(--muted-foreground, #8a8a8a);
             }
             #hf-model-explorer-dialog .hf-me-category-list {
                 display: flex;
                 flex-direction: column;
-                gap: 0.25rem;
+                gap: 4px;
                 min-height: 0;
             }
             #hf-model-explorer-dialog .hf-me-nav-item {
@@ -635,23 +671,36 @@ class ModelExplorerDialog {
                 border: none;
                 background: transparent;
                 width: 100%;
+                height: 44px;
                 display: flex;
                 align-items: center;
-                border-radius: 0.375rem;
-                padding: 0.75rem 1rem;
-                color: var(--base-foreground, var(--input-text, #e5e7eb));
-                font-size: 0.875rem;
-                font-weight: 500;
+                gap: 8px;
+                border-radius: 6px;
+                padding: 12px;
+                color: var(--foreground, #ffffff);
+                font-family: var(--font-inter, "Inter", sans-serif);
+                font-size: 14px;
+                line-height: 20px;
+                font-weight: 400;
                 text-align: left;
                 cursor: pointer;
-                transition: background-color 120ms ease;
+                transition: background-color 150ms ease, color 150ms ease;
                 user-select: none;
+                box-sizing: border-box;
+                flex-shrink: 0;
             }
             #hf-model-explorer-dialog .hf-me-nav-item:hover {
-                background: var(--interface-menu-component-surface-hovered, var(--secondary-background-hover, #3a4458));
+                background: var(--accent, #313235);
             }
             #hf-model-explorer-dialog .hf-me-nav-item.is-active {
-                background: var(--interface-menu-component-surface-selected, var(--secondary-background, #2f3747));
+                background: var(--muted, #3c3d42);
+            }
+            #hf-model-explorer-dialog .hf-me-nav-item.is-active:hover {
+                background: var(--muted, #3c3d42);
+            }
+            #hf-model-explorer-dialog .hf-me-nav-icon {
+                color: var(--foreground, #ffffff);
+                flex-shrink: 0;
             }
             #hf-model-explorer-dialog .hf-me-nav-label {
                 min-width: 0;
@@ -663,7 +712,7 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-main-panel {
                 display: flex;
                 flex-direction: column;
-                background: var(--base-background, var(--comfy-menu-bg, #111319));
+                background: var(--background, #171718);
                 overflow: hidden;
                 min-width: 0;
                 min-height: 0;
@@ -677,35 +726,39 @@ class ModelExplorerDialog {
                 justify-content: space-between;
                 gap: 8px;
                 flex-shrink: 0;
+                box-sizing: border-box;
             }
             #hf-model-explorer-dialog .hf-me-search-wrap {
                 display: flex;
                 flex: 1 1 auto;
                 align-items: center;
-                gap: 0.5rem;
+                justify-content: space-between;
+                gap: 8px;
                 min-width: 0;
-                max-width: 100%;
             }
             #hf-model-explorer-dialog .hf-me-hfsearch-btn {
+                appearance: none;
                 height: 40px;
-                padding: 0 0.85rem;
-                border-radius: 0.5rem;
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                background: rgba(59, 130, 246, 0.18);
-                color: var(--input-text, #eef2ff);
-                font-size: 0.85rem;
-                font-weight: 600;
+                padding: 8px 16px;
+                border-radius: 8px;
+                border: none;
+                background: var(--secondary, #262729);
+                color: var(--foreground, #ffffff);
+                font-family: var(--font-inter, "Inter", sans-serif);
+                font-size: 14px;
+                font-weight: 500;
+                line-height: 20px;
                 cursor: pointer;
                 white-space: nowrap;
                 display: inline-flex;
                 align-items: center;
-                gap: 0.4rem;
+                justify-content: center;
+                gap: 8px;
                 flex: 0 0 auto;
-                transition: background 120ms ease, border-color 120ms ease;
+                transition: background-color 150ms ease;
             }
             #hf-model-explorer-dialog .hf-me-hfsearch-btn:hover {
-                background: rgba(59, 130, 246, 0.32);
-                border-color: rgba(96, 165, 250, 0.55);
+                background: var(--accent, #313235);
             }
             #hf-model-explorer-dialog .hf-me-hfsearch-btn[hidden] {
                 display: none;
@@ -714,7 +767,7 @@ class ModelExplorerDialog {
                 position: fixed;
                 inset: 0;
                 z-index: 100020;
-                background: rgba(8, 10, 15, 0.72);
+                background: rgba(0, 0, 0, 0.55);
                 display: flex;
                 align-items: center;
                 justify-content: center;
@@ -723,64 +776,65 @@ class ModelExplorerDialog {
             .hf-me-hfsearch-modal {
                 width: min(760px, 95vw);
                 max-height: 82vh;
-                background: var(--comfy-menu-bg, #1c202a);
-                color: var(--input-text, #f0f2f7);
-                border: 1px solid rgba(255, 255, 255, 0.14);
-                border-radius: 0.75rem;
+                background: var(--background, #171718);
+                color: var(--foreground, #ffffff);
+                border: 1px solid var(--border, #494a50);
+                border-radius: 16px;
                 display: flex;
                 flex-direction: column;
                 overflow: hidden;
-                box-shadow: 0 22px 60px rgba(0, 0, 0, 0.65);
+                box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
+                font-family: var(--font-inter, "Inter", sans-serif);
             }
             .hf-me-hfsearch-header {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
                 gap: 0.75rem;
-                padding: 0.9rem 1.15rem;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-                font-weight: 700;
-                font-size: 0.98rem;
+                padding: 16px 20px;
+                border-bottom: 1px solid var(--border, #494a50);
+                font-weight: 600;
+                font-size: 16px;
             }
             .hf-me-hfsearch-body {
-                padding: 0.75rem 1.15rem 1.1rem;
+                padding: 12px 20px 20px;
                 overflow-y: auto;
                 display: flex;
                 flex-direction: column;
-                gap: 0.5rem;
+                gap: 8px;
             }
             .hf-me-hfsearch-row {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                gap: 0.85rem;
-                padding: 0.65rem 0.8rem;
-                border-radius: 0.5rem;
-                background: rgba(255, 255, 255, 0.04);
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                gap: 12px;
+                padding: 10px 14px;
+                border-radius: 8px;
+                background: var(--color-charcoal-700, #202121);
+                border: 1px solid var(--border, #494a50);
             }
             .hf-me-hfsearch-meta {
                 min-width: 0;
                 flex: 1 1 auto;
                 display: flex;
                 flex-direction: column;
-                gap: 0.2rem;
+                gap: 4px;
             }
             .hf-me-hfsearch-fn {
                 font-weight: 600;
-                font-size: 0.9rem;
+                font-size: 14px;
                 word-break: break-all;
             }
             .hf-me-hfsearch-sub {
-                font-size: 0.78rem;
-                color: var(--descrip-text, #9aa4b6);
+                font-size: 12px;
+                color: var(--muted-foreground, #8a8a8a);
                 display: flex;
                 flex-wrap: wrap;
-                gap: 0.6rem;
+                gap: 10px;
                 align-items: center;
             }
             .hf-me-hfsearch-sub a {
-                color: #7eb6ff;
+                color: var(--color-azure-400, #31b9f4);
                 text-decoration: none;
             }
             .hf-me-hfsearch-sub a:hover {
@@ -789,53 +843,117 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-searchbox {
                 position: relative;
                 display: flex;
-                width: min(38rem, 100%);
+                flex: 1 1 auto;
+                max-width: 32rem;
+                min-width: 0;
                 align-items: center;
-                gap: 0.5rem;
-                background: var(--comfy-input-bg, #2b3242);
-                color: var(--input-text);
-                border-radius: 0.5rem;
+                background: var(--secondary, #262729);
+                color: var(--foreground, #ffffff);
+                border-radius: 8px;
+                border: none;
                 height: 40px;
-                padding: 0.5rem 1rem;
+                padding: 8px;
+                box-sizing: border-box;
+                transition: box-shadow 150ms ease, background-color 150ms ease;
+            }
+            #hf-model-explorer-dialog .hf-me-searchbox:focus-within {
+                box-shadow: 0 0 0 1px var(--ring, #8a8a8a);
             }
             #hf-model-explorer-dialog .hf-me-search-icon {
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
-                font-size: 0.95rem;
+                position: absolute;
+                left: 10px;
+                color: var(--foreground, #ffffff);
                 pointer-events: none;
-                padding-left: 0.2rem;
             }
             #hf-model-explorer-dialog .hf-me-search-input {
-                position: absolute;
-                inset: 0;
                 width: 100%;
                 height: 100%;
                 border: none;
                 outline: none;
                 background: transparent;
-                color: var(--input-text);
-                font-size: 0.96rem;
-                padding-left: 2.55rem;
-                padding-right: 0.75rem;
+                color: var(--foreground, #ffffff);
+                font-family: var(--font-inter, "Inter", sans-serif);
+                font-size: 12px;
+                line-height: 16px;
+                padding: 0 28px 0 32px;
                 box-sizing: border-box;
-                border-radius: 0.5rem;
+                border-radius: 8px;
             }
             #hf-model-explorer-dialog .hf-me-search-input::placeholder {
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
+                color: var(--muted-foreground, #8a8a8a);
+            }
+            #hf-model-explorer-dialog .hf-me-search-clear {
+                position: absolute;
+                right: 6px;
+                width: 24px;
+                height: 24px;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+                color: var(--muted-foreground, #8a8a8a);
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                padding: 0;
+            }
+            #hf-model-explorer-dialog .hf-me-search-clear:hover {
+                background: var(--accent, #313235);
+                color: var(--foreground, #ffffff);
             }
             #hf-model-explorer-dialog .hf-me-header-actions {
                 display: flex;
                 align-items: center;
-                gap: 0.35rem;
+                gap: 8px;
                 flex: 0 0 auto;
             }
-            #hf-model-explorer-dialog .hf-me-close-btn {
-                margin-left: 0;
+            #hf-model-explorer-dialog .hf-me-import-btn {
+                appearance: none;
+                border: none;
+                height: 40px;
+                padding: 8px 16px;
+                border-radius: 8px;
+                background: var(--primary, #0b8ce9);
+                color: var(--foreground, #ffffff);
+                font-family: var(--font-inter, "Inter", sans-serif);
+                font-size: 14px;
+                font-weight: 500;
+                line-height: 20px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                cursor: pointer;
+                white-space: nowrap;
+                transition: background-color 150ms ease;
+            }
+            #hf-model-explorer-dialog .hf-me-import-btn:hover {
+                background: color-mix(in srgb, var(--primary, #0b8ce9) 90%, black);
+            }
+            #hf-model-explorer-dialog .hf-me-native-close-btn {
+                appearance: none;
+                border: none;
+                width: 40px;
+                height: 40px;
+                border-radius: 8px;
+                background: var(--secondary, #262729);
+                color: var(--foreground, #ffffff);
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                transition: background-color 150ms ease;
+                flex-shrink: 0;
+                padding: 0;
+            }
+            #hf-model-explorer-dialog .hf-me-native-close-btn:hover {
+                background: var(--accent, #313235);
             }
             #hf-model-explorer-dialog .hf-me-filter-row {
                 display: flex;
                 align-items: center;
-                gap: 0.5rem;
-                padding: 8px 24px 8px;
+                gap: 16px;
+                padding: 0;
                 flex-wrap: nowrap;
                 flex-shrink: 0;
             }
@@ -845,29 +963,35 @@ class ModelExplorerDialog {
             }
             #hf-model-explorer-dialog .hf-me-filter-trigger {
                 height: 40px;
-                min-width: 170px;
+                min-width: 128px;
                 position: relative;
                 display: inline-flex;
                 align-items: center;
-                justify-content: flex-start;
-                gap: 0.5rem;
-                border-radius: 0.5rem;
-                background: var(--secondary-background, #2f3747);
-                color: var(--base-foreground, var(--input-text, #e5e7eb));
+                justify-content: space-between;
+                gap: 12px;
+                border-radius: 8px;
+                background: var(--secondary, #262729);
+                color: var(--foreground, #ffffff);
                 border: 2.5px solid transparent;
-                transition: border-color 140ms ease, background-color 140ms ease;
-                padding: 0 0.9rem 0 0.95rem;
+                transition: all 200ms ease-in-out;
+                padding: 0 10px 0 12px;
                 cursor: pointer;
-                font-size: 0.92rem;
-                font-weight: 500;
+                font-family: var(--font-inter, "Inter", sans-serif);
+                font-size: 14px;
+                font-weight: 400;
+                line-height: 20px;
                 text-align: left;
+                outline: none;
+                box-sizing: border-box;
+                user-select: none;
             }
             #hf-model-explorer-dialog .hf-me-filter-trigger:hover {
-                background: var(--secondary-background-hover, #3a4458);
+                background: var(--accent, #313235);
             }
+            #hf-model-explorer-dialog .hf-me-filter-trigger:focus-visible,
             #hf-model-explorer-dialog .hf-me-filter.is-open .hf-me-filter-trigger,
             #hf-model-explorer-dialog .hf-me-filter.has-selection .hf-me-filter-trigger {
-                border-color: var(--node-component-border, var(--primary-background, #3b82f6));
+                border-color: var(--border, #494a50);
             }
             #hf-model-explorer-dialog .hf-me-filter-label {
                 display: inline-flex;
@@ -885,8 +1009,8 @@ class ModelExplorerDialog {
                 width: 20px;
                 height: 20px;
                 border-radius: 999px;
-                background: var(--primary-background, #2786e5);
-                color: var(--base-foreground, #fff);
+                background: var(--primary, #0b8ce9);
+                color: #ffffff;
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
@@ -896,39 +1020,44 @@ class ModelExplorerDialog {
             }
             #hf-model-explorer-dialog .hf-me-filter-caret {
                 margin-left: auto;
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
+                color: var(--muted-foreground, #8a8a8a);
                 pointer-events: none;
-                font-size: 0.9rem;
+                flex-shrink: 0;
             }
             #hf-model-explorer-dialog .hf-me-filter-popover {
                 position: absolute;
                 top: calc(100% + 8px);
                 left: 0;
-                min-width: 22rem;
-                max-width: 25rem;
-                z-index: 7;
-                border-radius: 0.75rem;
-                border: 1px solid var(--border-default, #4b5563);
-                background: var(--base-background, #111319);
-                padding: 0.55rem;
-                box-shadow: var(--shadow-interface, 0 12px 28px rgba(0, 0, 0, 0.45));
+                min-width: 20rem;
+                max-width: 24rem;
+                z-index: 1700;
+                border-radius: 8px;
+                border: 1px solid var(--border, #494a50);
+                background: var(--background, #171718);
+                color: var(--foreground, #ffffff);
+                padding: 8px;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+                box-sizing: border-box;
             }
             #hf-model-explorer-dialog .hf-me-filter-search {
                 position: relative;
                 width: 100%;
-                height: 38px;
-                border-radius: 0.5rem;
-                border: 1px solid var(--border-default, #4b5563);
-                background: var(--comfy-input-bg, #2b3242);
-                margin-bottom: 0.65rem;
+                height: 36px;
+                border-radius: 8px;
+                border: none;
+                background: var(--secondary, #262729);
+                margin-bottom: 8px;
+            }
+            #hf-model-explorer-dialog .hf-me-filter-search:focus-within {
+                box-shadow: 0 0 0 1px var(--ring, #8a8a8a);
             }
             #hf-model-explorer-dialog .hf-me-filter-search-icon {
                 position: absolute;
                 left: 10px;
                 top: 50%;
                 transform: translateY(-50%);
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
-                font-size: 0.95rem;
+                color: var(--muted-foreground, #8a8a8a);
+                font-size: 14px;
                 pointer-events: none;
             }
             #hf-model-explorer-dialog .hf-me-filter-search-input {
@@ -939,151 +1068,199 @@ class ModelExplorerDialog {
                 border: none;
                 outline: none;
                 background: transparent;
-                color: var(--input-text);
-                font-size: 0.9rem;
-                border-radius: 0.5rem;
-                padding: 0 0.55rem 0 2rem;
+                color: var(--foreground, #ffffff);
+                font-size: 13px;
+                border-radius: 8px;
+                padding: 0 10px 0 32px;
                 box-sizing: border-box;
             }
             #hf-model-explorer-dialog .hf-me-filter-search-input::placeholder {
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
+                color: var(--muted-foreground, #8a8a8a);
             }
             #hf-model-explorer-dialog .hf-me-filter-meta {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                gap: 0.5rem;
-                padding: 0 0.3rem 0.35rem;
+                gap: 8px;
+                padding: 0 4px 6px;
             }
             #hf-model-explorer-dialog .hf-me-filter-meta-text {
-                font-size: 0.92rem;
-                color: var(--base-foreground, var(--input-text, #e5e7eb));
+                font-size: 13px;
+                color: var(--muted-foreground, #8a8a8a);
                 font-weight: 500;
             }
             #hf-model-explorer-dialog .hf-me-filter-clear-btn {
                 appearance: none;
                 border: none;
                 background: transparent;
-                color: var(--base-foreground, var(--input-text, #e5e7eb));
-                font-size: 0.92rem;
-                font-weight: 600;
+                color: var(--muted-foreground, #8a8a8a);
+                font-size: 13px;
+                font-weight: 500;
                 cursor: pointer;
-                padding: 0.1rem 0.2rem;
+                padding: 2px 6px;
+                border-radius: 6px;
             }
             #hf-model-explorer-dialog .hf-me-filter-clear-btn:hover {
-                color: var(--primary-background, #2786e5);
+                background: var(--accent, #313235);
+                color: var(--foreground, #ffffff);
             }
             #hf-model-explorer-dialog .hf-me-filter-divider {
                 height: 1px;
-                background: var(--border-default, #4b5563);
-                margin: 0.4rem 0 0.5rem;
+                background: var(--border, #494a50);
+                margin: 4px 0 8px;
             }
             #hf-model-explorer-dialog .hf-me-filter-options {
                 max-height: min(18rem, 45vh);
                 overflow-y: auto;
-                scrollbar-gutter: stable;
+                scrollbar-width: thin;
+                scrollbar-color: var(--muted, #3c3d42) transparent;
                 display: flex;
                 flex-direction: column;
-                gap: 0.15rem;
+                gap: 2px;
             }
             #hf-model-explorer-dialog .hf-me-filter-option {
                 appearance: none;
                 border: none;
                 width: 100%;
-                display: flex;
-                align-items: center;
-                gap: 0.55rem;
                 min-height: 40px;
                 height: 40px;
-                padding: 0 0.5rem;
-                border-radius: 0.45rem;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 0 8px;
+                border-radius: 8px;
                 background: transparent;
-                color: var(--base-foreground, var(--input-text, #e5e7eb));
+                color: var(--foreground, #ffffff);
                 text-align: left;
-                font-size: 0.92rem;
+                font-family: var(--font-inter, "Inter", sans-serif);
+                font-size: 14px;
+                line-height: 20px;
                 cursor: pointer;
-                line-height: 1.2;
                 box-sizing: border-box;
+                flex-shrink: 0;
             }
             #hf-model-explorer-dialog .hf-me-filter-option:hover {
-                background: var(--secondary-background-hover, #3a4458);
+                background: var(--accent, #313235);
+            }
+            #hf-model-explorer-dialog .hf-me-filter-option.is-selected {
+                background: var(--muted, #3c3d42);
             }
             #hf-model-explorer-dialog .hf-me-filter-option-check {
-                width: 18px;
-                height: 18px;
+                width: 16px;
+                height: 16px;
                 border-radius: 4px;
-                background: var(--secondary-background, #2f3747);
+                background: var(--secondary, #262729);
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
                 flex: 0 0 auto;
                 color: transparent;
-                font-size: 10px;
+                font-size: 11px;
+                transition: all 150ms ease;
             }
             #hf-model-explorer-dialog .hf-me-filter-option.is-selected .hf-me-filter-option-check {
-                background: var(--primary-background, #2786e5);
-                color: var(--base-foreground, #fff);
+                background: var(--foreground, #ffffff);
+                color: var(--background, #171718);
             }
             #hf-model-explorer-dialog .hf-me-filter-option-label {
                 display: block;
-                line-height: 1.2;
+                line-height: 20px;
                 min-width: 0;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
             }
             #hf-model-explorer-dialog .hf-me-filter-empty {
-                padding: 0.35rem 0.5rem;
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
-                font-size: 0.88rem;
+                padding: 6px 8px;
+                color: var(--muted-foreground, #8a8a8a);
+                font-size: 13px;
             }
             #hf-model-explorer-dialog .hf-me-toggle-row {
                 display: flex;
                 align-items: center;
-                gap: 0.75rem;
-                padding: 0 24px 10px;
-                border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
+                justify-content: flex-start;
+                gap: 16px;
+                padding: 8px 24px 24px;
+                min-height: 72px;
+                box-sizing: border-box;
+                border-bottom: none;
                 flex-shrink: 0;
-                min-height: 56px;
             }
             #hf-model-explorer-dialog .hf-me-toggle-label {
                 display: inline-flex;
                 align-items: center;
-                gap: 0.75rem;
+                gap: 10px;
                 cursor: pointer;
                 user-select: none;
-                color: var(--base-foreground, var(--input-text, #e5e7eb));
-                font-size: 0.9rem;
-                font-weight: 500;
+                color: var(--foreground, #ffffff);
+                font-size: 14px;
+                font-weight: 400;
+                line-height: 20px;
             }
-            #hf-model-explorer-dialog .hf-me-filter-row {
-                margin-left: 0;
-                padding: 0;
-                gap: 0.5rem;
-                flex-wrap: nowrap;
-                justify-content: flex-start;
-            }
-            #hf-model-explorer-dialog .hf-me-installed-toggle {
-                flex: 0 0 auto;
-                margin: 0;
+            #hf-model-explorer-dialog .hf-me-tumbler {
+                position: relative;
+                display: inline-flex;
+                align-items: center;
+                width: 36px;
+                height: 20px;
+                flex-shrink: 0;
                 cursor: pointer;
-            }
-            #hf-model-explorer-dialog .hf-me-installed-toggle-wrap {
                 margin: 0;
+            }
+            #hf-model-explorer-dialog .hf-me-tumbler input {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                opacity: 0;
                 cursor: pointer;
-                flex: 0 0 auto;
+                z-index: 2;
+            }
+            #hf-model-explorer-dialog .hf-me-tumbler-track {
+                position: relative;
+                display: block;
+                width: 36px;
+                height: 20px;
+                border-radius: 9999px;
+                background: var(--secondary, #262729);
+                border: 1px solid var(--border, #494a50);
+                box-sizing: border-box;
+                transition: background-color 140ms ease, border-color 140ms ease;
+            }
+            #hf-model-explorer-dialog .hf-me-tumbler-track::before {
+                content: "";
+                position: absolute;
+                top: 50%;
+                left: 2px;
+                width: 14px;
+                height: 14px;
+                border-radius: 9999px;
+                background: #ffffff;
+                transform: translateY(-50%);
+                transition: transform 140ms ease;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+            }
+            #hf-model-explorer-dialog .hf-me-tumbler input:checked + .hf-me-tumbler-track {
+                background: var(--primary, #0b8ce9);
+                border-color: var(--primary, #0b8ce9);
+            }
+            #hf-model-explorer-dialog .hf-me-tumbler input:checked + .hf-me-tumbler-track::before {
+                transform: translate(16px, -50%);
             }
             #hf-model-explorer-dialog .hf-me-content-scroll {
                 flex: 1 1 auto;
                 overflow-y: auto;
+                scrollbar-width: thin;
+                scrollbar-color: var(--muted, #3c3d42) transparent;
                 scrollbar-gutter: stable;
-                padding: 0 10px 12px 8px;
+                padding: 0 24px 24px;
             }
             #hf-model-explorer-dialog .hf-me-body {
                 min-height: 0;
                 width: 100%;
                 box-sizing: border-box;
-                padding: 6px 0 10px;
+                padding: 0;
                 display: flex;
                 flex-direction: column;
                 gap: 6px;
@@ -1091,24 +1268,25 @@ class ModelExplorerDialog {
             #hf-model-explorer-dialog .hf-me-row {
                 display: flex;
                 align-items: center;
-                gap: 8px;
-                height: 40px;
-                border-radius: 6px;
-                background: var(--bg-100, var(--comfy-input-bg, #2b3242));
-                padding: 0 12px;
-                transition: background-color 120ms ease;
+                gap: 12px;
+                min-height: 48px;
+                height: 48px;
+                border-radius: 12px;
+                background: transparent;
+                padding: 0 8px 0 16px;
+                transition: background-color 150ms ease;
                 box-sizing: border-box;
                 overflow: hidden;
             }
             #hf-model-explorer-dialog .hf-me-row:hover {
-                background: var(--secondary-background-hover, #3a4458);
+                background: var(--secondary, #262729);
             }
             #hf-model-explorer-dialog .hf-me-row.hf-me-row--grouped {
                 border-radius: 0;
                 background: transparent;
             }
             #hf-model-explorer-dialog .hf-me-row.hf-me-row--grouped:hover {
-                background: color-mix(in srgb, var(--secondary-background-hover, #3a4458) 40%, transparent);
+                background: var(--secondary, #262729);
             }
             #hf-model-explorer-dialog .hf-me-main {
                 min-width: 0;
@@ -1116,20 +1294,21 @@ class ModelExplorerDialog {
                 flex: 1 1 auto;
             }
             #hf-model-explorer-dialog .hf-me-file {
-                font-size: 0.875rem;
-                font-weight: 500;
-                line-height: 1.2;
+                font-family: var(--font-inter, "Inter", sans-serif);
+                font-size: 14px;
+                font-weight: 600;
+                line-height: 20px;
                 white-space: nowrap;
                 overflow: hidden;
                 text-overflow: ellipsis;
-                color: var(--base-foreground, var(--input-text, #e5e7eb));
+                color: var(--foreground, #ffffff);
             }
             #hf-model-explorer-dialog .hf-me-meta {
                 margin-left: auto;
                 display: grid;
-                grid-template-columns: minmax(0, 1fr) calc(1.5rem + 4.4rem + 6px);
+                grid-template-columns: minmax(0, 1fr) calc(36px + 6.5rem + 6px);
                 align-items: center;
-                gap: 8px;
+                gap: 10px;
                 min-width: 0;
                 flex: 0 1 60%;
             }
@@ -1146,83 +1325,84 @@ class ModelExplorerDialog {
                 display: inline-flex;
                 align-items: center;
                 border-radius: 4px;
-                background: color-mix(in srgb, var(--secondary-background, #2f3747) 50%, var(--border-default, #4b5563) 50%);
-                color: var(--base-foreground, var(--input-text, #e5e7eb));
-                font-size: 0.7rem;
-                line-height: 1;
+                background: var(--muted, #3c3d42);
+                color: var(--foreground, #ffffff);
+                font-size: 12px;
+                line-height: 16px;
+                letter-spacing: 0.05em;
                 text-transform: uppercase;
                 font-weight: 700;
-                padding: 3px 6px;
+                padding: 4px 8px;
                 white-space: nowrap;
                 flex: 0 0 auto;
             }
             #hf-model-explorer-dialog .hf-me-tag--size {
+                background: transparent;
                 text-transform: none;
-                font-weight: 600;
+                letter-spacing: normal;
+                color: var(--muted-foreground, #8a8a8a);
+                font-size: 12px;
+                font-weight: 400;
+                padding: 0 4px;
             }
             #hf-model-explorer-dialog .hf-me-actions {
                 display: flex;
                 align-items: center;
                 justify-content: flex-end;
                 gap: 6px;
-                align-self: stretch;
-                width: calc(1.5rem + 4.4rem + 6px);
-                min-width: calc(1.5rem + 4.4rem + 6px);
-                max-width: calc(1.5rem + 4.4rem + 6px);
+                align-self: center;
+                width: calc(36px + 6.5rem + 6px);
+                min-width: calc(36px + 6.5rem + 6px);
+                max-width: calc(36px + 6.5rem + 6px);
             }
             #hf-model-explorer-dialog .hf-me-action-btn {
                 position: relative;
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
-                gap: 0.35rem;
+                gap: 6px;
                 cursor: pointer;
                 white-space: nowrap;
                 appearance: none;
                 border: none;
-                border-radius: 0.25rem;
+                border-radius: 8px;
                 text-align: center;
-                height: 1.5rem;
-                min-height: 1.5rem;
-                min-width: 4.4rem;
-                padding: 0 0.5rem;
-                font-size: 0.75rem;
+                height: 36px;
+                min-height: 36px;
+                min-width: 5.5rem;
+                padding: 0 16px;
+                font-size: 14px;
                 font-weight: 500;
-                font-family: var(--font-inter, Inter, sans-serif);
-                transition: background-color 120ms ease, opacity 120ms ease;
+                line-height: 20px;
+                font-family: var(--font-inter, "Inter", sans-serif);
+                transition: background-color 150ms ease, opacity 150ms ease;
             }
             #hf-model-explorer-dialog .hf-me-action-btn i {
-                font-size: 0.9rem;
                 line-height: 1;
             }
             #hf-model-explorer-dialog .hf-me-action-btn:disabled {
-                opacity: 0.6;
+                opacity: 0.5;
                 cursor: default;
             }
-            #hf-model-explorer-dialog .hf-me-action-btn--secondary {
-                background: var(--secondary-background, #3a4458);
-                color: var(--base-foreground, #e5e7eb);
-            }
-            #hf-model-explorer-dialog .hf-me-action-btn--secondary:hover:not(:disabled) {
-                background: var(--secondary-background-hover, #4a5469);
-            }
+            #hf-model-explorer-dialog .hf-me-action-btn--secondary,
             #hf-model-explorer-dialog .hf-me-action-btn--primary {
-                background: var(--primary-background, #2786e5);
-                color: var(--base-foreground, #e5e7eb);
+                background: var(--muted, #3c3d42);
+                color: var(--foreground, #ffffff);
             }
+            #hf-model-explorer-dialog .hf-me-action-btn--secondary:hover:not(:disabled),
             #hf-model-explorer-dialog .hf-me-action-btn--primary:hover:not(:disabled) {
-                background: var(--primary-background-hover, #3f98ef);
+                background: var(--border, #494a50);
             }
             #hf-model-explorer-dialog .hf-me-action-btn--destructive {
-                background: var(--destructive-background, #d24a4a);
-                color: #fff;
-                min-width: 1.5rem;
-                width: 1.5rem;
+                background: var(--destructive, #b33a3a);
+                color: #ffffff;
+                min-width: 36px;
+                width: 36px;
                 padding: 0;
                 opacity: 0;
                 pointer-events: none;
                 transform: scale(0.95);
-                transition: opacity 120ms ease, transform 120ms ease, background-color 120ms ease;
+                transition: opacity 150ms ease, transform 150ms ease, background-color 150ms ease;
             }
             #hf-model-explorer-dialog .hf-me-row:hover .hf-me-action-btn--destructive,
             #hf-model-explorer-dialog .hf-me-row:focus-within .hf-me-action-btn--destructive {
@@ -1234,71 +1414,71 @@ class ModelExplorerDialog {
                 opacity: 1;
             }
             #hf-model-explorer-dialog .hf-me-action-btn--destructive:hover:not(:disabled) {
-                background: var(--destructive-background-hover, #dd5c5c);
+                background: #c84646;
             }
             #hf-model-explorer-dialog .hf-me-group-blob {
                 border-radius: 12px;
-                border: 1px solid color-mix(in srgb, var(--border-default, #4b5563) 65%, transparent);
-                background: var(--secondary-background, #2f3747);
+                border: 1px solid var(--border, #494a50);
+                background: transparent;
                 overflow: hidden;
             }
             #hf-model-explorer-dialog .hf-me-group-blob .hf-me-row {
                 border-radius: 0;
             }
             #hf-model-explorer-dialog .hf-me-group-blob .hf-me-row + .hf-me-row {
-                border-top: 1px solid color-mix(in srgb, var(--border-default, #4b5563) 58%, transparent);
+                border-top: 1px solid color-mix(in srgb, var(--border, #494a50) 55%, transparent);
             }
             .hf-me-confirm-btn.p-button {
                 min-height: 40px;
-                padding: 0.5rem 0.8rem;
+                padding: 8px 16px;
                 font-size: 14px;
-                font-weight: 600;
-                font-family: var(--font-inter, Inter, sans-serif);
-                border-radius: 10px;
+                font-weight: 500;
+                font-family: var(--font-inter, "Inter", sans-serif);
+                border-radius: 8px;
                 border: none !important;
                 box-shadow: none !important;
-                background: var(--secondary-background) !important;
-                color: var(--base-foreground) !important;
-                transition: background-color 120ms ease, opacity 120ms ease;
+                background: var(--secondary, #262729) !important;
+                color: var(--foreground, #ffffff) !important;
+                transition: background-color 150ms ease, opacity 150ms ease;
                 display: inline-flex !important;
                 align-items: center;
                 justify-content: center;
-                gap: 0.35rem;
-                line-height: 1.1;
+                gap: 6px;
+                line-height: 20px;
             }
             .hf-me-confirm-btn.p-button:hover {
-                background: var(--secondary-background-hover) !important;
+                background: var(--accent, #313235) !important;
             }
             .hf-me-confirm-btn.p-button.p-button-success {
-                background: var(--success-background, #43c06b) !important;
+                background: #2f9e5b !important;
             }
             .hf-me-confirm-btn.p-button.p-button-success:hover {
-                background: var(--success-background-hover, #55d17c) !important;
+                background: #37b368 !important;
             }
             .hf-me-confirm-btn.p-button.hf-btn-primary {
-                background: var(--primary-background) !important;
+                background: var(--primary, #0b8ce9) !important;
             }
             .hf-me-confirm-btn.p-button.hf-btn-primary:hover {
-                background: var(--primary-background-hover) !important;
+                background: color-mix(in srgb, var(--primary, #0b8ce9) 90%, black) !important;
             }
             .hf-me-confirm-btn.p-button.p-button-danger {
-                background: var(--destructive-background) !important;
+                background: var(--destructive, #b33a3a) !important;
             }
             .hf-me-confirm-btn.p-button.p-button-danger:hover {
-                background: var(--destructive-background-hover) !important;
+                background: #c84646 !important;
             }
             #hf-model-explorer-dialog .hf-me-empty {
                 padding: 22px 10px;
-                color: var(--text-secondary, var(--descrip-text, #9aa4b6));
+                color: var(--muted-foreground, #8a8a8a);
                 font-size: 14px;
             }
-            @media (max-width: 1024px) {
+            @media (max-width: 720px) {
                 #hf-model-explorer-dialog .hf-me-shell {
                     grid-template-columns: minmax(0, 1fr);
                 }
                 #hf-model-explorer-dialog .hf-me-left-panel {
                     border-right: none;
-                    border-bottom: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
+                    border-bottom: 1px solid var(--border, #494a50);
                     max-height: 230px;
                 }
                 #hf-model-explorer-dialog .hf-me-toggle-row {
@@ -1311,9 +1491,6 @@ class ModelExplorerDialog {
                     width: 100%;
                     flex-wrap: nowrap;
                 }
-                #hf-model-explorer-dialog .hf-me-row {
-                    height: 40px;
-                }
                 #hf-model-explorer-dialog .hf-me-main {
                     flex: 1 1 auto;
                 }
@@ -1322,122 +1499,6 @@ class ModelExplorerDialog {
                     justify-content: initial;
                 }
             }
-            /* Upload dialog styles */
-            #hf-upload-modal-dialog {
-                position: fixed;
-                inset: 0;
-                width: 100vw;
-                height: 100vh;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                background: rgba(0, 0, 0, 0.5);
-                z-index: 10002;
-                padding: 16px;
-                box-sizing: border-box;
-            }
-            .hf-upload-modal-panel {
-                background: var(--modal-panel-background, var(--comfy-menu-bg, #1f2128));
-                color: var(--input-text, #e5e7eb);
-                border: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452)));
-                border-radius: 16px;
-                box-shadow: var(--shadow-interface, 0 12px 28px rgba(0, 0, 0, 0.45));
-                display: flex;
-                flex-direction: column;
-                gap: 16px;
-                padding: 24px;
-                overflow: hidden;
-                font-family: var(--font-sans, Inter, sans-serif);
-                min-width: 460px;
-                max-width: 550px;
-                width: 100%;
-            }
-            .hf-upload-modal-title {
-                font-size: 18px;
-                font-weight: 600;
-                margin: 0 0 4px;
-                color: var(--input-text, #e5e7eb);
-            }
-            .hf-upload-dropzone {
-                border: 2px dashed var(--border-default, #3c4452);
-                border-radius: 12px;
-                padding: 32px 16px;
-                text-align: center;
-                cursor: pointer;
-                background: var(--bg-100, var(--comfy-input-bg, #111319));
-                transition: border-color 120ms ease, background-color 120ms ease;
-            }
-            .hf-upload-dropzone:hover {
-                border-color: var(--primary-background, #2786e5);
-                background: var(--secondary-background-hover, #2b3242);
-            }
-            .hf-upload-dropzone i {
-                font-size: 32px;
-                color: var(--text-secondary, #9aa4b6);
-                margin-bottom: 8px;
-                display: block;
-            }
-            .hf-upload-dropzone p {
-                margin: 0;
-                font-size: 13px;
-                color: var(--text-secondary, #9aa4b6);
-            }
-            .hf-upload-file-info {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-                background: var(--bg-100, var(--comfy-input-bg, #111319));
-                padding: 12px;
-                border-radius: 8px;
-                border: 1px solid var(--border-default, #3c4452);
-            }
-            .hf-upload-file-row {
-                display: flex;
-                justify-content: space-between;
-                font-size: 13px;
-            }
-            .hf-upload-file-label {
-                color: var(--descrip-text, #9aa4b6);
-            }
-            .hf-upload-file-val {
-                font-weight: 500;
-                color: var(--input-text, #e5e7eb);
-            }
-            .hf-upload-folder-select {
-                width: 100%;
-                height: 38px;
-                background: var(--comfy-input-bg, #2b3242);
-                border: 1px solid var(--border-default, #3c4452);
-                color: var(--input-text, #e5e7eb);
-                border-radius: 6px;
-                padding: 0 8px;
-                font-size: 13px;
-                outline: none;
-            }
-            .hf-upload-progress-container {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-            }
-            .hf-upload-progress-bar {
-                width: 100%;
-                height: 8px;
-                background: var(--border-default, #3c4452);
-                border-radius: 999px;
-                overflow: hidden;
-            }
-            .hf-upload-progress-fill {
-                width: 0%;
-                height: 100%;
-                background: var(--primary-background, #2786e5);
-                transition: width 100ms linear;
-            }
-            .hf-upload-stats {
-                display: flex;
-                justify-content: space-between;
-                font-size: 12px;
-                color: var(--descrip-text, #9aa4b6);
-            }
         `;
         document.head.appendChild(style);
     }
@@ -1445,6 +1506,10 @@ class ModelExplorerDialog {
     async show() {
         if (!this.element) {
             this.createUi();
+        }
+        if (this._onDocClick && !this._docClickAttached) {
+            document.addEventListener("click", this._onDocClick);
+            this._docClickAttached = true;
         }
         this.element.style.display = "flex";
         try {
@@ -1455,6 +1520,10 @@ class ModelExplorerDialog {
     }
 
     close() {
+        if (this._onDocClick && this._docClickAttached) {
+            document.removeEventListener("click", this._onDocClick);
+            this._docClickAttached = false;
+        }
         if (this.element) {
             this.element.style.display = "none";
             this.closeFilterPopover(null, false);
@@ -1462,318 +1531,10 @@ class ModelExplorerDialog {
     }
 
     async showUploadDialog() {
-        let folderOptions = ["loras", "checkpoints", "clip", "diffusion_models", "vae", "controlnet"];
-        try {
-            const resp = await fetch("/folder_structure");
-            if (resp.ok) {
-                const data = await resp.json();
-                if (Array.isArray(data)) {
-                    folderOptions = data;
-                }
-            }
-        } catch (e) {
-            console.error("Failed to fetch folder structure", e);
-        }
-
-        let freeSpace = null;
-        let freeSpaceText = "Checking...";
-        try {
-            const resp = await fetch("/hf_downloader_model_explorer_v2/disk_space");
-            if (resp.ok) {
-                const spaceData = await resp.json();
-                if (Number.isFinite(spaceData.free)) {
-                    freeSpace = spaceData.free;
-                    freeSpaceText = this.formatSizeGb(freeSpace);
-                }
-            }
-        } catch (e) {
-            console.error("Failed to fetch disk space", e);
-            freeSpaceText = "Error checking";
-        }
-
-        const existing = document.getElementById("hf-upload-modal-dialog");
-        if (existing) existing.remove();
-
-        const overlay = document.createElement("div");
-        overlay.id = "hf-upload-modal-dialog";
-
-        const panel = document.createElement("div");
-        panel.className = "hf-upload-modal-panel";
-        
-        const title = document.createElement("h3");
-        title.className = "hf-upload-modal-title";
-        title.textContent = "Upload Model File";
-        panel.appendChild(title);
-
-        const diskInfo = document.createElement("div");
-        diskInfo.style.fontSize = "12px";
-        diskInfo.style.color = "var(--descrip-text, #9aa4b6)";
-        diskInfo.style.marginBottom = "8px";
-        diskInfo.innerHTML = `Available HDD space: <span id="hf-upload-disk-val" style="font-weight:600; color:var(--input-text, #e5e7eb);">${freeSpaceText}</span>`;
-        panel.appendChild(diskInfo);
-
-        const dropzone = document.createElement("div");
-        dropzone.className = "hf-upload-dropzone";
-        dropzone.innerHTML = `
-            <i class="pi pi-cloud-upload"></i>
-            <p>Click to browse or drag file here</p>
-            <input type="file" id="hf-upload-file-input" style="display:none;" />
-        `;
-        
-        const fileInput = dropzone.querySelector("#hf-upload-file-input");
-        dropzone.onclick = () => fileInput.click();
-        panel.appendChild(dropzone);
-
-        const detailsContainer = document.createElement("div");
-        detailsContainer.style.display = "none";
-        detailsContainer.style.flexDirection = "column";
-        detailsContainer.style.gap = "12px";
-
-        const fileDetails = document.createElement("div");
-        fileDetails.className = "hf-upload-file-info";
-        fileDetails.innerHTML = `
-            <div class="hf-upload-file-row">
-                <span class="hf-upload-file-label">File name:</span>
-                <span class="hf-upload-file-val" id="hf-upload-filename-val">-</span>
-            </div>
-            <div class="hf-upload-file-row">
-                <span class="hf-upload-file-label">File size:</span>
-                <span class="hf-upload-file-val" id="hf-upload-filesize-val">-</span>
-            </div>
-        `;
-        detailsContainer.appendChild(fileDetails);
-
-        const folderSelectGroup = document.createElement("div");
-        folderSelectGroup.innerHTML = `
-            <label style="display:block; font-size:12px; font-weight:600; margin-bottom:6px; color:var(--input-text, #e5e7eb);">Upload Folder Category:</label>
-            <select class="hf-upload-folder-select"></select>
-        `;
-        const selectEl = folderSelectGroup.querySelector("select");
-        for (const opt of folderOptions) {
-            const optEl = document.createElement("option");
-            optEl.value = opt;
-            optEl.textContent = opt;
-            if (opt === "loras" || opt === "lora") {
-                optEl.selected = true;
-            }
-            selectEl.appendChild(optEl);
-        }
-        detailsContainer.appendChild(folderSelectGroup);
-
-        const progressContainer = document.createElement("div");
-        progressContainer.className = "hf-upload-progress-container";
-        progressContainer.style.display = "none";
-        progressContainer.innerHTML = `
-            <div class="hf-upload-progress-bar">
-                <div class="hf-upload-progress-fill" id="hf-upload-progress-fill"></div>
-            </div>
-            <div class="hf-upload-stats">
-                <span id="hf-upload-percent">0%</span>
-                <span id="hf-upload-speed">0 MB/s</span>
-                <span id="hf-upload-eta">ETA: -</span>
-            </div>
-        `;
-        detailsContainer.appendChild(progressContainer);
-        panel.appendChild(detailsContainer);
-
-        const errorMsg = document.createElement("div");
-        errorMsg.id = "hf-upload-error-msg";
-        errorMsg.style.color = "var(--destructive-background, #d24a4a)";
-        errorMsg.style.fontSize = "12px";
-        errorMsg.style.display = "none";
-        panel.appendChild(errorMsg);
-
-        const footer = document.createElement("div");
-        footer.style.display = "flex";
-        footer.style.justifyContent = "flex-end";
-        footer.style.gap = "8px";
-        footer.style.marginTop = "8px";
-
-        const cancelBtn = createConfirmDialogButton("Cancel", "default");
-        const uploadStartBtn = createConfirmDialogButton("Start Upload", "primary");
-        uploadStartBtn.disabled = true;
-
-        footer.appendChild(cancelBtn);
-        footer.appendChild(uploadStartBtn);
-        panel.appendChild(footer);
-        overlay.appendChild(panel);
-        document.body.appendChild(overlay);
-
-        let selectedFile = null;
-        let isUploading = false;
-        let abortController = null;
-
-        const updateDiskWarning = () => {
-            if (selectedFile && freeSpace !== null && selectedFile.size > freeSpace) {
-                errorMsg.textContent = `Warning: File size (${this.formatSizeGb(selectedFile.size)}) exceeds free disk space (${freeSpaceText}).`;
-                errorMsg.style.display = "block";
-                uploadStartBtn.disabled = true;
-            } else {
-                errorMsg.style.display = "none";
-                if (selectedFile) {
-                    uploadStartBtn.disabled = false;
-                }
-            }
-        };
-
-        const onFileChosen = (file) => {
-            if (!file) return;
-            selectedFile = file;
-            dropzone.style.display = "none";
-            detailsContainer.style.display = "flex";
-            document.getElementById("hf-upload-filename-val").textContent = file.name;
-            document.getElementById("hf-upload-filesize-val").textContent = this.formatSizeGb(file.size);
-            updateDiskWarning();
-        };
-
-        fileInput.onchange = (e) => {
-            onFileChosen(e.target.files[0]);
-        };
-
-        dropzone.ondragover = (e) => {
-            e.preventDefault();
-            dropzone.style.borderColor = "var(--primary-background, #2786e5)";
-            dropzone.style.background = "var(--secondary-background-hover, #2b3242)";
-        };
-        dropzone.ondragleave = () => {
-            dropzone.style.borderColor = "var(--border-default, #3c4452)";
-            dropzone.style.background = "var(--bg-100, var(--comfy-input-bg, #111319))";
-        };
-        dropzone.ondrop = (e) => {
-            e.preventDefault();
-            dropzone.style.borderColor = "var(--border-default, #3c4452)";
-            dropzone.style.background = "var(--bg-100, var(--comfy-input-bg, #111319))";
-            if (e.dataTransfer?.files?.length) {
-                onFileChosen(e.dataTransfer.files[0]);
-            }
-        };
-
-        cancelBtn.onclick = () => {
-            if (isUploading && abortController) {
-                abortController.abort();
-            }
-            overlay.remove();
-        };
-
-        overlay.onclick = (e) => {
-            if (e.target === overlay && !isUploading) {
-                overlay.remove();
-            }
-        };
-
-        uploadStartBtn.onclick = async () => {
-            if (!selectedFile || isUploading) return;
-            isUploading = true;
-            uploadStartBtn.disabled = true;
-            cancelBtn.textContent = "Cancel Upload";
-            selectEl.disabled = true;
-            progressContainer.style.display = "flex";
-
-            const uploadId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-            const targetFolder = selectEl.value;
-            const filename = selectedFile.name;
-            const fileSize = selectedFile.size;
-            
-            const chunkSize = 8 * 1024 * 1024;
-            const totalChunks = Math.ceil(fileSize / chunkSize);
-
-            abortController = new AbortController();
-            const progressFill = document.getElementById("hf-upload-progress-fill");
-            const percentLabel = document.getElementById("hf-upload-percent");
-            const speedLabel = document.getElementById("hf-upload-speed");
-            const etaLabel = document.getElementById("hf-upload-eta");
-
-            const uploadStartTime = Date.now();
-            let bytesUploaded = 0;
-
-            for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-                if (abortController.signal.aborted) {
-                    break;
-                }
-
-                const start = chunkIndex * chunkSize;
-                const end = Math.min(start + chunkSize, fileSize);
-                const chunk = selectedFile.slice(start, end);
-                const currentChunkSize = end - start;
-
-                const formData = new FormData();
-                formData.append("upload_id", uploadId);
-                formData.append("filename", filename);
-                formData.append("folder", targetFolder);
-                formData.append("chunk_index", String(chunkIndex));
-                formData.append("total_chunks", String(totalChunks));
-                formData.append("chunk", chunk, filename);
-
-                let success = false;
-                let retries = 3;
-
-                while (retries > 0 && !success) {
-                    try {
-                        const resp = await fetch("/hf_downloader_model_explorer_v2/upload_chunk", {
-                            method: "POST",
-                            body: formData,
-                            signal: abortController.signal,
-                        });
-
-                        if (resp.ok) {
-                            success = true;
-                        } else {
-                            retries--;
-                            if (retries === 0) {
-                                throw new Error(`HTTP ${resp.status}`);
-                            }
-                            await new Promise(r => setTimeout(r, 1000));
-                        }
-                    } catch (e) {
-                        if (abortController.signal.aborted) break;
-                        retries--;
-                        if (retries === 0) {
-                            errorMsg.textContent = `Upload failed: ${e.message || e}`;
-                            errorMsg.style.display = "block";
-                            isUploading = false;
-                            uploadStartBtn.disabled = false;
-                            cancelBtn.textContent = "Close";
-                            return;
-                        }
-                        await new Promise(r => setTimeout(r, 1000));
-                    }
-                }
-
-                if (abortController.signal.aborted) break;
-
-                bytesUploaded += currentChunkSize;
-
-                const totalElapsed = (Date.now() - uploadStartTime) / 1000;
-                const percent = Math.round((bytesUploaded / fileSize) * 100);
-                const speedBps = bytesUploaded / (totalElapsed || 0.1);
-                const speedMbs = speedBps / (1024 * 1024);
-
-                const remainingBytes = fileSize - bytesUploaded;
-                const etaSeconds = speedBps > 0 ? Math.round(remainingBytes / speedBps) : 0;
-                
-                let etaText = "ETA: -";
-                if (etaSeconds > 0) {
-                    const m = Math.floor(etaSeconds / 60);
-                    const s = etaSeconds % 60;
-                    etaText = m > 0 ? `ETA: ${m}m ${s}s` : `ETA: ${s}s`;
-                }
-
-                progressFill.style.width = `${percent}%`;
-                percentLabel.textContent = `${percent}%`;
-                speedLabel.textContent = `${speedMbs.toFixed(1)} MB/s`;
-                etaLabel.textContent = etaText;
-            }
-
-            if (!abortController.signal.aborted) {
-                showToast({
-                    severity: "success",
-                    summary: "Upload complete",
-                    detail: `Successfully uploaded ${filename} to ${targetFolder}`,
-                });
-                overlay.remove();
-                await this.refreshAll();
-            }
-        };
+        showUnifiedImportModelDialog({
+            initialMode: "file",
+            onSuccess: () => void this.refreshAll(),
+        });
     }
 
     createUi() {
@@ -1790,10 +1551,6 @@ class ModelExplorerDialog {
 
         const panel = document.createElement("div");
         applyTemplateDialogPanelStyle(panel, {
-            width: "min(1600px, 100%)",
-            height: "92vh",
-            minHeight: "92vh",
-            maxHeight: "92vh",
             padding: "0",
         });
         panel.id = "hf-me-panel";
@@ -1805,34 +1562,13 @@ class ModelExplorerDialog {
         leftPanel.className = "hf-me-left-panel";
         leftPanel.innerHTML = `
             <header class="hf-me-left-header">
+                <i class="icon-[comfy--ai-model] hf-me-left-title-icon" aria-hidden="true"></i>
                 <h2 class="hf-me-left-title">Model Explorer</h2>
             </header>
             <div class="hf-me-left-scroll">
-                <div class="hf-me-nav-title">
-                    <span class="hf-me-nav-title-text">By type</span>
-                </div>
                 <div id="hf-me-category-list" class="hf-me-category-list"></div>
             </div>
-            <div class="hf-me-left-footer" style="padding: 12px; border-top: 1px solid var(--interface-stroke, var(--border-color, var(--border-default, #3c4452))); flex-shrink: 0;">
-                <button type="button" class="p-button p-component p-button-sm p-button-outlined hf-me-upload-btn" style="width: 100%; height: 36px; border-radius: 6px; border: 1px solid var(--border-default, #3c4452); background: transparent; color: var(--base-foreground, #e5e7eb); font-size: 13px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: background-color 120ms ease, border-color 120ms ease;">
-                    <i class="pi pi-upload" aria-hidden="true"></i>
-                    <span>Upload Model</span>
-                </button>
-            </div>
         `;
-        const uploadBtn = leftPanel.querySelector(".hf-me-upload-btn");
-        uploadBtn.onmouseenter = () => {
-            uploadBtn.style.background = "var(--secondary-background-hover, #3a4458)";
-            uploadBtn.style.borderColor = "var(--border-default, #4b5563)";
-        };
-        uploadBtn.onmouseleave = () => {
-            uploadBtn.style.background = "transparent";
-            uploadBtn.style.borderColor = "var(--border-default, #3c4452)";
-        };
-        uploadBtn.onclick = (e) => {
-            e.stopPropagation();
-            this.showUploadDialog();
-        };
         shell.appendChild(leftPanel);
 
         const mainPanel = document.createElement("div");
@@ -1844,8 +1580,11 @@ class ModelExplorerDialog {
         mainHeader.innerHTML = `
             <div class="hf-me-search-wrap">
                 <div class="hf-me-searchbox">
-                    <i class="hf-me-search-icon pi pi-search" aria-hidden="true"></i>
-                    <input id="hf-me-search" class="hf-me-search-input" type="text" placeholder="Search..." />
+                    <i class="hf-me-search-icon icon-[lucide--search] size-4" aria-hidden="true"></i>
+                    <input id="hf-me-search" class="hf-me-search-input" type="text" placeholder="Search ..." />
+                    <button id="hf-me-search-clear" type="button" class="hf-me-search-clear" aria-label="Clear search" style="display:none;">
+                        <i class="icon-[lucide--x] size-3.5" aria-hidden="true"></i>
+                    </button>
                 </div>
                 <button id="hf-me-hfsearch-btn" type="button" class="hf-me-hfsearch-btn" hidden>
                     <i class="pi pi-globe" aria-hidden="true"></i>
@@ -1856,8 +1595,32 @@ class ModelExplorerDialog {
 
         const headerActions = document.createElement("div");
         headerActions.className = "hf-me-header-actions";
-        const closeIconButton = createDialogCloseIconButton(() => this.close());
-        closeIconButton.classList.add("hf-me-close-btn");
+
+        const importBtn = document.createElement("button");
+        importBtn.id = "hf-me-import-btn";
+        importBtn.type = "button";
+        importBtn.className = "hf-me-import-btn";
+        importBtn.setAttribute("data-testid", "hf-me-import-btn");
+        importBtn.innerHTML = `<i class="icon-[lucide--folder-input] size-4" aria-hidden="true"></i><span>Import</span>`;
+        importBtn.onclick = (e) => {
+            e.stopPropagation();
+            showUnifiedImportModelDialog({
+                initialFolder: this.filters.category && this.filters.category !== MODEL_EXPLORER_OTHER_CATEGORY_KEY
+                    ? this.filters.category
+                    : "",
+                onSuccess: () => void this.refreshAll(),
+            });
+        };
+
+        const closeIconButton = document.createElement("button");
+        closeIconButton.type = "button";
+        closeIconButton.className = "hf-me-native-close-btn hf-me-close-btn";
+        closeIconButton.setAttribute("data-testid", "hf-me-close-btn");
+        closeIconButton.setAttribute("aria-label", "Close dialog");
+        closeIconButton.innerHTML = `<i class="icon-[lucide--x] size-4" aria-hidden="true"></i>`;
+        closeIconButton.onclick = () => this.close();
+
+        headerActions.appendChild(importBtn);
         headerActions.appendChild(closeIconButton);
         mainHeader.appendChild(headerActions);
         mainPanel.appendChild(mainHeader);
@@ -1870,12 +1633,12 @@ class ModelExplorerDialog {
                 <button type="button" class="hf-me-filter-trigger" aria-label="Base model filter">
                     <span class="hf-me-filter-label">Base model</span>
                     <span class="hf-me-filter-badge" style="display:none;">0</span>
-                    <i class="icon-[lucide--chevron-down] hf-me-filter-caret" aria-hidden="true"></i>
+                    <i class="icon-[lucide--chevron-down] size-5 hf-me-filter-caret" aria-hidden="true"></i>
                 </button>
                 <div class="hf-me-filter-popover" style="display:none;">
                     <div class="hf-me-filter-search">
-                        <i class="hf-me-filter-search-icon pi pi-search" aria-hidden="true"></i>
-                        <input type="text" class="hf-me-filter-search-input" placeholder="Search..." />
+                        <i class="hf-me-filter-search-icon icon-[lucide--search] size-4" aria-hidden="true"></i>
+                        <input type="text" class="hf-me-filter-search-input" placeholder="Search ..." />
                     </div>
                     <div class="hf-me-filter-meta">
                         <span class="hf-me-filter-meta-text">0 item selected</span>
@@ -1889,12 +1652,12 @@ class ModelExplorerDialog {
                 <button type="button" class="hf-me-filter-trigger" aria-label="Precision filter">
                     <span class="hf-me-filter-label">Precision</span>
                     <span class="hf-me-filter-badge" style="display:none;">0</span>
-                    <i class="icon-[lucide--chevron-down] hf-me-filter-caret" aria-hidden="true"></i>
+                    <i class="icon-[lucide--chevron-down] size-5 hf-me-filter-caret" aria-hidden="true"></i>
                 </button>
                 <div class="hf-me-filter-popover" style="display:none;">
                     <div class="hf-me-filter-search">
-                        <i class="hf-me-filter-search-icon pi pi-search" aria-hidden="true"></i>
-                        <input type="text" class="hf-me-filter-search-input" placeholder="Search..." />
+                        <i class="hf-me-filter-search-icon icon-[lucide--search] size-4" aria-hidden="true"></i>
+                        <input type="text" class="hf-me-filter-search-input" placeholder="Search ..." />
                     </div>
                     <div class="hf-me-filter-meta">
                         <span class="hf-me-filter-meta-text">0 item selected</span>
@@ -1910,9 +1673,9 @@ class ModelExplorerDialog {
         installedOnlyRow.className = "hf-me-toggle-row";
         installedOnlyRow.innerHTML = `
             <div class="hf-me-toggle-label">
-                <label class="hf-me-installed-toggle-wrap hf-manual-toggle p-toggleswitch p-component transition-transform active:scale-90">
-                    <input id="hf-me-installed-only" type="checkbox" class="p-toggleswitch-input" role="switch" aria-label="Show downloaded only" />
-                    <span class="p-toggleswitch-slider"></span>
+                <label class="hf-me-tumbler hf-me-installed-toggle-wrap">
+                    <input id="hf-me-installed-only" type="checkbox" role="switch" aria-label="Show downloaded only" />
+                    <span class="hf-me-tumbler-track" aria-hidden="true"></span>
                 </label>
                 <label for="hf-me-installed-only">Show downloaded only</label>
             </div>
@@ -1937,23 +1700,20 @@ class ModelExplorerDialog {
         this.baseControl = this.createFilterControl(panel.querySelector("#hf-me-base-wrap"), "base", "Base model");
         this.precisionControl = this.createFilterControl(panel.querySelector("#hf-me-precision-wrap"), "precision", "Precision");
         this.searchInput = panel.querySelector("#hf-me-search");
+        this.searchClearBtn = panel.querySelector("#hf-me-search-clear");
         this.installedOnlyToggle = panel.querySelector("#hf-me-installed-only");
         this.baseWrap = panel.querySelector("#hf-me-base-wrap");
         this.precisionWrap = panel.querySelector("#hf-me-precision-wrap");
         this.filterWrap = filterWrap;
         const leftScroll = leftPanel.querySelector(".hf-me-left-scroll");
         applyNativeScrollbarClasses(leftScroll);
-        const toggleWrap = installedOnlyRow.querySelector(".hf-me-installed-toggle-wrap");
         const toggleInput = this.installedOnlyToggle;
 
         const updateSliderState = () => {
-            if (!toggleWrap || !toggleInput) return;
-            toggleWrap.classList.toggle("p-toggleswitch-checked", Boolean(toggleInput.checked));
+            if (!toggleInput) return;
             toggleInput.setAttribute("aria-checked", toggleInput.checked ? "true" : "false");
         };
-        if (toggleInput && toggleWrap) {
-            toggleInput.addEventListener("focus", () => toggleWrap.classList.add("p-focus"));
-            toggleInput.addEventListener("blur", () => toggleWrap.classList.remove("p-focus"));
+        if (toggleInput) {
             toggleInput.addEventListener("change", () => updateSliderState());
             updateSliderState();
         }
@@ -1966,8 +1726,21 @@ class ModelExplorerDialog {
                 }
             };
         }
+        if (this.searchClearBtn) {
+            this.searchClearBtn.onclick = () => {
+                this.searchInput.value = "";
+                this.searchClearBtn.style.display = "none";
+                if (this.hfSearchBtn) this.hfSearchBtn.hidden = true;
+                this.filters.search = "";
+                void this.refreshGroups();
+                this.searchInput.focus();
+            };
+        }
         this.searchInput.oninput = () => {
             const rawVal = this.searchInput.value.trim();
+            if (this.searchClearBtn) {
+                this.searchClearBtn.style.display = rawVal.length > 0 ? "inline-flex" : "none";
+            }
             if (this.hfSearchBtn) {
                 this.hfSearchBtn.hidden = rawVal.length < 2;
             }
@@ -1987,13 +1760,14 @@ class ModelExplorerDialog {
             };
         }
 
-        document.addEventListener("click", (event) => {
+        this._onDocClick = (event) => {
             if (!this.element || this.element.style.display === "none") return;
             const target = event?.target;
             if (!(target instanceof Element)) return;
             if (target.closest(".hf-me-filter")) return;
             this.closeFilterPopover();
-        });
+        };
+        this._docClickAttached = false;
     }
 
     async refreshAll() {
@@ -2380,7 +2154,7 @@ class ModelExplorerDialog {
         if (!this.categoryList) return;
         this.categoryList.innerHTML = "";
 
-        const createCategoryButton = (value, label) => {
+        const createCategoryButton = (value, label, iconClass = "icon-[lucide--folder]") => {
             const button = document.createElement("button");
             button.type = "button";
             button.className = "hf-me-nav-item";
@@ -2388,6 +2162,7 @@ class ModelExplorerDialog {
                 button.classList.add("is-active");
             }
             button.innerHTML = `
+                <i class="${iconClass} size-4 hf-me-nav-icon" aria-hidden="true"></i>
                 <span class="hf-me-nav-label">${escapeHtml(label)}</span>
             `;
             button.onclick = () => {
@@ -2402,7 +2177,12 @@ class ModelExplorerDialog {
             this.categoryList.appendChild(button);
         };
 
-        createCategoryButton("", "All Categories");
+        createCategoryButton("", "All Categories", "icon-[lucide--list]");
+
+        const sectionHeader = document.createElement("div");
+        sectionHeader.className = "hf-me-nav-title";
+        sectionHeader.innerHTML = `<h3 class="hf-me-nav-title-text">By type</h3>`;
+        this.categoryList.appendChild(sectionHeader);
 
         const regularCategories = [];
         const deferredCategories = [];
@@ -2537,13 +2317,13 @@ class ModelExplorerDialog {
         const actions = installed
             ? `
                 <button class="hf-me-action-btn p-button p-component hf-me-action-btn--destructive" data-action="delete" data-key="${variantKey}" aria-label="Delete model">
-                    <i class="pi pi-times" aria-hidden="true"></i>
+                    <i class="icon-[lucide--trash-2] size-3.5" aria-hidden="true"></i>
                 </button>
                 <button class="hf-me-action-btn p-button p-component hf-me-action-btn--primary" data-action="use" data-key="${variantKey}">Use</button>
               `
             : `
                 <button class="hf-me-action-btn p-button p-component hf-me-action-btn--secondary" data-action="download" data-key="${variantKey}">
-                    <i class="icon-[lucide--download]" aria-hidden="true"></i>
+                    <i class="icon-[lucide--download] size-3.5" aria-hidden="true"></i>
                     <span>Download</span>
                 </button>
               `;
@@ -2860,7 +2640,7 @@ class ModelExplorerDialog {
         });
         if (!ok) return;
         button.disabled = true;
-        button.innerHTML = `<i class="pi pi-spin pi-spinner" aria-hidden="true"></i>`;
+        button.innerHTML = `<i class="pi pi-spin pi-spinner-dotted" aria-hidden="true"></i>`;
         try {
             const resp = await this.fetchExplorer("/delete", {
                 method: "POST",
@@ -2882,7 +2662,7 @@ class ModelExplorerDialog {
                 detail: String(error),
             });
             button.disabled = false;
-            button.innerHTML = `<i class="pi pi-times" aria-hidden="true"></i>`;
+            button.innerHTML = `<i class="icon-[lucide--trash-2] size-3.5" aria-hidden="true"></i>`;
         }
     }
 }
@@ -2900,6 +2680,11 @@ app.registerExtension({
     setup() {
         registerGlobalAction("showModelExplorer", () => {
             void modelExplorerDialog.show();
+        });
+        registerGlobalAction("refreshModelExplorer", () => {
+            if (modelExplorerDialog.element && modelExplorerDialog.element.style.display !== "none") {
+                void modelExplorerDialog.refreshAll();
+            }
         });
     },
 });

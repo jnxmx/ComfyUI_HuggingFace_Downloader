@@ -1,40 +1,38 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
+import { showUnifiedImportModelDialog } from "./import_model_dialog.js";
+import {
+    unwrapStoreValue,
+    getActiveWorkflow,
+    findPiniaStore,
+    resolveMissingModelStore,
+    resolveExecutionErrorStore,
+    resolveModelStore,
+    subscribeMissingModels,
+    dismissNativeErrorDialog,
+} from "./comfy_stores.js";
+import { mountInNativeStack, unmountFromNativeStack } from "./native_stack.js";
+
+const extensionLifecycleHandlers = {
+    beforeLoadGraph: null,
+    loadedGraphNode: null,
+    afterLoadGraph: null,
+};
 
 app.registerExtension({
     name: "autoDownloadModels",
+    beforeLoadGraph() {
+        return extensionLifecycleHandlers.beforeLoadGraph?.();
+    },
+    loadedGraphNode(node) {
+        return extensionLifecycleHandlers.loadedGraphNode?.(node);
+    },
+    afterLoadGraph() {
+        return extensionLifecycleHandlers.afterLoadGraph?.();
+    },
     setup() {
         const RUN_HOOK_SETTING_ID = "downloader.auto_open_missing_models_on_run";
-        const RUN_HOOK_TEMP_DISABLED = false;
-        const RUN_QUEUE_COMMAND_IDS = [
-            "Comfy.QueuePrompt",
-            "Comfy.QueuePromptFront",
-            "Comfy.QueueSelected",
-            "Comfy.QueueSelectedNodes",
-            "Comfy.QueueOutputNodes",
-            "Comfy.QueueSelectedOutputNodes",
-            "Comfy.QueueSelectedOutput",
-            "Comfy.ExecuteSelected",
-            "Comfy.ExecuteSelectedNodes",
-            "Comfy.ExecuteSelectedOutputNodes",
-            "Comfy.ExecuteSelectedOutput",
-            "Comfy.QueueGroup"
-        ];
-        const RUN_COMMAND_OVERRIDE_MARKER = "__hfAutoDownloadRunHookNativeAwareOverride";
-        const RUN_COMMAND_ORIGINAL_FN = "__hfAutoDownloadRunHookNativeAwareOriginalFn";
-        const RUN_COMMAND_OVERRIDE_RETRY_MS = 500;
-        const RUN_COMMAND_OVERRIDE_MAX_ATTEMPTS = 40;
-        const RUN_NATIVE_DIALOG_WAIT_MS = 1200;
-        const RUN_NATIVE_VALIDATION_WAIT_MS = 1200;
-        const RUN_NATIVE_DIALOG_POLL_MS = 60;
-        const RUN_NATIVE_VALIDATION_POLL_MS = 60;
         const RUN_HOOK_COOLDOWN_MS = 1800;
-        const WORKFLOW_OPEN_TRIGGER_COOLDOWN_MS = 1800;
-        const WORKFLOW_OPEN_CANDIDATE_POLL_MS = 150;
-        const MODEL_STORE_IMPORT_CANDIDATES = [];
-        const EXECUTION_ERROR_STORE_IMPORT_CANDIDATES = [];
-        const MISSING_MODEL_STORE_IMPORT_CANDIDATES = [];
-        let runHookBypassRemaining = 0;
 
         /* ──────────────── Helper Functions ──────────────── */
         const createButton = (text, className, onClick) => {
@@ -391,9 +389,6 @@ app.registerExtension({
         };
 
         const getRunHookEnabled = () => {
-            if (RUN_HOOK_TEMP_DISABLED) {
-                return false;
-            }
             const settingsUi = app?.ui?.settings;
             if (!settingsUi?.getSettingValue) {
                 return true;
@@ -409,19 +404,7 @@ app.registerExtension({
             return settingsUi.getSettingValue(RUN_HOOK_SETTING_ID) !== false;
         };
 
-        const unwrapStoreValue = (value) =>
-            value && typeof value === "object" && "value" in value
-                ? value.value
-                : value;
-
-        const getActiveWorkflowEntry = () => {
-            try {
-                const workflowStore = unwrapStoreValue(app?.extensionManager?.workflow);
-                return unwrapStoreValue(workflowStore?.activeWorkflow) || null;
-            } catch (_) {
-                return null;
-            }
-        };
+        const getActiveWorkflowEntry = () => getActiveWorkflow();
 
         const getActiveWorkflowPathKey = () => {
             const activeWorkflow = getActiveWorkflowEntry();
@@ -1648,171 +1631,161 @@ app.registerExtension({
             return true;
         };
 
-        /**
-         * Iterates over all graph nodes and aligns their widget path slashes
-         * (and relative subfolder paths when a model is installed at a different
-         * relative path under the same category) to match the server's populated
-         * combo options.
-         * Fixes Windows-to-Linux, Linux-to-Windows, and subfolder workflow loading mismatches.
-         */
+        const alignNodeWidgetSlashes = (node, currentGraph = null) => {
+            if (!node || typeof node !== "object") return false;
+            const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
+            let nodeUpdated = false;
+            for (const widget of widgets) {
+                const val = typeof widget?.value === "string" ? widget.value.trim() : "";
+                if (!val) {
+                    continue;
+                }
+
+                const options = resolveComboWidgetOptionsNativeLike(widget);
+                if (!Array.isArray(options) || !options.length) {
+                    continue;
+                }
+                if (options.includes(val)) {
+                    continue;
+                }
+
+                const normalizedVal = val.replace(/\\/g, "/");
+                const normalizedValLower = normalizedVal.toLowerCase();
+                let matchedOption = options.find(
+                    opt => typeof opt === "string" && opt.replace(/\\/g, "/") === normalizedVal
+                );
+                if (!matchedOption) {
+                    matchedOption = options.find(
+                        opt => typeof opt === "string" && opt.replace(/\\/g, "/").toLowerCase() === normalizedValLower
+                    );
+                }
+                if (
+                    !matchedOption &&
+                    MODELISH_FILENAME_PATTERN.test(val) &&
+                    isLocalModelLoaderNode(node)
+                ) {
+                    const widgetName = String(widget?.name || "").trim();
+                    const upstreamInfo = getUpstreamDownloaderNodeUrlAndFolder(node, widgetName, currentGraph || node?.graph || app?.rootGraph);
+                    if (!upstreamInfo) {
+                        const valBaseLower = getPathBasename(normalizedVal).toLowerCase();
+                        if (valBaseLower) {
+                            const baseMatches = options.filter(
+                                opt => typeof opt === "string" && getPathBasename(opt).toLowerCase() === valBaseLower
+                            );
+                            if (baseMatches.length) {
+                                matchedOption =
+                                    baseMatches.find(opt => opt.replace(/\\/g, "/").toLowerCase() === valBaseLower) ||
+                                    baseMatches[0];
+                            }
+                        }
+                    }
+                }
+                if (matchedOption && widget.value !== matchedOption) {
+                    widget.value = matchedOption;
+                    nodeUpdated = true;
+                }
+            }
+            if (nodeUpdated) {
+                node?.setDirtyCanvas?.(true);
+            }
+            return nodeUpdated;
+        };
+
         const alignGraphWidgetSlashes = (graph = null) => {
             const rootGraph = graph || app?.rootGraph;
             if (!rootGraph || typeof rootGraph !== "object") {
                 return;
             }
-            const visitGraph = (currentGraph) => {
+            const visitGraph = (currentGraph, visited = new Set()) => {
+                if (!currentGraph || visited.has(currentGraph)) return;
+                visited.add(currentGraph);
                 const nodes = Array.isArray(currentGraph?.nodes) ? currentGraph.nodes : [];
                 for (const node of nodes) {
                     if (!node || typeof node !== "object") continue;
-
-                    const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
-                    let nodeUpdated = false;
-                    for (const widget of widgets) {
-                        const val = typeof widget?.value === "string" ? widget.value.trim() : "";
-                        if (!val) {
-                            continue;
-                        }
-
-                        const options = resolveComboWidgetOptionsNativeLike(widget);
-                        if (!Array.isArray(options) || !options.length) {
-                            continue;
-                        }
-                        if (options.includes(val)) {
-                            continue;
-                        }
-
-                        const normalizedVal = val.replace(/\\/g, "/");
-                        const normalizedValLower = normalizedVal.toLowerCase();
-                        let matchedOption = options.find(
-                            opt => typeof opt === "string" && opt.replace(/\\/g, "/") === normalizedVal
-                        );
-                        if (!matchedOption) {
-                            matchedOption = options.find(
-                                opt => typeof opt === "string" && opt.replace(/\\/g, "/").toLowerCase() === normalizedValLower
-                            );
-                        }
-                        if (
-                            !matchedOption &&
-                            MODELISH_FILENAME_PATTERN.test(val) &&
-                            isLocalModelLoaderNode(node)
-                        ) {
-                            const widgetName = String(widget?.name || "").trim();
-                            const upstreamInfo = getUpstreamDownloaderNodeUrlAndFolder(node, widgetName, currentGraph);
-                            if (!upstreamInfo) {
-                                const valBaseLower = getPathBasename(normalizedVal).toLowerCase();
-                                if (valBaseLower) {
-                                    const baseMatches = options.filter(
-                                        opt => typeof opt === "string" && getPathBasename(opt).toLowerCase() === valBaseLower
-                                    );
-                                    if (baseMatches.length) {
-                                        matchedOption =
-                                            baseMatches.find(opt => opt.replace(/\\/g, "/").toLowerCase() === valBaseLower) ||
-                                            baseMatches[0];
-                                    }
-                                }
-                            }
-                        }
-                        if (matchedOption && widget.value !== matchedOption) {
-                            console.log(`[AutoDownload] Aligning path for widget "${widget.name}" on node ${node.id || node.type}: "${widget.value}" -> "${matchedOption}"`);
-                            widget.value = matchedOption;
-                            nodeUpdated = true;
-                        }
-                    }
-                    if (nodeUpdated) {
-                        node?.setDirtyCanvas?.(true);
-                    }
-
-                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
-                        visitGraph(node.subgraph);
+                    alignNodeWidgetSlashes(node, currentGraph);
+                    const sub = (typeof node?.getInnerGraph === "function" ? node.getInnerGraph() : null) || node?.subgraph;
+                    if (sub && typeof sub === "object") {
+                        visitGraph(sub, visited);
                     }
                 }
             };
             visitGraph(rootGraph);
         };
 
-        /**
-         * For every loader node whose model widget is linked to an upstream
-         * "Hugging Face Download Model" node, parse the expected filename from the
-         * HF link URL and write it into the widget value.  This prevents the native
-         * ComfyUI "Missing Models" panel from showing a stale/random filename.
-         */
+        const parseDownloaderLinkFilename = (url) => {
+            try {
+                const cleaned = String(url || "").split("?")[0].split("#")[0];
+                const parts = cleaned.split("/").filter(Boolean);
+                const last = parts[parts.length - 1];
+                return last ? decodeURIComponent(last) : "";
+            } catch (_) {
+                return "";
+            }
+        };
+
+        const syncNodeDownloaderLinkedWidgets = (node, currentGraph = null) => {
+            if (!node || typeof node !== "object") return false;
+            const resolvedGraph = currentGraph || node?.graph || app?.rootGraph;
+            if (!resolvedGraph || typeof resolvedGraph !== "object") return false;
+            const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
+            const inputs = Array.isArray(node?.inputs) ? node.inputs : [];
+            if (!widgets.length || !inputs.length) return false;
+
+            let updated = false;
+            for (const widget of widgets) {
+                const widgetName = String(widget?.name || "").trim();
+                if (!widgetName || !isModelValidationInputName(widgetName)) continue;
+
+                const inp = inputs.find(entry =>
+                    String(entry?.name || "").trim() === widgetName ||
+                    String(entry?.widget?.name || "").trim() === widgetName
+                );
+                if (!inp || inp.link == null) continue;
+
+                const link = resolvedGraph.links ? resolvedGraph.links[inp.link] : null;
+                if (!link) continue;
+
+                const upstreamId = link.origin_id;
+                if (upstreamId == null) continue;
+
+                const upstreamNode = typeof resolvedGraph.getNodeById === "function"
+                    ? resolvedGraph.getNodeById(upstreamId)
+                    : (resolvedGraph._nodes_by_id ? resolvedGraph._nodes_by_id[upstreamId] : null);
+                if (!upstreamNode || String(upstreamNode.type) !== "Hugging Face Download Model") {
+                    continue;
+                }
+
+                const upWidgets = Array.isArray(upstreamNode.widgets) ? upstreamNode.widgets : [];
+                const linkWidget = upWidgets.find(w => w?.name === "link");
+                const hfUrl = String(linkWidget ? linkWidget.value : "").trim();
+                if (!hfUrl) continue;
+
+                const parsedFilename = parseDownloaderLinkFilename(hfUrl);
+                if (!parsedFilename) continue;
+
+                if (widget.value !== parsedFilename) {
+                    widget.value = parsedFilename;
+                    updated = true;
+                }
+            }
+            return updated;
+        };
+
         const syncDownloaderLinkedWidgetNames = (graph = null) => {
             const rootGraph = graph || app?.rootGraph;
             if (!rootGraph || typeof rootGraph !== "object") {
                 return;
             }
-
-            const parseFilenameFromUrl = (url) => {
-                try {
-                    const cleaned = String(url || "").split("?")[0].split("#")[0];
-                    const parts = cleaned.split("/").filter(Boolean);
-                    const last = parts[parts.length - 1];
-                    return last ? decodeURIComponent(last) : "";
-                } catch (_) {
-                    return "";
-                }
-            };
-
-            const visitGraph = (currentGraph) => {
+            const visitGraph = (currentGraph, visited = new Set()) => {
+                if (!currentGraph || visited.has(currentGraph)) return;
+                visited.add(currentGraph);
                 const nodes = Array.isArray(currentGraph?.nodes) ? currentGraph.nodes : [];
                 for (const node of nodes) {
                     if (!node || typeof node !== "object") continue;
-
-                    const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
-                    const inputs = Array.isArray(node?.inputs) ? node.inputs : [];
-
-                    for (const widget of widgets) {
-                        const widgetName = String(widget?.name || "").trim();
-                        if (!widgetName) continue;
-
-                        // Only process model-like combo widgets
-                        if (!isModelValidationInputName(widgetName)) continue;
-
-                        // Check if this widget has a linked input
-                        const inp = inputs.find(entry =>
-                            String(entry?.name || "").trim() === widgetName ||
-                            String(entry?.widget?.name || "").trim() === widgetName
-                        );
-                        if (!inp || inp.link == null) continue;
-
-                        // Resolve the link to find the upstream node
-                        const link = currentGraph.links
-                            ? currentGraph.links[inp.link]
-                            : null;
-                        if (!link) continue;
-
-                        const upstreamId = link.origin_id;
-                        if (upstreamId == null) continue;
-
-                        const upstreamNode = typeof currentGraph.getNodeById === "function"
-                            ? currentGraph.getNodeById(upstreamId)
-                            : (currentGraph._nodes_by_id ? currentGraph._nodes_by_id[upstreamId] : null);
-
-                        if (!upstreamNode || String(upstreamNode.type) !== "Hugging Face Download Model") {
-                            continue;
-                        }
-
-                        // Extract the link URL from the upstream HF Download node
-                        const upWidgets = Array.isArray(upstreamNode.widgets) ? upstreamNode.widgets : [];
-                        const linkWidget = upWidgets.find(w => w?.name === "link");
-                        const hfUrl = String(linkWidget ? linkWidget.value : "").trim();
-                        if (!hfUrl) continue;
-
-                        const parsedFilename = parseFilenameFromUrl(hfUrl);
-                        if (!parsedFilename) continue;
-
-                        // Only update if the current widget value differs
-                        if (widget.value !== parsedFilename) {
-                            console.log(
-                                `[AutoDownload] Syncing widget "${widgetName}" on node ${node.id || node.type}: ` +
-                                `"${widget.value}" -> "${parsedFilename}" (from HF Download link)`
-                            );
-                            widget.value = parsedFilename;
-                        }
-                    }
-
-                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
-                        visitGraph(node.subgraph);
+                    syncNodeDownloaderLinkedWidgets(node, currentGraph);
+                    const sub = (typeof node?.getInnerGraph === "function" ? node.getInnerGraph() : null) || node?.subgraph;
+                    if (sub && typeof sub === "object") {
+                        visitGraph(sub, visited);
                     }
                 }
             };
@@ -2040,8 +2013,16 @@ app.registerExtension({
 
             const collected = [];
             const seen = new Set();
+            const visitedGraphs = new Set();
             const visitGraph = (currentGraph, prefix = "") => {
-                const nodes = Array.isArray(currentGraph?.nodes) ? currentGraph.nodes : [];
+                if (!currentGraph || typeof currentGraph !== "object" || visitedGraphs.has(currentGraph)) {
+                    return;
+                }
+                visitedGraphs.add(currentGraph);
+
+                const nodes = Array.isArray(currentGraph?.nodes)
+                    ? currentGraph.nodes
+                    : (Array.isArray(currentGraph?._nodes) ? currentGraph._nodes : []);
                 for (const node of nodes) {
                     if (!node || typeof node !== "object") {
                         continue;
@@ -2055,8 +2036,9 @@ app.registerExtension({
                         ? `${prefix}:${nodeId}`
                         : nodeId;
 
-                    if (typeof node?.isSubgraphNode === "function" && node.isSubgraphNode() && node?.subgraph) {
-                        visitGraph(node.subgraph, executionId);
+                    const sub = (typeof node?.getInnerGraph === "function" ? node.getInnerGraph() : null) || node?.subgraph;
+                    if (sub && typeof sub === "object") {
+                        visitGraph(sub, executionId);
                         continue;
                     }
 
@@ -2148,6 +2130,31 @@ app.registerExtension({
                         collected.push(candidate);
                     }
                 }
+
+                try {
+                    const subgraphs = currentGraph.subgraphs;
+                    if (subgraphs) {
+                        if (typeof subgraphs.values === "function") {
+                            for (const sub of subgraphs.values()) {
+                                if (sub && typeof sub === "object") {
+                                    visitGraph(sub, prefix);
+                                }
+                            }
+                        } else if (Array.isArray(subgraphs)) {
+                            for (const sub of subgraphs) {
+                                if (sub && typeof sub === "object") {
+                                    visitGraph(sub, prefix);
+                                }
+                            }
+                        } else if (typeof subgraphs === "object") {
+                            for (const sub of Object.values(subgraphs)) {
+                                if (sub && typeof sub === "object") {
+                                    visitGraph(sub, prefix);
+                                }
+                            }
+                        }
+                    }
+                } catch (_) {}
             };
 
             visitGraph(rootGraph, "");
@@ -2853,25 +2860,6 @@ app.registerExtension({
             );
         };
 
-        const prefetchNativeStoreFileSize = async (url, missingModelStore) => {
-            if (!url || !missingModelStore || typeof missingModelStore.setFileSize !== "function") {
-                return;
-            }
-            const existingSizes = unwrapStoreValue(missingModelStore.fileSizes);
-            if (existingSizes && existingSizes[url] !== undefined) {
-                return;
-            }
-            try {
-                const resp = await fetch(url, { method: "HEAD" });
-                if (!resp.ok) return;
-                const cl = resp.headers.get("content-length");
-                const parsed = cl ? parseInt(cl, 10) : NaN;
-                if (Number.isFinite(parsed) && parsed > 0) {
-                    missingModelStore.setFileSize(url, parsed);
-                }
-            } catch (_) {}
-        };
-
         const syncResolvedUrlsIntoNativeMissingModelStore = async (entries = []) => {
             recordCatalogResolvedEntries(entries);
             try {
@@ -2932,11 +2920,8 @@ app.registerExtension({
                             try {
                                 missingModelStore.setFileSize(item.url, item.sizeBytes);
                             } catch (_) {}
-                        } else {
-                            void prefetchNativeStoreFileSize(item.url, missingModelStore);
                         }
                     }
-                    setTimeout(() => injectButtonsIntoMissingModelsDialogs(document), 60);
                 }
                 return changed;
             } catch (err) {
@@ -3110,12 +3095,54 @@ app.registerExtension({
             return getSafeSubgraphList(graphData).length > 0;
         };
 
+        const isLiveGraphDefaultWorkflow = (rootGraph = app?.rootGraph) => {
+            if (!rootGraph || typeof rootGraph !== "object") return false;
+            const nodes = Array.isArray(rootGraph.nodes)
+                ? rootGraph.nodes
+                : (Array.isArray(rootGraph._nodes) ? rootGraph._nodes : []);
+            if (nodes.length !== 7) return false;
+            const types = nodes.map((n) => String(n?.type || "").trim()).sort();
+            const expectedTypes = [
+                "CLIPTextEncode",
+                "CLIPTextEncode",
+                "CheckpointLoaderSimple",
+                "EmptyLatentImage",
+                "KSampler",
+                "SaveImage",
+                "VAEDecode",
+            ];
+            if (!types.every((t, idx) => t === expectedTypes[idx])) return false;
+            const ckptNode = nodes.find((n) => n?.type === "CheckpointLoaderSimple");
+            const ckptWidget = Array.isArray(ckptNode?.widgets) ? ckptNode.widgets[0] : null;
+            const ckptVal = String(ckptWidget?.value || "").trim().toLowerCase();
+            return (
+                ckptVal === "v1-5-pruned-emaonly-fp16.safetensors" ||
+                ckptVal === "v1-5-pruned-emaonly.safetensors" ||
+                ckptVal === "v1-5-pruned-emaonly.ckpt"
+            );
+        };
+
+        const computeLiveGraphRevisionKey = (graph = null) => {
+            const rootGraph = graph || app?.rootGraph;
+            if (!rootGraph || typeof rootGraph !== "object") return "";
+            const parts = [];
+            forEachGraphNodeRecursive(rootGraph, (node) => {
+                if (!node || typeof node !== "object") return;
+                const mode = Number(node.mode ?? 0);
+                const wv = Array.isArray(node.widgets)
+                    ? node.widgets.map((w) => (typeof w?.value === "string" ? w.value : "")).join(",")
+                    : "";
+                parts.push(`${node.id ?? ""}:${node.type || ""}:${mode}:${wv}`);
+            });
+            return `${parts.length}#${parts.join("|")}`;
+        };
+
         const serializeWorkflowForModelScan = () => {
-            const sanitizeData = (data) => {
+            const sanitizeData = (data, cloneFirst = false) => {
                 if (!data || typeof data !== "object") return data;
                 
                 try {
-                    const parsedData = JSON.parse(JSON.stringify(data));
+                    const parsedData = cloneFirst ? JSON.parse(JSON.stringify(data)) : data;
                     const liveNodes = app?.rootGraph?._nodes_by_id || app?.graph?._nodes_by_id || {};
                     
                     const processNodeList = (nodes) => {
@@ -3319,7 +3346,7 @@ app.registerExtension({
                 const activeWorkflow = getActiveWorkflowEntry();
                 const activeState = activeWorkflow?.activeState;
                 if (activeState && typeof activeState === "object") {
-                    return sanitizeData(activeState);
+                    return sanitizeData(activeState, true);
                 }
             } catch (_) {
                 // Fall through to deprecated graph alias.
@@ -3347,8 +3374,8 @@ app.registerExtension({
             if (app?.isGraphReady === false) {
                 return false;
             }
-            const workflow = serializeWorkflowForModelScan();
-            return Boolean(workflow && typeof workflow === "object");
+            const rootGraph = app?.rootGraph || app?.graph;
+            return Boolean(rootGraph && (Array.isArray(rootGraph.nodes) || Array.isArray(rootGraph._nodes)));
         };
 
         const formatFoundModelPath = (value) => {
@@ -3823,12 +3850,150 @@ app.registerExtension({
             "pointer-events-none flex w-full justify-end transition-all duration-300 ease-out";
         const NATIVE_OVERLAY_PANEL_CLASS =
             "pointer-events-auto relative flex w-fit max-w-120 min-w-80 flex-col gap-2 overflow-hidden rounded-lg border border-l-4 bg-background p-3 shadow-md transition-colors duration-200 ease-in-out border-l-warning";
+        const applyNativeToasterPanelStyle = (panel) => {
+            if (!panel) return;
+            panel.className =
+                "pointer-events-auto relative flex flex-col overflow-hidden rounded-lg border border-l-4 bg-background text-foreground p-3 shadow-md transition-colors duration-200 ease-in-out border-l-warning";
+            const nativeErrorOverlay = typeof document !== "undefined"
+                ? document.querySelector('[data-testid="error-overlay"]')
+                : null;
+            const measuredWidth = nativeErrorOverlay
+                ? Math.round(nativeErrorOverlay.getBoundingClientRect().width)
+                : 0;
+            const targetWidth = measuredWidth >= 320 && measuredWidth <= 480
+                ? `min(${measuredWidth}px, calc(100vw - 32px))`
+                : "min(416px, calc(100vw - 32px))";
+            Object.assign(panel.style, {
+                width: targetWidth,
+                minWidth: "min(320px, calc(100vw - 32px))",
+                maxWidth: "min(480px, calc(100vw - 32px))",
+                padding: "12px",
+                gap: "10px",
+            });
+        };
         const NATIVE_OVERLAY_CLOSE_BTN_CLASS =
             "inline-flex cursor-pointer touch-manipulation appearance-none items-center justify-center gap-2 border-none font-inter text-sm font-medium whitespace-nowrap transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 bg-transparent text-muted-foreground hover:bg-accent p-0 absolute top-2 right-2 size-6 rounded-sm";
         const NATIVE_SECONDARY_BTN_CLASS =
             "relative inline-flex cursor-pointer touch-manipulation appearance-none items-center justify-center gap-2 border-none font-inter whitespace-nowrap transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 bg-secondary text-foreground hover:bg-accent min-h-8 rounded-lg px-3 py-2 text-xs font-normal";
         const NATIVE_PRIMARY_BTN_CLASS =
             "relative inline-flex cursor-pointer touch-manipulation appearance-none items-center justify-center gap-2 border-none font-inter whitespace-nowrap transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 bg-primary text-foreground hover:bg-primary/90 min-h-8 rounded-lg px-3 py-2 text-xs font-medium";
+
+        const ensureAutoDownloadOverlayControlStyles = () => {
+            if (typeof document === "undefined" || document.getElementById("hf-auto-download-control-styles")) {
+                return;
+            }
+            const style = document.createElement("style");
+            style.id = "hf-auto-download-control-styles";
+            style.textContent = `
+                .hf-row-skip-btn {
+                    position: relative;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 20px;
+                    height: 20px;
+                    padding: 0;
+                    border: none;
+                    border-radius: 4px;
+                    background: transparent;
+                    cursor: pointer;
+                    flex-shrink: 0;
+                    transition: background-color 120ms ease;
+                }
+                .hf-row-skip-btn .hf-skip-x {
+                    display: none;
+                }
+                .hf-row-skip-btn:not(:disabled):hover,
+                .hf-row-skip-btn:not(:disabled):focus-visible {
+                    background: var(--accent, rgba(255, 255, 255, 0.08));
+                    outline: none;
+                }
+                .hf-row-skip-btn:not(:disabled):hover .hf-skip-spinner,
+                .hf-row-skip-btn:not(:disabled):focus-visible .hf-skip-spinner {
+                    display: none !important;
+                }
+                .hf-row-skip-btn:not(:disabled):hover .hf-skip-x,
+                .hf-row-skip-btn:not(:disabled):focus-visible .hf-skip-x {
+                    display: inline-flex;
+                }
+                .hf-node-tumbler {
+                    position: relative;
+                    display: inline-flex;
+                    align-items: center;
+                    width: 26px;
+                    height: 14px;
+                    flex-shrink: 0;
+                    cursor: pointer;
+                    vertical-align: middle;
+                    margin: 0;
+                }
+                .hf-node-tumbler input {
+                    position: absolute;
+                    inset: 0;
+                    width: 100%;
+                    height: 100%;
+                    margin: 0;
+                    opacity: 0;
+                    cursor: pointer;
+                    z-index: 2;
+                }
+                .hf-node-tumbler-track {
+                    position: relative;
+                    display: block;
+                    width: 26px;
+                    height: 14px;
+                    border-radius: 9999px;
+                    background: var(--comfy-input-bg, #3a3a42);
+                    border: 1px solid var(--border-default, rgba(255, 255, 255, 0.18));
+                    box-sizing: border-box;
+                    transition: background-color 140ms ease, border-color 140ms ease;
+                }
+                .hf-node-tumbler-track::before {
+                    content: "";
+                    position: absolute;
+                    top: 50%;
+                    left: 1px;
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 9999px;
+                    background: #ffffff;
+                    transform: translateY(-50%);
+                    transition: transform 140ms ease;
+                    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+                }
+                .hf-node-tumbler input:checked + .hf-node-tumbler-track {
+                    background: var(--primary-background, #2786e5);
+                    border-color: var(--primary-background, #2786e5);
+                }
+                .hf-node-tumbler input:checked + .hf-node-tumbler-track::before {
+                    transform: translate(12px, -50%);
+                }
+                .hf-node-tumbler input:focus-visible + .hf-node-tumbler-track {
+                    outline: 1px solid var(--ring, #3b82f6);
+                    outline-offset: 1px;
+                }
+            `;
+            (document.head || document.documentElement).appendChild(style);
+        };
+
+        const createMissingCountBadge = (count = 0) => {
+            const badge = document.createElement("span");
+            badge.setAttribute("data-testid", "hf-model-count-badge");
+            badge.className = "inline-flex shrink-0 items-center justify-center rounded-full font-semibold tabular-nums";
+            Object.assign(badge.style, {
+                minWidth: "18px",
+                height: "18px",
+                padding: "0 4px",
+                background: "var(--warning, #f59e0b)",
+                color: "#111111",
+                fontSize: "11px",
+                fontWeight: "600",
+                lineHeight: "1",
+                boxSizing: "border-box",
+            });
+            badge.textContent = String(Math.max(0, Number(count) || 0));
+            return badge;
+        };
 
         const createNativeOverlayCloseButton = (testId, onClose) => {
             const closeBtn = document.createElement("button");
@@ -3858,88 +4023,26 @@ app.registerExtension({
                     existing.__hfOverlayCleanup();
                 }
             } catch (_) {}
+            unmountFromNativeStack(existing, "auto-download-dialog");
             existing.remove();
         };
 
         const mountOverlayInNativeStack = (dlg) => {
-            let stackObserver = null;
-            const cleanupObserver = () => {
-                if (stackObserver) {
-                    stackObserver.disconnect();
-                    stackObserver = null;
-                }
-            };
-
-            const findStackRefs = () => {
-                const errorOverlayEl = document.querySelector('[data-testid="error-overlay"]');
-                const errorOverlayWrapper = errorOverlayEl?.parentElement || null;
-                const downloadsOverlayEl = document.getElementById("hf-downloader-panel-wrapper");
-                const actionbarsEl = document.querySelector('[data-testid="top-menu-actionbars"]');
-                const stackContainer =
-                    errorOverlayWrapper?.parentElement ||
-                    downloadsOverlayEl?.parentElement ||
-                    actionbarsEl?.parentElement ||
-                    null;
-                return { errorOverlayWrapper, downloadsOverlayEl, actionbarsEl, stackContainer };
-            };
-
-            const placeInStack = () => {
-                const { errorOverlayWrapper, downloadsOverlayEl, actionbarsEl, stackContainer } = findStackRefs();
-                if (!stackContainer) {
-                    return false;
-                }
-                if (downloadsOverlayEl && downloadsOverlayEl.parentElement === stackContainer) {
-                    if (downloadsOverlayEl.nextElementSibling !== dlg) {
-                        downloadsOverlayEl.insertAdjacentElement("afterend", dlg);
-                    }
-                    return true;
-                }
-                if (errorOverlayWrapper && errorOverlayWrapper.parentElement === stackContainer) {
-                    if (errorOverlayWrapper.nextElementSibling !== dlg) {
-                        errorOverlayWrapper.insertAdjacentElement("afterend", dlg);
-                    }
-                    return true;
-                }
-                if (actionbarsEl && actionbarsEl.parentElement === stackContainer) {
-                    if (dlg.parentElement !== stackContainer || actionbarsEl.nextElementSibling !== dlg) {
-                        actionbarsEl.insertAdjacentElement("afterend", dlg);
-                    }
-                    return true;
-                }
-                if (dlg.parentElement !== stackContainer) {
-                    stackContainer.appendChild(dlg);
-                }
-                return true;
-            };
-
-            if (placeInStack()) {
-                const { stackContainer } = findStackRefs();
-                if (stackContainer && typeof MutationObserver !== "undefined") {
-                    stackObserver = new MutationObserver(() => {
-                        if (!dlg.isConnected) return;
-                        placeInStack();
-                    });
-                    stackObserver.observe(stackContainer, { childList: true });
-                }
-            } else {
-                Object.assign(dlg.style, {
-                    position: "fixed",
-                    top: "56px",
-                    right: "16px",
-                    zIndex: "9000",
-                    width: "auto",
-                });
-                document.body.appendChild(dlg);
-            }
-
-            dlg.__hfOverlayCleanup = cleanupObserver;
-            return cleanupObserver;
+            const unmount = mountInNativeStack(dlg, {
+                id: "auto-download-dialog",
+                priority: 30,
+                visible: true,
+            });
+            dlg.__hfOverlayCleanup = unmount;
+            return unmount;
         };
 
         /* Show loading dialog immediately */
-        const showLoadingDialog = (onSkip, options = {}) => {
+        const showLoadingDialog = (onSkipModel, options = {}) => {
             const skipModeActive = Boolean(options.skipModeActive);
+            const initialModels = Array.isArray(options.initialModels) ? options.initialModels.filter(Boolean) : [];
             removeExistingAutoDownloadDialog();
+            ensureAutoDownloadOverlayControlStyles();
 
             const dlg = document.createElement("div");
             dlg.id = "auto-download-dialog";
@@ -3948,7 +4051,7 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             panel.setAttribute("role", "status");
-            panel.className = NATIVE_OVERLAY_PANEL_CLASS;
+            applyNativeToasterPanelStyle(panel);
 
             let cleanupOverlay = () => {};
             const closeBtn = createNativeOverlayCloseButton("hf-model-search-dismiss", () => {
@@ -3961,65 +4064,231 @@ app.registerExtension({
             });
 
             const headerRow = document.createElement("div");
-            headerRow.className = "flex w-full items-start gap-2 pr-8";
+            headerRow.className = "flex w-full items-center gap-2 pr-7";
+            headerRow.style.marginBottom = "2px";
 
-            const spinnerIcon = document.createElement("i");
-            spinnerIcon.className = "mt-0.5 size-4 shrink-0 icon-[lucide--loader-circle] animate-spin text-warning";
-            spinnerIcon.setAttribute("aria-hidden", "true");
+            const countBadge = createMissingCountBadge(initialModels.length);
+            if (initialModels.length === 0) {
+                countBadge.style.display = "none";
+            }
+            const titleEl = document.createElement("span");
+            titleEl.className = "shrink-0 text-foreground";
+            Object.assign(titleEl.style, {
+                fontSize: "13px",
+                fontWeight: "600",
+                lineHeight: "1.2",
+            });
+            titleEl.textContent = "Auto-Download Models";
 
             const statusEl = document.createElement("span");
-            statusEl.className = "min-w-0 flex-1 truncate text-sm text-foreground";
-            statusEl.textContent = "Preparing scan...";
+            statusEl.className = "min-w-0 flex-1 truncate text-muted-foreground";
+            statusEl.style.fontSize = "11px";
+            statusEl.textContent = skipModeActive ? "Skipping unresolved..." : "Searching...";
 
-            headerRow.appendChild(spinnerIcon);
+            headerRow.appendChild(countBadge);
+            headerRow.appendChild(titleEl);
             headerRow.appendChild(statusEl);
 
-            const detailRow = document.createElement("div");
-            detailRow.className = "flex w-full items-start gap-2 pr-8";
+            const detailEl = document.createElement("div");
+            detailEl.className = "m-0 min-w-0 text-muted-foreground truncate";
+            Object.assign(detailEl.style, {
+                fontSize: "12px",
+                lineHeight: "1.35",
+                display: initialModels.length > 0 ? "none" : "block",
+            });
+            detailEl.textContent = "Scanning workflow for missing models...";
 
-            const detailSpacer = document.createElement("span");
-            detailSpacer.className = "size-4 shrink-0";
-            detailSpacer.setAttribute("aria-hidden", "true");
+            const searchRows = [];
+            let listEl = null;
+            if (initialModels.length > 0) {
+                listEl = document.createElement("div");
+                listEl.className = "flex flex-col overflow-y-auto pr-0.5";
+                Object.assign(listEl.style, {
+                    maxHeight: "min(65vh, 500px)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                });
+                applyNativeScrollbarClasses(listEl);
 
-            const detailEl = document.createElement("p");
-            detailEl.className = "m-0 line-clamp-3 min-w-0 flex-1 text-sm/snug wrap-break-word whitespace-pre-wrap text-muted-foreground";
-            detailEl.textContent = "Preparing workflow scan...";
+                initialModels.forEach((m) => {
+                    const displayName = String(
+                        m.display_name || m.requested_path || m.filename || m.name || ""
+                    ).trim() || "Unknown model";
+                    const rawFilename = String(m.filename || m.name || displayName).trim();
+                    const folderLabel = String(
+                        m.locked_folder || m.suggested_folder || m.directory || m.folder || ""
+                    ).trim();
+                    const nodeTitle = String(m.node_title || m.nodeType || "").trim();
 
-            detailRow.appendChild(detailSpacer);
-            detailRow.appendChild(detailEl);
+                    const row = document.createElement("div");
+                    row.setAttribute("data-testid", "hf-model-search-row");
+                    Object.assign(row.style, {
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "5px",
+                        padding: "0",
+                        borderTop: "none",
+                    });
 
-            const actionsEl = document.createElement("div");
-            actionsEl.className = "flex w-full items-center justify-end gap-2 pt-2";
+                    const topLine = document.createElement("div");
+                    Object.assign(topLine.style, {
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                    });
 
-            const skipBtn = document.createElement("button");
-            skipBtn.type = "button";
-            skipBtn.className = NATIVE_SECONDARY_BTN_CLASS;
-            skipBtn.textContent = "Skip Model";
-            skipBtn.disabled = skipModeActive;
-            skipBtn.onclick = () => {
-                if (skipBtn.disabled) return;
-                if (onSkip) onSkip();
-            };
+                    const nameEl = document.createElement("div");
+                    nameEl.className = "min-w-0 flex-1 truncate text-foreground";
+                    Object.assign(nameEl.style, {
+                        fontSize: "12px",
+                        fontWeight: "500",
+                        lineHeight: "1.3",
+                    });
+                    nameEl.textContent = displayName;
+                    nameEl.title = nodeTitle ? `${displayName} (${nodeTitle})` : displayName;
 
-            const cancelBtn = document.createElement("button");
-            cancelBtn.type = "button";
-            cancelBtn.className = NATIVE_SECONDARY_BTN_CLASS;
-            cancelBtn.textContent = "Cancel";
-            cancelBtn.onclick = () => {
-                if (typeof options.onClose === "function") {
-                    options.onClose();
-                } else {
-                    cleanupOverlay();
-                    if (dlg.parentElement) dlg.remove();
-                }
-            };
+                    const skipBtn = document.createElement("button");
+                    skipBtn.type = "button";
+                    skipBtn.className = "hf-row-skip-btn";
+                    skipBtn.setAttribute("data-testid", "hf-model-row-skip-search");
+                    skipBtn.setAttribute("aria-label", `Skip searching for ${displayName}`);
+                    skipBtn.title = "Skip searching for this model";
+                    skipBtn.disabled = skipModeActive;
 
-            actionsEl.appendChild(skipBtn);
-            actionsEl.appendChild(cancelBtn);
+                    const rowSpinner = document.createElement("i");
+                    rowSpinner.setAttribute("data-testid", "hf-model-row-spinner");
+                    rowSpinner.setAttribute("aria-hidden", "true");
+                    rowSpinner.className = "hf-skip-spinner pi pi-spinner-dotted pi-spin inline-flex size-3.5 items-center justify-center text-xs leading-none text-muted-foreground";
+
+                    const skipXIcon = document.createElement("i");
+                    skipXIcon.setAttribute("aria-hidden", "true");
+                    skipXIcon.className = "hf-skip-x icon-[lucide--x] size-3.5 text-foreground";
+
+                    skipBtn.appendChild(rowSpinner);
+                    skipBtn.appendChild(skipXIcon);
+
+                    const locateBtn = document.createElement("button");
+                    locateBtn.type = "button";
+                    locateBtn.setAttribute("data-testid", "hf-model-locate-node");
+                    locateBtn.setAttribute("aria-label", `Locate node${nodeTitle ? `: ${nodeTitle}` : ""}`);
+                    locateBtn.title = nodeTitle ? `Locate node: ${nodeTitle}` : "Locate node on canvas";
+                    locateBtn.className =
+                        "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-none bg-transparent p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+                    const locateIcon = document.createElement("i");
+                    locateIcon.className = "icon-[lucide--locate] size-3.5";
+                    locateIcon.setAttribute("aria-hidden", "true");
+                    locateBtn.appendChild(locateIcon);
+                    locateBtn.onclick = (event) => {
+                        event.stopPropagation();
+                        locateModelNodeOnCanvas({
+                            ...m,
+                            filename: rawFilename,
+                            display_name: displayName,
+                        });
+                    };
+
+                    topLine.appendChild(nameEl);
+                    topLine.appendChild(skipBtn);
+                    topLine.appendChild(locateBtn);
+
+                    const controlsLine = document.createElement("div");
+                    Object.assign(controlsLine.style, {
+                        paddingLeft: "0",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                    });
+
+                    const folderField = document.createElement("input");
+                    folderField.type = "text";
+                    folderField.readOnly = true;
+                    folderField.tabIndex = -1;
+                    folderField.value = folderLabel;
+                    folderField.placeholder = "Folder";
+                    Object.assign(folderField.style, {
+                        width: "120px",
+                        minWidth: "0",
+                        flexShrink: "0",
+                        height: "24px",
+                        minHeight: "24px",
+                        fontSize: "11px",
+                        lineHeight: "1.2",
+                        padding: "2px 7px",
+                        borderRadius: "5px",
+                        background: "var(--comfy-input-bg)",
+                        border: "1px solid var(--border-default)",
+                        color: "var(--muted-foreground, var(--input-text))",
+                        boxSizing: "border-box",
+                        opacity: "0.85",
+                    });
+
+                    const urlField = document.createElement("input");
+                    urlField.type = "text";
+                    urlField.readOnly = true;
+                    urlField.tabIndex = -1;
+                    urlField.value = m.url || "";
+                    urlField.placeholder = skipModeActive ? "Search skipped" : "Searching...";
+                    Object.assign(urlField.style, {
+                        flex: "1",
+                        minWidth: "0",
+                        width: "100%",
+                        height: "24px",
+                        minHeight: "24px",
+                        fontSize: "11px",
+                        lineHeight: "1.2",
+                        padding: "2px 7px",
+                        borderRadius: "5px",
+                        background: "var(--comfy-input-bg)",
+                        border: "1px solid var(--border-default)",
+                        color: "var(--muted-foreground, var(--input-text))",
+                        boxSizing: "border-box",
+                        opacity: "0.85",
+                    });
+
+                    controlsLine.appendChild(folderField);
+                    controlsLine.appendChild(urlField);
+
+                    row.appendChild(topLine);
+                    row.appendChild(controlsLine);
+                    listEl.appendChild(row);
+
+                    const searchRowEntry = {
+                        filename: rawFilename.toLowerCase(),
+                        baseFilename: (rawFilename.split("/").pop() || rawFilename).toLowerCase(),
+                        displayName: displayName.toLowerCase(),
+                        rowSpinner,
+                        skipBtn,
+                        urlField,
+                        row,
+                        skipped: skipModeActive,
+                    };
+                    skipBtn.onclick = (event) => {
+                        event.stopPropagation();
+                        if (skipBtn.disabled || searchRowEntry.skipped) return;
+                        searchRowEntry.skipped = true;
+                        skipBtn.disabled = true;
+                        skipBtn.title = "Search skipped";
+                        rowSpinner.className = "icon-[lucide--x] size-3.5 text-muted-foreground opacity-50";
+                        skipXIcon.style.display = "none";
+                        if (!urlField.value) {
+                            urlField.placeholder = "Search skipped";
+                        }
+                        row.style.opacity = "0.6";
+                        if (typeof onSkipModel === "function") {
+                            onSkipModel(rawFilename);
+                        }
+                    };
+                    searchRows.push(searchRowEntry);
+                });
+            }
 
             panel.appendChild(headerRow);
-            panel.appendChild(detailRow);
-            panel.appendChild(actionsEl);
+            if (!listEl) {
+                panel.appendChild(detailEl);
+            } else {
+                panel.appendChild(listEl);
+            }
             panel.appendChild(closeBtn);
             dlg.appendChild(panel);
 
@@ -4028,9 +4297,44 @@ app.registerExtension({
             return {
                 dlg,
                 setStatus: (text) => { statusEl.textContent = text; },
-                setDetail: (text) => { detailEl.textContent = text; },
+                setDetail: (text) => {
+                    if (!listEl && text) {
+                        detailEl.textContent = text;
+                    }
+                },
+                setTotalCount: (n) => {
+                    const count = Math.max(0, Number(n) || 0);
+                    if (count > 0) {
+                        countBadge.textContent = String(count);
+                        countBadge.style.display = "inline-flex";
+                    }
+                },
+                setActiveModel: (filename, statusText = "") => {
+                    const target = String(filename || "").trim().toLowerCase();
+                    const targetBase = target ? (target.split("/").pop() || target) : "";
+                    for (const sr of searchRows) {
+                        if (sr.skipped) continue;
+                        const matched = Boolean(
+                            target && (
+                                sr.filename === target ||
+                                sr.baseFilename === targetBase ||
+                                sr.displayName === target
+                            )
+                        );
+                        sr.rowSpinner.className = matched
+                            ? "hf-skip-spinner pi pi-spinner-dotted pi-spin inline-flex size-3.5 items-center justify-center text-xs leading-none text-warning"
+                            : "hf-skip-spinner pi pi-spinner-dotted pi-spin inline-flex size-3.5 items-center justify-center text-xs leading-none text-muted-foreground";
+                        if (matched && statusText && !sr.urlField.value) {
+                            sr.urlField.placeholder = statusText;
+                        }
+                    }
+                },
                 setSkipMode: (active) => {
-                    skipBtn.disabled = Boolean(active);
+                    for (const sr of searchRows) {
+                        if (!sr.skipped) {
+                            sr.skipBtn.disabled = Boolean(active);
+                        }
+                    }
                 },
                 cleanup: cleanupOverlay,
                 remove: () => {
@@ -4112,21 +4416,25 @@ app.registerExtension({
         };
 
         const showResultsDialog = (data, options = {}) => {
-            let pollTimer = null;
-            let loaderWatchTimer = null;
+            let statusUnsub = null;
+            let graphChangeHandler = null;
             let adaptDebounceTimer = null;
             let adaptAbortController = null;
             const stopPolling = () => {
-                if (pollTimer) {
-                    clearInterval(pollTimer);
-                    pollTimer = null;
+                if (typeof statusUnsub === "function") {
+                    try {
+                        statusUnsub();
+                    } catch (_) {}
+                    statusUnsub = null;
                 }
             };
             const stopLoaderWatcher = () => {
-                if (loaderWatchTimer) {
-                    clearInterval(loaderWatchTimer);
-                    loaderWatchTimer = null;
+                if (graphChangeHandler && api && typeof api.removeEventListener === "function") {
+                    try {
+                        api.removeEventListener("graphChanged", graphChangeHandler);
+                    } catch (_) {}
                 }
+                graphChangeHandler = null;
                 if (adaptDebounceTimer) {
                     clearTimeout(adaptDebounceTimer);
                     adaptDebounceTimer = null;
@@ -4140,6 +4448,7 @@ app.registerExtension({
             };
 
             removeExistingAutoDownloadDialog();
+            ensureAutoDownloadOverlayControlStyles();
 
             const dlg = document.createElement("div");
             dlg.id = "auto-download-dialog";
@@ -4160,9 +4469,14 @@ app.registerExtension({
                 cleanupOverlayMount();
             };
 
-            const closeDialog = () => {
+            const closeDialog = (userDismissed = false) => {
                 stopPolling();
                 cleanupUi();
+                if (userDismissed && typeof options?.onUserDismiss === "function") {
+                    try {
+                        options.onUserDismiss();
+                    } catch (_) {}
+                }
                 if (dlg.parentElement) {
                     dlg.remove();
                 }
@@ -4170,30 +4484,32 @@ app.registerExtension({
 
             const panel = document.createElement("div");
             panel.setAttribute("role", "status");
-            panel.className = NATIVE_OVERLAY_PANEL_CLASS
-                .replace("gap-2", "gap-1.5")
-                .replace("p-3", "p-2.5");
-            panel.style.width = "min(480px, calc(100vw - 32px))";
+            applyNativeToasterPanelStyle(panel);
 
             const headerWrap = document.createElement("div");
-            headerWrap.className = "flex w-full items-center gap-2 pr-8";
+            headerWrap.className = "flex w-full items-center gap-2 pr-7";
+            headerWrap.style.marginBottom = "2px";
 
-            const headerIcon = document.createElement("i");
-            headerIcon.className = "size-4 shrink-0 icon-[lucide--download] text-warning";
-            headerIcon.setAttribute("aria-hidden", "true");
+            const countBadge = createMissingCountBadge(0);
 
             const titleEl = document.createElement("span");
-            titleEl.className = "shrink-0 text-sm font-medium text-foreground";
+            titleEl.className = "shrink-0 text-foreground";
+            Object.assign(titleEl.style, {
+                fontSize: "13px",
+                fontWeight: "600",
+                lineHeight: "1.2",
+            });
             titleEl.textContent = "Auto-Download Models";
 
             const summaryInline = document.createElement("span");
-            summaryInline.className = "min-w-0 flex-1 truncate text-xs text-muted-foreground";
+            summaryInline.className = "min-w-0 flex-1 truncate text-muted-foreground";
+            summaryInline.style.fontSize = "11px";
 
-            headerWrap.appendChild(headerIcon);
+            headerWrap.appendChild(countBadge);
             headerWrap.appendChild(titleEl);
             headerWrap.appendChild(summaryInline);
             panel.appendChild(headerWrap);
-            panel.appendChild(createNativeOverlayCloseButton("hf-model-results-dismiss", closeDialog));
+            panel.appendChild(createNativeOverlayCloseButton("hf-model-results-dismiss", () => closeDialog(true)));
 
             const rawMissingModels = coalesceMissingEntriesByDestination(
                 Array.isArray(data.missing) ? [...data.missing] : []
@@ -4218,7 +4534,6 @@ app.registerExtension({
                 return (a.filename || "").localeCompare(b.filename || "");
             });
 
-            const foundModels = Array.isArray(data.found) ? data.found : [];
             let mismatchModels = Array.isArray(data.mismatches)
                 ? [...data.mismatches]
                 : (Array.isArray(data.path_mismatches) ? [...data.path_mismatches] : []);
@@ -4287,10 +4602,10 @@ app.registerExtension({
                 return;
             }
 
-            const summaryParts = [`Missing: ${totalMissingCount}`];
-            if (foundModels.length > 0) {
-                summaryParts.push(`Found: ${foundModels.length}`);
-            }
+            countBadge.textContent = String(totalMissingCount);
+            countBadge.style.display = totalMissingCount > 0 ? "inline-flex" : "none";
+
+            const summaryParts = [];
             if (mismatchModels.length > 0) {
                 summaryParts.push(`Mismatches: ${mismatchModels.length}`);
             }
@@ -4300,15 +4615,24 @@ app.registerExtension({
             listFrame.className = "flex flex-col overflow-hidden";
 
             content = document.createElement("div");
-            content.className = "flex flex-col gap-1.5 overflow-y-auto pr-0.5";
-            content.style.maxHeight = "min(65vh, 500px)";
+            content.className = "flex flex-col overflow-y-auto pr-0.5";
+            Object.assign(content.style, {
+                maxHeight: "min(65vh, 500px)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+            });
             applyNativeScrollbarClasses(content);
             loadFolderList();
 
             const makeSectionTitle = (text, color = "") => {
                 const sectionTitle = document.createElement("div");
                 sectionTitle.textContent = text;
-                sectionTitle.className = "text-2xs font-semibold uppercase tracking-wider text-muted-foreground pt-0.5";
+                sectionTitle.className = "font-medium uppercase tracking-wider text-muted-foreground";
+                Object.assign(sectionTitle.style, {
+                    fontSize: "10px",
+                    paddingTop: "4px",
+                });
                 if (color) {
                     sectionTitle.style.color = color;
                 }
@@ -4317,11 +4641,11 @@ app.registerExtension({
 
             const makeBaseCard = () => {
                 const row = document.createElement("div");
-                row.className = "rounded-md border border-solid border-border/60 bg-secondary/40 px-2 py-1.5 flex flex-col gap-1";
+                row.className = "rounded-md border border-solid border-border/60 bg-secondary/40 px-2.5 py-2 flex flex-col gap-1.5";
                 return row;
             };
 
-            const applyCompactInputStyle = (inp, horizontalPadding = 8) => {
+            const applyCompactInputStyle = (inp, horizontalPadding = 7) => {
                 Object.assign(inp.style, {
                     width: "100%",
                     minWidth: "0",
@@ -4335,6 +4659,27 @@ app.registerExtension({
             };
 
             const rowInputs = [];
+            let downloadBtn = null;
+            let downloadBtnLabel = null;
+            const updateDownloadButtonState = () => {
+                if (!downloadBtn || !downloadBtnLabel) return;
+                const total = rowInputs.length;
+                const checked = rowInputs.filter((r) => r.checkbox.checked).length;
+                if (total === 0 || checked === 0) {
+                    downloadBtn.disabled = true;
+                    downloadBtnLabel.textContent = "Select models to download";
+                } else if (checked === total) {
+                    downloadBtn.disabled = false;
+                    downloadBtnLabel.textContent = total === 1
+                        ? "Download model"
+                        : `Download all (${total})`;
+                } else {
+                    downloadBtn.disabled = false;
+                    downloadBtnLabel.textContent = checked === 1
+                        ? "Download 1 model"
+                        : `Download ${checked} of ${total} models`;
+                }
+            };
 
             const renderMissingRows = (models, renderOptions = {}) => {
                 const isFolderRepoSection = Boolean(renderOptions.isFolderRepoSection);
@@ -4342,9 +4687,14 @@ app.registerExtension({
                     const downloadMode = isFolderRepoSection || isFolderRepoDownloadModel(m) ? "folder" : "file";
                     const displayName = String(m.display_name || m.requested_path || m.filename || "").trim() || "Unknown model";
                     const rowWrapper = document.createElement("div");
-                    rowWrapper.className = "flex flex-col gap-1";
-
-                    const row = makeBaseCard();
+                    rowWrapper.setAttribute("data-testid", "hf-model-result-row");
+                    Object.assign(rowWrapper.style, {
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "5px",
+                        padding: "0",
+                        borderTop: "none",
+                    });
 
                     const topLine = document.createElement("div");
                     Object.assign(topLine.style, {
@@ -4353,17 +4703,31 @@ app.registerExtension({
                         gap: "6px",
                     });
 
+                    const toggleLabel = document.createElement("label");
+                    toggleLabel.className = "hf-node-tumbler";
+                    toggleLabel.setAttribute("data-testid", "hf-model-toggle");
+                    toggleLabel.title = "Include in download";
+
                     const cb = document.createElement("input");
                     cb.type = "checkbox";
                     cb.checked = Boolean(m.url);
-                    Object.assign(cb.style, {
-                        margin: "0",
-                        flexShrink: "0",
-                        cursor: "pointer",
-                    });
+                    cb.setAttribute("aria-label", `Include ${displayName} in download`);
+                    cb.addEventListener("change", updateDownloadButtonState);
+
+                    const toggleTrack = document.createElement("span");
+                    toggleTrack.className = "hf-node-tumbler-track";
+                    toggleTrack.setAttribute("aria-hidden", "true");
+
+                    toggleLabel.appendChild(cb);
+                    toggleLabel.appendChild(toggleTrack);
 
                     const nameEl = document.createElement("div");
-                    nameEl.className = "min-w-0 flex-1 truncate text-xs font-medium text-foreground leading-tight";
+                    nameEl.className = "min-w-0 flex-1 truncate text-foreground";
+                    Object.assign(nameEl.style, {
+                        fontSize: "12px",
+                        fontWeight: "500",
+                        lineHeight: "1.3",
+                    });
                     nameEl.textContent = displayName;
                     nameEl.title = m.node_title ? `${displayName} (${m.node_title})` : displayName;
 
@@ -4371,12 +4735,12 @@ app.registerExtension({
                     const folderPicker = createFolderPicker(defaultFolder, "Folder");
                     rowFolderPickers.push(folderPicker);
                     Object.assign(folderPicker.wrapper.style, {
-                        width: "132px",
+                        width: "120px",
                         minWidth: "0",
                         flexShrink: "0",
                     });
-                    applyCompactInputStyle(folderPicker.input, 6);
-                    folderPicker.input.style.paddingRight = "20px";
+                    applyCompactInputStyle(folderPicker.input, 7);
+                    folderPicker.input.style.paddingRight = "18px";
                     folderPicker.input.setAttribute("data-testid", "hf-model-folder-input");
                     if (downloadMode === "folder") {
                         folderPicker.input.placeholder = "Root";
@@ -4396,7 +4760,7 @@ app.registerExtension({
                     locateBtn.setAttribute("aria-label", `Locate node${m.node_title ? `: ${m.node_title}` : ""}`);
                     locateBtn.title = m.node_title ? `Locate node: ${m.node_title}` : "Locate node on canvas";
                     locateBtn.className =
-                        "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-sm border-none bg-transparent p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+                        "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-none bg-transparent p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
                     const locateIcon = document.createElement("i");
                     locateIcon.className = "icon-[lucide--locate] size-3.5";
                     locateIcon.setAttribute("aria-hidden", "true");
@@ -4406,25 +4770,33 @@ app.registerExtension({
                         locateModelNodeOnCanvas(m);
                     };
 
-                    topLine.appendChild(cb);
                     topLine.appendChild(nameEl);
-                    topLine.appendChild(folderPicker.wrapper);
+                    topLine.appendChild(toggleLabel);
                     topLine.appendChild(locateBtn);
 
                     const controlsLine = document.createElement("div");
-                    controlsLine.style.paddingLeft = "20px";
+                    Object.assign(controlsLine.style, {
+                        paddingLeft: "0",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                    });
 
                     const urlPlaceholder = downloadMode === "folder"
                         ? "HuggingFace repo/folder URL..."
                         : "HuggingFace URL...";
                     const urlInput = createInput(m.url, urlPlaceholder);
-                    applyCompactInputStyle(urlInput, 8);
+                    applyCompactInputStyle(urlInput, 7);
+                    Object.assign(urlInput.style, {
+                        flex: "1",
+                        minWidth: "0",
+                    });
 
+                    controlsLine.appendChild(folderPicker.wrapper);
                     controlsLine.appendChild(urlInput);
 
-                    row.appendChild(topLine);
-                    row.appendChild(controlsLine);
-                    rowWrapper.appendChild(row);
+                    rowWrapper.appendChild(topLine);
+                    rowWrapper.appendChild(controlsLine);
 
                     const rowData = {
                         rowWrapper,
@@ -4462,7 +4834,7 @@ app.registerExtension({
                         altToggle.textContent = `Alternatives (${m.alternatives.length})`;
                         Object.assign(altToggle.style, {
                             alignSelf: "flex-start",
-                            marginLeft: "20px",
+                            marginLeft: "0",
                             fontSize: "11px",
                             padding: "2px 8px",
                             background: "var(--comfy-input-bg)",
@@ -4476,7 +4848,7 @@ app.registerExtension({
                         const altList = document.createElement("div");
                         Object.assign(altList.style, {
                             display: "none",
-                            marginLeft: "20px",
+                            marginLeft: "0",
                             background: "var(--comfy-input-bg)",
                             border: "1px solid var(--border-default)",
                             padding: "6px",
@@ -4519,6 +4891,7 @@ app.registerExtension({
                                     rowData.urlInput.value = alt.url;
                                     rowData.resolvedUrl = alt.url;
                                     cb.checked = true;
+                                    updateDownloadButtonState();
                                 }
                                 if (alt.suggested_folder && !rowData.userEditedFolder && !rowData.preferAuthoritativeFolder) {
                                     rowData.folderInput.value = alt.suggested_folder;
@@ -4571,71 +4944,6 @@ app.registerExtension({
                 }
             } else {
                 renderMissingRows(missingModels);
-            }
-
-            if (foundModels.length > 0 || totalMissingCount === 0) {
-                const foundTargetContainer = totalMissingCount > 0 ? document.createElement("details") : content;
-                if (totalMissingCount > 0) {
-                    const foundSummary = document.createElement("summary");
-                    foundSummary.className = "cursor-pointer text-2xs font-semibold uppercase tracking-wider text-muted-foreground pt-0.5 select-none";
-                    foundSummary.textContent = `Found Local Models (${foundModels.length})`;
-                    foundTargetContainer.className = "flex flex-col gap-1.5 pt-0.5";
-                    foundTargetContainer.appendChild(foundSummary);
-                } else {
-                    foundTargetContainer.appendChild(makeSectionTitle("Found Local Models"));
-                }
-
-                if (!foundModels.length) {
-                    const noneFound = document.createElement("div");
-                    noneFound.textContent = "No already-installed models matched this workflow.";
-                    noneFound.className = "text-xs text-muted-foreground py-1";
-                    foundTargetContainer.appendChild(noneFound);
-                } else {
-                    const foundListWrap = document.createElement("div");
-                    foundListWrap.className = "flex flex-col gap-1 pt-1";
-                    foundModels.forEach((m) => {
-                        const row = document.createElement("div");
-                        row.className = "rounded-md border border-solid border-border/60 bg-secondary/40 px-2 py-1.5 flex items-center justify-between gap-2";
-
-                        const leftWrap = document.createElement("div");
-                        leftWrap.className = "flex items-center gap-2 min-w-0 flex-1";
-
-                        const marker = document.createElement("span");
-                        marker.textContent = "●";
-                        Object.assign(marker.style, {
-                            color: "#56d78f",
-                            fontSize: "9px",
-                            flexShrink: "0",
-                        });
-
-                        const nameEl = document.createElement("div");
-                        nameEl.className = "min-w-0 flex-1 truncate text-xs font-medium text-foreground leading-tight";
-                        nameEl.textContent = m.filename || "Unknown model";
-                        const foundPathLabel = formatFoundModelPath(m.found_path || m.clean_path || "");
-                        nameEl.title = foundPathLabel || nameEl.textContent;
-
-                        leftWrap.appendChild(marker);
-                        leftWrap.appendChild(nameEl);
-
-                        const installedEl = document.createElement("span");
-                        installedEl.textContent = "Installed";
-                        Object.assign(installedEl.style, {
-                            fontSize: "11px",
-                            fontWeight: "600",
-                            color: "#56d78f",
-                            flexShrink: "0",
-                        });
-
-                        row.appendChild(leftWrap);
-                        row.appendChild(installedEl);
-                        foundListWrap.appendChild(row);
-                    });
-                    foundTargetContainer.appendChild(foundListWrap);
-                }
-
-                if (totalMissingCount > 0) {
-                    content.appendChild(foundTargetContainer);
-                }
             }
 
             if (mismatchModels.length > 0) {
@@ -4769,12 +5077,30 @@ app.registerExtension({
             };
 
             const footer = document.createElement("div");
-            footer.className = "flex w-full items-center justify-end gap-2 pt-1";
+            footer.className = "flex w-full items-center pt-0.5";
 
-            const downloadBtn = document.createElement("button");
+            downloadBtn = document.createElement("button");
             downloadBtn.type = "button";
-            downloadBtn.textContent = "Download Selected";
-            downloadBtn.className = NATIVE_PRIMARY_BTN_CLASS;
+            downloadBtn.setAttribute("data-testid", "hf-download-all-btn");
+            downloadBtn.className = `${NATIVE_SECONDARY_BTN_CLASS} w-full justify-center font-medium`;
+            Object.assign(downloadBtn.style, {
+                width: "100%",
+                height: "32px",
+                minHeight: "32px",
+                borderRadius: "6px",
+                fontSize: "12px",
+                fontWeight: "500",
+            });
+            const downloadBtnIcon = document.createElement("i");
+            downloadBtnIcon.className = "icon-[lucide--download] size-4 shrink-0";
+            downloadBtnIcon.setAttribute("aria-hidden", "true");
+            downloadBtnLabel = document.createElement("span");
+            downloadBtnLabel.setAttribute("data-testid", "hf-download-btn-label");
+            downloadBtnLabel.className = "truncate";
+            downloadBtn.appendChild(downloadBtnIcon);
+            downloadBtn.appendChild(downloadBtnLabel);
+            updateDownloadButtonState();
+
             downloadBtn.onclick = async () => {
                 const selectedRows = rowInputs.filter((r) => r.checkbox.checked);
                 let missingFolderCount = 0;
@@ -4818,7 +5144,7 @@ app.registerExtension({
 
                 setStatus("Queuing downloads...", "#9ad6ff");
                 downloadBtn.disabled = true;
-                downloadBtn.textContent = "Queued";
+                downloadBtnLabel.textContent = "Queued";
 
                 const queueable = [];
                 const queueRows = [];
@@ -4844,8 +5170,7 @@ app.registerExtension({
 
                 if (!queueable.length) {
                     setStatus("No valid URLs to queue.", "#f5b14c");
-                    downloadBtn.disabled = false;
-                    downloadBtn.textContent = "Download Selected";
+                    updateDownloadButtonState();
                     return;
                 }
 
@@ -4883,71 +5208,66 @@ app.registerExtension({
                     const statusMap = {};
                     const pending = new Set(downloadIds);
 
-                    const poll = async () => {
-                        if (!downloadIds.length) return;
-                        try {
-                            const statusResp = await fetch(`/download_status?ids=${encodeURIComponent(downloadIds.join(","))}`);
-                            if (statusResp.status !== 200) return;
-                            const statusData = await statusResp.json();
-                            const downloads = statusData.downloads || {};
+                    const applyDownloadUpdate = (downloads) => {
+                        if (!downloads || typeof downloads !== "object") return;
+                        for (const id of downloadIds) {
+                            const info = downloads[id];
+                            if (!info) continue;
+                            const last = statusMap[id];
+                            if (last !== info.status) {
+                                statusMap[id] = info.status;
+                            }
+                            if (info.status === "downloaded" || info.status === "completed" || info.status === "failed" || info.status === "cancelled") {
+                                pending.delete(id);
+                            }
+                        }
 
+                        if (pending.size === 0) {
+                            stopPolling();
+                            let updatedRefs = 0;
                             for (const id of downloadIds) {
                                 const info = downloads[id];
-                                if (!info) continue;
-                                const last = statusMap[id];
-                                if (last !== info.status) {
-                                    statusMap[id] = info.status;
+                                if (!info || (info.status !== "downloaded" && info.status !== "completed")) continue;
+                                const row = queueRowsById.get(id);
+                                if (!row) continue;
+                                if (row.downloadMode !== "folder") {
+                                    const effectiveFilename = resolveDownloadedFilename(row, info);
+                                    if (effectiveFilename) {
+                                        syncRowFilename(row, effectiveFilename);
+                                    }
                                 }
-                                if (info.status === "downloaded" || info.status === "completed" || info.status === "failed" || info.status === "cancelled") {
-                                    pending.delete(id);
+                                if (row.skipWorkflowUpdate) {
+                                    continue;
                                 }
+                                updatedRefs += applyDownloadedReferenceToWorkflow(row, info);
                             }
 
-                            if (pending.size === 0) {
-                                stopPolling();
-                                let updatedRefs = 0;
-                                for (const id of downloadIds) {
-                                    const info = downloads[id];
-                                    if (!info || (info.status !== "downloaded" && info.status !== "completed")) continue;
-                                    const row = queueRowsById.get(id);
-                                    if (!row) continue;
-                                    if (row.downloadMode !== "folder") {
-                                        const effectiveFilename = resolveDownloadedFilename(row, info);
-                                        if (effectiveFilename) {
-                                            syncRowFilename(row, effectiveFilename);
-                                        }
-                                    }
-                                    if (row.skipWorkflowUpdate) {
-                                        continue;
-                                    }
-                                    updatedRefs += applyDownloadedReferenceToWorkflow(row, info);
-                                }
-
-                                if (updatedRefs > 0) {
-                                    showToast({
-                                        severity: "success",
-                                        summary: "Workflow updated",
-                                        detail: `Updated ${updatedRefs} model reference${updatedRefs === 1 ? "" : "s"} automatically.`,
-                                    });
-                                }
+                            if (updatedRefs > 0) {
+                                showToast({
+                                    severity: "success",
+                                    summary: "Workflow updated",
+                                    detail: `Updated ${updatedRefs} model reference${updatedRefs === 1 ? "" : "s"} automatically.`,
+                                });
                             }
-                        } catch (e) {
-                            // Status panel already tracks final errors; avoid noisy alerts here.
                         }
                     };
 
-                    pollTimer = setInterval(poll, 1000);
-                    poll();
+                    if (downloadIds.length && api && typeof api.addEventListener === "function") {
+                        const onWsStatus = (event) => {
+                            applyDownloadUpdate(event?.detail?.downloads);
+                        };
+                        api.addEventListener("hf_download_status", onWsStatus);
+                        statusUnsub = () => {
+                            try {
+                                api.removeEventListener("hf_download_status", onWsStatus);
+                            } catch (_) {}
+                        };
+                    }
                 } catch (e) {
                     setStatus(`Queue error: ${e}`, "#ff6b6b");
-                    downloadBtn.disabled = false;
-                    downloadBtn.textContent = "Download Selected";
+                    updateDownloadButtonState();
                 }
             };
-
-            if (rowInputs.length === 0) {
-                downloadBtn.disabled = true;
-            }
 
             footer.appendChild(downloadBtn);
             panel.appendChild(footer);
@@ -4956,13 +5276,11 @@ app.registerExtension({
             cleanupOverlayMount = mountOverlayInNativeStack(dlg);
             dlg.__hfOverlayCleanup = cleanupUi;
 
-            let foundCount = foundModels.length;
             let currentBaseSummaryText = summaryInline.textContent;
             const updateSummaryLine = () => {
-                const parts = [`Missing: ${rowInputs.length}`];
-                if (foundCount > 0) {
-                    parts.push(`Found: ${foundCount}`);
-                }
+                countBadge.textContent = String(rowInputs.length);
+                countBadge.style.display = rowInputs.length > 0 ? "inline-flex" : "none";
+                const parts = [];
                 if (mismatchModels.length > 0) {
                     parts.push(`Mismatches: ${mismatchModels.length}`);
                 }
@@ -5009,15 +5327,57 @@ app.registerExtension({
                 }
                 if (removed === 0) return;
 
-                foundCount += removed;
                 if (rowInputs.length === 0 && mismatchModels.length === 0) {
                     closeDialog();
                     return;
                 }
                 updateSummaryLine();
-                if (rowInputs.length === 0) {
-                    downloadBtn.disabled = true;
+                updateDownloadButtonState();
+            };
+
+            const collectLiveGraphLoaderModelValues = (graph = null) => {
+                const rootGraph = graph || app?.rootGraph || app?.graph;
+                const referencedNames = new Set();
+                const existingSelectedNames = new Set();
+                const addNameForms = (targetSet, val) => {
+                    const norm = normalizeWorkflowPath(val).toLowerCase();
+                    if (!norm) return;
+                    targetSet.add(norm);
+                    const base = getPathBasename(norm).toLowerCase();
+                    if (base) targetSet.add(base);
+                };
+                forEachGraphNodeRecursive(rootGraph, (node) => {
+                    if (!node || typeof node !== "object") return;
+                    if (isGraphNodeBypassed(node) || isExcludedDiscoveryNode(node)) return;
+                    if (!isLocalModelLoaderNode(node)) return;
+                    const widgets = Array.isArray(node.widgets) ? node.widgets : [];
+                    for (const w of widgets) {
+                        if (!w || typeof w.value !== "string") continue;
+                        if (isDynamicGroupWidgetDisabledInNode(node, w.name)) continue;
+                        const opts = resolveComboWidgetOptionsNativeLike(w);
+                        const isModelWidget = isModelValidationInputName(w.name) || opts.length > 0;
+                        if (!isModelWidget) continue;
+                        const trimmed = w.value.trim();
+                        if (!trimmed) continue;
+                        addNameForms(referencedNames, trimmed);
+                        if (opts.length > 0 && isValuePresentInComboOptions(opts, trimmed)) {
+                            addNameForms(existingSelectedNames, trimmed);
+                        }
+                    }
+                });
+                return { referencedNames, existingSelectedNames };
+            };
+
+            const collectRowNameForms = (vals = []) => {
+                const forms = [];
+                for (const raw of vals) {
+                    const norm = normalizeWorkflowPath(raw).toLowerCase();
+                    if (!norm) continue;
+                    forms.push(norm);
+                    const base = getPathBasename(norm).toLowerCase();
+                    if (base && base !== norm) forms.push(base);
                 }
+                return forms;
             };
 
             const dialogLoadGeneration = currentWorkflowLoadGeneration;
@@ -5034,11 +5394,73 @@ app.registerExtension({
                     return;
                 }
 
+                const liveValues = collectLiveGraphLoaderModelValues(app?.rootGraph);
                 const localMissing = collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, workflow);
-                if (localMissing.length === 0 && liveStateNow.allCombosPopulated) {
-                    void clearMissingModelStoreState([]);
-                    void clearModelValidationErrorsFromFrontendState();
-                    closeDialog();
+                const localMissingNameSet = new Set();
+                for (const c of localMissing) {
+                    for (const form of collectRowNameForms([c?.name])) {
+                        localMissingNameSet.add(form);
+                    }
+                }
+
+                let prunedAny = false;
+                for (let i = rowInputs.length - 1; i >= 0; i -= 1) {
+                    const row = rowInputs[i];
+                    const rowForms = collectRowNameForms([
+                        row.filename,
+                        row.requestedPath,
+                        row.originalFilename,
+                        row.displayName,
+                    ]);
+                    if (rowForms.length === 0) continue;
+                    const stillInLocalMissing = rowForms.some((f) => localMissingNameSet.has(f));
+                    if (stillInLocalMissing) continue;
+                    const stillReferenced = rowForms.some((f) => liveValues.referencedNames.has(f));
+                    const selectedAsExisting = rowForms.some((f) => liveValues.existingSelectedNames.has(f));
+                    if (!stillReferenced || selectedAsExisting) {
+                        try {
+                            row.folderPicker?.destroy?.();
+                        } catch (_) {}
+                        row.rowWrapper?.remove?.();
+                        rowInputs.splice(i, 1);
+                        prunedAny = true;
+                    }
+                }
+
+                if (prunedAny) {
+                    if (rowInputs.length === 0 && mismatchModels.length === 0 && localMissing.length === 0) {
+                        void clearMissingModelStoreState([]);
+                        void clearModelValidationErrorsFromFrontendState();
+                        closeDialog();
+                        return;
+                    }
+                    updateSummaryLine();
+                    updateDownloadButtonState();
+                }
+
+                const existingRowNameSet = new Set();
+                for (const row of rowInputs) {
+                    for (const form of collectRowNameForms([
+                        row.filename,
+                        row.requestedPath,
+                        row.originalFilename,
+                        row.displayName,
+                    ])) {
+                        existingRowNameSet.add(form);
+                    }
+                }
+                const hasNewMissing = localMissing.some((c) => {
+                    const forms = collectRowNameForms([c?.name]);
+                    if (forms.length === 0) return false;
+                    return !forms.some((f) => existingRowNameSet.has(f));
+                });
+
+                if (!hasNewMissing) {
+                    if (rowInputs.length === 0 && mismatchModels.length === 0) {
+                        void clearMissingModelStoreState([]);
+                        void clearModelValidationErrorsFromFrontendState();
+                        closeDialog();
+                    }
                     return;
                 }
 
@@ -5120,7 +5542,7 @@ app.registerExtension({
                 }
             };
 
-            loaderWatchTimer = setInterval(() => {
+            graphChangeHandler = () => {
                 if (!dlg.isConnected || dialogLoadGeneration !== currentWorkflowLoadGeneration) {
                     stopLoaderWatcher();
                     return;
@@ -5136,7 +5558,10 @@ app.registerExtension({
                     adaptDebounceTimer = null;
                     void adaptToLoaderModelChange(currentSig);
                 }, 250);
-            }, 400);
+            };
+            if (api && typeof api.addEventListener === "function") {
+                api.addEventListener("graphChanged", graphChangeHandler);
+            }
 
             if (!options?.triggeredByWorkflowOpen && !options?.triggeredByLoaderChange) {
                 setTimeout(() => {
@@ -5152,445 +5577,19 @@ app.registerExtension({
         };
 
         const showManualDownloadDialog = () => {
-
-            let pollTimer = null;
-            const stopPolling = () => {
-                if (pollTimer) {
-                    clearInterval(pollTimer);
-                    pollTimer = null;
-                }
-            };
-
-            const existing = document.getElementById("manual-download-dialog");
-            if (existing) {
-                existing.__hfManualCleanup?.();
-                existing.remove();
-            }
-
-            let folderPicker = null;
-            const dlg = document.createElement("div");
-            dlg.id = "manual-download-dialog";
-            applyTemplateDialogOverlayStyle(dlg, 9000);
-
-            const closeDialog = () => {
-                stopPolling();
-                folderPicker?.destroy?.();
-                if (dlg.parentElement) {
-                    dlg.remove();
-                }
-            };
-            dlg.__hfManualCleanup = () => folderPicker?.destroy?.();
-
-            bindBackdropClose(dlg, closeDialog);
-
-            const panel = document.createElement("div");
-            applyTemplateDialogPanelStyle(panel, {
-                padding: "0",
-                width: "min(820px, 100%)",
-                maxWidth: "92vw",
-                maxHeight: "92vh",
+            showUnifiedImportModelDialog({
+                initialMode: "url",
+                onSuccess: () => {
+                    try {
+                        window?.hfDownloader?.refreshModelExplorer?.();
+                    } catch (_) {}
+                },
             });
-            // Allow folder picker popup to extend beyond the panel body.
-            panel.style.overflow = "visible";
-
-            const headerWrap = document.createElement("div");
-            Object.assign(headerWrap.style, {
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "10px",
-                height: "88px",
-                padding: "0 24px",
-                flexShrink: "0",
-            });
-
-            const titleWrap = document.createElement("div");
-            Object.assign(titleWrap.style, {
-                display: "flex",
-                flexDirection: "column",
-                gap: "0",
-            });
-
-            const titleEl = document.createElement("div");
-            titleEl.textContent = "Download New Model";
-            Object.assign(titleEl.style, {
-                letterSpacing: "0",
-                color: "var(--input-text)",
-            });
-            titleEl.style.setProperty("font-family", "Inter, Arial, sans-serif", "important");
-            titleEl.style.setProperty("font-size", "24px", "important");
-            titleEl.style.setProperty("font-weight", "600", "important");
-            titleEl.style.setProperty("line-height", "32px", "important");
-
-            titleWrap.appendChild(titleEl);
-            headerWrap.appendChild(titleWrap);
-            headerWrap.appendChild(createDialogCloseIconButton(closeDialog));
-            panel.appendChild(headerWrap);
-
-            const content = document.createElement("div");
-            Object.assign(content.style, {
-                display: "flex",
-                flexDirection: "column",
-                gap: "10px",
-                background: "transparent",
-                border: "none",
-                borderRadius: "0",
-                padding: "12px 24px",
-                overflow: "visible",
-            });
-
-            const urlLabel = document.createElement("div");
-            urlLabel.textContent = "Model URL";
-            Object.assign(urlLabel.style, {
-                fontSize: "11px",
-                color: "var(--descrip-text, #999)",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                fontWeight: "600",
-            });
-            const urlInput = createInput("", "Model URL...", { highlightMissingUrl: false });
-            Object.assign(urlInput.style, {
-                fontSize: "14px",
-                minHeight: "40px",
-            });
-
-            const fullRepoSwitchRow = document.createElement("div");
-            Object.assign(fullRepoSwitchRow.style, {
-                // Shrink to the switch + label so clicks elsewhere across the dialog
-                // don't toggle it.
-                display: "inline-flex",
-                alignSelf: "flex-start",
-                alignItems: "center",
-                justifyContent: "flex-start",
-                gap: "10px",
-                marginTop: "2px",
-                cursor: "pointer",
-            });
-
-            const fullRepoSwitchText = document.createElement("span");
-            fullRepoSwitchText.textContent = "Download full repo/folder";
-            Object.assign(fullRepoSwitchText.style, {
-                fontSize: "13px",
-                color: "var(--input-text)",
-                fontWeight: "500",
-                userSelect: "none",
-            });
-
-            const fullRepoSwitchWrap = document.createElement("label");
-            fullRepoSwitchWrap.className = "hf-manual-toggle p-toggleswitch p-component transition-transform active:scale-90";
-            Object.assign(fullRepoSwitchWrap.style, {
-                margin: "0",
-                cursor: "pointer",
-                flexShrink: "0",
-            });
-
-            const fullRepoSwitch = document.createElement("input");
-            fullRepoSwitch.type = "checkbox";
-            fullRepoSwitch.className = "p-toggleswitch-input";
-            fullRepoSwitch.checked = false;
-            fullRepoSwitch.setAttribute("role", "switch");
-            fullRepoSwitch.setAttribute("aria-label", "Download full repo/folder");
-
-            const fullRepoSwitchSlider = document.createElement("span");
-            fullRepoSwitchSlider.className = "p-toggleswitch-slider";
-
-            const setFullRepoSwitchVisualState = () => {
-                const on = Boolean(fullRepoSwitch.checked);
-                fullRepoSwitchWrap.classList.toggle("p-toggleswitch-checked", on);
-                fullRepoSwitch.setAttribute("aria-checked", on ? "true" : "false");
-            };
-
-            fullRepoSwitch.addEventListener("focus", () => {
-                fullRepoSwitchWrap.classList.add("p-focus");
-            });
-            fullRepoSwitch.addEventListener("blur", () => {
-                fullRepoSwitchWrap.classList.remove("p-focus");
-            });
-
-            fullRepoSwitchWrap.appendChild(fullRepoSwitch);
-            fullRepoSwitchWrap.appendChild(fullRepoSwitchSlider);
-            fullRepoSwitchRow.appendChild(fullRepoSwitchWrap);
-            fullRepoSwitchRow.appendChild(fullRepoSwitchText);
-
-            fullRepoSwitchRow.addEventListener("click", (event) => {
-                const target = event?.target;
-                if (target === fullRepoSwitch || fullRepoSwitchWrap.contains(target)) {
-                    return;
-                }
-                fullRepoSwitch.checked = !fullRepoSwitch.checked;
-                fullRepoSwitch.dispatchEvent(new Event("change", { bubbles: true }));
-            });
-
-            const destinationPreviewLine = document.createElement("div");
-            Object.assign(destinationPreviewLine.style, {
-                display: "none",
-                fontSize: "13px",
-                color: "var(--descrip-text, #9aa1ad)",
-                fontWeight: "500",
-                lineHeight: "1.4",
-                marginTop: "-2px",
-                marginBottom: "2px",
-            });
-
-            const folderLabel = document.createElement("div");
-            folderLabel.textContent = "Folder";
-            Object.assign(folderLabel.style, {
-                fontSize: "11px",
-                color: "var(--descrip-text, #999)",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                fontWeight: "600",
-            });
-            folderPicker = createFolderPicker("loras", "Folder");
-            Object.assign(folderPicker.input.style, {
-                fontSize: "14px",
-                minHeight: "40px",
-                paddingRight: "28px",
-            });
-
-            content.appendChild(urlLabel);
-            content.appendChild(urlInput);
-            content.appendChild(fullRepoSwitchRow);
-            content.appendChild(destinationPreviewLine);
-            content.appendChild(folderLabel);
-            content.appendChild(folderPicker.wrapper);
-            panel.appendChild(content);
-
-            const footer = document.createElement("div");
-            Object.assign(footer.style, {
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: "10px",
-                padding: "0 24px 16px",
-            });
-
-            const statusLine = document.createElement("div");
-            Object.assign(statusLine.style, {
-                fontSize: "13px",
-                color: "var(--descrip-text, #999)",
-                minHeight: "20px",
-                padding: "0 24px",
-            });
-            panel.appendChild(statusLine);
-
-            const setStatus = (msg, color = "#9aa4b6") => {
-                statusLine.textContent = msg || "";
-                statusLine.style.color = color;
-            };
-
-            let folderValueForNormalMode = "loras";
-            let folderValueForRepoMode = "";
-
-            const setFolderInputValue = (value) => {
-                folderPicker.input.value = String(value || "");
-            };
-
-            const updateManualDownloadModeUi = (reason = "refresh") => {
-                const fullRepoMode = Boolean(fullRepoSwitch.checked);
-                const currentFolderValue = normalizeFolderPathInput(folderPicker.input.value);
-
-                if (reason === "toggle") {
-                    if (fullRepoMode) {
-                        folderValueForNormalMode = currentFolderValue || "loras";
-                        setFolderInputValue(folderValueForRepoMode);
-                    } else {
-                        folderValueForRepoMode = currentFolderValue;
-                        setFolderInputValue(folderValueForNormalMode || "loras");
-                    }
-                } else if (fullRepoMode) {
-                    folderValueForRepoMode = currentFolderValue;
-                } else {
-                    folderValueForNormalMode = currentFolderValue || "loras";
-                }
-
-                if (fullRepoMode) {
-                    urlLabel.textContent = "Hugging Face URL / Repo / Folder";
-                    urlInput.placeholder = "https://huggingface.co/owner/repo[/tree/main/subfolder]";
-                    folderLabel.textContent = "Folder";
-                    folderPicker.input.placeholder = "Root";
-                    destinationPreviewLine.style.display = "block";
-                    const parsed = parseHfFolderLinkInfo(urlInput.value);
-                    if (parsed?.targetSegment) {
-                        destinationPreviewLine.textContent = buildFolderDownloadDestinationPreview(
-                            folderPicker.input.value,
-                            parsed.targetSegment
-                        );
-                    } else {
-                        destinationPreviewLine.textContent = "models/<repo-or-subfolder>/";
-                    }
-                    return;
-                }
-
-                urlLabel.textContent = "Model URL";
-                urlInput.placeholder = "https://example.com/path/model.safetensors";
-                folderLabel.textContent = "Folder";
-                folderPicker.input.placeholder = "Folder";
-                destinationPreviewLine.style.display = "none";
-            };
-
-            fullRepoSwitch.addEventListener("change", () => {
-                setFullRepoSwitchVisualState();
-                updateManualDownloadModeUi("toggle");
-            });
-            urlInput.addEventListener("input", () => updateManualDownloadModeUi("input"));
-            folderPicker.input.addEventListener("input", () => updateManualDownloadModeUi("input"));
-            setFullRepoSwitchVisualState();
-            updateManualDownloadModeUi();
-
-            const downloadBtn = createButton("Download", "p-button p-component p-button-success", async () => {
-                const url = urlInput.value.trim();
-                const fullRepoMode = Boolean(fullRepoSwitch.checked);
-                const normalizedFolder = normalizeFolderPathInput(folderPicker.input.value);
-                let filename = "";
-                let queueModel = null;
-
-                if (!url) {
-                    showToast({
-                        severity: "warn",
-                        summary: "Missing URL",
-                        detail: fullRepoMode
-                            ? "Enter a Hugging Face repo or folder link."
-                            : "Enter a direct model file URL."
-                    });
-                    return;
-                }
-
-                if (fullRepoMode) {
-                    const parsedFolder = parseHfFolderLinkInfo(url);
-                    if (!parsedFolder?.targetSegment) {
-                        showToast({
-                            severity: "error",
-                            summary: "Invalid link",
-                            detail: "Could not parse repository/folder from Hugging Face link."
-                        });
-                        return;
-                    }
-                    filename = `${parsedFolder.targetSegment}`;
-                    queueModel = {
-                        filename,
-                        url,
-                        folder: normalizedFolder,
-                        download_mode: "folder"
-                    };
-                } else {
-                    filename = parseFilenameFromUrl(url) || "";
-                    queueModel = {
-                        filename,
-                        url,
-                        folder: normalizedFolder || "loras"
-                    };
-                }
-
-                downloadBtn.disabled = true;
-                downloadBtn.textContent = "Queued";
-                setStatus(
-                    fullRepoMode ? "Queuing folder download..." : "Queuing download...",
-                    "#9ad6ff"
-                );
-
-                try {
-                    const resp = await fetch("/queue_download", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            models: [queueModel]
-                        })
-                    });
-                    if (resp.status !== 200) {
-                        throw new Error("Server returned " + resp.status + " " + resp.statusText);
-                    }
-                    const res = await resp.json();
-                    const queued = res.queued || [];
-                    const rejected = Array.isArray(res.rejected) ? res.rejected : [];
-                    const downloadIds = queued.map(q => q.download_id);
-                    if (!downloadIds.length) {
-                        const rejection = rejected.length ? String(rejected[0]?.error || "").trim() : "";
-                        const detail = rejection || "No download was queued.";
-                        showToast({ severity: "warn", summary: "Queue rejected", detail });
-                        downloadBtn.disabled = false;
-                        downloadBtn.textContent = "Download";
-                        setStatus(detail, "#f5b14c");
-                        return;
-                    }
-
-                    setStatus(`Queued ${downloadIds.length} download(s). Track progress in the Downloads panel.`, "#9ad6ff");
-                    const statusMap = {};
-                    const pending = new Set(downloadIds);
-                    let statusErrorToastShown = false;
-
-                    const poll = async () => {
-                        try {
-                            const statusResp = await fetch(`/download_status?ids=${encodeURIComponent(downloadIds.join(","))}`);
-                            if (statusResp.status !== 200) return;
-                            const statusData = await statusResp.json();
-                            const downloads = statusData.downloads || {};
-                            statusErrorToastShown = false;
-
-                            for (const id of downloadIds) {
-                                const info = downloads[id];
-                                if (!info) continue;
-                                const last = statusMap[id];
-                                if (last !== info.status) {
-                                    statusMap[id] = info.status;
-                                }
-                                if (info.status === "downloaded" || info.status === "completed" || info.status === "failed" || info.status === "cancelled") {
-                                    pending.delete(id);
-                                }
-                            }
-
-                            if (pending.size === 0) {
-                                stopPolling();
-                                const failures = downloadIds.filter((id) => downloads[id]?.status === "failed" || downloads[id]?.status === "cancelled").length;
-                                downloadBtn.disabled = false;
-                                downloadBtn.textContent = "Download";
-                                if (failures) {
-                                    setStatus(`Finished with ${failures} error(s).`, "#ff6b6b");
-                                } else {
-                                    setStatus("Download completed.", "#5bd98c");
-                                }
-                            }
-                        } catch (e) {
-                            if (!statusErrorToastShown) {
-                                showToast({
-                                    severity: "error",
-                                    summary: "Status error",
-                                    detail: "Status polling failed. Retrying in background."
-                                });
-                                statusErrorToastShown = true;
-                            }
-                            setStatus("Status polling error.", "#ff6b6b");
-                        }
-                    };
-
-                    pollTimer = setInterval(poll, 1000);
-                    poll();
-                } catch (e) {
-                    showToast({ severity: "error", summary: "Queue error", detail: String(e) });
-                    downloadBtn.disabled = false;
-                    downloadBtn.textContent = "Download";
-                    setStatus(`Queue error: ${String(e)}`, "#ff6b6b");
-                }
-            });
-            applyNativeButtonStyle(downloadBtn, "primary");
-
-            footer.appendChild(downloadBtn);
-            panel.appendChild(footer);
-
-            dlg.appendChild(panel);
-            document.body.appendChild(dlg);
-            loadFolderList();
-            setTimeout(() => {
-                if (urlInput) {
-                    urlInput.focus();
-                    urlInput.select();
-                }
-            }, 0);
         };
 
         let currentWorkflowLoadGeneration = 0;
         let activeAutoDownloadCancel = null;
         let lastObservedActiveWorkflowKey = "";
-        let activeWorkflowTabWatcherTimer = null;
 
         const abortActiveAutoDownloadForTabSwitch = () => {
             if (typeof activeAutoDownloadCancel === "function") {
@@ -5613,7 +5612,7 @@ app.registerExtension({
             let loadingDlg = null;
             let aborted = false;
             let skipRequested = false;
-            let statusTimer = null;
+            let searchStatusUnsub = null;
             let currentSearchingFilename = "";
             const requestId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
@@ -5660,14 +5659,19 @@ app.registerExtension({
             };
 
             const controller = new AbortController();
+            const cleanupSearchListener = () => {
+                if (typeof searchStatusUnsub === "function") {
+                    try {
+                        searchStatusUnsub();
+                    } catch (_) {}
+                    searchStatusUnsub = null;
+                }
+            };
             const cancelCurrentScan = () => {
                 if (aborted) return;
                 aborted = true;
                 skipRequested = false;
-                if (statusTimer) {
-                    clearInterval(statusTimer);
-                    statusTimer = null;
-                }
+                cleanupSearchListener();
                 try {
                     controller.abort();
                 } catch (_) {}
@@ -5686,105 +5690,144 @@ app.registerExtension({
             activeAutoDownloadCancel = cancelCurrentScan;
 
             try {
-                // Show loading dialog immediately
-                loadingDlg = showLoadingDialog(() => {
-                    if (currentSearchingFilename) {
-                        doFetch(`/skip_search_model`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ request_id: requestId, filename: currentSearchingFilename })
-                        }).catch(err => console.error("[AutoDownload] Skip model request failed:", err));
+                let initialWorkflow = null;
+                let initialModels = [];
+                try {
+                    initialWorkflow = serializeWorkflowForModelScan();
+                    const rawInitialCandidates = (
+                        Array.isArray(options?.frontendMissingModelCandidates) &&
+                        options.frontendMissingModelCandidates.length
+                    )
+                        ? options.frontendMissingModelCandidates
+                        : (() => {
+                            const liveCandidates = initialWorkflow && typeof initialWorkflow === "object"
+                                ? collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, initialWorkflow)
+                                : [];
+                            if (liveCandidates.length) return liveCandidates;
+                            return Array.isArray(cachedNativeMissingCandidates) && cachedNativeMissingCandidates.length
+                                ? cachedNativeMissingCandidates
+                                : [];
+                        })();
+                    if (Array.isArray(rawInitialCandidates) && rawInitialCandidates.length) {
+                        initialModels = coalesceMissingEntriesByDestination(
+                            rawInitialCandidates
+                                .filter((entry) => Boolean(entry && (entry.filename || entry.name)))
+                                .map((entry) => ({
+                                    ...entry,
+                                    filename: entry?.filename || entry?.name || "",
+                                    suggested_folder: entry?.suggested_folder || entry?.directory || entry?.folder || "",
+                                }))
+                        );
                     }
+                } catch (_) {
+                    initialModels = [];
+                }
+
+                // Show loading dialog immediately
+                loadingDlg = showLoadingDialog((targetFilename) => {
+                    const skipName = String(targetFilename || currentSearchingFilename || "").trim();
+                    if (!skipName) return;
+                    skippedFilenames.add(skipName.toLowerCase());
+                    const baseSkip = skipName.split("/").pop();
+                    if (baseSkip) {
+                        skippedFilenames.add(baseSkip.toLowerCase());
+                    }
+                    doFetch(`/skip_search_model`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ request_id: requestId, filename: skipName })
+                    }).catch(err => console.error("[AutoDownload] Skip model request failed:", err));
                 }, {
                     skipModeActive: skipAllUnresolved,
+                    initialModels,
                     onClose: cancelCurrentScan
                 });
 
-                if (skipAllUnresolved) {
-                    loadingDlg.setStatus("Skipping unresolved models...");
-                    loadingDlg.setDetail("Running fast scan with available links.");
-                } else {
-                    loadingDlg.setStatus("Looking for links...");
-                    loadingDlg.setDetail("Preparing workflow scan...");
-                }
+                loadingDlg.setStatus(skipAllUnresolved ? "Skipping unresolved..." : "Searching...");
 
-                const pollStatus = async () => {
-                    if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration) return;
-                    try {
-                        const statusResp = await doFetch(`/search_status?request_id=${encodeURIComponent(requestId)}&_t=${Date.now()}`, {
-                            cache: "no-store",
-                            signal: controller.signal
-                        });
-                        if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration) return;
-                        if (statusResp.status !== 200) return;
-                        const statusData = await statusResp.json();
-                        if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration) return;
-                        const status = statusData.status || {};
-                        const source = String(status.source || "").trim();
-                        const filename = String(status.filename || "").trim();
-                        const detailRaw = String(status.detail || "").trim();
-                        let message = String(status.message || "").trim();
+                const applySearchStatusPayload = (statusData) => {
+                    if (aborted || myLoadGeneration !== currentWorkflowLoadGeneration || !loadingDlg) return;
+                    if (!statusData || typeof statusData !== "object") return;
+                    if (statusData.request_id && statusData.request_id !== requestId) return;
+                    const status = statusData.status || statusData;
+                    if (!status || typeof status !== "object") return;
+                    const source = String(status.source || "").trim();
+                    const filename = String(status.filename || "").trim();
+                    const detailRaw = String(status.detail || "").trim();
+                    let message = String(status.message || "").trim();
 
+                    if (filename) {
+                        currentSearchingFilename = filename;
+                    }
+
+                    let displayMessage = message;
+                    let displayDetail = "";
+
+                    if (status.current_index && status.total_files) {
+                        const idx = status.current_index;
+                        const total = status.total_files;
+                        const fn = filename || "model";
+                        const node = status.node_label || "";
+                        displayMessage = `Searching model ${idx} of ${total}`;
+                        displayDetail = node ? `"${fn}" in ${node}` : `"${fn}"`;
+                    } else {
+                        const sourceLabelMap = {
+                            workflow: "Scanning workflow",
+                            popular_models: "Checking curated model list",
+                            manager_cache: "Checking manager cache",
+                            huggingface_search: "Searching Hugging Face",
+                            huggingface_fulltext: "Searching by file name",
+                            huggingface_priority_authors: "Searching priority authors",
+                            huggingface_priority_repos: "Searching priority repos",
+                            huggingface_skip: "Skipping unresolved Hugging Face lookups",
+                            complete: "Scan complete"
+                        };
+
+                        const sourceLabel = sourceLabelMap[source] || (
+                            source
+                                ? source.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+                                : ""
+                        );
+
+                        if (!displayMessage) {
+                            displayMessage = sourceLabel || "Looking for links...";
+                        }
+
+                        const detailParts = [];
                         if (filename) {
-                            currentSearchingFilename = filename;
+                            detailParts.push(filename);
                         }
-
-                        let displayMessage = message;
-                        let displayDetail = "";
-
-                        if (status.current_index && status.total_files) {
-                            const idx = status.current_index;
-                            const total = status.total_files;
-                            const fn = filename || "model";
-                            const node = status.node_label || "";
-                            displayMessage = `Searching model ${idx} of ${total}`;
-                            displayDetail = node ? `"${fn}" in ${node}` : `"${fn}"`;
-                        } else {
-                            const sourceLabelMap = {
-                                workflow: "Scanning workflow",
-                                popular_models: "Checking curated model list",
-                                manager_cache: "Checking manager cache",
-                                huggingface_search: "Searching Hugging Face",
-                                huggingface_fulltext: "Searching by file name",
-                                huggingface_priority_authors: "Searching priority authors",
-                                huggingface_priority_repos: "Searching priority repos",
-                                huggingface_skip: "Skipping unresolved Hugging Face lookups",
-                                complete: "Scan complete"
-                            };
-
-                            const sourceLabel = sourceLabelMap[source] || (
-                                source
-                                    ? source.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-                                    : ""
-                            );
-
-                            if (!displayMessage) {
-                                displayMessage = sourceLabel || "Looking for links...";
-                            }
-
-                            const detailParts = [];
-                            if (filename) {
-                                detailParts.push(filename);
-                            }
-                            if (detailRaw) {
-                                detailParts.push(detailRaw);
-                            }
-                            if (sourceLabel && !displayMessage.toLowerCase().includes(sourceLabel.toLowerCase())) {
-                                detailParts.push(sourceLabel);
-                            }
-                            displayDetail = detailParts.length ? detailParts.join(" • ") : "Working...";
+                        if (detailRaw) {
+                            detailParts.push(detailRaw);
                         }
+                        if (sourceLabel && !displayMessage.toLowerCase().includes(sourceLabel.toLowerCase())) {
+                            detailParts.push(sourceLabel);
+                        }
+                        displayDetail = detailParts.length ? detailParts.join(" • ") : "Working...";
+                    }
 
-                        loadingDlg.setStatus(displayMessage);
-                        loadingDlg.setDetail(displayDetail);
-                    } catch (e) {
-                        // Ignore polling errors during search
+                    loadingDlg.setStatus(displayMessage);
+                    loadingDlg.setDetail(displayDetail);
+                    if (status.total_files) {
+                        loadingDlg.setTotalCount(status.total_files);
+                    }
+                    if (filename) {
+                        loadingDlg.setActiveModel(filename, displayDetail || displayMessage);
                     }
                 };
-                statusTimer = setInterval(pollStatus, 600);
-                pollStatus();
+                if (api && typeof api.addEventListener === "function") {
+                    const onWsSearchStatus = (event) => {
+                        applySearchStatusPayload(event?.detail);
+                    };
+                    api.addEventListener("hf_search_status", onWsSearchStatus);
+                    searchStatusUnsub = () => {
+                        try {
+                            api.removeEventListener("hf_search_status", onWsSearchStatus);
+                        } catch (_) {}
+                    };
+                }
 
-                const workflow = serializeWorkflowForModelScan();
+                const workflow = initialWorkflow || serializeWorkflowForModelScan();
                 if (!workflow || typeof workflow !== "object") {
                     throw new Error("Workflow is not ready for missing-model scan.");
                 }
@@ -5813,10 +5856,7 @@ app.registerExtension({
                         }
                     );
                     if (loadingDlg) {
-                        if (statusTimer) {
-                            clearInterval(statusTimer);
-                            statusTimer = null;
-                        }
+                        cleanupSearchListener();
                         loadingDlg.cleanup();
                         loadingDlg.remove();
                     }
@@ -5865,10 +5905,7 @@ app.registerExtension({
 
                 // Remove loading dialog
                 if (loadingDlg) {
-                    if (statusTimer) {
-                        clearInterval(statusTimer);
-                        statusTimer = null;
-                    }
+                    cleanupSearchListener();
                     loadingDlg.cleanup();
                     loadingDlg.remove();
                 }
@@ -6075,11 +6112,8 @@ app.registerExtension({
 
             } catch (e) {
                 // Remove loading dialog on error
+                cleanupSearchListener();
                 if (loadingDlg) {
-                    if (statusTimer) {
-                        clearInterval(statusTimer);
-                        statusTimer = null;
-                    }
                     loadingDlg.cleanup();
                     if (aborted || (e && e.name === "AbortError")) {
                         if (skipRequested && !skipAllUnresolved) {
@@ -6133,15 +6167,8 @@ app.registerExtension({
 
             const actionBtn = document.createElement("button");
             actionBtn.type = "button";
-            actionBtn.className = "p-button p-component p-button-sm";
+            actionBtn.className = NATIVE_SECONDARY_BTN_CLASS;
             actionBtn.textContent = "Auto-search and download missing models";
-            Object.assign(actionBtn.style, {
-                background: "#2196f3",
-                color: "#fff",
-                border: "none",
-                padding: "9px 16px",
-                fontWeight: "600"
-            });
 
             actionBtn.onclick = (event) => {
                 event.preventDefault();
@@ -6182,107 +6209,259 @@ app.registerExtension({
         };
 
         const NATIVE_DOWNLOAD_TO_COMFY_ATTR = "data-hf-download-to-comfy";
+        const NATIVE_SPLIT_BTN_PART_CLASS =
+            "bg-secondary text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50";
+        const NATIVE_SPLIT_MENU_CONTAINER_CLASS =
+            "z-3000 min-w-44 overflow-y-auto rounded-lg border border-solid border-border bg-background p-1 text-foreground shadow-lg outline-none";
+        const NATIVE_SPLIT_MENU_ITEM_CLASS =
+            "group flex min-h-8 w-full cursor-pointer appearance-none items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-1 text-left font-inter text-xs text-foreground outline-none transition-colors hover:bg-accent focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-50";
         let cachedNativeMissingCandidates = [];
-        let nativeSidebarInjectTimer = null;
+        let activeNativeSplitDropdown = null;
+
+        const closeNativeSplitDropdown = () => {
+            if (!activeNativeSplitDropdown) return;
+            const current = activeNativeSplitDropdown;
+            activeNativeSplitDropdown = null;
+            try {
+                current.cleanup?.();
+            } catch (_) {}
+            try {
+                if (current.triggerBtn) {
+                    current.triggerBtn.removeAttribute("data-state");
+                    current.triggerBtn.setAttribute("aria-expanded", "false");
+                }
+            } catch (_) {}
+            try {
+                current.menu?.remove?.();
+            } catch (_) {}
+        };
+
+        const openNativeSplitDropdown = (anchorEl, triggerBtn, options = {}) => {
+            if (!anchorEl || !triggerBtn) return;
+            if (activeNativeSplitDropdown?.triggerBtn === triggerBtn) {
+                closeNativeSplitDropdown();
+                return;
+            }
+            closeNativeSplitDropdown();
+
+            const menu = document.createElement("div");
+            menu.setAttribute("role", "menu");
+            menu.setAttribute("data-testid", "hf-native-split-menu");
+            menu.className = NATIVE_SPLIT_MENU_CONTAINER_CLASS;
+            Object.assign(menu.style, {
+                position: "fixed",
+                top: "0px",
+                left: "0px",
+                zIndex: "10050",
+            });
+
+            const addMenuItem = (label, iconClass, disabled, onSelect) => {
+                const item = document.createElement("button");
+                item.type = "button";
+                item.setAttribute("role", "menuitem");
+                item.className = NATIVE_SPLIT_MENU_ITEM_CLASS;
+                item.disabled = Boolean(disabled);
+                const icon = document.createElement("i");
+                icon.className = `${iconClass} size-3.5 shrink-0 text-muted-foreground`;
+                icon.setAttribute("aria-hidden", "true");
+                const text = document.createElement("span");
+                text.className = "truncate";
+                text.textContent = label;
+                item.appendChild(icon);
+                item.appendChild(text);
+                item.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeNativeSplitDropdown();
+                    if (typeof onSelect === "function") {
+                        onSelect();
+                    }
+                });
+                menu.appendChild(item);
+            };
+
+            addMenuItem(
+                "Download to Comfy",
+                "icon-[lucide--hard-drive-download]",
+                Boolean(options.comfyDisabled),
+                options.onComfyDownload
+            );
+            addMenuItem(
+                "Download to browser",
+                "icon-[lucide--globe]",
+                Boolean(options.browserDisabled),
+                options.onBrowserDownload
+            );
+
+            (document.body || document.documentElement).appendChild(menu);
+
+            const positionMenu = () => {
+                if (!anchorEl.isConnected || !triggerBtn.isConnected || !menu.isConnected) {
+                    closeNativeSplitDropdown();
+                    return;
+                }
+                const rect = anchorEl.getBoundingClientRect();
+                const menuRect = menu.getBoundingClientRect();
+                const vw = window.innerWidth;
+                const vh = window.innerHeight;
+                const left = Math.max(8, Math.min(rect.right - menuRect.width, vw - menuRect.width - 8));
+                const spaceBelow = vh - rect.bottom - 8;
+                const spaceAbove = rect.top - 8;
+                const top =
+                    spaceBelow >= menuRect.height || spaceBelow >= spaceAbove
+                        ? Math.min(rect.bottom + 4, vh - menuRect.height - 8)
+                        : Math.max(8, rect.top - menuRect.height - 4);
+                menu.style.left = `${Math.round(left)}px`;
+                menu.style.top = `${Math.round(top)}px`;
+            };
+
+            positionMenu();
+            triggerBtn.setAttribute("data-state", "open");
+            triggerBtn.setAttribute("aria-expanded", "true");
+
+            const onDocPointerDown = (event) => {
+                const target = event?.target;
+                if (target instanceof Node && (menu.contains(target) || triggerBtn.contains(target))) {
+                    return;
+                }
+                closeNativeSplitDropdown();
+            };
+            const onDocKeyDown = (event) => {
+                if (event.key === "Escape") {
+                    event.stopPropagation();
+                    closeNativeSplitDropdown();
+                }
+            };
+            const onWindowReposition = () => {
+                positionMenu();
+            };
+
+            document.addEventListener("pointerdown", onDocPointerDown, true);
+            document.addEventListener("keydown", onDocKeyDown, true);
+            window.addEventListener("scroll", onWindowReposition, true);
+            window.addEventListener("resize", onWindowReposition);
+
+            activeNativeSplitDropdown = {
+                menu,
+                triggerBtn,
+                cleanup: () => {
+                    document.removeEventListener("pointerdown", onDocPointerDown, true);
+                    document.removeEventListener("keydown", onDocKeyDown, true);
+                    window.removeEventListener("scroll", onWindowReposition, true);
+                    window.removeEventListener("resize", onWindowReposition);
+                },
+            };
+        };
 
         const ensureNativeSidebarStyles = () => {
             if (document.getElementById("hf-native-sidebar-styles")) return;
             const style = document.createElement("style");
             style.id = "hf-native-sidebar-styles";
             style.textContent = `
-                .hf-native-comfy-btn {
-                    background: #3b82f6;
-                    color: #ffffff;
-                    border: none;
+                .hf-native-hidden-download {
+                    display: none !important;
+                }
+                .hf-native-split-group {
+                    display: inline-flex;
+                    align-items: stretch;
+                    height: 32px;
+                    border-radius: 8px;
+                    overflow: hidden;
+                    flex-shrink: 0;
+                }
+                .hf-native-split-group-all {
+                    width: 100%;
+                    flex: 1 1 0%;
+                    min-width: 0;
                     border-radius: 6px;
-                    font-size: 12px;
-                    font-weight: 500;
-                    line-height: 1;
+                }
+                .hf-native-split-main,
+                .hf-native-split-chevron {
+                    appearance: none;
+                    border: none;
+                    margin: 0;
                     cursor: pointer;
+                    font-family: var(--font-inter, Inter, sans-serif);
+                    font-size: 12px;
+                    font-weight: 400;
+                    line-height: 1;
                     display: inline-flex;
                     align-items: center;
                     justify-content: center;
-                    gap: 4px;
+                    gap: 6px;
+                    transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease;
+                }
+                .hf-native-split-main {
+                    padding: 0 10px;
                     white-space: nowrap;
-                    flex-shrink: 0;
-                    transition: background-color 150ms ease, opacity 150ms ease;
-                }
-                .hf-native-comfy-btn:hover:not(:disabled) {
-                    background: #2563eb;
-                }
-                .hf-native-comfy-btn:disabled {
-                    opacity: 0.65;
-                    cursor: default;
-                }
-                .hf-native-comfy-btn-row {
-                    height: 24px;
-                    padding: 0 5px;
-                    font-size: 11px;
-                    max-width: 100%;
                     min-width: 0;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
                 }
-                .hf-native-comfy-btn-all {
-                    width: 100%;
-                    height: 32px;
+                .hf-native-split-group-all .hf-native-split-main {
+                    flex: 1 1 0%;
                     padding: 0 12px;
                 }
-                .hf-native-download-all-wrap {
-                    width: 100%;
-                    display: flex;
-                    align-items: center;
-                    padding-top: 8px;
+                .hf-native-split-chevron {
+                    width: 22px;
+                    padding: 0;
+                    flex-shrink: 0;
+                    border-left: 1px solid color-mix(in srgb, var(--border-default, rgba(255, 255, 255, 0.14)) 70%, transparent);
                 }
-                .hf-native-missing-row {
-                    display: grid !important;
-                    grid-template-columns: minmax(0, 1fr) auto auto !important;
-                    align-items: center !important;
-                    column-gap: 4px !important;
-                    row-gap: 6px !important;
-                }
-                .hf-native-missing-row-info {
-                    grid-column: 1 / -1 !important;
-                    min-width: 0 !important;
-                    width: 100% !important;
-                    max-width: 100% !important;
-                }
-                .hf-native-missing-row-actions {
-                    grid-column: 1 / -1 !important;
-                    justify-self: end !important;
-                    margin-left: auto !important;
-                    display: inline-flex !important;
-                    align-items: center !important;
-                    flex-wrap: nowrap !important;
-                    justify-content: flex-end !important;
-                    gap: 4px !important;
-                    max-width: 100% !important;
-                    min-width: 0 !important;
-                }
-                .hf-native-missing-row > [data-testid="hf-download-to-comfy"] {
-                    justify-self: end !important;
-                    margin-left: 0 !important;
-                }
-                .hf-native-missing-row [data-testid="missing-model-download"] {
-                    height: 24px !important;
-                    min-height: 24px !important;
-                    padding-left: 6px !important;
-                    padding-right: 6px !important;
-                    font-size: 11px !important;
-                    line-height: 1 !important;
-                    white-space: nowrap !important;
-                    flex-shrink: 0 !important;
-                }
-                .hf-native-missing-row [data-testid="missing-model-locate"] {
-                    width: 24px !important;
-                    min-width: 24px !important;
-                    height: 24px !important;
-                    min-height: 24px !important;
-                    padding: 0 !important;
-                    flex-shrink: 0 !important;
+                .hf-native-split-chevron[data-state="open"] i {
+                    rotate: 180deg;
                 }
             `;
             (document.head || document.documentElement).appendChild(style);
+        };
+
+        const formatNativeByteSize = (bytes) => {
+            const val = Number(bytes);
+            if (!Number.isFinite(val) || val <= 0) return "";
+            const units = ["B", "KB", "MB", "GB", "TB"];
+            let idx = 0;
+            let scaled = val;
+            while (scaled >= 1024 && idx < units.length - 1) {
+                scaled /= 1024;
+                idx += 1;
+            }
+            return `${scaled.toFixed(idx === 0 ? 0 : 2)} ${units[idx]}`;
+        };
+
+        const setNativeMainButtonLabel = (btnEl, text) => {
+            if (!btnEl) return;
+            const span = btnEl.querySelector("[data-hf-label]");
+            if (span) {
+                span.textContent = text;
+            } else {
+                btnEl.textContent = text;
+            }
+        };
+
+        const triggerBrowserDownloadForItems = (items = [], nativeBtn = null) => {
+            if (nativeBtn && typeof nativeBtn.click === "function") {
+                nativeBtn.click();
+                return;
+            }
+            const valid = (Array.isArray(items) ? items : []).filter((item) => item && String(item.url || "").trim());
+            if (!valid.length) {
+                showToast({
+                    severity: "warn",
+                    summary: "No download URL",
+                    detail: "No resolved link found in catalog for this model yet.",
+                    life: 3500
+                });
+                return;
+            }
+            for (const item of valid) {
+                const a = document.createElement("a");
+                a.href = item.url;
+                a.download = item.filename || "";
+                a.target = "_blank";
+                a.rel = "noopener noreferrer";
+                a.style.display = "none";
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+            }
         };
 
         const queueModelsToComfyBackend = async (modelsToQueue, btnEl, defaultLabel) => {
@@ -6300,7 +6479,7 @@ app.registerExtension({
             }
             if (btnEl) {
                 btnEl.disabled = true;
-                btnEl.textContent = "Queuing...";
+                setNativeMainButtonLabel(btnEl, "Queuing...");
             }
             try {
                 const resp = await fetch("/queue_download", {
@@ -6323,11 +6502,14 @@ app.registerExtension({
                     window?.hfDownloader?.pollDownloadStatusNow?.();
                 } catch (_) {}
                 if (btnEl) {
-                    btnEl.textContent = validItems.length > 1 ? `Queued (${queuedCount})` : "Queued";
+                    setNativeMainButtonLabel(btnEl, validItems.length > 1 ? `Queued (${queuedCount})` : "Queued");
                     setTimeout(() => {
                         if (!btnEl.isConnected) return;
                         btnEl.disabled = false;
-                        btnEl.textContent = defaultLabel;
+                        setNativeMainButtonLabel(
+                            btnEl,
+                            btnEl.dataset.hfDefaultLabel || defaultLabel
+                        );
                     }, 1800);
                 }
             } catch (err) {
@@ -6340,7 +6522,10 @@ app.registerExtension({
                 });
                 if (btnEl) {
                     btnEl.disabled = false;
-                    btnEl.textContent = defaultLabel;
+                    setNativeMainButtonLabel(
+                        btnEl,
+                        btnEl.dataset.hfDefaultLabel || defaultLabel
+                    );
                 }
             }
         };
@@ -6367,6 +6552,7 @@ app.registerExtension({
                 }) ||
                 "checkpoints"
             ).trim();
+            const sizeBytes = Number(catalogMatch?.sizeBytes || candidate?.sizeBytes || 0) || 0;
             return {
                 filename,
                 target_filename: filename,
@@ -6374,6 +6560,7 @@ app.registerExtension({
                 requested_path: rawName,
                 url,
                 folder,
+                sizeBytes,
                 folder_locked: Boolean(catalogMatch?.folder && candidate?.directory),
                 locked_folder: String(candidate?.directory || catalogMatch?.folder || "").trim(),
             };
@@ -6404,6 +6591,41 @@ app.registerExtension({
             return rows;
         };
 
+        const collectNonButtonTextLines = (rowEl) => {
+            if (!rowEl || !(rowEl instanceof Element)) return [];
+            const ignoredSelector =
+                '[data-testid="missing-model-download"], [data-testid="missing-model-locate"], [data-testid="hf-download-split"], [data-testid="hf-download-to-comfy"], button';
+            const lines = [];
+            let current = "";
+            const walk = (node) => {
+                if (!node) return;
+                if (node.nodeType === Node.TEXT_NODE) {
+                    current += node.textContent || "";
+                    return;
+                }
+                if (node.nodeType !== Node.ELEMENT_NODE) return;
+                if (node.matches?.(ignoredSelector)) return;
+                const tag = node.tagName;
+                const isBreak = tag === "DIV" || tag === "P" || tag === "LI" || tag === "BR" || tag === "TR";
+                if (isBreak && current.trim()) {
+                    lines.push(current.trim());
+                    current = "";
+                }
+                for (let child = node.firstChild; child; child = child.nextSibling) {
+                    walk(child);
+                }
+                if (isBreak && current.trim()) {
+                    lines.push(current.trim());
+                    current = "";
+                }
+            };
+            walk(rowEl);
+            if (current.trim()) lines.push(current.trim());
+            return lines.flatMap((chunk) =>
+                chunk.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+            );
+        };
+
         const extractNativeRowModelLabel = (rowEl) => {
             if (!rowEl || !(rowEl instanceof Element)) return "";
             const titled = rowEl.querySelectorAll("[title]");
@@ -6426,36 +6648,17 @@ app.registerExtension({
                     return t;
                 }
             }
-            const clone = rowEl.cloneNode(true);
-            if (clone instanceof Element) {
-                clone.querySelectorAll(
-                    '[data-testid="missing-model-download"], [data-testid="missing-model-locate"], [data-testid="hf-download-to-comfy"], button'
-                ).forEach((el) => el.remove());
-                const lines = String(clone.textContent || "")
-                    .split(/\r?\n/)
-                    .map((s) => s.trim())
-                    .filter(Boolean);
-                for (const line of lines) {
-                    if (line.includes(".") && !/\b(?:KB|MB|GB|TB|bytes)\b/i.test(line)) {
-                        return line;
-                    }
+            const lines = collectNonButtonTextLines(rowEl);
+            for (const line of lines) {
+                if (line.includes(".") && !/\b(?:KB|MB|GB|TB|bytes)\b/i.test(line)) {
+                    return line;
                 }
-                return lines[0] || "";
             }
-            return "";
+            return lines[0] || "";
         };
 
         const extractNativeRowFolderHint = (rowEl) => {
-            if (!rowEl || !(rowEl instanceof Element)) return "";
-            const clone = rowEl.cloneNode(true);
-            if (!(clone instanceof Element)) return "";
-            clone.querySelectorAll(
-                '[data-testid="missing-model-download"], [data-testid="missing-model-locate"], [data-testid="hf-download-to-comfy"], button'
-            ).forEach((el) => el.remove());
-            const lines = String(clone.textContent || "")
-                .split(/\r?\n/)
-                .map((s) => s.trim())
-                .filter(Boolean);
+            const lines = collectNonButtonTextLines(rowEl);
             for (const line of lines) {
                 const head = line.split("·")[0].trim();
                 if (
@@ -6504,6 +6707,72 @@ app.registerExtension({
             return { candidate: null, rowLabel, rowFolderHint };
         };
 
+        const createNativeSplitButtonGroup = ({
+            groupTestId,
+            mainTestId,
+            chevronTestId,
+            label,
+            title,
+            isFooterAll = false,
+            onMainClick,
+            onDropdownRequest,
+        }) => {
+            const group = document.createElement("div");
+            group.setAttribute("data-testid", groupTestId);
+            group.setAttribute(NATIVE_DOWNLOAD_TO_COMFY_ATTR, "true");
+            group.className = isFooterAll
+                ? "hf-native-split-group hf-native-split-group-all"
+                : "hf-native-split-group";
+
+            const mainBtn = document.createElement("button");
+            mainBtn.type = "button";
+            mainBtn.setAttribute("data-testid", mainTestId);
+            mainBtn.setAttribute(NATIVE_DOWNLOAD_TO_COMFY_ATTR, "true");
+            mainBtn.className = `hf-native-split-main ${NATIVE_SPLIT_BTN_PART_CLASS}`;
+            mainBtn.dataset.hfDefaultLabel = label;
+            if (title) mainBtn.title = title;
+
+            if (isFooterAll) {
+                const dlIcon = document.createElement("i");
+                dlIcon.className = "icon-[lucide--download] size-4 shrink-0";
+                dlIcon.setAttribute("aria-hidden", "true");
+                const textSpan = document.createElement("span");
+                textSpan.setAttribute("data-hf-label", "true");
+                textSpan.className = "truncate";
+                textSpan.textContent = label;
+                mainBtn.appendChild(dlIcon);
+                mainBtn.appendChild(textSpan);
+            } else {
+                mainBtn.textContent = label;
+            }
+
+            const chevronBtn = document.createElement("button");
+            chevronBtn.type = "button";
+            chevronBtn.setAttribute("data-testid", chevronTestId);
+            chevronBtn.setAttribute("aria-label", "Download options");
+            chevronBtn.setAttribute("aria-haspopup", "menu");
+            chevronBtn.setAttribute("aria-expanded", "false");
+            chevronBtn.className = `hf-native-split-chevron ${NATIVE_SPLIT_BTN_PART_CLASS}`;
+            chevronBtn.innerHTML =
+                `<i class="icon-[lucide--chevron-down] size-3 text-muted-foreground transition-transform duration-150" aria-hidden="true"></i>`;
+
+            mainBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                closeNativeSplitDropdown();
+                onMainClick?.(mainBtn);
+            });
+            chevronBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onDropdownRequest?.(group, chevronBtn, mainBtn);
+            });
+
+            group.appendChild(mainBtn);
+            group.appendChild(chevronBtn);
+            return { group, mainBtn, chevronBtn };
+        };
+
         const injectNativeSidebarMissingModelButtonsSync = (candidates = []) => {
             const rowsContainers = Array.from(
                 document.querySelectorAll('[data-testid="missing-model-importable-rows"]')
@@ -6541,127 +6810,180 @@ app.registerExtension({
                     const nativeDownloadBtn = rowEl.querySelector('[data-testid="missing-model-download"]');
                     const nativeLocateBtn = rowEl.querySelector('[data-testid="missing-model-locate"]');
                     const anchorBtn = nativeDownloadBtn || (queueItem ? nativeLocateBtn : null);
-                    let comfyBtn = rowEl.querySelector('[data-testid="hf-download-to-comfy"]');
+                    let splitGroup = rowEl.querySelector('[data-testid="hf-download-split"]');
 
                     if (!anchorBtn || !queueItem) {
-                        if (comfyBtn && !queueItem) {
-                            comfyBtn.remove();
+                        if (splitGroup) {
+                            splitGroup.remove();
                         }
-                        if (nativeDownloadBtn) nativeDownloadBtn.style.gridColumn = "";
-                        if (nativeLocateBtn) nativeLocateBtn.style.gridColumn = "";
+                        if (nativeDownloadBtn) {
+                            nativeDownloadBtn.classList.remove("hf-native-hidden-download");
+                        }
                         return;
                     }
 
-                    if (!comfyBtn) {
-                        comfyBtn = document.createElement("button");
-                        comfyBtn.type = "button";
-                        comfyBtn.setAttribute("data-testid", "hf-download-to-comfy");
-                        comfyBtn.setAttribute(NATIVE_DOWNLOAD_TO_COMFY_ATTR, "true");
-                        comfyBtn.className = "hf-native-comfy-btn hf-native-comfy-btn-row";
-                        comfyBtn.textContent = "Download to Comfy";
-                        comfyBtn.title = `Download ${queueItem.filename} into ComfyUI models/${queueItem.folder}`;
-                        anchorBtn.insertAdjacentElement("beforebegin", comfyBtn);
-                    } else if (comfyBtn.nextElementSibling !== anchorBtn) {
-                        anchorBtn.insertAdjacentElement("beforebegin", comfyBtn);
+                    if (nativeDownloadBtn) {
+                        nativeDownloadBtn.classList.add("hf-native-hidden-download");
                     }
 
-                    const anchorParent = anchorBtn.parentElement;
-                    const parentOnlyButtons =
-                        anchorParent &&
-                        anchorParent !== rowsContainer &&
-                        Array.from(anchorParent.children).every(
-                            (child) => child.tagName === "BUTTON" || child.hasAttribute?.(NATIVE_DOWNLOAD_TO_COMFY_ATTR)
-                        );
-                    const actionContainer = parentOnlyButtons ? anchorParent : null;
-                    const flexRowEl = (actionContainer ? actionContainer.parentElement : anchorParent) || rowEl;
-                    if (flexRowEl && flexRowEl !== rowsContainer) {
-                        flexRowEl.classList.add("hf-native-missing-row");
-                        Array.from(flexRowEl.children).forEach((child) => {
-                            if (
-                                child !== actionContainer &&
-                                child !== comfyBtn &&
-                                child !== nativeDownloadBtn &&
-                                child !== nativeLocateBtn
-                            ) {
-                                child.classList.add("hf-native-missing-row-info");
-                            }
+                    if (!splitGroup) {
+                        const created = createNativeSplitButtonGroup({
+                            groupTestId: "hf-download-split",
+                            mainTestId: "hf-download-to-comfy",
+                            chevronTestId: "hf-download-split-trigger",
+                            label: "Download",
+                            title: `Download ${queueItem.filename} to ComfyUI (models/${queueItem.folder})`,
+                            isFooterAll: false,
+                            onMainClick: (btn) => {
+                                const itemToQueue = splitGroup?._hfQueueItem;
+                                if (!itemToQueue) return;
+                                void queueModelsToComfyBackend([itemToQueue], btn, "Download");
+                            },
+                            onDropdownRequest: (groupEl, chevronEl, mainEl) => {
+                                const itemToQueue = groupEl?._hfQueueItem;
+                                const nativeBtn = groupEl?._hfNativeDownloadBtn || null;
+                                openNativeSplitDropdown(groupEl, chevronEl, {
+                                    comfyDisabled: !itemToQueue || mainEl.disabled,
+                                    browserDisabled: !nativeBtn && !itemToQueue?.url,
+                                    onComfyDownload: () => {
+                                        if (!itemToQueue) return;
+                                        void queueModelsToComfyBackend([itemToQueue], mainEl, "Download");
+                                    },
+                                    onBrowserDownload: () => {
+                                        triggerBrowserDownloadForItems(
+                                            itemToQueue ? [itemToQueue] : [],
+                                            nativeBtn
+                                        );
+                                    },
+                                });
+                            },
                         });
-                        if (actionContainer) {
-                            actionContainer.classList.add("hf-native-missing-row-actions");
-                            comfyBtn.style.marginLeft = "";
-                            comfyBtn.style.gridColumn = "";
-                            if (nativeDownloadBtn) nativeDownloadBtn.style.gridColumn = "";
-                            if (nativeLocateBtn) nativeLocateBtn.style.gridColumn = "";
-                        } else {
-                            comfyBtn.style.marginLeft = "";
-                            if (nativeDownloadBtn && nativeLocateBtn) {
-                                comfyBtn.style.gridColumn = "1";
-                                nativeDownloadBtn.style.gridColumn = "2";
-                                nativeLocateBtn.style.gridColumn = "3";
-                            } else if (nativeDownloadBtn) {
-                                comfyBtn.style.gridColumn = "2";
-                                nativeDownloadBtn.style.gridColumn = "3";
-                            } else if (nativeLocateBtn) {
-                                comfyBtn.style.gridColumn = "2";
-                                nativeLocateBtn.style.gridColumn = "3";
-                            } else {
-                                comfyBtn.style.gridColumn = "3";
-                            }
+                        splitGroup = created.group;
+                        anchorBtn.insertAdjacentElement("beforebegin", splitGroup);
+                    } else {
+                        if (splitGroup.nextElementSibling !== anchorBtn) {
+                            anchorBtn.insertAdjacentElement("beforebegin", splitGroup);
+                        }
+                        const mainEl = splitGroup.querySelector('[data-testid="hf-download-to-comfy"]');
+                        if (mainEl) {
+                            mainEl.title = `Download ${queueItem.filename} to ComfyUI (models/${queueItem.folder})`;
                         }
                     }
 
-                    comfyBtn._hfQueueItem = queueItem;
-                    if (!comfyBtn._hfBoundClick) {
-                        comfyBtn._hfBoundClick = true;
-                        comfyBtn.addEventListener("click", (event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            const itemToQueue = comfyBtn._hfQueueItem;
-                            if (!itemToQueue) return;
-                            void queueModelsToComfyBackend([itemToQueue], comfyBtn, "Download to Comfy");
-                        });
-                    }
+                    splitGroup._hfQueueItem = queueItem;
+                    splitGroup._hfNativeDownloadBtn = nativeDownloadBtn || null;
                 });
 
                 const cardScope = rowsContainer.parentElement || document;
                 const actionsEl =
                     cardScope.querySelector('[data-testid="missing-model-actions"]') ||
                     document.querySelector('[data-testid="missing-model-actions"]');
+                const nativeDownloadAllBtn = actionsEl
+                    ? actionsEl.querySelector('[data-testid="missing-model-download-all"]')
+                    : null;
                 let allWrap = cardScope.querySelector('[data-testid="hf-native-download-all-wrap"]');
+                let allSplit = cardScope.querySelector('[data-testid="hf-download-all-split"]');
 
-                if (!containerQueueItems.length) {
-                    if (allWrap) {
-                        allWrap.remove();
+                const shouldShowDownloadAll =
+                    containerQueueItems.length > 0 &&
+                    (Boolean(nativeDownloadAllBtn) || containerQueueItems.length > 1);
+
+                if (!shouldShowDownloadAll) {
+                    if (allSplit) allSplit.remove();
+                    if (allWrap) allWrap.remove();
+                    if (nativeDownloadAllBtn) {
+                        nativeDownloadAllBtn.classList.remove("hf-native-hidden-download");
                     }
                     continue;
                 }
 
-                if (!allWrap) {
-                    allWrap = document.createElement("div");
-                    allWrap.setAttribute("data-testid", "hf-native-download-all-wrap");
-                    allWrap.className = "hf-native-download-all-wrap";
-
-                    const allBtn = document.createElement("button");
-                    allBtn.type = "button";
-                    allBtn.setAttribute("data-testid", "hf-download-all-to-comfy");
-                    allBtn.className = "hf-native-comfy-btn hf-native-comfy-btn-all";
-                    allBtn.textContent = "Download all to Comfy";
-                    allBtn.addEventListener("click", (event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        const items = Array.isArray(allWrap._hfQueueItems) ? allWrap._hfQueueItems : [];
-                        void queueModelsToComfyBackend(items, allBtn, "Download all to Comfy");
-                    });
-                    allWrap.appendChild(allBtn);
+                let downloadAllLabel = "";
+                if (nativeDownloadAllBtn) {
+                    const nativeText = String(nativeDownloadAllBtn.textContent || "").trim();
+                    if (nativeText) {
+                        downloadAllLabel = nativeText;
+                    }
                 }
-                allWrap._hfQueueItems = containerQueueItems;
+                if (!downloadAllLabel) {
+                    const totalBytes = containerQueueItems.reduce(
+                        (acc, item) => acc + (Number(item?.sizeBytes || 0) || 0),
+                        0
+                    );
+                    const formattedSize = formatNativeByteSize(totalBytes);
+                    downloadAllLabel = formattedSize ? `Download all (${formattedSize})` : "Download all";
+                }
+
+                if (nativeDownloadAllBtn) {
+                    nativeDownloadAllBtn.classList.add("hf-native-hidden-download");
+                }
+
+                if (!allSplit) {
+                    const createdAll = createNativeSplitButtonGroup({
+                        groupTestId: "hf-download-all-split",
+                        mainTestId: "hf-download-all-to-comfy",
+                        chevronTestId: "hf-download-all-split-trigger",
+                        label: downloadAllLabel,
+                        title: "Download all missing models to ComfyUI",
+                        isFooterAll: true,
+                        onMainClick: (btn) => {
+                            const items = Array.isArray(allSplit?._hfQueueItems) ? allSplit._hfQueueItems : [];
+                            void queueModelsToComfyBackend(
+                                items,
+                                btn,
+                                btn.dataset.hfDefaultLabel || downloadAllLabel
+                            );
+                        },
+                        onDropdownRequest: (groupEl, chevronEl, mainEl) => {
+                            const items = Array.isArray(groupEl?._hfQueueItems) ? groupEl._hfQueueItems : [];
+                            const nativeBtn = groupEl?._hfNativeDownloadAllBtn || null;
+                            openNativeSplitDropdown(groupEl, chevronEl, {
+                                comfyDisabled: !items.length || mainEl.disabled,
+                                browserDisabled: !nativeBtn && !items.some((item) => item?.url),
+                                onComfyDownload: () => {
+                                    void queueModelsToComfyBackend(
+                                        items,
+                                        mainEl,
+                                        mainEl.dataset.hfDefaultLabel || downloadAllLabel
+                                    );
+                                },
+                                onBrowserDownload: () => {
+                                    triggerBrowserDownloadForItems(items, nativeBtn);
+                                },
+                            });
+                        },
+                    });
+                    allSplit = createdAll.group;
+                } else {
+                    const mainEl = allSplit.querySelector('[data-testid="hf-download-all-to-comfy"]');
+                    if (mainEl && !mainEl.disabled) {
+                        mainEl.dataset.hfDefaultLabel = downloadAllLabel;
+                        setNativeMainButtonLabel(mainEl, downloadAllLabel);
+                    }
+                }
+
+                allSplit._hfQueueItems = containerQueueItems;
+                allSplit._hfNativeDownloadAllBtn = nativeDownloadAllBtn || null;
 
                 if (actionsEl) {
-                    if (actionsEl.previousElementSibling !== allWrap) {
-                        actionsEl.insertAdjacentElement("beforebegin", allWrap);
+                    if (allWrap) {
+                        allWrap.remove();
+                        allWrap = null;
                     }
-                } else if (rowsContainer.nextElementSibling !== allWrap) {
-                    rowsContainer.insertAdjacentElement("afterend", allWrap);
+                    if (allSplit.parentElement !== actionsEl) {
+                        actionsEl.appendChild(allSplit);
+                    }
+                } else {
+                    if (!allWrap) {
+                        allWrap = document.createElement("div");
+                        allWrap.setAttribute("data-testid", "hf-native-download-all-wrap");
+                        allWrap.className = "flex items-center pt-2";
+                    }
+                    if (allSplit.parentElement !== allWrap) {
+                        allWrap.appendChild(allSplit);
+                    }
+                    if (rowsContainer.nextElementSibling !== allWrap) {
+                        rowsContainer.insertAdjacentElement("afterend", allWrap);
+                    }
                 }
             }
         };
@@ -6710,57 +7032,75 @@ app.registerExtension({
             injectNativeSidebarMissingModelButtons();
         };
 
+        let missingModelsObserverTarget = null;
+        let nativeSidebarInjectRaf = 0;
+
         const scheduleNativeMissingModelsInjection = () => {
-            if (nativeSidebarInjectTimer) return;
-            nativeSidebarInjectTimer = setTimeout(() => {
-                nativeSidebarInjectTimer = null;
+            if (nativeSidebarInjectRaf || typeof requestAnimationFrame !== "function") {
+                if (typeof requestAnimationFrame !== "function") {
+                    injectButtonsIntoMissingModelsDialogs(document);
+                }
+                return;
+            }
+            nativeSidebarInjectRaf = requestAnimationFrame(() => {
+                nativeSidebarInjectRaf = 0;
                 injectButtonsIntoMissingModelsDialogs(document);
-            }, 40);
+            });
         };
 
-        const setupMissingModelsDialogObserver = () => {
-            if (missingModelsObserver || typeof MutationObserver === "undefined") return;
-            const relevantSelector =
-                `${MISSING_MODELS_LIST_SELECTOR}, [data-testid="missing-model-importable-rows"], ` +
-                `[data-testid="missing-model-actions"], [data-testid="missing-model-download"], ` +
-                `[data-testid="missing-model-locate"], [data-testid="error-overlay"]`;
-            missingModelsObserver = new MutationObserver((mutations) => {
-                let shouldScheduleNative = false;
-                for (const mutation of mutations) {
-                    const targetEl = mutation.target instanceof Element ? mutation.target : null;
-                    if (
-                        targetEl &&
-                        targetEl.closest?.('[data-testid="missing-model-importable-rows"], [data-testid="missing-model-actions"], [data-testid="error-overlay"]')
-                    ) {
-                        shouldScheduleNative = true;
-                    }
-                    if (!mutation.addedNodes?.length) continue;
-                    for (const node of mutation.addedNodes) {
-                        if (node.nodeType !== Node.ELEMENT_NODE) continue;
-                        if (node.matches?.(MISSING_MODELS_LIST_SELECTOR) || node.querySelector?.(MISSING_MODELS_LIST_SELECTOR)) {
-                            injectButtonsIntoMissingModelsDialogs(node);
-                        }
-                        if (
-                            !shouldScheduleNative &&
-                            (node.matches?.(relevantSelector) || node.querySelector?.(relevantSelector))
-                        ) {
-                            shouldScheduleNative = true;
-                        }
-                    }
-                }
-                if (shouldScheduleNative) {
-                    scheduleNativeMissingModelsInjection();
-                }
-            });
+        const disconnectMissingModelsObserver = () => {
+            if (missingModelsObserver) {
+                try {
+                    missingModelsObserver.disconnect();
+                } catch (_) {}
+            }
+            missingModelsObserverTarget = null;
+        };
 
-            missingModelsObserver.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
+        const findScopedMissingModelsContainer = () => {
+            const importableRows = document.querySelector('[data-testid="missing-model-importable-rows"]');
+            if (importableRows) {
+                return (
+                    importableRows.closest('[data-testid="error-overlay"], aside, [class*="side-bar"], [class*="sidebar"]') ||
+                    importableRows.parentElement ||
+                    importableRows
+                );
+            }
+            return (
+                document.querySelector('[data-testid="error-overlay"]') ||
+                document.querySelector(MISSING_MODELS_LIST_SELECTOR)?.closest('.p-dialog') ||
+                document.querySelector(MISSING_MODELS_LIST_SELECTOR) ||
+                document.querySelector('[data-testid="sidebar-right"], .comfyui-body-right') ||
+                null
+            );
+        };
 
+        // Option 1A: Lazy container-scoped observer active ONLY when missingModelStore has candidates.
+        const syncMissingModelsObserverWithStore = (hasMissing) => {
+            if (!hasMissing) {
+                disconnectMissingModelsObserver();
+                return;
+            }
             injectButtonsIntoMissingModelsDialogs(document);
-            setTimeout(() => injectButtonsIntoMissingModelsDialogs(document), 300);
-            setTimeout(() => injectButtonsIntoMissingModelsDialogs(document), 1000);
+            if (typeof MutationObserver === "undefined") return;
+            const target = findScopedMissingModelsContainer();
+            if (!target || target === document.body || target === document.documentElement) {
+                return;
+            }
+            if (missingModelsObserverTarget === target && missingModelsObserver) {
+                return;
+            }
+            disconnectMissingModelsObserver();
+            if (!missingModelsObserver) {
+                missingModelsObserver = new MutationObserver(() => {
+                    scheduleNativeMissingModelsInjection();
+                });
+            }
+            missingModelsObserver.observe(target, {
+                childList: true,
+                subtree: true,
+            });
+            missingModelsObserverTarget = target;
         };
 
         let runHookLastTriggeredAt = 0;
@@ -7217,135 +7557,8 @@ app.registerExtension({
             return { repoFolderMissing, curatedMissing, regularMissing };
         };
 
-        const findPiniaStore = (storeId) => {
-            try {
-                const appEl = document.querySelector('#app') || document.querySelector('#root') || document.body;
-                if (!appEl) return null;
-                const vueApp = appEl.__vue_app__;
-                if (!vueApp) return null;
-                const provides = vueApp._context?.provides;
-                if (!provides) return null;
-                
-                let pinia = null;
-                const symbols = Object.getOwnPropertySymbols(provides);
-                for (const sym of symbols) {
-                    if (sym.toString().includes("pinia") || sym.description === "pinia") {
-                        pinia = provides[sym];
-                        break;
-                    }
-                }
-                if (!pinia) return null;
-                
-                const storeMap = pinia._s || pinia.stores;
-                if (storeMap && typeof storeMap.get === "function" && storeMap.has(storeId)) {
-                    return storeMap.get(storeId);
-                }
-            } catch (e) {
-                console.warn("[AutoDownload] Error finding Pinia store:", storeId, e);
-            }
-            return null;
-        };
-
-        let resolvedModelStorePromise = null;
-        let resolvedExecutionErrorStorePromise = null;
-        let resolvedMissingModelStorePromise = null;
-
-        const resolveModelStore = async () => {
-            if (resolvedModelStorePromise) {
-                return resolvedModelStorePromise;
-            }
-
-            resolvedModelStorePromise = (async () => {
-                try {
-                    const store = findPiniaStore("model");
-                    if (store) return store;
-                } catch (e) {}
-
-                for (const candidate of MODEL_STORE_IMPORT_CANDIDATES) {
-                    try {
-                        const module = await import(candidate);
-                        const useModelStore = module?.useModelStore;
-                        if (typeof useModelStore === "function") {
-                            const store = useModelStore();
-                            if (
-                                store &&
-                                typeof store.loadModelFolders === "function" &&
-                                typeof store.getLoadedModelFolder === "function"
-                            ) {
-                                return store;
-                            }
-                        }
-                    } catch (_) {
-                        // Try next import candidate.
-                    }
-                }
-                return null;
-            })();
-
-            return resolvedModelStorePromise;
-        };
-
-        const resolveExecutionErrorStore = async () => {
-            if (resolvedExecutionErrorStorePromise) {
-                return resolvedExecutionErrorStorePromise;
-            }
-
-            resolvedExecutionErrorStorePromise = (async () => {
-                try {
-                    const store = findPiniaStore("executionError");
-                    if (store) return store;
-                } catch (e) {}
-
-                for (const candidate of EXECUTION_ERROR_STORE_IMPORT_CANDIDATES) {
-                    try {
-                        const module = await import(candidate);
-                        const useExecutionErrorStore = module?.useExecutionErrorStore;
-                        if (typeof useExecutionErrorStore === "function") {
-                            const store = useExecutionErrorStore();
-                            if (store && typeof store === "object" && ("lastNodeErrors" in store)) {
-                                return store;
-                            }
-                        }
-                    } catch (_) {
-                        // Try next import candidate.
-                    }
-                }
-                return null;
-            })();
-
-            return resolvedExecutionErrorStorePromise;
-        };
-
-        const resolveMissingModelStore = async () => {
-            if (resolvedMissingModelStorePromise) {
-                return resolvedMissingModelStorePromise;
-            }
-
-            resolvedMissingModelStorePromise = (async () => {
-                try {
-                    const store = findPiniaStore("missingModel");
-                    if (store) return store;
-                } catch (e) {}
-
-                for (const candidate of MISSING_MODEL_STORE_IMPORT_CANDIDATES) {
-                    try {
-                        const module = await import(candidate);
-                        const useMissingModelStore = module?.useMissingModelStore;
-                        if (typeof useMissingModelStore === "function") {
-                            const store = useMissingModelStore();
-                            if (store && typeof store === "object" && ("missingModelCandidates" in store)) {
-                                return store;
-                            }
-                        }
-                    } catch (_) {
-                        // Try next import candidate.
-                    }
-                }
-                return null;
-            })();
-
-            return resolvedMissingModelStorePromise;
-        };
+        // Pinia store lookups (resolveModelStore, resolveExecutionErrorStore, resolveMissingModelStore, findPiniaStore)
+        // are imported from ./comfy_stores.js.
 
         const getSelectedModelsMetadataNativeLike = (node) => {
             try {
@@ -7986,44 +8199,8 @@ app.registerExtension({
             return false;
         };
 
-        const waitForNativeMissingModelsDialog = async (timeoutMs) => {
-            const start = Date.now();
-            while (Date.now() - start <= timeoutMs) {
-                if (hasNativeMissingModelsDialog()) {
-                    return true;
-                }
-                await wait(RUN_NATIVE_DIALOG_POLL_MS);
-            }
-            return false;
-        };
-
-        const closeNativePromptValidationDialogs = () => {
-            let removed = 0;
-            const nodes = document.querySelectorAll(RUN_ERROR_DIALOG_SELECTOR);
-            for (const node of nodes) {
-                const text = String(node?.textContent || "").toLowerCase();
-                if (!text.includes("prompt execution failed")) continue;
-                if (!text.includes("value not in list")) continue;
-
-                const container =
-                    node.closest(".p-dialog-mask") ||
-                    node.closest(".p-dialog") ||
-                    node;
-                if (container && container.parentElement) {
-                    container.remove();
-                    removed += 1;
-                }
-            }
-            return removed;
-        };
-
-        const suppressNativePromptValidationDialogsSoon = () => {
-            closeNativePromptValidationDialogs();
-            [70, 160, 320, 620].forEach((delay) => {
-                setTimeout(() => {
-                    closeNativePromptValidationDialogs();
-                }, delay);
-            });
+        const suppressNativeErrorOverlay = () => {
+            void dismissNativeErrorDialog();
         };
 
         const stripModelValidationErrorsFromNodeErrors = (nodeErrors) => {
@@ -8660,17 +8837,14 @@ app.registerExtension({
             return false;
         };
 
-        const triggerAutoDownloadFromWorkflowOpen = async (candidates = [], workflowGraphData = null) => {
+        const triggerAutoDownloadFromWorkflowOpen = async (candidates = [], workflowGraphData = null, extraOpts = {}) => {
             const myGen = currentWorkflowLoadGeneration;
             if (workflowOpenTriggeredForCurrentLoad) {
                 return false;
             }
-            if (isComfyDefaultWorkflow(workflowGraphData || serializeWorkflowForModelScan())) {
+            if (workflowGraphData ? isComfyDefaultWorkflow(workflowGraphData) : isLiveGraphDefaultWorkflow(app?.rootGraph)) {
                 return false;
             }
-            try {
-                alignGraphWidgetSlashes(app?.rootGraph);
-            } catch (_) {}
             const workflowOpenCandidates = Array.isArray(candidates)
                 ? candidates
                     .filter((candidate) => isMissingModelCandidate(candidate))
@@ -8690,15 +8864,6 @@ app.registerExtension({
                 clearMissingModelNodeHighlights(bypassedWorkflowOpenCandidates);
                 void clearMissingModelStoreState(bypassedWorkflowOpenCandidates);
             }
-            console.log(
-                "[AutoDownload] Workflow-open candidates:",
-                activeWorkflowOpenCandidates.map((candidate) => ({
-                    name: candidate?.name || candidate?.filename || "",
-                    directory: candidate?.directory || candidate?.folder || "",
-                    nodeId: candidate?.nodeId ?? candidate?.node_id ?? "",
-                    widgetName: candidate?.widgetName || candidate?.input_name || "",
-                }))
-            );
             if (!activeWorkflowOpenCandidates.length) {
                 void clearModelValidationErrorsFromFrontendState();
                 return false;
@@ -8712,14 +8877,6 @@ app.registerExtension({
             if (myGen !== currentWorkflowLoadGeneration) {
                 return false;
             }
-            console.log(
-                "[AutoDownload] Workflow-open actionable entries:",
-                frontendMissingEntries.map((entry) => ({
-                    filename: entry?.filename || entry?.name || "",
-                    folder: entry?.suggested_folder || entry?.directory || "",
-                    url: entry?.url || "",
-                }))
-            );
             if (!frontendMissingEntries.length) {
                 void applyResolvedFrontendMissingModelState(workflowOpenCandidates, [], []);
                 return false;
@@ -8738,6 +8895,7 @@ app.registerExtension({
                     triggeredByWorkflowOpen: true,
                     frontendMissingModelCandidates: activeWorkflowOpenCandidates,
                     reason: "workflow-open-missing-models",
+                    ...extraOpts,
                 });
                 return true;
             }
@@ -8755,6 +8913,7 @@ app.registerExtension({
                     triggeredByWorkflowOpen: true,
                     frontendMissingModelCandidates: activeWorkflowOpenCandidates,
                     reason: "workflow-open-missing-models",
+                    ...extraOpts,
                 }
             );
             return true;
@@ -8837,744 +8996,127 @@ app.registerExtension({
             }
         };
 
-        const runWorkflowOpenScanForActiveTab = async (
-            expectedGeneration,
-            graphDataHint = null,
-            activePathHint = ""
-        ) => {
-            if (expectedGeneration !== currentWorkflowLoadGeneration) {
-                return;
-            }
-            if (!getWorkflowOpenAutoEnabled()) {
-                return;
-            }
-            if (!isWorkflowReadyForModelScan()) {
-                return;
-            }
-            const currentGraph = graphDataHint || serializeWorkflowForModelScan();
-            if (isComfyDefaultWorkflow(currentGraph)) {
-                console.log("[AutoDownload] Skipping workflow-open missing-model prompt for default ComfyUI workflow.");
-                return;
-            }
-            const activePath = String(
-                activePathHint || getActiveWorkflowStableKey() || getActiveWorkflowPathKey() || ""
-            ).trim();
-            const candidates = await getFrontendMissingModelCandidates(graphDataHint);
-            if (expectedGeneration !== currentWorkflowLoadGeneration) {
-                return;
-            }
-            let signature = buildMissingModelCandidatesSignature(candidates);
-            console.log(
-                "[AutoDownload] Workflow-open active-tab candidates:",
-                Array.isArray(candidates) ? candidates.length : 0,
-                activePath || "(no active path)"
-            );
-            if (!signature) {
-                const backendResults = await getWorkflowOpenBackendResults(
-                    serializeWorkflowForModelScan() || graphDataHint,
-                    expectedGeneration
-                );
-                if (expectedGeneration !== currentWorkflowLoadGeneration) {
-                    return;
-                }
-                const backendTargetCount = countDownloadRequiredScanResults(backendResults || {});
-                const backendSignature =
-                    backendTargetCount > 0
-                        ? buildScanResultsSignature(backendResults)
-                        : "";
-                console.log(
-                    "[AutoDownload] Workflow-open backend fallback results:",
-                    backendTargetCount
-                );
-                if (backendSignature) {
-                    if (workflowOpenTriggeredForCurrentLoad) {
-                        return;
-                    }
-                    if (
-                        backendSignature === workflowOpenLastHandledSignature &&
-                        (!activePath || activePath === workflowOpenLastHandledPath)
-                    ) {
-                        return;
-                    }
-                    workflowOpenLastHandledSignature = backendSignature;
-                    workflowOpenLastHandledPath = activePath;
-                    workflowOpenTriggeredForCurrentLoad = true;
-                    removeExistingAutoDownloadDialog();
-                    showResultsDialog(
-                        backendResults,
-                        {
-                            suppressEmptyResults: true,
-                            triggeredByWorkflowOpen: true,
-                            reason: "workflow-open-missing-models",
-                        }
-                    );
-                    return;
-                }
-                if (activePath) {
-                    workflowOpenLastHandledPath = activePath;
-                }
-                workflowOpenLastHandledSignature = "";
-                return;
-            }
-            if (
-                signature === workflowOpenLastHandledSignature &&
-                (!activePath || activePath === workflowOpenLastHandledPath)
-            ) {
-                return;
-            }
-            workflowOpenLastHandledSignature = signature;
-            workflowOpenLastHandledPath = activePath;
-            await triggerAutoDownloadFromWorkflowOpen(candidates, graphDataHint);
-        };
+        // Per-tab memoization cache keyed by workflow path -> { revKey, dismissed, candidatesSig }
+        const workflowScanCache = new Map();
+        let isLoadingWorkflow = false;
+        let postSettleScanTimer = null;
 
-        const normalizeWorkflowOpenGraphDataArg = (value) => {
-            if (!value) {
-                return null;
-            }
-            if (typeof value === "object") {
-                return value;
-            }
-            if (typeof value === "string") {
-                try {
-                    const parsed = JSON.parse(value);
-                    return parsed && typeof parsed === "object" ? parsed : null;
-                } catch (_) {
-                    return null;
-                }
-            }
-            return null;
-        };
+        const getTabCacheKey = () =>
+            String(getActiveWorkflowStableKey() || getActiveWorkflowPathKey() || "__default__").trim();
 
-        const installWorkflowOpenLoadGraphHook = () => {
-            const comfyApp = app;
-            if (!comfyApp || typeof comfyApp.loadGraphData !== "function") {
-                return false;
-            }
-            if (comfyApp.__hfAutoDownloadLoadGraphHookInstalled) {
-                return true;
-            }
-
-            const origLoadGraphDataFn = comfyApp.loadGraphData;
-            const originalLoadGraphData = (...args) => origLoadGraphDataFn.apply(comfyApp, args);
-            comfyApp.loadGraphData = async (...args) => {
-                const loadedGraphData = normalizeWorkflowOpenGraphDataArg(args?.[0]);
-                currentWorkflowLoadGeneration += 1;
-                const loadGeneration = currentWorkflowLoadGeneration;
-                abortActiveAutoDownloadForTabSwitch();
-                const preKey = getActiveWorkflowStableKey();
-                if (preKey) {
-                    lastObservedActiveWorkflowKey = preKey;
-                }
-                workflowOpenLastTriggeredAt = 0;
-                workflowOpenLastHandledSignature = "";
-                workflowOpenLastHandledPath = "";
-                workflowOpenTriggeredForCurrentLoad = false;
-                const result = await originalLoadGraphData(...args);
-                const postKey = getActiveWorkflowStableKey();
-                if (postKey) {
-                    lastObservedActiveWorkflowKey = postKey;
-                }
-                if (loadGeneration !== currentWorkflowLoadGeneration) {
-                    return result;
-                }
-                try {
-                    alignGraphWidgetSlashes(app?.rootGraph);
-                } catch (e) {
-                    console.warn("[AutoDownload] Slash alignment failed on workflow load:", e);
-                }
-                try {
-                    syncDownloaderLinkedWidgetNames(app?.rootGraph);
-                } catch (e) {}
-                setTimeout(() => {
-                    if (loadGeneration === currentWorkflowLoadGeneration) {
-                        void enrichNativeMissingModelStoreFromCatalog();
-                    }
-                }, 250);
-                try {
-                    if (!getWorkflowOpenAutoEnabled()) {
-                        return result;
-                    }
-
-                    setTimeout(async () => {
-                        try {
-                            await runWorkflowOpenScanForActiveTab(
-                                loadGeneration,
-                                loadedGraphData,
-                                postKey || getActiveWorkflowPathKey()
-                            );
-                        } catch (hookErr) {
-                            console.warn("[AutoDownload] Workflow-open loadGraph hook failed:", hookErr);
-                        }
-                    }, 0);
-                } catch (_) {
-                    // Keep native load behavior intact.
-                }
-                return result;
-            };
-
-            comfyApp.__hfAutoDownloadLoadGraphHookInstalled = true;
-            return true;
-        };
-
-        const installActiveWorkflowTabWatcher = () => {
-            if (activeWorkflowTabWatcherTimer) {
-                return true;
-            }
-            lastObservedActiveWorkflowKey = getActiveWorkflowStableKey();
-            activeWorkflowTabWatcherTimer = setInterval(() => {
-                const nextKey = getActiveWorkflowStableKey();
-                if (!nextKey || nextKey === lastObservedActiveWorkflowKey) {
-                    return;
-                }
-                lastObservedActiveWorkflowKey = nextKey;
-                currentWorkflowLoadGeneration += 1;
-                const tabGeneration = currentWorkflowLoadGeneration;
-                abortActiveAutoDownloadForTabSwitch();
-                workflowOpenLastTriggeredAt = 0;
-                workflowOpenLastHandledSignature = "";
-                workflowOpenLastHandledPath = "";
-                workflowOpenTriggeredForCurrentLoad = false;
-
-                setTimeout(async () => {
-                    if (tabGeneration !== currentWorkflowLoadGeneration) {
-                        return;
-                    }
-                    void enrichNativeMissingModelStoreFromCatalog();
-                    try {
-                        await runWorkflowOpenScanForActiveTab(tabGeneration, null, nextKey);
-                    } catch (err) {
-                        console.warn("[AutoDownload] Tab-switch workflow scan failed:", err);
-                    }
-                }, 16);
-            }, 100);
-            return true;
-        };
-
-        const installNativeMissingModelsSurfaceHook = async () => {
-            const executionErrorStore = await resolveExecutionErrorStore();
-            if (!executionErrorStore || typeof executionErrorStore !== "object") {
-                return;
-            }
-            if (executionErrorStore.__hfAutoDownloadSurfaceMissingModelsPatched) {
-                return;
-            }
-            if (typeof executionErrorStore.surfaceMissingModels !== "function") {
-                return;
-            }
-
-            const origSurfaceMissingModelsFn = executionErrorStore.surfaceMissingModels;
-            const originalSurfaceMissingModels = (...args) =>
-                origSurfaceMissingModelsFn.apply(executionErrorStore, args);
-
-            executionErrorStore.surfaceMissingModels = (models) => {
-                try {
-                    alignGraphWidgetSlashes(app?.rootGraph);
-                } catch (_) {}
-                let filteredModels = models;
-                try {
-                    const hasLiveNodes = Array.isArray(app?.rootGraph?.nodes) && app.rootGraph.nodes.length > 0;
-                    if (hasLiveNodes && Array.isArray(models) && models.length) {
-                        const liveValues = collectAllLiveWidgetValues();
-                        const resolvedCandidates = models.filter(
-                            (c) => isFrontendMissingModelCandidateBypassed(c) || isPendingCandidateStaleInLiveGraph(c, liveValues)
-                        );
-                        filteredModels = models.filter(
-                            (c) => !isFrontendMissingModelCandidateBypassed(c) && !isPendingCandidateStaleInLiveGraph(c, liveValues)
-                        );
-                        if (resolvedCandidates.length) {
-                            clearMissingModelNodeHighlights(resolvedCandidates);
-                            void clearMissingModelStoreState(resolvedCandidates);
-                        }
-                        if (!filteredModels.length) {
-                            return;
-                        }
-                    }
-                } catch (_) {}
-                const result = originalSurfaceMissingModels(filteredModels);
-                try {
-                    if (getWorkflowOpenAutoEnabled() && Array.isArray(filteredModels) && filteredModels.length) {
-                        if (workflowOpenTriggeredForCurrentLoad) {
-                            return result;
-                        }
-                        const activePath = getActiveWorkflowPathKey();
-                        const signature = buildMissingModelCandidatesSignature(filteredModels);
-                        if (
-                            signature &&
-                            signature === workflowOpenLastHandledSignature &&
-                            (!activePath || activePath === workflowOpenLastHandledPath)
-                        ) {
-                            return result;
-                        }
-                        if (signature) {
-                            workflowOpenLastHandledSignature = signature;
-                            workflowOpenLastHandledPath = activePath;
-                        }
-                        void triggerAutoDownloadFromWorkflowOpen(filteredModels);
-                    }
-                } catch (err) {
-                    console.warn(
-                        "[AutoDownload] Failed to trigger from native missing-model surface hook:",
-                        err
-                    );
-                }
-                return result;
-            };
-
-            executionErrorStore.__hfAutoDownloadSurfaceMissingModelsPatched = true;
-        };
-
-        const installWorkflowOpenMissingModelsWatcher = () => {
-            if (workflowOpenMissingModelsTimer) {
-                return;
-            }
-
-            let pollBusy = false;
-            const poll = async () => {
-                if (pollBusy) {
-                    return;
-                }
-                pollBusy = true;
-                try {
-                    if (!getWorkflowOpenAutoEnabled()) {
-                        return;
-                    }
-                    if (workflowOpenTriggeredForCurrentLoad) {
-                        return;
-                    }
-                    const candidates = await getFrontendMissingModelCandidates();
-                    const signature = buildMissingModelCandidatesSignature(candidates);
-                    const activePath = getActiveWorkflowPathKey();
-                    if (!signature) {
-                        workflowOpenLastHandledSignature = "";
-                        workflowOpenLastHandledPath = activePath;
-                        return;
-                    }
-                    if (
-                        signature === workflowOpenLastHandledSignature &&
-                        (!activePath || activePath === workflowOpenLastHandledPath)
-                    ) {
-                        return;
-                    }
-                    if (!isWorkflowReadyForModelScan()) {
-                        return;
-                    }
-
-                    workflowOpenLastHandledSignature = signature;
-                    workflowOpenLastHandledPath = activePath;
-                    await triggerAutoDownloadFromWorkflowOpen(candidates);
-                } finally {
-                    pollBusy = false;
-                }
-            };
-
-            workflowOpenMissingModelsTimer = setInterval(() => {
-                void poll();
-            }, WORKFLOW_OPEN_CANDIDATE_POLL_MS);
-            void poll();
-        };
-
-        const waitForNativeModelValidationFailure = async ({
-            timeoutMs,
-            beforeSignature,
-            hadValidationDialogBeforeRun
-        }) => {
-            const start = Date.now();
-            while (Date.now() - start <= timeoutMs) {
-                const nodeErrors = getNodeErrorsSnapshot();
-                const signature = getNodeErrorsSignature(nodeErrors);
-                if (signature && signature !== beforeSignature) {
-                    const failures = getNativeModelValidationFailures(nodeErrors);
-                    if (failures.length) {
-                        return failures;
-                    }
-                }
-
-                if (!hadValidationDialogBeforeRun && hasNativePromptValidationDialog()) {
-                    const failures = getNativeModelValidationFailures(nodeErrors);
-                    if (failures.length) {
-                        return failures;
-                    }
-                    if (shouldSuppressPromptValidationTriggerForFlashVsr()) {
-                        return [];
-                    }
-                    return [
-                        {
-                            classType: "",
-                            inputName: "",
-                            missingValue: "",
-                            details: "Prompt execution failed"
-                        }
-                    ];
-                }
-
-                await wait(RUN_NATIVE_VALIDATION_POLL_MS);
-            }
-            return [];
-        };
-
-        const getImmediateValidationFailures = ({
-            beforeSignature,
-            hadValidationDialogBeforeRun
-        }) => {
-            const nodeErrors = getNodeErrorsSnapshot();
-            const signature = getNodeErrorsSignature(nodeErrors);
-            if (signature && signature !== beforeSignature) {
-                const failures = getNativeModelValidationFailures(nodeErrors);
-                if (failures.length) {
-                    return failures;
-                }
-            }
-
-            if (!hadValidationDialogBeforeRun && hasNativePromptValidationDialog()) {
-                const failures = getNativeModelValidationFailures(nodeErrors);
-                if (failures.length) {
-                    return failures;
-                }
-                if (shouldSuppressPromptValidationTriggerForFlashVsr()) {
-                    return [];
-                }
-                return [
-                    {
-                        classType: "",
-                        inputName: "",
-                        missingValue: "",
-                        details: "Prompt execution failed"
-                    }
-                ];
-            }
-
-            return [];
-        };
-
-        const triggerAutoDownloadFromRunHook = (reason = "missing-dialog", failures = [], extraOptions = {}) => {
-            const isValidationReason = reason === "model-validation";
-            const now = Date.now();
-            if (now - runHookLastTriggeredAt < RUN_HOOK_COOLDOWN_MS) {
-                if (isValidationReason) {
-                    void clearModelValidationErrorsFromFrontendState();
-                }
-                if (document.getElementById("auto-download-dialog")) {
-                    suppressNativePromptValidationDialogsSoon();
-                }
-                return false;
-            }
-            if (document.getElementById("auto-download-dialog")) {
-                if (isValidationReason) {
-                    void clearModelValidationErrorsFromFrontendState();
-                }
-                suppressNativePromptValidationDialogsSoon();
-                return false;
-            }
-            const runAction = window?.hfDownloader?.runAutoDownload;
-            if (typeof runAction !== "function") {
-                return false;
-            }
-
-            runHookLastTriggeredAt = now;
-            suppressNativePromptValidationDialogsSoon();
-            runAction(new Set(), false, {
-                suppressEmptyResults: true,
-                triggeredByRunHook: true,
-                reason,
-                runHookFailures: Array.isArray(failures) ? failures : [],
-                ...extraOptions,
+        const markCurrentTabDismissed = (tabKey, revKey) => {
+            if (!tabKey) return;
+            const existing = workflowScanCache.get(tabKey) || {};
+            workflowScanCache.set(tabKey, {
+                ...existing,
+                revKey: revKey || existing.revKey || "",
+                dismissed: true,
             });
-            if (isValidationReason) {
-                void clearModelValidationErrorsFromFrontendState();
-            }
-
-            const firstMissing = failures.find((item) => item?.missingValue)?.missingValue || "";
-            const detail = isValidationReason
-                ? (
-                    firstMissing
-                        ? `Detected run validation mismatch for "${firstMissing}". Started auto-download scan.`
-                        : "Detected run validation mismatch for model loaders. Started auto-download scan."
-                )
-                : (reason === "native-missing-models"
-                    ? (
-                        firstMissing
-                            ? `Native missing-model check found "${firstMissing}". Started auto-download scan.`
-                            : "Native missing-model check failed. Started auto-download scan."
-                    )
-                    : "Started auto-download scan from native missing-model check.");
-
-            showToast({
-                severity: "info",
-                summary: "Missing models detected",
-                detail,
-                life: 3200
-            });
-            return true;
         };
 
-        const executeRunWithAutoDownload = async (fallbackFn, args, contextThis) => {
-            if (typeof fallbackFn !== "function") {
-                return undefined;
-            }
-            if (runHookBypassRemaining > 0) {
-                runHookBypassRemaining = Math.max(0, runHookBypassRemaining - 1);
-                return fallbackFn.apply(contextThis, args);
-            }
+        const runUncachedFallbackBackendScan = async (expectedGeneration, tabKey, revKey) => {
+            if (expectedGeneration !== currentWorkflowLoadGeneration) return;
+            if (!getWorkflowOpenAutoEnabled() || !isWorkflowReadyForModelScan()) return;
+            if (isLiveGraphDefaultWorkflow(app?.rootGraph)) return;
+            if (document.getElementById("auto-download-dialog") || typeof activeAutoDownloadCancel === "function") return;
 
-            // Align widget path separators to match the system OS before executing the workflow
-            try {
-                alignGraphWidgetSlashes(app?.rootGraph);
-            } catch (e) {}
-
-            // Sync loader widget values to match filenames from connected HF Download nodes
-            try {
-                syncDownloaderLinkedWidgetNames(app?.rootGraph);
-            } catch (e) {}
-
-            let resumeQueued = false;
-            const resumeRun = () => {
-                if (resumeQueued) {
-                    return;
-                }
-                resumeQueued = true;
-                runHookBypassRemaining += 1;
-                setTimeout(async () => {
-                    try {
-                        await fallbackFn.apply(contextThis, args);
-                    } catch (resumeErr) {
-                        console.error("[AutoDownload] Failed to resume original run:", resumeErr);
-                    }
-                }, 0);
-            };
-
-            const hookEnabled = getRunHookEnabled();
-            const graphData = serializeWorkflowForModelScan();
-            const missingNodeTypes = getMissingNodeTypesNativeLike(graphData);
-            const hasMissingNodes = missingNodeTypes.length > 0;
-            const hadDialogBeforeRun = hasNativeMissingModelsDialog();
-            const hadValidationDialogBeforeRun = hasNativePromptValidationDialog();
-            const beforeNodeErrorSignature = getNodeErrorsSignature(getNodeErrorsSnapshot());
-            let preRunEligibleMissingModels = [];
-            let preRunPathMismatches = [];
-
-            if (hookEnabled && !hasMissingNodes) {
-                const preRunMissingModels = await getPreRunMissingModelsNativeLike(graphData);
-                preRunEligibleMissingModels =
-                    filterRunHookEligibleMissingModels(preRunMissingModels);
-                if (!preRunEligibleMissingModels.length) {
-                    const backendPreflight =
-                        await getPreRunMissingModelsBackendFallback(graphData);
-                    preRunEligibleMissingModels = backendPreflight.missing;
-                    preRunPathMismatches = backendPreflight.pathMismatches;
-                }
-                // Third fallback: scan live graph widget values against combo
-                // options. This catches models in nodes that were just un-bypassed
-                // and whose properties.models metadata was never embedded.
-                if (!preRunEligibleMissingModels.length && !preRunPathMismatches.length) {
-                    try {
-                        const liveGraphCandidates =
-                            collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, graphData);
-                        if (liveGraphCandidates.length) {
-                            preRunEligibleMissingModels =
-                                filterRunHookEligibleMissingModels(liveGraphCandidates);
-                        }
-                    } catch (_) {}
-                }
-                if (preRunEligibleMissingModels.length || preRunPathMismatches.length) {
-                    const preRunFailures = preRunEligibleMissingModels.map((model) => ({
-                        classType: "",
-                        inputName: "",
-                        missingValue: String(model?.name || "").trim(),
-                        details: `${String(model?.directory || "").trim()}/${String(model?.name || "").trim()}`
-                    })).concat(
-                        preRunPathMismatches.map((item) => ({
-                            classType: "",
-                            inputName: "",
-                            missingValue:
-                                String(item?.filename || item?.requested_path || "").trim(),
-                            details:
-                                String(item?.expected_path || item?.requested_path || "").trim() ||
-                                String(item?.actual_path || "").trim()
-                        }))
-                    );
-                    const preRunReason = preRunEligibleMissingModels.length
-                        ? "native-missing-models"
-                        : "missing-dialog";
-                    if (triggerAutoDownloadFromRunHook(preRunReason, preRunFailures, { resumeRun })) {
-                        return false;
-                    }
-                }
+            const cachedEntry = workflowScanCache.get(tabKey);
+            if (cachedEntry && cachedEntry.revKey === revKey) {
+                return;
             }
 
-            let result;
-            let error;
-            try {
-                result = await fallbackFn.apply(contextThis, args);
-            } catch (err) {
-                error = err;
-            }
+            // Fast zero-clone check of live graph widgets first (catches un-embedded custom loaders / HF download nodes)
+            const liveCandidates = collectLiveGraphMissingModelCandidatesNativeLike(app?.rootGraph, null);
+            if (expectedGeneration !== currentWorkflowLoadGeneration) return;
 
-            if (hookEnabled && !hasMissingNodes) {
-                const immediateHasDialog = !hadDialogBeforeRun && hasNativeMissingModelsDialog();
-                const immediateValidationFailures = getImmediateValidationFailures({
-                    beforeSignature: beforeNodeErrorSignature,
-                    hadValidationDialogBeforeRun
+            if (liveCandidates.length > 0) {
+                workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true });
+                await triggerAutoDownloadFromWorkflowOpen(liveCandidates, null, {
+                    onUserDismiss: () => markCurrentTabDismissed(tabKey, revKey),
                 });
-
-                let triggeredImmediately = false;
-                if (immediateHasDialog) {
-                    const shouldSuppressFlashVsrDialogTrigger =
-                        shouldSuppressMissingDialogTriggerForFlashVsr();
-                    const shouldTriggerMissingDialog =
-                        !shouldSuppressFlashVsrDialogTrigger ||
-                        preRunEligibleMissingModels.length > 0;
-                    if (shouldTriggerMissingDialog) {
-                        triggeredImmediately =
-                            triggerAutoDownloadFromRunHook("missing-dialog", [], { resumeRun }) || triggeredImmediately;
-                    }
-                }
-                if (immediateValidationFailures.length) {
-                    triggeredImmediately =
-                        triggerAutoDownloadFromRunHook("model-validation", immediateValidationFailures, { resumeRun }) ||
-                        triggeredImmediately;
-                }
-
-                if (!triggeredImmediately) {
-                    void (async () => {
-                        try {
-                            const [hasDialogNow, validationFailures] = await Promise.all([
-                                hadDialogBeforeRun
-                                    ? Promise.resolve(false)
-                                    : waitForNativeMissingModelsDialog(RUN_NATIVE_DIALOG_WAIT_MS),
-                                waitForNativeModelValidationFailure({
-                                    timeoutMs: RUN_NATIVE_VALIDATION_WAIT_MS,
-                                    beforeSignature: beforeNodeErrorSignature,
-                                    hadValidationDialogBeforeRun
-                                })
-                            ]);
-
-                            if (hasDialogNow) {
-                                const shouldSuppressFlashVsrDialogTrigger =
-                                    shouldSuppressMissingDialogTriggerForFlashVsr();
-                                const shouldTriggerMissingDialog =
-                                    !shouldSuppressFlashVsrDialogTrigger ||
-                                    preRunEligibleMissingModels.length > 0;
-                                if (shouldTriggerMissingDialog) {
-                                    triggerAutoDownloadFromRunHook("missing-dialog", [], { resumeRun });
-                                }
-                            }
-                            if (validationFailures.length) {
-                                triggerAutoDownloadFromRunHook("model-validation", validationFailures, { resumeRun });
-                            }
-                        } catch (_) {
-                            // No-op: run behavior must remain native even if hook observation fails.
-                        }
-                    })();
-                }
+                return;
             }
 
-            if (error) {
-                throw error;
+            // Quick local heuristic check before incurring graph serialize + /check_missing_models
+            const workflow = serializeWorkflowForModelScan();
+            if (!workflow || isComfyDefaultWorkflow(workflow)) {
+                workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true });
+                return;
             }
-            return result;
+            if (!workflowLikelyContainsModelReferences(workflow)) {
+                workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true });
+                return;
+            }
+
+            const backendResults = await getWorkflowOpenBackendResults(workflow, expectedGeneration);
+            if (expectedGeneration !== currentWorkflowLoadGeneration) return;
+
+            workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true });
+            const backendTargetCount = countDownloadRequiredScanResults(backendResults || {});
+            const backendSignature = backendTargetCount > 0 ? buildScanResultsSignature(backendResults) : "";
+            if (!backendSignature || workflowOpenTriggeredForCurrentLoad) return;
+
+            workflowOpenLastHandledSignature = backendSignature;
+            workflowOpenLastHandledPath = tabKey;
+            workflowOpenTriggeredForCurrentLoad = true;
+            removeExistingAutoDownloadDialog();
+            showResultsDialog(backendResults, {
+                suppressEmptyResults: true,
+                triggeredByWorkflowOpen: true,
+                reason: "workflow-open-missing-models",
+                onUserDismiss: () => markCurrentTabDismissed(tabKey, revKey),
+            });
         };
 
-        const installRunQueueCommandHooksNativeAware = () => {
-            let attempts = 0;
-            let timer = null;
-
-            const applyOverride = (commandTarget) => {
-                let command = null;
-                if (typeof commandTarget === "string") {
-                    const commands = app?.extensionManager?.command?.commands;
-                    if (!Array.isArray(commands)) {
-                        return false;
-                    }
-                    command = commands.find((entry) => entry?.id === commandTarget);
-                } else if (commandTarget && typeof commandTarget === "object") {
-                    command = commandTarget;
-                }
-                if (!command || typeof command.function !== "function") {
-                    return false;
-                }
-                if (command[RUN_COMMAND_OVERRIDE_MARKER]) {
-                    return true;
-                }
-
-                const originalFn = command.function;
-                command[RUN_COMMAND_ORIGINAL_FN] = originalFn;
-
-                command.function = function(...args) {
-                    return executeRunWithAutoDownload(command[RUN_COMMAND_ORIGINAL_FN], args, this);
-                };
-
-                command[RUN_COMMAND_OVERRIDE_MARKER] = true;
-                return true;
-            };
-
-            const hookAppQueuePrompt = () => {
-                if (!app || typeof app.queuePrompt !== "function") return false;
-                if (app[RUN_COMMAND_OVERRIDE_MARKER]) return true;
-
-                const originalFn = app.queuePrompt;
-                app[RUN_COMMAND_ORIGINAL_FN] = originalFn;
-
-                app.queuePrompt = function(...args) {
-                    return executeRunWithAutoDownload(app[RUN_COMMAND_ORIGINAL_FN], args, this);
-                };
-
-                app[RUN_COMMAND_OVERRIDE_MARKER] = true;
-                return true;
-            };
-
-            const hookApiQueuePrompt = () => {
-                if (!api || typeof api.queuePrompt !== "function") return false;
-                if (api[RUN_COMMAND_OVERRIDE_MARKER]) return true;
-
-                const originalFn = api.queuePrompt;
-                api[RUN_COMMAND_ORIGINAL_FN] = originalFn;
-
-                api.queuePrompt = function(...args) {
-                    return executeRunWithAutoDownload(api[RUN_COMMAND_ORIGINAL_FN], args, this);
-                };
-
-                api[RUN_COMMAND_OVERRIDE_MARKER] = true;
-                return true;
-            };
-
-            const runAttempt = () => {
-                attempts += 1;
-                let anyApplied = false;
-
-                if (hookAppQueuePrompt()) anyApplied = true;
-                if (hookApiQueuePrompt()) anyApplied = true;
-
-                for (const commandId of RUN_QUEUE_COMMAND_IDS) {
-                    if (applyOverride(commandId)) {
-                        anyApplied = true;
-                    }
-                }
-
-                const commands = app?.extensionManager?.command?.commands;
-                if (Array.isArray(commands)) {
-                    for (const cmd of commands) {
-                        const id = String(cmd?.id || "");
-                        if (/^Comfy\.(Queue|Execute)/i.test(id) || /Queue|Execute/i.test(id)) {
-                            if (applyOverride(cmd)) {
-                                anyApplied = true;
-                            }
-                        }
-                    }
-                }
-
-                if (anyApplied || attempts >= RUN_COMMAND_OVERRIDE_MAX_ATTEMPTS) {
-                    if (timer) {
-                        clearInterval(timer);
-                        timer = null;
-                    }
-                }
-                return anyApplied;
-            };
-
-            const firstApplied = runAttempt();
-            if (!firstApplied && attempts < RUN_COMMAND_OVERRIDE_MAX_ATTEMPTS) {
-                timer = setInterval(runAttempt, RUN_COMMAND_OVERRIDE_RETRY_MS);
+        // Native ComfyUI lifecycle hooks (zero setInterval, zero loadGraphData monkey-patching)
+        extensionLifecycleHandlers.beforeLoadGraph = () => {
+            isLoadingWorkflow = true;
+            currentWorkflowLoadGeneration += 1;
+            if (postSettleScanTimer) {
+                clearTimeout(postSettleScanTimer);
+                postSettleScanTimer = null;
             }
+            abortActiveAutoDownloadForTabSwitch();
+            workflowOpenLastTriggeredAt = 0;
+            workflowOpenLastHandledSignature = "";
+            workflowOpenLastHandledPath = "";
+            workflowOpenTriggeredForCurrentLoad = false;
+        };
+
+        extensionLifecycleHandlers.loadedGraphNode = (node) => {
+            try {
+                const graph = node?.graph || app?.rootGraph;
+                alignNodeWidgetSlashes(node, graph);
+                syncNodeDownloaderLinkedWidgets(node, graph);
+            } catch (_) {}
+        };
+
+        extensionLifecycleHandlers.afterLoadGraph = () => {
+            isLoadingWorkflow = false;
+            const loadGen = currentWorkflowLoadGeneration;
+            const tabKey = getTabCacheKey();
+            lastObservedActiveWorkflowKey = tabKey;
+            const revKey = computeLiveGraphRevisionKey(app?.rootGraph);
+            const cachedEntry = workflowScanCache.get(tabKey);
+
+            // Fast exit on already-scanned tabs (e.g. switching tabs with skipAssetScans: true)
+            if (cachedEntry && cachedEntry.revKey === revKey) {
+                return;
+            }
+
+            if (postSettleScanTimer) {
+                clearTimeout(postSettleScanTimer);
+            }
+            postSettleScanTimer = setTimeout(() => {
+                postSettleScanTimer = null;
+                if (loadGen !== currentWorkflowLoadGeneration) return;
+                // If Pinia missingModelStore already received candidates (from pipeline or showPendingWarnings),
+                // the reactive subscriber handles it cleanly without a second fallback scan.
+                if (workflowOpenTriggeredForCurrentLoad || cachedNativeMissingCandidates.length > 0) {
+                    return;
+                }
+                void runUncachedFallbackBackendScan(loadGen, tabKey, revKey);
+            }, 140);
         };
 
         let inFlightModelRefreshPromise = null;
@@ -9724,79 +9266,144 @@ app.registerExtension({
             }
         };
 
-        const installDisableMissingModelsRedFramesObserver = () => {
-            const handleValidationError = () => {
+        const installReactiveMissingModelSubscription = () => {
+            subscribeMissingModels((candidates) => {
+                const list = Array.isArray(candidates) ? candidates : [];
+                cachedNativeMissingCandidates = list;
+                syncMissingModelsObserverWithStore(list.length > 0);
+
+                if (isLoadingWorkflow || !list.length) {
+                    return;
+                }
+
+                void enrichNativeMissingModelStoreFromCatalog();
+
+                if (!getWorkflowOpenAutoEnabled()) {
+                    return;
+                }
+
+                const tabKey = getTabCacheKey();
+                const revKey = computeLiveGraphRevisionKey(app?.rootGraph);
+                const cached = workflowScanCache.get(tabKey);
+                const sig = buildMissingModelCandidatesSignature(list);
+
+                if (
+                    cached &&
+                    cached.revKey === revKey &&
+                    (cached.dismissed || (sig && sig === cached.candidatesSig))
+                ) {
+                    return;
+                }
+                if (
+                    sig &&
+                    sig === workflowOpenLastHandledSignature &&
+                    (!tabKey || tabKey === workflowOpenLastHandledPath)
+                ) {
+                    return;
+                }
+
+                workflowOpenLastHandledSignature = sig;
+                workflowOpenLastHandledPath = tabKey;
+                workflowScanCache.set(tabKey, {
+                    revKey,
+                    dismissed: false,
+                    handled: true,
+                    candidatesSig: sig,
+                });
+                void triggerAutoDownloadFromWorkflowOpen(list, null, {
+                    onUserDismiss: () => markCurrentTabDismissed(tabKey, revKey),
+                });
+            }, { immediate: true });
+        };
+
+        const installApiValidationAndDownloadListeners = () => {
+            const handleValidationEvent = (event) => {
                 const settingsUi = app?.ui?.settings;
                 const disableRedFrames = settingsUi?.getSettingValue("downloader.disable_missing_model_red_frames") === true;
-                if (!disableRedFrames) return;
-                
-                setTimeout(() => {
-                    void clearModelValidationErrorsFromFrontendState();
-                }, 100);
+                if (disableRedFrames) {
+                    setTimeout(() => {
+                        void clearModelValidationErrorsFromFrontendState();
+                    }, 80);
+                }
+
+                // Option 2B: Do not intercept queuePrompt; react to native validation_error / execution_error events.
+                if (!getRunHookEnabled()) return;
+                if (document.getElementById("auto-download-dialog") || typeof activeAutoDownloadCancel === "function") {
+                    return;
+                }
+                const now = Date.now();
+                if (now - runHookLastTriggeredAt < RUN_HOOK_COOLDOWN_MS) {
+                    return;
+                }
+
+                const detail = event?.detail;
+                const nodeErrors = detail?.node_errors || getNodeErrorsSnapshot();
+                const failures = getNativeModelValidationFailures(nodeErrors);
+                if (!failures.length) {
+                    return;
+                }
+
+                runHookLastTriggeredAt = now;
+                suppressNativeErrorOverlay();
+                void clearModelValidationErrorsFromFrontendState();
+                void runAutoDownload(new Set(), false, {
+                    suppressEmptyResults: true,
+                    triggeredByRunHook: true,
+                    reason: "model-validation",
+                    runHookFailures: failures,
+                });
             };
 
             if (api && typeof api.addEventListener === "function") {
-                api.addEventListener("validation_error", handleValidationError);
-                api.addEventListener("execution_error", handleValidationError);
+                api.addEventListener("validation_error", handleValidationEvent);
+                api.addEventListener("execution_error", handleValidationEvent);
 
                 api.addEventListener("hf_download_finished", (event) => {
+                    workflowScanCache.clear();
                     const path = event.detail?.path;
                     void refreshAfterModelDownload(path ? [path] : []);
                 });
             }
         };
 
-        const installNodeUnbypassWatcher = () => {
-            if (window.__hfNodeUnbypassWatcherTimer) {
-                return;
+        const installEventDrivenUnbypassHook = () => {
+            const nodeCtor = globalThis?.LiteGraph?.LGraphNode || window?.LiteGraph?.LGraphNode;
+            if (!nodeCtor || !nodeCtor.prototype || typeof nodeCtor.prototype.changeMode !== "function") {
+                return false;
             }
-            let prevBypassMap = new WeakMap();
-            let lastGeneration = currentWorkflowLoadGeneration;
-            let unbypassCheckBusy = false;
+            const HOOK_SYM = Symbol.for("hfAutoDownloadChangeModeHook");
+            if (nodeCtor.prototype[HOOK_SYM]) {
+                return true;
+            }
 
-            const seedBypassMap = (graph) => {
-                prevBypassMap = new WeakMap();
-                forEachGraphNodeRecursive(graph, (node) => {
-                    if (!node || typeof node !== "object") return;
-                    prevBypassMap.set(node, isGraphNodeBypassed(node));
-                });
-            };
+            const pendingNodes = new Set();
+            let unbypassTimer = null;
+            let unbypassBusy = false;
 
-            seedBypassMap(app?.rootGraph || app?.graph);
+            const flushUnbypassedNodes = async () => {
+                unbypassTimer = null;
+                const unbypassedNodes = Array.from(pendingNodes).filter(
+                    (n) => n && typeof n === "object" && !isGraphNodeBypassed(n)
+                );
+                pendingNodes.clear();
 
-            window.__hfNodeUnbypassWatcherTimer = setInterval(async () => {
-                const rootGraph = app?.rootGraph || app?.graph;
-                if (!rootGraph || typeof rootGraph !== "object") return;
-
-                if (lastGeneration !== currentWorkflowLoadGeneration) {
-                    lastGeneration = currentWorkflowLoadGeneration;
-                    seedBypassMap(rootGraph);
-                    return;
-                }
-
-                const unbypassedNodes = [];
-                forEachGraphNodeRecursive(rootGraph, (node) => {
-                    if (!node || typeof node !== "object") return;
-                    const bypassedNow = isGraphNodeBypassed(node);
-                    const wasBypassed = prevBypassMap.get(node);
-                    prevBypassMap.set(node, bypassedNow);
-                    if (wasBypassed === true && !bypassedNow) {
-                        unbypassedNodes.push(node);
-                    }
-                });
-
-                if (!unbypassedNodes.length) return;
+                if (!unbypassedNodes.length || isLoadingWorkflow) return;
                 if (!getWorkflowOpenAutoEnabled()) return;
-                if (unbypassCheckBusy) return;
+                if (unbypassBusy) return;
                 if (document.getElementById("auto-download-dialog") || typeof activeAutoDownloadCancel === "function") {
                     return;
                 }
 
-                unbypassCheckBusy = true;
+                const rootGraph = app?.rootGraph || app?.graph;
+                if (!rootGraph || typeof rootGraph !== "object") return;
+
+                unbypassBusy = true;
                 try {
                     const genAtTrigger = currentWorkflowLoadGeneration;
-                    const workflow = serializeWorkflowForModelScan();
-                    const allLiveMissing = collectLiveGraphMissingModelCandidatesNativeLike(rootGraph, workflow);
+                    const tabKey = getTabCacheKey();
+                    workflowScanCache.delete(tabKey);
+
+                    const allLiveMissing = collectLiveGraphMissingModelCandidatesNativeLike(rootGraph, null);
                     const unbypassedIds = new Set(
                         unbypassedNodes.map((n) => String(n?.id ?? "").trim()).filter(Boolean)
                     );
@@ -9828,8 +9435,9 @@ app.registerExtension({
                         });
                     });
 
-                    if (hasUnpopulatedLoader && workflow) {
-                        const backendResults = await getWorkflowOpenBackendResults(workflow, genAtTrigger);
+                    if (hasUnpopulatedLoader) {
+                        const workflow = serializeWorkflowForModelScan();
+                        const backendResults = workflow ? await getWorkflowOpenBackendResults(workflow, genAtTrigger) : null;
                         if (genAtTrigger !== currentWorkflowLoadGeneration) return;
                         if (document.getElementById("auto-download-dialog")) return;
                         if (countDownloadRequiredScanResults(backendResults || {}) > 0) {
@@ -9843,9 +9451,30 @@ app.registerExtension({
                 } catch (err) {
                     console.warn("[AutoDownload] Unbypass missing-model check failed:", err);
                 } finally {
-                    unbypassCheckBusy = false;
+                    unbypassBusy = false;
                 }
-            }, 250);
+            };
+
+            const origChangeMode = nodeCtor.prototype.changeMode;
+            nodeCtor.prototype.changeMode = function(mode) {
+                const prevMode = this?.mode;
+                const result = origChangeMode.apply(this, arguments);
+                const nextMode = this?.mode;
+                if (
+                    !isLoadingWorkflow &&
+                    isNodeBypassedMode(prevMode) &&
+                    !isNodeBypassedMode(nextMode)
+                ) {
+                    pendingNodes.add(this);
+                    if (unbypassTimer) clearTimeout(unbypassTimer);
+                    unbypassTimer = setTimeout(() => {
+                        void flushUnbypassedNodes();
+                    }, 80);
+                }
+                return result;
+            };
+            nodeCtor.prototype[HOOK_SYM] = true;
+            return true;
         };
 
         registerGlobalAction("runAutoDownload", runAutoDownload);
@@ -9853,13 +9482,8 @@ app.registerExtension({
         registerGlobalAction("clearCompletedModelsFromStore", clearCompletedModelsFromStore);
         registerGlobalAction("clearModelValidationErrorsFromFrontendState", clearModelValidationErrorsFromFrontendState);
         registerGlobalAction("refreshAfterModelDownload", refreshAfterModelDownload);
-        setupMissingModelsDialogObserver();
-        // void installNativeMissingModelsSurfaceHook();
-        installWorkflowOpenLoadGraphHook();
-        installActiveWorkflowTabWatcher();
-        // installWorkflowOpenMissingModelsWatcher();
-        installNodeUnbypassWatcher();
-        installRunQueueCommandHooksNativeAware();
-        installDisableMissingModelsRedFramesObserver();
+        installReactiveMissingModelSubscription();
+        installApiValidationAndDownloadListeners();
+        installEventDrivenUnbypassHook();
     }
 });
