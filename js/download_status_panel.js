@@ -967,11 +967,29 @@ app.registerExtension({
             if (isBackup || toUiStatus(info.status) !== "failed") return false;
             const errorCode = String(info.error_code || "").trim();
             const errorText = String(info.error || "").trim();
-            const hasGatedMarkers =
-                /gated|accept (its|the|model) terms|acceptance of its conditions|request access|ask for access|authorized list|restricted|agreement|agree to the license|license agreement|403/i.test(
+            const urlText = String(info.url || "").trim();
+            const combined = `${urlText} ${errorText}`;
+            if (
+                errorCode.startsWith("civitai_") ||
+                /civitai\.(com|green|red)|civitai api key|early access on civitai/i.test(combined)
+            ) {
+                return false;
+            }
+            const isHfContext =
+                Boolean(String(info.repo_id || "").trim()) ||
+                /huggingface\.co/i.test(`${info.repo_url || ""} ${urlText} ${errorText}`);
+            const hasExplicitHfGatedMarkers =
+                /gated|accept (its|the|model) terms|acceptance of its conditions|request access|ask for access|authorized list|agree to the license|license agreement/i.test(
                     errorText
                 );
-            return errorCode === "gated_repo" || errorCode === "hf_forbidden" || hasGatedMarkers;
+            const hasContextGatedMarkers =
+                isHfContext && /\b403\b|restricted|agreement/i.test(errorText);
+            return (
+                errorCode === "gated_repo" ||
+                errorCode === "hf_forbidden" ||
+                hasExplicitHfGatedMarkers ||
+                hasContextGatedMarkers
+            );
         };
 
         const createItemNode = () => {
@@ -1336,10 +1354,11 @@ app.registerExtension({
                     : "Gated model — accept the license on Hugging Face, then retry.";
                 refs.gatedCallout.title = errorText;
             } else if (isFailed && errorText) {
+                const displayError = String(info.action_message || "").trim() || errorText;
                 refs.gatedCallout.style.display = "none";
                 refs.gatedText.textContent = "";
                 refs.gatedCallout.title = "";
-                renderErrorWithLinks(refs.error, errorText);
+                renderErrorWithLinks(refs.error, displayError);
                 refs.error.title = errorText;
                 refs.error.style.display = "block";
             } else {
@@ -1352,9 +1371,13 @@ app.registerExtension({
             }
 
             const isInterrupted = !isBackup && info.status === "interrupted";
+            const isCivitaiRetryable =
+                isFailed &&
+                String(info.error_code || "").startsWith("civitai_") &&
+                Boolean(retryPayload);
 
             refs.root.classList.toggle("has-detail", (isFailed && !!errorText) || isInterrupted || isGated);
-            refs.actions.classList.toggle("visible", isGated || isInterrupted);
+            refs.actions.classList.toggle("visible", isGated || isInterrupted || isCivitaiRetryable);
             refs.agreementHint.textContent = "";
             refs.agreementHint.style.display = "none";
 
@@ -1370,6 +1393,7 @@ app.registerExtension({
                 refs.repoLink.style.display = "none";
             }
 
+            const canRetryFailed = isGated || isCivitaiRetryable;
             if (isInterrupted) {
                 refs.retryBtn.style.display = "inline-flex";
                 refs.retryBtn.textContent = "Resume";
@@ -1391,9 +1415,9 @@ app.registerExtension({
                 };
             } else {
                 refs.retryBtn.textContent = "Retry";
-                refs.retryBtn.style.display = isGated ? "inline-flex" : "none";
+                refs.retryBtn.style.display = canRetryFailed ? "inline-flex" : "none";
                 refs.retryBtn.disabled = !retryPayload;
-                refs.retryBtn.onclick = isGated
+                refs.retryBtn.onclick = canRetryFailed
                     ? async (event) => {
                           event.preventDefault();
                           event.stopPropagation();

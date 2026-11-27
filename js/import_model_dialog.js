@@ -131,7 +131,14 @@ const isCivitaiUrl = (url) => {
         const parsed = new URL(raw);
         if (!["http:", "https:"].includes(parsed.protocol)) return false;
         const host = String(parsed.hostname || "").toLowerCase();
-        return host === "civitai.com" || host === "www.civitai.com" || host === "civitai.green" || host === "www.civitai.green";
+        return (
+            host === "civitai.com"
+            || host === "www.civitai.com"
+            || host === "civitai.green"
+            || host === "www.civitai.green"
+            || host === "civitai.red"
+            || host === "www.civitai.red"
+        );
     } catch {
         return false;
     }

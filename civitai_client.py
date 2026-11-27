@@ -18,6 +18,8 @@ CIVITAI_HOSTS = {
     "www.civitai.com",
     "civitai.green",
     "www.civitai.green",
+    "civitai.red",
+    "www.civitai.red",
 }
 
 CIVITAI_API_BASE = "https://civitai.com/api/v1"
@@ -86,7 +88,7 @@ def _extract_host(url: str | None) -> str:
 
 
 def is_civitai_url(url: str | None) -> bool:
-    """Return True if url points to civitai.com or civitai.green over http(s)."""
+    """Return True if url points to civitai.com, civitai.green, or civitai.red over http(s)."""
     return _extract_host(url) in CIVITAI_HOSTS
 
 
@@ -115,7 +117,7 @@ def parse_civitai_url(url: str | None) -> dict[str, Any] | None:
       - https://civitai.com/models/{model_id}[/{slug}][?modelVersionId={version_id}]
       - https://civitai.com/model-versions/{version_id}
       - https://civitai.com/api/download/models/{version_id}[?...]
-      - Same paths on civitai.green
+      - Same paths on civitai.green and civitai.red
     """
     if not is_civitai_url(url):
         return None

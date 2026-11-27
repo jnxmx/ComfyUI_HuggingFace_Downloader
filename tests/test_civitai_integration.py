@@ -104,6 +104,22 @@ class TestCivitaiClientAndUrlParsing(unittest.TestCase):
         self.assertEqual(p6["version_id"], "999")
         self.assertEqual(p6["host"], "civitai.green")
 
+        p7 = civitai_client.parse_civitai_url(
+            "https://civitai.red/models/1332651/grainscape-ultrareal?modelVersionId=3410552"
+        )
+        self.assertEqual(p7["kind"], "model")
+        self.assertEqual(p7["model_id"], "1332651")
+        self.assertEqual(p7["version_id"], "3410552")
+        self.assertEqual(p7["host"], "civitai.red")
+
+        self.assertTrue(
+            civitai_client.is_civitai_url("https://www.civitai.red/api/download/models/3410552")
+        )
+        p8 = civitai_client.parse_civitai_url("https://www.civitai.red/api/download/models/3410552")
+        self.assertEqual(p8["kind"], "download")
+        self.assertEqual(p8["version_id"], "3410552")
+        self.assertEqual(p8["host"], "civitai.red")
+
         self.assertIsNone(civitai_client.parse_civitai_url("https://huggingface.co/owner/repo"))
         self.assertIsNone(civitai_client.parse_civitai_url("https://civitai.com/user/account"))
 
