@@ -2200,6 +2200,149 @@ app.registerExtension({
             return collected;
         };
 
+        const collectLiveGraphValidModelWidgets = (graph = null) => {
+            const rootGraph = graph || app?.rootGraph;
+            const validByNodeAndName = new Set();
+            if (!rootGraph || typeof rootGraph !== "object") {
+                return { validByNodeAndName, hasUnverifiedNodes: true };
+            }
+
+            let hasUnverifiedNodes = false;
+            const regTypes =
+                typeof LiteGraph !== "undefined" && LiteGraph?.registered_node_types && typeof LiteGraph.registered_node_types === "object"
+                    ? LiteGraph.registered_node_types
+                    : null;
+            if (!regTypes) {
+                hasUnverifiedNodes = true;
+            }
+
+            const visitedGraphs = new Set();
+            const visitGraph = (currentGraph, prefix = "") => {
+                if (!currentGraph || typeof currentGraph !== "object" || visitedGraphs.has(currentGraph)) {
+                    return;
+                }
+                visitedGraphs.add(currentGraph);
+
+                const nodes = Array.isArray(currentGraph?.nodes)
+                    ? currentGraph.nodes
+                    : (Array.isArray(currentGraph?._nodes) ? currentGraph._nodes : []);
+                for (const node of nodes) {
+                    if (!node || typeof node !== "object") continue;
+                    if (isGraphNodeBypassed(node) || isExcludedDiscoveryNode(node)) continue;
+
+                    const nodeId = String(node?.id ?? "").trim();
+                    const executionId = prefix ? `${prefix}:${nodeId}` : nodeId;
+
+                    const sub = (typeof node?.getInnerGraph === "function" ? node.getInnerGraph() : null) || node?.subgraph;
+                    if (sub && typeof sub === "object") {
+                        visitGraph(sub, executionId);
+                        continue;
+                    }
+
+                    const nodeType = String(node?.type || "").trim();
+                    if (nodeType.includes("Note") || nodeType.includes("PrimitiveString")) {
+                        continue;
+                    }
+                    if (
+                        nodeType === "Hugging Face Download Model" ||
+                        nodeType === "Hugging Face Download Folder"
+                    ) {
+                        hasUnverifiedNodes = true;
+                        continue;
+                    }
+                    const isRegistered = Boolean(
+                        nodeType &&
+                        nodeType !== "MissingNode" &&
+                        regTypes &&
+                        Object.prototype.hasOwnProperty.call(regTypes, nodeType)
+                    );
+                    if (!isRegistered || Boolean(node?.flags?.ghost)) {
+                        hasUnverifiedNodes = true;
+                        continue;
+                    }
+
+                    const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
+                    for (const widget of widgets) {
+                        const value = typeof widget?.value === "string" ? widget.value.trim() : "";
+                        if (!value || !MODELISH_FILENAME_PATTERN.test(value)) {
+                            continue;
+                        }
+                        const widgetName = String(widget?.name || "").trim();
+                        if (isDynamicGroupWidgetDisabledInNode(node, widgetName)) {
+                            continue;
+                        }
+                        const hasLinkedInput = Array.isArray(node?.inputs) && node.inputs.some((inp) =>
+                            (String(inp?.name || "").trim() === widgetName || String(inp?.widget?.name || "").trim() === widgetName) && inp.link != null
+                        );
+                        if (hasLinkedInput) {
+                            if (getUpstreamDownloaderNodeUrlAndFolder(node, widgetName, currentGraph)) {
+                                hasUnverifiedNodes = true;
+                            }
+                            continue;
+                        }
+
+                        const options = resolveComboWidgetOptionsNativeLike(widget);
+                        const hasOptions = Array.isArray(options) && options.length > 0;
+                        if (hasOptions && isValuePresentInComboOptions(options, value)) {
+                            const normVal = normalizeWorkflowPath(value).toLowerCase();
+                            const baseVal = getPathBasename(normVal).toLowerCase();
+                            for (const idKey of [executionId, nodeId]) {
+                                const cleanId = String(idKey || "").trim().toLowerCase();
+                                if (!cleanId) continue;
+                                if (normVal) validByNodeAndName.add(`${cleanId}|${normVal}`);
+                                if (baseVal) validByNodeAndName.add(`${cleanId}|${baseVal}`);
+                            }
+                        } else {
+                            hasUnverifiedNodes = true;
+                        }
+                    }
+                }
+
+                try {
+                    const subgraphs = currentGraph.subgraphs;
+                    if (subgraphs) {
+                        if (typeof subgraphs.values === "function") {
+                            for (const sub of subgraphs.values()) {
+                                if (sub && typeof sub === "object") visitGraph(sub, prefix);
+                            }
+                        } else if (Array.isArray(subgraphs)) {
+                            for (const sub of subgraphs) {
+                                if (sub && typeof sub === "object") visitGraph(sub, prefix);
+                            }
+                        } else if (typeof subgraphs === "object") {
+                            for (const sub of Object.values(subgraphs)) {
+                                if (sub && typeof sub === "object") visitGraph(sub, prefix);
+                            }
+                        }
+                    }
+                } catch (_) {}
+            };
+
+            visitGraph(rootGraph, "");
+            return { validByNodeAndName, hasUnverifiedNodes };
+        };
+
+        const filterOutModelsValidInLiveGraph = (entries, graph = null) => {
+            if (!Array.isArray(entries) || !entries.length) {
+                return [];
+            }
+            const { validByNodeAndName } = collectLiveGraphValidModelWidgets(graph || app?.rootGraph);
+            if (!validByNodeAndName.size) {
+                return entries;
+            }
+            return entries.filter((entry) => {
+                const rawNodeId = String(entry?.node_id ?? entry?.nodeId ?? "").trim().toLowerCase();
+                if (!rawNodeId) return true;
+                const fn = normalizeWorkflowPath(entry?.filename || entry?.name || "").toLowerCase();
+                const req = normalizeWorkflowPath(entry?.requested_path || "").toLowerCase();
+                const base = getPathBasename(fn || req).toLowerCase();
+                if (fn && validByNodeAndName.has(`${rawNodeId}|${fn}`)) return false;
+                if (req && validByNodeAndName.has(`${rawNodeId}|${req}`)) return false;
+                if (base && validByNodeAndName.has(`${rawNodeId}|${base}`)) return false;
+                return true;
+            });
+        };
+
         const collectEmbeddedMissingModelCandidatesNativeLike = async (graphData = null) => {
             if (!graphData || typeof graphData !== "object") {
                 return [];
@@ -5028,6 +5171,9 @@ app.registerExtension({
                 const checkedRows = rowInputs.filter((r) => r.checkbox.checked);
                 const checked = checkedRows.length;
                 const lockedChecked = checkedRows.filter((r) => r.isGatedLocked);
+                const missingFolderChecked = checkedRows.filter(
+                    (r) => r.downloadMode !== "folder" && !r.folderInput.value.trim()
+                );
                 if (total === 0 || checked === 0) {
                     downloadBtn.disabled = true;
                     downloadBtn.title = "";
@@ -5038,6 +5184,12 @@ app.registerExtension({
                     downloadBtnLabel.textContent = lockedChecked.length === 1
                         ? "Accept license for 1 gated model"
                         : `Accept license for ${lockedChecked.length} gated models`;
+                } else if (missingFolderChecked.length > 0) {
+                    downloadBtn.disabled = true;
+                    downloadBtn.title = "Select a target folder for all checked models before downloading";
+                    downloadBtnLabel.textContent = missingFolderChecked.length === 1
+                        ? "Select folder for 1 model"
+                        : `Select folder for ${missingFolderChecked.length} models`;
                 } else if (checked === total) {
                     downloadBtn.disabled = false;
                     downloadBtn.title = "";
@@ -5104,7 +5256,10 @@ app.registerExtension({
                     nameEl.title = m.node_title ? `${displayName} (${m.node_title})` : displayName;
 
                     const defaultFolder = String(m.locked_folder || m.suggested_folder || "").trim();
-                    const folderPicker = createFolderPicker(defaultFolder, "Folder");
+                    const folderPicker = createFolderPicker(
+                        defaultFolder,
+                        downloadMode === "folder" ? "Root" : "Select folder..."
+                    );
                     rowFolderPickers.push(folderPicker);
                     Object.assign(folderPicker.wrapper.style, {
                         width: "120px",
@@ -5118,13 +5273,22 @@ app.registerExtension({
                         folderPicker.input.placeholder = "Root";
                     }
                     const preferAuthoritativeFolder = Boolean(m.folder_locked) && downloadMode !== "folder";
-                    const updateFolderTooltip = () => {
+                    const updateRowFolderValidity = () => {
                         const val = folderPicker.input.value.trim();
+                        const missingFolder = downloadMode !== "folder" && !val;
+                        folderPicker.input.style.borderColor = missingFolder
+                            ? "var(--warning-color, #d97706)"
+                            : "";
+                        folderPicker.input.style.boxShadow = missingFolder
+                            ? "0 0 0 1px var(--warning-color, rgba(217, 119, 6, 0.35))"
+                            : "";
                         folderPicker.input.title = val
                             ? `Download folder: ${val} (click to change)`
-                            : "Click to choose download folder";
+                            : (missingFolder
+                                ? "Required: select a target folder before downloading"
+                                : "Click to choose download folder");
                     };
-                    updateFolderTooltip();
+                    updateRowFolderValidity();
 
                     const locateBtn = document.createElement("button");
                     locateBtn.type = "button";
@@ -5168,7 +5332,7 @@ app.registerExtension({
 
                     const urlPlaceholder = downloadMode === "folder"
                         ? "HuggingFace repo/folder URL..."
-                        : "HuggingFace URL...";
+                        : "HuggingFace or Civitai URL...";
                     const urlInput = createInput(m.url, urlPlaceholder);
                     applyCompactInputStyle(urlInput, 7);
                     Object.assign(urlInput.style, {
@@ -5220,7 +5384,8 @@ app.registerExtension({
                     urlInput.addEventListener("change", scheduleRowAccessCheck);
                     const onFolderEdited = () => {
                         rowData.userEditedFolder = true;
-                        updateFolderTooltip();
+                        updateRowFolderValidity();
+                        updateDownloadButtonState();
                     };
                     folderPicker.input.addEventListener("input", onFolderEdited);
                     folderPicker.input.addEventListener("change", onFolderEdited);
@@ -5294,7 +5459,8 @@ app.registerExtension({
                                 }
                                 if (alt.suggested_folder && !rowData.userEditedFolder && !rowData.preferAuthoritativeFolder) {
                                     rowData.folderInput.value = alt.suggested_folder;
-                                    updateFolderTooltip();
+                                    updateRowFolderValidity();
+                                    updateDownloadButtonState();
                                 }
                                 rowData.nameEl.textContent = rowData.filename;
                                 rowData.nameEl.title = rowData.nodeTitle
@@ -6422,8 +6588,11 @@ app.registerExtension({
                 ) {
                     return;
                 }
-                data.missing = coalesceMissingEntriesByDestination(
-                    Array.isArray(data?.missing) ? data.missing : []
+                data.missing = filterOutModelsValidInLiveGraph(
+                    coalesceMissingEntriesByDestination(
+                        Array.isArray(data?.missing) ? data.missing : []
+                    ),
+                    app?.rootGraph
                 );
                 console.log("[AutoDownload] Scan results:", data);
 
@@ -9576,8 +9745,11 @@ app.registerExtension({
                         life: 3200,
                     });
                 }
-                const filteredMissing = filterRunHookEligibleMissingModels(
-                    Array.isArray(data?.missing) ? data.missing : []
+                const filteredMissing = filterOutModelsValidInLiveGraph(
+                    filterRunHookEligibleMissingModels(
+                        Array.isArray(data?.missing) ? data.missing : []
+                    ),
+                    app?.rootGraph
                 );
                 void syncResolvedUrlsIntoNativeMissingModelStore(filteredMissing);
                 return {
@@ -9633,6 +9805,14 @@ app.registerExtension({
                 await triggerAutoDownloadFromWorkflowOpen(liveCandidates, null, {
                     onUserDismiss: () => markCurrentTabDismissed(tabKey, revKey),
                 });
+                return;
+            }
+
+            // 0ms fast-exit when every active node is registered and every model widget value
+            // is present in its live ComfyUI combo options list (ground-truth installed check).
+            const liveValidState = collectLiveGraphValidModelWidgets(app?.rootGraph);
+            if (!liveValidState.hasUnverifiedNodes) {
+                workflowScanCache.set(tabKey, { revKey, dismissed: false, handled: true, hasMissing: false });
                 return;
             }
 

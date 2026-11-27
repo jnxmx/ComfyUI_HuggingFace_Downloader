@@ -561,16 +561,24 @@ def _snapshot_has_entries(snapshot_data: dict) -> bool:
     return False
 
 
+SECRET_SETTINGS_KEYS = ("downloader.hf_token", "downloader.civitai_api_key")
+
+
 def _copy_settings_without_token(src_file: str, temp_dir: str) -> str:
     dst_file = os.path.join(temp_dir, os.path.basename(src_file))
     shutil.copy2(src_file, dst_file)
     try:
         with open(dst_file, "r", encoding="utf-8") as handle:
             data = json.load(handle)
-        if isinstance(data, dict) and "downloader.hf_token" in data:
-            del data["downloader.hf_token"]
-            with open(dst_file, "w", encoding="utf-8") as handle:
-                json.dump(data, handle, indent=2)
+        if isinstance(data, dict):
+            removed = False
+            for secret_key in SECRET_SETTINGS_KEYS:
+                if secret_key in data:
+                    del data[secret_key]
+                    removed = True
+            if removed:
+                with open(dst_file, "w", encoding="utf-8") as handle:
+                    json.dump(data, handle, indent=2)
     except Exception as e:
         print(f"[WARNING] Failed to sanitize settings file '{src_file}': {e}")
     return dst_file
@@ -682,11 +690,14 @@ def _copy_and_strip_token(src_folder, temp_dir):
                 try:
                     with open(fpath, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    if "downloader.hf_token" in data:
-                        del data["downloader.hf_token"]
-                        with open(fpath, "w", encoding="utf-8") as f:
-                            json.dump(data, f, indent=2)
-                        print(f"[INFO] Stripped downloader.hf_token from {fpath}")
+                    if isinstance(data, dict):
+                        stripped_keys = [k for k in SECRET_SETTINGS_KEYS if k in data]
+                        if stripped_keys:
+                            for k in stripped_keys:
+                                del data[k]
+                            with open(fpath, "w", encoding="utf-8") as f:
+                                json.dump(data, f, indent=2)
+                            print(f"[INFO] Stripped {', '.join(stripped_keys)} from {fpath}")
                 except Exception as e:
                     print(f"[WARNING] Could not clean token from {fpath}: {e}")
     return dst_folder
@@ -1970,6 +1981,8 @@ def _copy_repo_file_to_target(src_file: str, repo_file: str, target_dir: str, to
             new_settings["downloader.hf_token"] = existing_settings["downloader.hf_token"]
         else:
             new_settings["downloader.hf_token"] = token
+        if isinstance(existing_settings, dict) and "downloader.civitai_api_key" in existing_settings:
+            new_settings["downloader.civitai_api_key"] = existing_settings["downloader.civitai_api_key"]
         with open(dst_file, "w", encoding="utf-8") as handle:
             json.dump(new_settings, handle, indent=2)
         return

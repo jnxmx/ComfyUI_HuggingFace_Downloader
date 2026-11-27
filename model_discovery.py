@@ -10,8 +10,15 @@ import urllib.error
 from typing import List, Dict, Any, Tuple
 from types import SimpleNamespace
 from huggingface_hub import HfApi
-from .downloader import get_token
+from .downloader import get_token, get_civitai_token, has_civitai_token
+from .civitai_client import (
+    is_civitai_url,
+    parse_civitai_url,
+    lookup_civitai_by_hash,
+    search_civitai_by_filename,
+)
 from .parse_link import parse_link
+from .file_manager import get_registered_model_buckets, is_valid_model_folder_type
 import folder_paths
 
 # Known extensions for model files
@@ -35,7 +42,9 @@ PRIORITY_AUTHORS = [
 
 POPULAR_MODELS_FILE = os.path.join(os.path.dirname(__file__), "metadata", "popular-models.json")
 _popular_models_cache = None
+_popular_models_cache_civitai_enabled: bool | None = None
 _manager_model_list_cache = None
+_manager_model_list_cache_civitai_enabled: bool | None = None
 _hf_search_cache: dict[str, dict | None] = {}
 _hf_api_calls = 0
 _hf_rate_limited_until = 0.0
@@ -45,6 +54,7 @@ _hf_repo_files_cache: dict[str, list[str] | None] = {}
 _hf_url_exists_cache: dict[str, bool] = {}
 _nunchaku_blackwell_cache: bool | None = None
 _node_widget_schema_hints_cache: dict[str, list[dict[str, Any]]] | None = None
+_runtime_node_widget_schema_cache: dict[str, list[dict[str, Any]]] = {}
 
 HF_SEARCH_MAX_CALLS = int(os.getenv("HF_SEARCH_MAX_CALLS", "200"))
 HF_SEARCH_RATE_LIMIT_SECONDS = int(os.getenv("HF_SEARCH_RATE_LIMIT_SECONDS", "300"))
@@ -186,7 +196,10 @@ def extract_hf_repo_and_path(url: str) -> tuple[str | None, str | None]:
     return repo, filename
 
 def is_specific_model_file_url(url: str, expected_filename: str | None = None) -> bool:
-    """True when URL/shorthand points to a specific model file path (not repo/folder)."""
+    """True when URL/shorthand points to a specific model file path or Civitai model/version target."""
+    if url and is_civitai_url(url) and parse_civitai_url(url) is not None:
+        return True
+
     hf_repo, hf_path = extract_hf_repo_and_path(url)
     if not hf_repo or not hf_path:
         return False
@@ -292,18 +305,21 @@ def _looks_like_model_widget_value(value: str, node_type: str) -> bool:
     return False
 
 def invalidate_popular_models_cache() -> None:
-    global _popular_models_cache
+    global _popular_models_cache, _popular_models_cache_civitai_enabled
     _popular_models_cache = None
+    _popular_models_cache_civitai_enabled = None
 
 
 def load_popular_models_registry() -> dict:
     """Load curated popular-models.json registry."""
-    global _popular_models_cache
-    if _popular_models_cache is not None:
+    global _popular_models_cache, _popular_models_cache_civitai_enabled
+    civitai_enabled = has_civitai_token()
+    if _popular_models_cache is not None and _popular_models_cache_civitai_enabled == civitai_enabled:
         return _popular_models_cache
 
     if not os.path.exists(POPULAR_MODELS_FILE):
         _popular_models_cache = {}
+        _popular_models_cache_civitai_enabled = civitai_enabled
         return _popular_models_cache
 
     try:
@@ -313,18 +329,22 @@ def load_popular_models_registry() -> dict:
     except Exception as e:
         print(f"[ERROR] Failed to load popular models registry: {e}")
         _popular_models_cache = {}
+        _popular_models_cache_civitai_enabled = civitai_enabled
         return _popular_models_cache
 
     registry = {}
     for name, info in models.items():
         url = info.get("url", "")
-        if "huggingface.co" not in url:
+        is_hf = "huggingface.co" in url
+        is_civ = civitai_enabled and is_civitai_url(url)
+        if not is_hf and not is_civ:
             continue
         entry = dict(info)
         entry["filename"] = name
         registry[name.lower()] = entry
 
     _popular_models_cache = registry
+    _popular_models_cache_civitai_enabled = civitai_enabled
     return _popular_models_cache
 
 def _iter_registry_urls(entry: dict) -> list[str]:
@@ -351,7 +371,11 @@ def _iter_registry_urls(entry: dict) -> list[str]:
     return deduped
 
 def _hf_url_exists(url: str) -> bool:
-    if not url or "huggingface.co" not in url:
+    if not url:
+        return False
+    if is_civitai_url(url):
+        return has_civitai_token()
+    if "huggingface.co" not in url:
         return False
     cached = _hf_url_exists_cache.get(url)
     if cached is not None:
@@ -461,8 +485,9 @@ def _is_exact_popular_entry_match(entry: dict | None, requested_path: str | None
 
 def load_comfyui_manager_model_list() -> dict:
     """Load ComfyUI Manager model-list.json from known locations."""
-    global _manager_model_list_cache
-    if _manager_model_list_cache is not None:
+    global _manager_model_list_cache, _manager_model_list_cache_civitai_enabled
+    civitai_enabled = has_civitai_token()
+    if _manager_model_list_cache is not None and _manager_model_list_cache_civitai_enabled == civitai_enabled:
         return _manager_model_list_cache
 
     model_map = {}
@@ -494,7 +519,7 @@ def load_comfyui_manager_model_list() -> dict:
             for model in data.get("models", []):
                 filename = model.get("filename")
                 url = model.get("url", "")
-                if not filename or "huggingface.co" not in url:
+                if not filename or not ("huggingface.co" in url or (civitai_enabled and is_civitai_url(url))):
                     continue
                 filename_lower = filename.lower()
                 if filename_lower in model_map:
@@ -533,6 +558,7 @@ def load_comfyui_manager_model_list() -> dict:
             print(f"[ERROR] Failed to load manager model list {path}: {e}")
 
     _manager_model_list_cache = model_map
+    _manager_model_list_cache_civitai_enabled = civitai_enabled
     return _manager_model_list_cache
 
 def _iter_manager_entries_for_filename(manager_map: dict, filename: str | None) -> list[dict]:
@@ -640,7 +666,9 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
 
 def _extract_folder_names_from_ast_expr(
     expr: ast.AST | None,
-    folder_vars: dict[str, list[str]]
+    folder_vars: dict[str, list[str]],
+    module_consts: dict[str, str] | None = None,
+    helper_folders: dict[str, list[str]] | None = None,
 ) -> list[str]:
     if expr is None:
         return []
@@ -653,24 +681,35 @@ def _extract_folder_names_from_ast_expr(
             and isinstance(fn.value, ast.Name)
             and fn.value.id == "folder_paths"
             and expr.args
-            and isinstance(expr.args[0], ast.Constant)
-            and isinstance(expr.args[0].value, str)
         ):
-            return _dedupe_preserve_order([expr.args[0].value])
-        if isinstance(fn, ast.Name) and fn.id in {"list", "tuple", "set", "sorted"} and expr.args:
-            return _extract_folder_names_from_ast_expr(expr.args[0], folder_vars)
+            arg0 = expr.args[0]
+            if isinstance(arg0, ast.Constant) and isinstance(arg0.value, str):
+                return _dedupe_preserve_order([arg0.value])
+            if isinstance(arg0, ast.Name) and module_consts and arg0.id in module_consts:
+                return _dedupe_preserve_order([module_consts[arg0.id]])
+        if isinstance(fn, ast.Name):
+            if helper_folders and fn.id in helper_folders:
+                return list(helper_folders[fn.id])
+            if fn.id in {"list", "tuple", "set", "sorted"} and expr.args:
+                return _extract_folder_names_from_ast_expr(
+                    expr.args[0], folder_vars, module_consts, helper_folders
+                )
         return []
 
     if isinstance(expr, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
         combined: list[str] = []
         for gen in expr.generators:
-            combined.extend(_extract_folder_names_from_ast_expr(gen.iter, folder_vars))
-        combined.extend(_extract_folder_names_from_ast_expr(expr.elt, folder_vars))
+            combined.extend(
+                _extract_folder_names_from_ast_expr(gen.iter, folder_vars, module_consts, helper_folders)
+            )
+        combined.extend(
+            _extract_folder_names_from_ast_expr(expr.elt, folder_vars, module_consts, helper_folders)
+        )
         return _dedupe_preserve_order(combined)
 
     if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
-        left = _extract_folder_names_from_ast_expr(expr.left, folder_vars)
-        right = _extract_folder_names_from_ast_expr(expr.right, folder_vars)
+        left = _extract_folder_names_from_ast_expr(expr.left, folder_vars, module_consts, helper_folders)
+        right = _extract_folder_names_from_ast_expr(expr.right, folder_vars, module_consts, helper_folders)
         return _dedupe_preserve_order(left + right)
 
     if isinstance(expr, ast.Name):
@@ -679,15 +718,163 @@ def _extract_folder_names_from_ast_expr(
     if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
         combined: list[str] = []
         for item in expr.elts:
-            combined.extend(_extract_folder_names_from_ast_expr(item, folder_vars))
+            combined.extend(
+                _extract_folder_names_from_ast_expr(item, folder_vars, module_consts, helper_folders)
+            )
         return _dedupe_preserve_order(combined)
 
     if isinstance(expr, ast.IfExp):
-        body = _extract_folder_names_from_ast_expr(expr.body, folder_vars)
-        orelse = _extract_folder_names_from_ast_expr(expr.orelse, folder_vars)
+        body = _extract_folder_names_from_ast_expr(expr.body, folder_vars, module_consts, helper_folders)
+        orelse = _extract_folder_names_from_ast_expr(expr.orelse, folder_vars, module_consts, helper_folders)
         return _dedupe_preserve_order(body + orelse)
 
     return []
+
+
+def _resolve_ast_str_constant(expr: ast.AST | None, consts: dict[str, str] | None = None) -> str | None:
+    if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+        return expr.value
+    if isinstance(expr, ast.Name) and consts and expr.id in consts:
+        return consts[expr.id]
+    return None
+
+
+def _extract_module_constants_and_helpers_ast(
+    tree: ast.Module,
+) -> tuple[dict[str, str], dict[str, list[str]]]:
+    module_consts: dict[str, str] = {}
+    helper_folders: dict[str, list[str]] = {}
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+            for target in stmt.targets:
+                if isinstance(target, ast.Name):
+                    module_consts[target.id] = stmt.value.value
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.value is not None:
+            if isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+                module_consts[stmt.target.id] = stmt.value.value
+
+    for stmt in tree.body:
+        if not isinstance(stmt, ast.FunctionDef):
+            continue
+        local_vars: dict[str, list[str]] = {}
+        local_consts = dict(module_consts)
+        for sub in stmt.body:
+            if isinstance(sub, ast.Assign):
+                val_str = _resolve_ast_str_constant(sub.value, local_consts)
+                folders = _extract_folder_names_from_ast_expr(sub.value, local_vars, local_consts, helper_folders)
+                for target in sub.targets:
+                    if isinstance(target, ast.Name):
+                        if val_str is not None:
+                            local_consts[target.id] = val_str
+                        if folders:
+                            local_vars[target.id] = folders
+            elif isinstance(sub, ast.Return) and sub.value is not None:
+                ret_folders = _extract_folder_names_from_ast_expr(
+                    sub.value, local_vars, local_consts, helper_folders
+                )
+                if ret_folders:
+                    helper_folders[stmt.name] = _dedupe_preserve_order(ret_folders)
+                break
+
+    return module_consts, helper_folders
+
+
+_V3_WIDGET_INPUT_TYPES = {
+    "Combo",
+    "MultiCombo",
+    "Int",
+    "Float",
+    "Boolean",
+    "String",
+    "Text",
+    "Autogrow",
+    "DynamicCombo",
+}
+
+_V3_SOCKET_INPUT_TYPES = {
+    "Custom",
+    "Model",
+    "Conditioning",
+    "Audio",
+    "Vae",
+    "Clip",
+    "Image",
+    "Latent",
+    "Mask",
+    "ControlNet",
+    "ClipVision",
+    "StyleModel",
+    "Gligen",
+    "UpscaleModel",
+    "Sigmas",
+    "Sampler",
+    "Noise",
+    "Guider",
+    "Mesh",
+    "Voxel",
+    "Video",
+    "Photomaker",
+    "ModelType",
+    "AnyType",
+}
+
+
+def _extract_method_folder_bindings_ast(
+    cls_node: ast.ClassDef,
+    module_consts: dict[str, str] | None = None,
+) -> dict[str, list[str]]:
+    bindings: dict[str, list[str]] = {}
+    local_consts = dict(module_consts or {})
+    for child in cls_node.body:
+        if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if child.name in {"INPUT_TYPES", "define_schema"}:
+            continue
+        for sub in ast.walk(child):
+            if not isinstance(sub, ast.Call):
+                continue
+            fn = sub.func
+            if not (
+                isinstance(fn, ast.Attribute)
+                and fn.attr in {"get_full_path", "get_full_path_or_raise"}
+                and isinstance(fn.value, ast.Name)
+                and fn.value.id == "folder_paths"
+            ):
+                continue
+            folder_expr = sub.args[0] if len(sub.args) >= 1 else None
+            param_expr = sub.args[1] if len(sub.args) >= 2 else None
+            for kw in sub.keywords:
+                if kw.arg in {"folder_name", "folder_type", "type"} and folder_expr is None:
+                    folder_expr = kw.value
+                elif kw.arg in {"filename", "filename_name"} and param_expr is None:
+                    param_expr = kw.value
+            folder_str = _resolve_ast_str_constant(folder_expr, local_consts)
+            if folder_str and isinstance(param_expr, ast.Name):
+                norm_folder = normalize_save_path(folder_str) or folder_str
+                existing = bindings.setdefault(param_expr.id, [])
+                if norm_folder not in existing:
+                    existing.append(norm_folder)
+    return bindings
+
+
+def _merge_method_folder_bindings(
+    schema: list[dict[str, Any]],
+    method_bindings: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    if not schema or not method_bindings:
+        return schema
+    for entry in schema:
+        widget_name = entry.get("name")
+        if not widget_name or widget_name not in method_bindings:
+            continue
+        if not entry.get("folders"):
+            entry["folders"] = _dedupe_preserve_order(list(method_bindings[widget_name]))
+        else:
+            combined = list(entry["folders"]) + list(method_bindings[widget_name])
+            entry["folders"] = _dedupe_preserve_order(combined)
+    return schema
+
 
 def _resolve_ast_dict_expr(expr: ast.AST | None, dict_vars: dict[str, ast.Dict]) -> ast.Dict | None:
     if isinstance(expr, ast.Dict):
@@ -696,16 +883,26 @@ def _resolve_ast_dict_expr(expr: ast.AST | None, dict_vars: dict[str, ast.Dict])
         return dict_vars.get(expr.id)
     return None
 
-def _extract_widget_schema_from_input_types_ast(fn: ast.FunctionDef) -> list[dict[str, Any]]:
+def _extract_widget_schema_from_input_types_ast(
+    fn: ast.FunctionDef,
+    module_consts: dict[str, str] | None = None,
+    helper_folders: dict[str, list[str]] | None = None,
+) -> list[dict[str, Any]]:
     folder_vars: dict[str, list[str]] = {}
     dict_vars: dict[str, ast.Dict] = {}
+    local_consts = dict(module_consts or {})
     return_expr: ast.AST | None = None
 
     for stmt in fn.body:
         if isinstance(stmt, ast.Assign):
-            folders = _extract_folder_names_from_ast_expr(stmt.value, folder_vars)
+            val_str = _resolve_ast_str_constant(stmt.value, local_consts)
+            folders = _extract_folder_names_from_ast_expr(
+                stmt.value, folder_vars, local_consts, helper_folders
+            )
             for target in stmt.targets:
                 if isinstance(target, ast.Name):
+                    if val_str is not None:
+                        local_consts[target.id] = val_str
                     if folders:
                         folder_vars[target.id] = folders
                     if isinstance(stmt.value, ast.Dict):
@@ -717,7 +914,12 @@ def _extract_widget_schema_from_input_types_ast(fn: ast.FunctionDef) -> list[dic
             target = stmt.target
             value = stmt.value
             if isinstance(target, ast.Name) and value is not None:
-                folders = _extract_folder_names_from_ast_expr(value, folder_vars)
+                val_str = _resolve_ast_str_constant(value, local_consts)
+                if val_str is not None:
+                    local_consts[target.id] = val_str
+                folders = _extract_folder_names_from_ast_expr(
+                    value, folder_vars, local_consts, helper_folders
+                )
                 if folders:
                     folder_vars[target.id] = folders
                 if isinstance(value, ast.Dict):
@@ -753,7 +955,9 @@ def _extract_widget_schema_from_input_types_ast(fn: ast.FunctionDef) -> list[dic
             if isinstance(widget_value_expr, ast.Tuple) and widget_value_expr.elts:
                 first_expr = widget_value_expr.elts[0]
 
-            folders = _extract_folder_names_from_ast_expr(first_expr, folder_vars)
+            folders = _extract_folder_names_from_ast_expr(
+                first_expr, folder_vars, local_consts, helper_folders
+            )
             schema.append({
                 "name": widget_name,
                 "folders": _dedupe_preserve_order(folders),
@@ -761,8 +965,157 @@ def _extract_widget_schema_from_input_types_ast(fn: ast.FunctionDef) -> list[dic
 
     return schema
 
+
+def _extract_v3_io_input_entry(
+    expr: ast.AST | None,
+    folder_vars: dict[str, list[str]],
+    local_consts: dict[str, str],
+    helper_folders: dict[str, list[str]] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(expr, ast.Call):
+        return None
+    fn = expr.func
+    if not isinstance(fn, ast.Attribute) or fn.attr != "Input":
+        return None
+
+    # Detect io.<Type>.Input(...) or <Type>.Input(...) vs io.Custom(...).Input(...)
+    type_name: str | None = None
+    owner = fn.value
+    if isinstance(owner, ast.Attribute):
+        type_name = owner.attr
+    elif isinstance(owner, ast.Name):
+        type_name = owner.id
+    elif isinstance(owner, ast.Call):
+        # e.g. io.Custom("DRAMA3_MODEL").Input(...) -> pure socket input
+        return None
+
+    if type_name in _V3_SOCKET_INPUT_TYPES:
+        return None
+
+    widget_name: str | None = None
+    if expr.args:
+        widget_name = _resolve_ast_str_constant(expr.args[0], local_consts)
+    for kw in expr.keywords:
+        if kw.arg == "id" and widget_name is None:
+            widget_name = _resolve_ast_str_constant(kw.value, local_consts)
+    if not widget_name:
+        return None
+
+    options_expr: ast.AST | None = None
+    for kw in expr.keywords:
+        if kw.arg == "options":
+            options_expr = kw.value
+            break
+    if options_expr is None and type_name in {"Combo", "MultiCombo"} and len(expr.args) >= 2:
+        options_expr = expr.args[1]
+
+    folders = _extract_folder_names_from_ast_expr(
+        options_expr, folder_vars, local_consts, helper_folders
+    )
+
+    if type_name not in _V3_WIDGET_INPUT_TYPES and not folders:
+        return None
+
+    return {
+        "name": widget_name,
+        "folders": _dedupe_preserve_order(folders),
+    }
+
+
+def _extract_widget_schema_from_define_schema_ast(
+    fn: ast.FunctionDef,
+    cls_node: ast.ClassDef,
+    module_consts: dict[str, str] | None = None,
+    helper_folders: dict[str, list[str]] | None = None,
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """Extracts (node_id, ordered widget schema) from a ComfyUI V3 io.ComfyNode define_schema method."""
+    folder_vars: dict[str, list[str]] = {}
+    local_consts = dict(module_consts or {})
+    list_vars: dict[str, ast.AST] = {}
+    call_vars: dict[str, ast.Call] = {}
+    return_expr: ast.AST | None = None
+
+    for stmt in fn.body:
+        if isinstance(stmt, ast.Assign):
+            val_str = _resolve_ast_str_constant(stmt.value, local_consts)
+            folders = _extract_folder_names_from_ast_expr(
+                stmt.value, folder_vars, local_consts, helper_folders
+            )
+            for target in stmt.targets:
+                if isinstance(target, ast.Name):
+                    if val_str is not None:
+                        local_consts[target.id] = val_str
+                    if folders:
+                        folder_vars[target.id] = folders
+                    if isinstance(stmt.value, (ast.List, ast.Tuple)):
+                        list_vars[target.id] = stmt.value
+                    elif isinstance(stmt.value, ast.Call):
+                        call_vars[target.id] = stmt.value
+                    elif isinstance(stmt.value, ast.Name):
+                        if stmt.value.id in list_vars:
+                            list_vars[target.id] = list_vars[stmt.value.id]
+                        if stmt.value.id in call_vars:
+                            call_vars[target.id] = call_vars[stmt.value.id]
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.value is not None:
+            val_str = _resolve_ast_str_constant(stmt.value, local_consts)
+            if val_str is not None:
+                local_consts[stmt.target.id] = val_str
+            folders = _extract_folder_names_from_ast_expr(
+                stmt.value, folder_vars, local_consts, helper_folders
+            )
+            if folders:
+                folder_vars[stmt.target.id] = folders
+            if isinstance(stmt.value, (ast.List, ast.Tuple)):
+                list_vars[stmt.target.id] = stmt.value
+            elif isinstance(stmt.value, ast.Call):
+                call_vars[stmt.target.id] = stmt.value
+        elif isinstance(stmt, ast.Return):
+            return_expr = stmt.value
+            break
+
+    schema_call: ast.Call | None = None
+    if isinstance(return_expr, ast.Call):
+        schema_call = return_expr
+    elif isinstance(return_expr, ast.Name):
+        schema_call = call_vars.get(return_expr.id)
+
+    if schema_call is None:
+        return None, []
+
+    fn_ref = schema_call.func
+    schema_fn_name = fn_ref.attr if isinstance(fn_ref, ast.Attribute) else (fn_ref.id if isinstance(fn_ref, ast.Name) else "")
+    if schema_fn_name != "Schema":
+        return None, []
+
+    node_id: str | None = cls_node.name
+    inputs_expr: ast.AST | None = None
+    for kw in schema_call.keywords:
+        if kw.arg == "node_id":
+            resolved = _resolve_ast_str_constant(kw.value, local_consts)
+            if resolved:
+                node_id = resolved
+        elif kw.arg == "inputs":
+            inputs_expr = kw.value
+
+    if isinstance(inputs_expr, ast.Name):
+        inputs_expr = list_vars.get(inputs_expr.id, inputs_expr)
+
+    if not isinstance(inputs_expr, (ast.List, ast.Tuple)):
+        return node_id, []
+
+    schema: list[dict[str, Any]] = []
+    for item_expr in inputs_expr.elts:
+        entry = _extract_v3_io_input_entry(item_expr, folder_vars, local_consts, helper_folders)
+        if entry is not None:
+            schema.append(entry)
+
+    return node_id, schema
+
+
 def _scan_custom_node_widget_schemas() -> dict[str, list[dict[str, Any]]]:
     comfy_root = folder_paths.base_path if hasattr(folder_paths, "base_path") else os.getcwd()
+    if not isinstance(comfy_root, str) or not comfy_root:
+        comfy_root = os.getcwd()
     custom_nodes_dir = os.path.join(comfy_root, "custom_nodes")
     if not os.path.isdir(custom_nodes_dir):
         return {}
@@ -770,6 +1123,18 @@ def _scan_custom_node_widget_schemas() -> dict[str, list[dict[str, Any]]]:
     hints: dict[str, list[dict[str, Any]]] = {}
     skip_dirs = {".git", "__pycache__", "venv", ".venv", "node_modules", "tests", "metadata"}
     files_processed = 0
+
+    def _store_hint(key: str, schema: list[dict[str, Any]]) -> None:
+        if not key or not schema:
+            return
+        existing = hints.get(key)
+        if not existing:
+            hints[key] = schema
+            return
+        existing_scored = sum(1 for item in existing if item.get("folders"))
+        schema_scored = sum(1 for item in schema if item.get("folders"))
+        if schema_scored > existing_scored:
+            hints[key] = schema
 
     for root, dirs, files in os.walk(custom_nodes_dir, followlinks=True):
         dirs[:] = [d for d in dirs if d not in skip_dirs]
@@ -789,32 +1154,161 @@ def _scan_custom_node_widget_schemas() -> dict[str, list[dict[str, Any]]]:
             except Exception:
                 continue
 
+            module_consts, helper_folders = _extract_module_constants_and_helpers_ast(tree)
+
             for node in tree.body:
                 if not isinstance(node, ast.ClassDef):
                     continue
                 input_types_fn = None
+                define_schema_fn = None
                 for child in node.body:
-                    if isinstance(child, ast.FunctionDef) and child.name == "INPUT_TYPES":
+                    if not isinstance(child, ast.FunctionDef):
+                        continue
+                    if child.name == "INPUT_TYPES" and input_types_fn is None:
                         input_types_fn = child
-                        break
-                if input_types_fn is None:
-                    continue
+                    elif child.name == "define_schema" and define_schema_fn is None:
+                        define_schema_fn = child
 
-                schema = _extract_widget_schema_from_input_types_ast(input_types_fn)
-                if not schema:
-                    continue
+                method_bindings = _extract_method_folder_bindings_ast(node, module_consts)
 
-                existing = hints.get(node.name)
-                if not existing:
-                    hints[node.name] = schema
-                    continue
+                if input_types_fn is not None:
+                    schema = _extract_widget_schema_from_input_types_ast(
+                        input_types_fn, module_consts, helper_folders
+                    )
+                    schema = _merge_method_folder_bindings(schema, method_bindings)
+                    _store_hint(node.name, schema)
 
-                existing_scored = sum(1 for item in existing if item.get("folders"))
-                schema_scored = sum(1 for item in schema if item.get("folders"))
-                if schema_scored > existing_scored:
-                    hints[node.name] = schema
+                if define_schema_fn is not None:
+                    v3_node_id, v3_schema = _extract_widget_schema_from_define_schema_ast(
+                        define_schema_fn, node, module_consts, helper_folders
+                    )
+                    v3_schema = _merge_method_folder_bindings(v3_schema, method_bindings)
+                    if v3_schema:
+                        if v3_node_id:
+                            _store_hint(v3_node_id, v3_schema)
+                        if node.name and node.name != v3_node_id:
+                            _store_hint(node.name, v3_schema)
 
     return hints
+
+
+def _match_runtime_options_to_model_buckets(options: Any) -> list[str]:
+    if not isinstance(options, (list, tuple, set)):
+        return []
+    opt_set = {str(v).strip() for v in options if isinstance(v, str) and str(v).strip()}
+    if not opt_set:
+        return []
+    matched: list[str] = []
+    for bucket in get_registered_model_buckets(folder_paths_mod=folder_paths):
+        try:
+            bucket_files = folder_paths.get_filename_list(bucket)
+        except Exception:
+            continue
+        if not isinstance(bucket_files, (list, tuple, set)) or not bucket_files:
+            continue
+        bucket_set = {str(v).strip() for v in bucket_files if isinstance(v, str) and str(v).strip()}
+        if not bucket_set:
+            continue
+        if opt_set.issubset(bucket_set) or bucket_set.issubset(opt_set):
+            norm = normalize_save_path(bucket) or bucket
+            if norm not in matched:
+                matched.append(norm)
+    return matched
+
+
+def _inspect_runtime_node_widget_schema(node_type: str) -> list[dict[str, Any]]:
+    if not node_type or node_type in _runtime_node_widget_schema_cache:
+        return _runtime_node_widget_schema_cache.get(node_type, [])
+
+    schema: list[dict[str, Any]] = []
+    try:
+        import inspect
+        import nodes as comfy_nodes
+        mappings = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", None)
+        cls = mappings.get(node_type) if isinstance(mappings, dict) else None
+        if cls is not None:
+            # 1. Prefer source AST introspection of the live class if source file is readable
+            try:
+                src = inspect.getsource(cls)
+                cls_tree = ast.parse(src)
+                if cls_tree.body and isinstance(cls_tree.body[0], ast.ClassDef):
+                    cls_ast = cls_tree.body[0]
+                    mod_consts: dict[str, str] = {}
+                    method_bindings = _extract_method_folder_bindings_ast(cls_ast, mod_consts)
+                    for child in cls_ast.body:
+                        if not isinstance(child, ast.FunctionDef):
+                            continue
+                        if child.name == "define_schema":
+                            _, v3_schema = _extract_widget_schema_from_define_schema_ast(
+                                child, cls_ast, mod_consts, None
+                            )
+                            schema = _merge_method_folder_bindings(v3_schema, method_bindings)
+                            break
+                        if child.name == "INPUT_TYPES":
+                            v1_schema = _extract_widget_schema_from_input_types_ast(child, mod_consts, None)
+                            schema = _merge_method_folder_bindings(v1_schema, method_bindings)
+                            break
+            except Exception:
+                pass
+
+            # 2. If AST didn't yield folder hints, inspect live V3 define_schema() or V1 INPUT_TYPES()
+            has_folder_hints = any(item.get("folders") for item in schema)
+            if not has_folder_hints and callable(getattr(cls, "define_schema", None)):
+                try:
+                    live_schema = cls.define_schema()
+                    live_inputs = getattr(live_schema, "inputs", None) or []
+                    runtime_rows: list[dict[str, Any]] = []
+                    for inp in live_inputs:
+                        inp_type_name = type(inp).__name__
+                        inp_id = str(getattr(inp, "id", "") or "").strip()
+                        if not inp_id:
+                            continue
+                        if inp_type_name in _V3_SOCKET_INPUT_TYPES:
+                            continue
+                        options = getattr(inp, "options", None)
+                        matched_buckets = _match_runtime_options_to_model_buckets(options)
+                        if inp_type_name in _V3_WIDGET_INPUT_TYPES or hasattr(inp, "options") or matched_buckets:
+                            runtime_rows.append({"name": inp_id, "folders": matched_buckets})
+                    if runtime_rows:
+                        schema = runtime_rows
+                except Exception:
+                    pass
+
+            has_folder_hints = any(item.get("folders") for item in schema)
+            if not has_folder_hints and callable(getattr(cls, "INPUT_TYPES", None)):
+                try:
+                    live_types = cls.INPUT_TYPES()
+                    if isinstance(live_types, dict):
+                        runtime_rows = []
+                        for section in ("required", "optional"):
+                            sec_dict = live_types.get(section)
+                            if not isinstance(sec_dict, dict):
+                                continue
+                            for w_name, spec in sec_dict.items():
+                                first = spec[0] if isinstance(spec, (tuple, list)) and spec else spec
+                                matched_buckets = _match_runtime_options_to_model_buckets(first)
+                                runtime_rows.append({"name": str(w_name), "folders": matched_buckets})
+                        if runtime_rows:
+                            schema = runtime_rows
+                except Exception:
+                    pass
+    except Exception:
+        schema = []
+
+    _runtime_node_widget_schema_cache[node_type] = schema
+    return schema
+
+
+def _get_widget_schema_hints_for_node(node_type: str | None) -> list[dict[str, Any]]:
+    if not node_type:
+        return []
+    hints = get_node_widget_schema_hints().get(node_type) or []
+    if hints and any(item.get("folders") for item in hints):
+        return hints
+    runtime_hints = _inspect_runtime_node_widget_schema(node_type)
+    if runtime_hints and any(item.get("folders") for item in runtime_hints):
+        return runtime_hints
+    return hints or runtime_hints
 
 _BUILTIN_NODE_WIDGET_SCHEMA_HINTS: dict[str, list[dict[str, Any]]] = {
     "LTXAVTextEncoderLoader": [
@@ -920,6 +1414,15 @@ def _guess_folder_from_filename(filename: str | None) -> str | None:
     if "whisper" in name:
         return "audio_encoders"
     if (
+        "asr" in re.split(r"[^a-z0-9]+", name)
+        or "_asr_" in name
+        or "-asr-" in name
+        or "_asr." in name
+    ):
+        return "asr"
+    if "codec" in name and "video" not in name:
+        return "vae"
+    if (
         "text_encoder" in name
         or "text-encoder" in name
         or "umt5" in name
@@ -968,6 +1471,7 @@ def _is_specific_model_bucket(folder: str | None) -> bool:
         "style_models",
         "gligen",
         "audio_encoders",
+        "asr",
         "wav2vec2",
         "nlf",
         "mmaudio",
@@ -1045,20 +1549,20 @@ def _choose_best_folder_candidate(
 
     return normalized[0]
 
-def resolve_node_folder_for_widget(
+def resolve_node_folder_for_widget_with_authority(
     node: dict,
     *,
     widget_index: int | None = None,
     widget_name: str | None = None,
     widget_value: str | None = None
-) -> str | None:
+) -> tuple[str | None, bool, str | None]:
     if widget_name:
         direct_widget_hint = resolve_proxy_widget_folder(widget_name)
         if direct_widget_hint:
-            return direct_widget_hint
+            return direct_widget_hint, False, widget_name
 
     node_type = node.get("type", "")
-    schema_hints = get_node_widget_schema_hints().get(node_type) or []
+    schema_hints = _get_widget_schema_hints_for_node(node_type)
 
     if schema_hints:
         hint_entry = None
@@ -1066,15 +1570,15 @@ def resolve_node_folder_for_widget(
             hint_entry = schema_hints[widget_index]
 
         if hint_entry is not None:
-            if not widget_name:
-                widget_name = hint_entry.get("name")
+            resolved_wname = widget_name or hint_entry.get("name")
             chosen = _choose_best_folder_candidate(
                 hint_entry.get("folders") or [],
-                widget_name=widget_name,
+                widget_name=resolved_wname,
                 filename=widget_value
             )
             if chosen:
-                return chosen
+                return chosen, True, resolved_wname
+            widget_name = resolved_wname
 
         if widget_name:
             for entry in schema_hints:
@@ -1086,18 +1590,18 @@ def resolve_node_folder_for_widget(
                     filename=widget_value
                 )
                 if chosen:
-                    return chosen
+                    return chosen, True, widget_name
 
         all_candidates: list[str] = []
         for entry in schema_hints:
             all_candidates.extend(entry.get("folders") or [])
         chosen = _choose_best_folder_candidate(all_candidates, widget_name=widget_name, filename=widget_value)
         if chosen:
-            return chosen
+            return chosen, True, widget_name
 
     fallback = resolve_node_folder(node)
     if _is_strict_node_folder_mapping(node_type, fallback):
-        return fallback
+        return fallback, True, widget_name
 
     filename_hint = _guess_folder_from_filename(widget_value)
     known_dir = _lookup_known_directory_for_filename(widget_value)
@@ -1113,20 +1617,36 @@ def resolve_node_folder_for_widget(
 
     if known_dir:
         if not fallback or fallback == "checkpoints":
-            return known_dir
+            return known_dir, False, widget_name
         if fallback == "diffusion_models" and _is_specific_model_bucket(known_dir):
-            return known_dir
+            return known_dir, False, widget_name
     if filename_hint:
         if not fallback or fallback == "checkpoints":
-            return filename_hint
+            return filename_hint, False, widget_name
         if fallback == "diffusion_models" and _is_specific_model_bucket(filename_hint):
-            return filename_hint
-    return fallback
+            return filename_hint, False, widget_name
+    return fallback, False, widget_name
+
+
+def resolve_node_folder_for_widget(
+    node: dict,
+    *,
+    widget_index: int | None = None,
+    widget_name: str | None = None,
+    widget_value: str | None = None
+) -> str | None:
+    folder, _, _ = resolve_node_folder_for_widget_with_authority(
+        node,
+        widget_index=widget_index,
+        widget_name=widget_name,
+        widget_value=widget_value,
+    )
+    return folder
 
 def apply_known_directory_hints(models: list[dict]) -> None:
     for model in models:
-        locked_folder = normalize_save_path(model.get("locked_folder")) or ""
-        if model.get("folder_locked"):
+        locked_folder = normalize_save_path(model.get("locked_folder") or model.get("authoritative_folder")) or ""
+        if model.get("folder_locked") or model.get("authoritative_folder"):
             if locked_folder and not model.get("suggested_folder"):
                 model["suggested_folder"] = locked_folder.split("/", 1)[0]
             continue
@@ -1616,6 +2136,10 @@ def _get_strict_node_folder(node_type: str | None) -> str | None:
 def _lock_model_to_node_folder(model: dict) -> None:
     strict_folder = _get_strict_node_folder(model.get("node_type"))
     if not strict_folder:
+        auth_folder = normalize_save_path(model.get("authoritative_folder"))
+        if auth_folder:
+            strict_folder = auth_folder
+    if not strict_folder:
         return
 
     current = normalize_save_path(model.get("suggested_folder")) or ""
@@ -1948,6 +2472,137 @@ def patch_lora_stack_nodes():
         print(f"[ComfyUI_HuggingFace_Downloader] Note: could not patch LoRA stack validation: {e}")
 
 
+_HF_REPO_EXCLUDED_OWNERS = {
+    "spaces",
+    "datasets",
+    "docs",
+    "blog",
+    "organizations",
+    "settings",
+    "join",
+    "login",
+    "pricing",
+    "enterprise",
+    "models",
+    "tasks",
+}
+
+_NOTE_MODEL_FILENAME_RE = re.compile(
+    r"([A-Za-z0-9._/\-]+\.(?:safetensors|ckpt|pt|bin|pth|gguf))",
+    re.IGNORECASE,
+)
+_NOTE_MODELS_DIR_RE = re.compile(
+    r"(?:^|[\s`|(\"'=])models[/\\]([A-Za-z0-9_.\-/]+)",
+    re.IGNORECASE,
+)
+
+
+def _extract_hf_repo_id_from_url(url: str | None) -> str | None:
+    if not url or not isinstance(url, str):
+        return None
+    m = re.search(r"huggingface\.co/([A-Za-z0-9._\-]+)/([A-Za-z0-9._\-]+)", url, re.IGNORECASE)
+    if not m:
+        return None
+    owner = m.group(1).strip()
+    repo = m.group(2).strip().rstrip(".,;:!?)\"'`")
+    if not owner or not repo or owner.lower() in _HF_REPO_EXCLUDED_OWNERS:
+        return None
+    return f"{owner}/{repo}"
+
+
+def _extract_note_context_from_text(
+    text: str,
+    note_links: dict[str, str],
+    note_links_normalized: dict[str, str],
+    note_repos: list[str] | None = None,
+    note_folder_hints: dict[str, str] | None = None,
+) -> None:
+    if not isinstance(text, str) or not text:
+        return
+
+    # 1. Markdown links: [text](url)
+    links = re.findall(r'\[([^\]]+)\]\((https?://[^)]+)\)', text, re.IGNORECASE)
+    for label, url in links:
+        repo_id = _extract_hf_repo_id_from_url(url)
+        if repo_id and note_repos is not None and repo_id not in note_repos:
+            note_repos.append(repo_id)
+        if not is_specific_model_file_url(url):
+            continue
+        url_filename = url.split("?")[0].split("/")[-1]
+        candidates = []
+        if any(url_filename.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
+            candidates.append(url_filename)
+        if any(label.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
+            candidates.append(label)
+        for filename in candidates:
+            note_key = normalize_filename_key(filename)
+            note_links.setdefault(note_key, url)
+            note_links_normalized.setdefault(normalize_filename_compact(filename), url)
+
+    # 2. Bare HuggingFace URLs in notes (e.g. plain https://huggingface.co/owner/repo)
+    for raw_url in re.findall(r"https?://huggingface\.co/[^\s)>\]]+", text, re.IGNORECASE):
+        repo_id = _extract_hf_repo_id_from_url(raw_url)
+        if repo_id and note_repos is not None and repo_id not in note_repos:
+            note_repos.append(repo_id)
+
+    # 3. Markdown tables or line-by-line hints: | file.safetensors | models/asr |
+    if note_folder_hints is not None:
+        for line in text.splitlines():
+            folder_matches = _NOTE_MODELS_DIR_RE.findall(line)
+            if not folder_matches:
+                continue
+            raw_folder = folder_matches[-1].strip().strip("`|\"'.,;:()[]{}").rstrip("/\\")
+            norm_folder = normalize_relative_model_path(raw_folder)
+            if not norm_folder:
+                continue
+            top_bucket = norm_folder.split("/", 1)[0]
+            if top_bucket in {"output", "input", "temp", "user", "custom_nodes"}:
+                continue
+            for file_match in _NOTE_MODEL_FILENAME_RE.findall(line):
+                fname = os.path.basename(file_match.replace("\\", "/")).strip()
+                if not fname:
+                    continue
+                note_folder_hints.setdefault(normalize_filename_key(fname), norm_folder)
+                note_folder_hints.setdefault(normalize_filename_compact(fname), norm_folder)
+
+
+def _extract_note_context_from_workflow(workflow: dict) -> tuple[list[str], dict[str, str]]:
+    note_links: dict[str, str] = {}
+    note_links_normalized: dict[str, str] = {}
+    note_repos: list[str] = []
+    note_folder_hints: dict[str, str] = {}
+
+    def _visit_nodes(node_list: Any) -> None:
+        if not isinstance(node_list, list):
+            return
+        for node in node_list:
+            if not isinstance(node, dict):
+                continue
+            if node.get("mode", 0) in {2, 4}:
+                continue
+            node_type = str(node.get("type") or "")
+            if "Note" in node_type or "PrimitiveString" in node_type:
+                wv = node.get("widgets_values")
+                if isinstance(wv, list):
+                    for val in wv:
+                        if isinstance(val, str):
+                            _extract_note_context_from_text(
+                                val,
+                                note_links,
+                                note_links_normalized,
+                                note_repos,
+                                note_folder_hints,
+                            )
+
+    _visit_nodes(workflow.get("nodes", []))
+    defs = workflow.get("definitions", {})
+    if isinstance(defs, dict):
+        for sg in _collect_all_subgraph_defs(defs.get("subgraphs", [])):
+            _visit_nodes(sg.get("nodes", []))
+
+    return note_repos, note_folder_hints
+
+
 def _collect_models_from_nodes(
     nodes: list[dict],
     links_map: dict,
@@ -1956,7 +2611,9 @@ def _collect_models_from_nodes(
     note_links: dict,
     note_links_normalized: dict,
     node_title_fallback: str,
-    node_id_prefix: str = ""
+    node_id_prefix: str = "",
+    note_repos: list[str] | None = None,
+    note_folder_hints: dict[str, str] | None = None,
 ) -> None:
     for node in nodes:
         # Skip disabled/muted nodes
@@ -2224,24 +2881,16 @@ def _collect_models_from_nodes(
         # Extract links from Notes - but DON'T add them to found_models
         # They should only be used to enrich loader nodes
         if "Note" in node_type or "PrimitiveString" in node_type:
-            if "widgets_values" in node:
+            if "widgets_values" in node and isinstance(node["widgets_values"], list):
                 for val in node["widgets_values"]:
                     if isinstance(val, str):
-                        # Regex to find markdown links: [text](url)
-                        links = re.findall(r'\[([^\]]+)\]\((https?://[^)]+)\)', val, re.IGNORECASE)
-                        for label, url in links:
-                            if not is_specific_model_file_url(url):
-                                continue
-                            url_filename = url.split("?")[0].split("/")[-1]
-                            candidates = []
-                            if any(url_filename.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
-                                candidates.append(url_filename)
-                            if any(label.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
-                                candidates.append(label)
-                            for filename in candidates:
-                                note_key = normalize_filename_key(filename)
-                                note_links.setdefault(note_key, url)
-                                note_links_normalized.setdefault(normalize_filename_compact(filename), url)
+                        _extract_note_context_from_text(
+                            val,
+                            note_links,
+                            note_links_normalized,
+                            note_repos,
+                            note_folder_hints,
+                        )
             continue  # Don't process Notes as loader nodes
 
         # 2. Check properties -> models (Standard ComfyUI template format)
@@ -2309,20 +2958,27 @@ def _collect_models_from_nodes(
                             # If it looks like a model filename
                             if any(parsed_filename.endswith(ext) for ext in MODEL_EXTENSIONS):
                                 if not any(m["filename"] == parsed_filename and m["node_id"] == node_id for m in found_models):
-                                    suggested_folder = resolve_node_folder_for_widget(
+                                    suggested_folder, is_auth, resolved_wname = resolve_node_folder_for_widget_with_authority(
                                         node,
                                         widget_index=idx,
                                         widget_name=None,
                                         widget_value=parsed_filename
                                     )
-                                    found_models.append({
+                                    entry = {
                                         "filename": parsed_filename,
                                         "url": val,
                                         "node_id": node_id,
                                         "node_title": node_title,
                                         "node_type": node_type,
-                                        "suggested_folder": suggested_folder
-                                    })
+                                        "suggested_folder": suggested_folder,
+                                        "widget_index": idx,
+                                    }
+                                    if resolved_wname:
+                                        entry["input_name"] = resolved_wname
+                                    if is_auth and suggested_folder:
+                                        entry["authoritative_folder"] = suggested_folder
+                                        entry["folder_locked"] = True
+                                    found_models.append(entry)
                                 continue
 
                     # CASE B: Value is a filename
@@ -2333,21 +2989,28 @@ def _collect_models_from_nodes(
                         filename, requested_path = split_model_identifier(val)
                         if not any(m["filename"] == filename and m["node_id"] == node_id for m in found_models):
                             # Try to map folder
-                            suggested_folder = resolve_node_folder_for_widget(
+                            suggested_folder, is_auth, resolved_wname = resolve_node_folder_for_widget_with_authority(
                                 node,
                                 widget_index=idx,
                                 widget_name=None,
                                 widget_value=filename
                             )
-                            found_models.append({
+                            entry = {
                                 "filename": filename,
                                 "requested_path": requested_path,
                                 "url": None,
                                 "node_id": node_id,
                                 "node_title": node_title,
                                 "node_type": node_type,
-                                "suggested_folder": suggested_folder
-                            })
+                                "suggested_folder": suggested_folder,
+                                "widget_index": idx,
+                            }
+                            if resolved_wname:
+                                entry["input_name"] = resolved_wname
+                            if is_auth and suggested_folder:
+                                entry["authoritative_folder"] = suggested_folder
+                                entry["folder_locked"] = True
+                            found_models.append(entry)
 
             if isinstance(named_widgets, dict):
                 for w_name, val in named_widgets.items():
@@ -2358,21 +3021,26 @@ def _collect_models_from_nodes(
                     if _looks_like_model_widget_value(val, node_type):
                         filename, requested_path = split_model_identifier(val)
                         if not any(m["filename"] == filename and m["node_id"] == node_id for m in found_models):
-                            suggested_folder = resolve_node_folder_for_widget(
+                            suggested_folder, is_auth, resolved_wname = resolve_node_folder_for_widget_with_authority(
                                 node,
                                 widget_index=None,
                                 widget_name=w_name,
                                 widget_value=filename
                             )
-                            found_models.append({
+                            entry = {
                                 "filename": filename,
                                 "requested_path": requested_path,
                                 "url": None,
                                 "node_id": node_id,
                                 "node_title": node_title,
                                 "node_type": node_type,
-                                "suggested_folder": suggested_folder
-                            })
+                                "suggested_folder": suggested_folder,
+                                "input_name": resolved_wname or w_name,
+                            }
+                            if is_auth and suggested_folder:
+                                entry["authoritative_folder"] = suggested_folder
+                                entry["folder_locked"] = True
+                            found_models.append(entry)
 
         # 4. Check inputs for upstream URLs (Model Injection)
         if "inputs" in node:
@@ -2437,6 +3105,8 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
     # They should only be used to enrich loader nodes that are missing URLs
     note_links = {}  # {normalized_filename: url}
     note_links_normalized = {}  # {compact_filename: url}
+    note_repos: list[str] = []
+    note_folder_hints: dict[str, str] = {}
 
     links_map = _build_links_map(workflow.get("links", []))
     nodes = workflow.get("nodes", [])
@@ -2448,7 +3118,9 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
         found_models,
         note_links,
         note_links_normalized,
-        "Unknown Node"
+        "Unknown Node",
+        note_repos=note_repos,
+        note_folder_hints=note_folder_hints,
     )
 
     definitions = workflow.get("definitions", {})
@@ -2477,16 +3149,25 @@ def extract_models_from_workflow(workflow: Dict[str, Any]) -> List[Dict[str, Any
                 note_links,
                 note_links_normalized,
                 f"Subgraph Node ({subgraph_name})",
-                instance_path
+                instance_path,
+                note_repos=note_repos,
+                note_folder_hints=note_folder_hints,
             )
 
-    # Enrich found_models with URLs from note_links.
+    # Enrich found_models with URLs from note_links and folder hints from MarkdownNote tables.
     # Note links should never override an already valid file URL from loader metadata.
     for model in found_models:
         note_key = normalize_filename_key(model["filename"])
-        url = note_links.get(note_key)
-        if not url:
-            url = note_links_normalized.get(normalize_filename_compact(model["filename"]))
+        compact_key = normalize_filename_compact(model["filename"])
+
+        if not model.get("folder_locked"):
+            hinted_folder = note_folder_hints.get(note_key) or note_folder_hints.get(compact_key)
+            if hinted_folder:
+                current_folder = normalize_save_path(model.get("suggested_folder")) or ""
+                if not current_folder or current_folder in {"checkpoints", "diffusion_models", "text_encoders"}:
+                    model["suggested_folder"] = hinted_folder
+
+        url = note_links.get(note_key) or note_links_normalized.get(compact_key)
         if not url:
             continue
         if not is_specific_model_file_url(url, expected_filename=model["filename"]):
@@ -2678,51 +3359,83 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
 
         found_path = None
         found_root = None
+        found_bucket = None
         allow_nunchaku_fuzzy = _is_nunchaku_extensionless_identifier(filename)
-        
-        for root_path in search_paths:
-             if not os.path.exists(root_path):
-                 continue
 
-             # 1. Exact requested-path check.
-             # This keeps workflow-managed downloader nodes fast even when multiple
-             # models share the same basename in different subfolders.
-             exact_path = resolve_requested_model_path(root_path, requested_path, filename)
-             if exact_path:
-                 found_path = exact_path
-                 found_root = root_path
-                 break
-                 
-             # 2. Recursive search (e.g., "model.safetensors" in "models/checkpoints/subfolder/model.safetensors")
-             found_file = recursive_find_file(filename, root_path)
-             if found_file:
-                 found_path = found_file
-                 found_root = root_path
-                 break
+        def _search_roots_for_model(roots: list[str], search_folder_type: str | None) -> tuple[str | None, str | None]:
+            for root_path in roots:
+                if not isinstance(root_path, str) or not root_path or not os.path.exists(root_path):
+                    continue
 
-             # Some ComfyUI ecosystems refer to CLIP vision encoders by different but
-             # equivalent filenames (for example CLIP-ViT-H-* vs clip_vision_h).
-             # Treat those as present so the workflow can be auto-fixed as a path mismatch
-             # instead of re-downloading the same weights.
-             found_file = recursive_find_equivalent_model_file(filename, root_path, folder_type)
-             if found_file:
-                 found_path = found_file
-                 found_root = root_path
-                 break
+                exact_path = resolve_requested_model_path(root_path, requested_path, filename)
+                if exact_path:
+                    return exact_path, root_path
 
-             # Nunchaku workflows may store extensionless SVDQ identifiers (e.g. svdq-int4-...).
-             # Try matching stem-based filenames and directories for these nodes.
-             if allow_nunchaku_fuzzy:
-                 found_file = recursive_find_file_by_stem(filename, root_path)
-                 if found_file:
-                     found_path = found_file
-                     found_root = root_path
-                     break
-                 found_dir = recursive_find_dir(filename, root_path)
-                 if found_dir:
-                     found_path = found_dir
-                     found_root = root_path
-                     break
+                found_file = recursive_find_file(filename, root_path)
+                if found_file:
+                    return found_file, root_path
+
+                found_file = recursive_find_equivalent_model_file(filename, root_path, search_folder_type)
+                if found_file:
+                    return found_file, root_path
+
+                if allow_nunchaku_fuzzy:
+                    found_file = recursive_find_file_by_stem(filename, root_path)
+                    if found_file:
+                        return found_file, root_path
+                    found_dir = recursive_find_dir(filename, root_path)
+                    if found_dir:
+                        return found_dir, root_path
+            return None, None
+
+        found_path, found_root = _search_roots_for_model(search_paths, folder_type)
+
+        # Cross-bucket fallback: when a model's folder was unknown or only guessed weakly
+        # (not folder_locked by an authoritative node schema), check all valid registered
+        # model buckets in folder_paths so already-installed models in custom buckets
+        # (such as models/asr) are never falsely reported as missing.
+        if not found_path and not model.get("folder_locked"):
+            fp_base = getattr(folder_paths, "base_path", None)
+            fp_base_str = fp_base if isinstance(fp_base, str) and fp_base else os.getcwd()
+            fp_models = getattr(folder_paths, "models_dir", None)
+            fp_models_str = (
+                fp_models
+                if isinstance(fp_models, str) and fp_models
+                else os.path.join(fp_base_str, "models")
+            )
+            checked_roots = {
+                os.path.realpath(os.path.abspath(p))
+                for p in search_paths
+                if isinstance(p, str) and p
+            }
+            for bucket in get_registered_model_buckets(models_dir=fp_models_str, folder_paths_mod=folder_paths):
+                if bucket == folder_type:
+                    continue
+                bucket_paths: list[str] = []
+                try:
+                    raw_paths = folder_paths.get_folder_paths(bucket)
+                    if isinstance(raw_paths, (list, tuple, set)):
+                        bucket_paths = [p for p in raw_paths if isinstance(p, str) and p]
+                except Exception:
+                    bucket_paths = []
+                default_bucket_dir = os.path.join(fp_models_str, bucket)
+                if os.path.isdir(default_bucket_dir) and default_bucket_dir not in bucket_paths:
+                    bucket_paths.append(default_bucket_dir)
+                candidate_roots = [
+                    p
+                    for p in bucket_paths
+                    if os.path.exists(p) and os.path.realpath(os.path.abspath(p)) not in checked_roots
+                ]
+                if not candidate_roots:
+                    continue
+                for p in candidate_roots:
+                    checked_roots.add(os.path.realpath(os.path.abspath(p)))
+                c_path, c_root = _search_roots_for_model(candidate_roots, bucket)
+                if c_path:
+                    found_path = c_path
+                    found_root = c_root
+                    found_bucket = bucket
+                    break
         
         if found_path:
             # Calculate relative path to see if it matches the widget value
@@ -2740,6 +3453,9 @@ def check_model_files(found_models: List[Dict[str, Any]]) -> Tuple[List[Dict[str
             model_entry = model.copy()
             model_entry["found_path"] = found_path
             model_entry["clean_path"] = rel_path # Path relative to the model type root
+            if found_bucket:
+                model_entry["suggested_folder"] = found_bucket
+                model_entry["actual_folder"] = found_bucket
             
             existing.append(model_entry)
             
@@ -4468,7 +5184,41 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         missing_models = load_comfyui_manager_cache(missing_models, status_cb=status_cb, request_id=request_id)
 
     token = get_token()
+    civitai_token = get_civitai_token()
     skip_hf_search_all = bool(workflow_json.get("skip_hf_search"))
+
+    # 4b. Fast exact hash lookup on Civitai when API key is configured and workflow provides a model hash
+    if missing_models and civitai_token and not skip_hf_search_all:
+        for model in missing_models:
+            _check_cancelled()
+            if model.get("url"):
+                continue
+            model_hash = str(model.get("hash") or "").strip()
+            if not model_hash:
+                continue
+            filename = model.get("filename") or ""
+            if filename and request_id:
+                if is_model_skipped(request_id, filename):
+                    continue
+                set_current_searching_model(request_id, filename)
+            if status_cb:
+                status_cb({
+                    "message": "Checking Civitai by hash",
+                    "source": "civitai_hash",
+                    "filename": filename,
+                })
+            hit = lookup_civitai_by_hash(model_hash, token=civitai_token)
+            if hit and hit.get("download_url"):
+                model["url"] = hit["download_url"]
+                model["source"] = "civitai_hash"
+                if hit.get("size_bytes") is not None:
+                    model["expected_size"] = hit["size_bytes"]
+                if hit.get("sha256"):
+                    model["expected_sha"] = hit["sha256"]
+                if not model.get("folder_locked") and not model.get("suggested_folder") and hit.get("folder"):
+                    model["suggested_folder"] = hit["folder"]
+            if filename and request_id:
+                set_current_searching_model(request_id, None)
 
     skip_filenames = {
         (f or "").lower()
@@ -4508,12 +5258,93 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
             })
 
     # 5. Search HF for remaining missing models (that didn't have URL from registry/manager)
+    workflow_note_repos, _ = _extract_note_context_from_workflow(workflow_json)
     priority_author_repos: dict[str, list[str]] | None = None
     api = None
     if missing_models and not skip_hf_search_all:
-        priority_author_repos = {}
         try:
             api = HfApi(token=token)
+        except Exception as e:
+            print(f"[DEBUG] HfApi init failed: {e}")
+            api = None
+
+    def _scan_repo_list_for_missing(repo_ids: list[str], source_label: str) -> None:
+        if not repo_ids or not api or not missing_models:
+            return
+        remaining: dict[str, dict] = {}
+        for model in [m for m in missing_models if not m.get("url")]:
+            if _skip_hf_search(model):
+                continue
+            fn = model.get("filename")
+            if fn:
+                remaining[fn.lower()] = model
+        if not remaining:
+            return
+        for repo_id in repo_ids:
+            if not remaining:
+                break
+            _check_cancelled()
+            current_model = next(iter(remaining.values()))
+            current_filename = current_model.get("filename") or ""
+            if current_filename and request_id:
+                if is_model_skipped(request_id, current_filename):
+                    remaining.pop(current_filename.lower(), None)
+                    continue
+                set_current_searching_model(request_id, current_filename)
+            if status_cb:
+                status_cb({
+                    "message": f"Checking {repo_id}",
+                    "source": source_label,
+                    "filename": current_filename,
+                    "detail": repo_id,
+                })
+            try:
+                files = _get_repo_files(api, repo_id, token)
+            except HFSearchBudgetError:
+                if current_filename and request_id:
+                    set_current_searching_model(request_id, None)
+                return
+            except Exception:
+                if current_filename and request_id:
+                    set_current_searching_model(request_id, None)
+                continue
+
+            found_paths: dict[str, str] = {}
+            for f in files:
+                base = os.path.basename(f).lower()
+                if base not in remaining:
+                    continue
+                prev = found_paths.get(base)
+                if prev is None or len(f) < len(prev):
+                    found_paths[base] = f
+
+            for base, match_path in found_paths.items():
+                model = remaining.pop(base, None)
+                if not model:
+                    continue
+                model["url"] = f"https://huggingface.co/{repo_id}/resolve/main/{match_path}"
+                model["hf_repo"] = repo_id
+                model["hf_path"] = match_path
+                model["source"] = source_label
+                _hf_search_cache[base] = {
+                    "url": model["url"],
+                    "hf_repo": repo_id,
+                    "hf_path": match_path,
+                }
+                print(f"[DEBUG] Found {model.get('filename')} in repo {repo_id} ({source_label})")
+
+            if current_filename and request_id:
+                set_current_searching_model(request_id, None)
+
+    # Tier-0: Check explicit Hugging Face repositories linked inside workflow Note / MarkdownNote nodes
+    # before fetching PRIORITY_AUTHORS or falling back to global search/mirrors.
+    if missing_models and workflow_note_repos and not skip_hf_search_all and api:
+        _reset_hf_search_budget()
+        _scan_repo_list_for_missing(workflow_note_repos, "workflow_note_repo")
+
+    if any(not m.get("url") and not _skip_hf_search(m) for m in missing_models) and not skip_hf_search_all and api:
+        priority_author_repos = {}
+        try:
             for author in PRIORITY_AUTHORS:
                 _check_cancelled()
                 try:
@@ -4759,6 +5590,48 @@ def process_workflow_for_missing_models(workflow_json: Dict[str, Any], status_cb
         _run_hf_stage("basic", "basic")
         if priority_author_repos is None:
             _run_hf_stage("priority", "priority")
+
+    # 5b. Civitai exact-filename fallback search when Civitai API key is configured
+    if missing_models and civitai_token and not skip_hf_search_all:
+        for m in [m for m in missing_models if not m.get("url")]:
+            _check_cancelled()
+            filename = m.get("filename") or ""
+            if not filename:
+                continue
+            if request_id:
+                if is_model_skipped(request_id, filename):
+                    continue
+                set_current_searching_model(request_id, filename)
+            if _skip_hf_search(m):
+                if request_id:
+                    set_current_searching_model(request_id, None)
+                continue
+            if status_cb:
+                status_cb({
+                    "message": "Searching Civitai",
+                    "source": "civitai_search",
+                    "filename": filename,
+                })
+            hit = search_civitai_by_filename(
+                filename,
+                folder_hint=m.get("suggested_folder"),
+                token=civitai_token,
+            )
+            if hit and hit.get("download_url"):
+                m["url"] = hit["download_url"]
+                m["source"] = "civitai_search"
+                if hit.get("size_bytes") is not None:
+                    m["expected_size"] = hit["size_bytes"]
+                if hit.get("sha256"):
+                    m["expected_sha"] = hit["sha256"]
+                if (
+                    not m.get("folder_locked")
+                    and hit.get("folder")
+                    and str(m.get("suggested_folder") or "").strip() in {"", "checkpoints"}
+                ):
+                    m["suggested_folder"] = hit["folder"]
+            if request_id:
+                set_current_searching_model(request_id, None)
 
     final_missing = missing_models
     enforce_authoritative_node_folders(final_missing)

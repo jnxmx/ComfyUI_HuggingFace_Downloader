@@ -124,6 +124,19 @@ const normalizeHfDownloadUrl = (url) => {
     return raw;
 };
 
+const isCivitaiUrl = (url) => {
+    const raw = String(url || "").trim();
+    if (!raw) return false;
+    try {
+        const parsed = new URL(raw);
+        if (!["http:", "https:"].includes(parsed.protocol)) return false;
+        const host = String(parsed.hostname || "").toLowerCase();
+        return host === "civitai.com" || host === "www.civitai.com" || host === "civitai.green" || host === "www.civitai.green";
+    } catch {
+        return false;
+    }
+};
+
 const parseHfFolderLinkInfo = (link) => {
     if (!link || typeof link !== "string") return null;
     const value = link.trim();
@@ -858,6 +871,11 @@ export function showUnifiedImportModelDialog(options = {}) {
     let urlValue = String(options.initialUrl || "").trim();
     let fullRepoMode = Boolean(options.fullRepoMode);
     let selectedFile = null;
+    let resolvedCivitai = null;
+    let selectedCivitaiVersionId = "";
+    let isResolvingUrl = false;
+    let step1ContinueBtnEl = null;
+    let step1UrlInputEl = null;
     let folderOptions = [...DEFAULT_FOLDERS];
     const normalizedInitialFolder = normalizeFolderPathInput(options.initialFolder);
     let selectedFolder = (normalizedInitialFolder && normalizedInitialFolder !== "all") ? normalizedInitialFolder : "loras";
@@ -1001,11 +1019,45 @@ export function showUnifiedImportModelDialog(options = {}) {
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
 
+    const getActiveCivitaiVersion = () => {
+        if (!resolvedCivitai) return null;
+        const versions = Array.isArray(resolvedCivitai.versions) ? resolvedCivitai.versions : [];
+        if (versions.length && selectedCivitaiVersionId) {
+            const matched = versions.find((v) => String(v.id) === String(selectedCivitaiVersionId));
+            if (matched) return matched;
+        }
+        if (versions.length) return versions[0];
+        return {
+            id: resolvedCivitai.version_id || "",
+            name: resolvedCivitai.version_name || "",
+            base_model: resolvedCivitai.base_model || "",
+            filename: resolvedCivitai.filename || "",
+            size_bytes: resolvedCivitai.size_bytes || null,
+            sha256: resolvedCivitai.sha256 || null,
+            download_url: resolvedCivitai.download_url || "",
+            folder: resolvedCivitai.folder || "checkpoints",
+            early_access: Boolean(resolvedCivitai.early_access),
+        };
+    };
+
     const resolveDetectedTarget = () => {
         if (activeSource === "file" && selectedFile) {
             return {
                 displayName: selectedFile.name,
                 filename: selectedFile.name,
+                sizeBytes: selectedFile.size,
+                repoInfo: null,
+            };
+        }
+        const civitaiVer = getActiveCivitaiVersion();
+        if (civitaiVer && civitaiVer.filename) {
+            return {
+                displayName: civitaiVer.filename,
+                filename: civitaiVer.filename,
+                sizeBytes: civitaiVer.size_bytes || null,
+                downloadUrl: civitaiVer.download_url || "",
+                sha256: civitaiVer.sha256 || null,
+                earlyAccess: Boolean(civitaiVer.early_access),
                 repoInfo: null,
             };
         }
@@ -1033,7 +1085,8 @@ export function showUnifiedImportModelDialog(options = {}) {
         };
     };
 
-    const advanceFromUrlStep = () => {
+    const advanceFromUrlStep = async () => {
+        if (isResolvingUrl || isSubmitting) return;
         const trimmed = urlValue.trim();
         if (!trimmed) {
             stepErrorText = "Please enter a model URL or Hugging Face link.";
@@ -1052,6 +1105,51 @@ export function showUnifiedImportModelDialog(options = {}) {
             return;
         }
 
+        if (isCivitaiUrl(trimmed)) {
+            isResolvingUrl = true;
+            stepErrorText = "";
+            if (step1ContinueBtnEl) {
+                step1ContinueBtnEl.disabled = true;
+                step1ContinueBtnEl.innerHTML = `<i class="pi pi-spin pi-spinner-dotted" aria-hidden="true"></i><span>Resolving...</span>`;
+            }
+            if (step1UrlInputEl) {
+                step1UrlInputEl.disabled = true;
+            }
+            try {
+                const resp = await fetch("/api/resolve_model_url", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url: trimmed }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!overlay.isConnected) return;
+                if (!resp.ok || data.ok === false) {
+                    throw new Error(data.error || `Server returned ${resp.status} ${resp.statusText}`);
+                }
+                resolvedCivitai = data;
+                selectedCivitaiVersionId = String(data.version_id || "");
+                fullRepoMode = false;
+                activeSource = "url";
+                selectedFile = null;
+                selectedFolder = normalizeFolderPathInput(data.folder)
+                    || inferModelFolderFromLinkOrName(trimmed, data.filename || "", false, options.initialFolder || "");
+                isResolvingUrl = false;
+                step = 2;
+                render();
+                return;
+            } catch (err) {
+                if (!overlay.isConnected) return;
+                resolvedCivitai = null;
+                selectedCivitaiVersionId = "";
+                isResolvingUrl = false;
+                stepErrorText = String(err?.message || err || "Failed to resolve Civitai link.");
+                render();
+                return;
+            }
+        }
+
+        resolvedCivitai = null;
+        selectedCivitaiVersionId = "";
         const hfInfo = parseHfFolderLinkInfo(trimmed);
         fullRepoMode = Boolean(hfInfo?.isExplicitRepoOrTree);
         activeSource = fullRepoMode ? "repo" : "url";
@@ -1079,6 +1177,8 @@ export function showUnifiedImportModelDialog(options = {}) {
 
     const advanceFromFileStep = (file) => {
         if (!file) return;
+        resolvedCivitai = null;
+        selectedCivitaiVersionId = "";
         selectedFile = file;
         activeSource = "file";
         fullRepoMode = false;
@@ -1127,8 +1227,11 @@ export function showUnifiedImportModelDialog(options = {}) {
     });
 
     const handleUrlSubmit = async (submitBtn, errorEl) => {
-        const trimmed = normalizeHfDownloadUrl(urlValue);
         const detected = resolveDetectedTarget();
+        const civitaiVer = getActiveCivitaiVersion();
+        const trimmed = civitaiVer?.download_url
+            ? civitaiVer.download_url
+            : normalizeHfDownloadUrl(urlValue);
         const normalizedFolder = normalizeFolderPathInput(selectedFolder);
         const targetFolder = fullRepoMode ? normalizedFolder : (normalizedFolder || "loras");
         const queueModel = fullRepoMode
@@ -1140,8 +1243,11 @@ export function showUnifiedImportModelDialog(options = {}) {
             }
             : {
                 filename: detected.filename,
+                target_filename: detected.filename,
                 url: trimmed,
                 folder: targetFolder,
+                ...(civitaiVer?.size_bytes ? { expected_size: civitaiVer.size_bytes } : {}),
+                ...(civitaiVer?.sha256 ? { expected_sha: civitaiVer.sha256 } : {}),
             };
 
         isSubmitting = true;
@@ -1433,9 +1539,12 @@ export function showUnifiedImportModelDialog(options = {}) {
         urlInput.addEventListener("keydown", (event) => {
             if (event.key === "Enter" && !continueBtn.disabled) {
                 event.preventDefault();
-                advanceFromUrlStep();
+                void advanceFromUrlStep();
             }
         });
+
+        step1UrlInputEl = urlInput;
+        step1ContinueBtnEl = continueBtn;
 
         inputGroup.appendChild(urlInput);
         if (stepErrorText) {
@@ -1492,7 +1601,7 @@ export function showUnifiedImportModelDialog(options = {}) {
         stepContainer.appendChild(topStack);
 
         syncContinueDisabled();
-        continueBtn.onclick = () => advanceFromUrlStep();
+        continueBtn.onclick = () => void advanceFromUrlStep();
 
         footer.innerHTML = "";
         const cancelBtn = document.createElement("button");
@@ -1543,16 +1652,159 @@ export function showUnifiedImportModelDialog(options = {}) {
         detectedName.title = detected.displayName || "";
         detectedCard.appendChild(detectedName);
 
-        if (activeSource === "file" && selectedFile) {
+        if (detected.sizeBytes > 0) {
             const sizeMeta = document.createElement("span");
             sizeMeta.className = "hf-import-detected-meta";
-            sizeMeta.textContent = formatSizeHuman(selectedFile.size);
+            sizeMeta.textContent = formatSizeHuman(detected.sizeBytes);
             detectedCard.appendChild(sizeMeta);
         }
 
         readoutBlock.appendChild(fieldLabel);
         readoutBlock.appendChild(detectedCard);
         stepContainer.appendChild(readoutBlock);
+
+        const openDropdownMenu = (triggerBtn, items, currentValue, testId, onSelect) => {
+            if (triggerBtn.disabled || isSubmitting) return;
+            if (activeDropdownMenu && triggerBtn.classList.contains("is-open")) {
+                closeFolderDropdown();
+                return;
+            }
+            closeFolderDropdown();
+
+            const rect = triggerBtn.getBoundingClientRect();
+            const menu = document.createElement("div");
+            menu.className = "hf-import-select-menu scrollbar-custom";
+            menu.setAttribute("role", "listbox");
+            menu.setAttribute("data-testid", testId);
+            menu.style.left = `${rect.left}px`;
+            menu.style.width = `${rect.width}px`;
+
+            const spaceBelow = window.innerHeight - rect.bottom - 8;
+            if (spaceBelow < 180 && rect.top > 200) {
+                menu.style.bottom = `${window.innerHeight - rect.top + 6}px`;
+            } else {
+                menu.style.top = `${rect.bottom + 6}px`;
+            }
+
+            for (const item of items) {
+                const isSelected = String(item.value) === String(currentValue);
+                const optBtn = document.createElement("button");
+                optBtn.type = "button";
+                optBtn.className = `hf-import-select-option${isSelected ? " is-selected" : ""}`;
+                optBtn.setAttribute("role", "option");
+                optBtn.setAttribute("aria-selected", isSelected ? "true" : "false");
+                optBtn.dataset.value = item.value;
+
+                const optText = document.createElement("span");
+                optText.textContent = item.label;
+                optBtn.appendChild(optText);
+
+                if (isSelected) {
+                    const checkIcon = document.createElement("i");
+                    checkIcon.className = "icon-[lucide--check] size-4";
+                    checkIcon.setAttribute("aria-hidden", "true");
+                    optBtn.appendChild(checkIcon);
+                }
+
+                optBtn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    onSelect(item);
+                    closeFolderDropdown();
+                });
+
+                menu.appendChild(optBtn);
+            }
+
+            document.body.appendChild(menu);
+            triggerBtn.classList.add("is-open");
+            triggerBtn.setAttribute("aria-expanded", "true");
+            activeDropdownMenu = menu;
+
+            const selectedEl = menu.querySelector(".hf-import-select-option.is-selected");
+            if (selectedEl) {
+                selectedEl.scrollIntoView({ block: "nearest" });
+            }
+
+            const handleOutsidePointerDown = (e) => {
+                if (!menu.contains(e.target) && !triggerBtn.contains(e.target)) {
+                    closeFolderDropdown();
+                }
+            };
+            const handleWindowResize = () => closeFolderDropdown();
+
+            document.addEventListener("pointerdown", handleOutsidePointerDown, true);
+            window.addEventListener("resize", handleWindowResize);
+
+            activeDropdownCleanup = () => {
+                document.removeEventListener("pointerdown", handleOutsidePointerDown, true);
+                window.removeEventListener("resize", handleWindowResize);
+                triggerBtn.classList.remove("is-open");
+                triggerBtn.setAttribute("aria-expanded", "false");
+            };
+        };
+
+        const civitaiVersions = Array.isArray(resolvedCivitai?.versions) ? resolvedCivitai.versions : [];
+        if (resolvedCivitai && civitaiVersions.length > 1) {
+            const versionBlock = document.createElement("div");
+            versionBlock.className = "hf-import-readout-block";
+
+            const versionLabelRow = document.createElement("div");
+            versionLabelRow.className = "hf-import-type-label-row";
+            versionLabelRow.innerHTML = `<label for="hf-import-version-select-el">Version</label>`;
+
+            const versionWrap = document.createElement("div");
+            versionWrap.className = "hf-import-select-wrap";
+
+            const versionBtn = document.createElement("button");
+            versionBtn.type = "button";
+            versionBtn.id = "hf-import-version-select-el";
+            versionBtn.className = "hf-import-select-btn";
+            versionBtn.setAttribute("data-testid", "hf-import-version-select");
+            versionBtn.setAttribute("role", "combobox");
+            versionBtn.setAttribute("aria-haspopup", "listbox");
+            versionBtn.setAttribute("aria-expanded", "false");
+
+            const versionLabelEl = document.createElement("span");
+            versionLabelEl.className = "hf-import-select-label";
+
+            const versionChevron = document.createElement("span");
+            versionChevron.className = "hf-import-select-chevron-wrap";
+            versionChevron.innerHTML = `<i class="icon-[lucide--chevron-down] size-5 hf-import-select-chevron" aria-hidden="true"></i>`;
+
+            versionBtn.appendChild(versionLabelEl);
+            versionBtn.appendChild(versionChevron);
+
+            const versionItems = civitaiVersions.map((v) => {
+                const sizeText = v.size_bytes ? ` · ${formatSizeHuman(v.size_bytes)}` : "";
+                const baseText = v.base_model ? ` · ${v.base_model}` : "";
+                return {
+                    value: String(v.id),
+                    label: `${v.name || `Version ${v.id}`}${baseText}${sizeText}`,
+                };
+            });
+            const activeVer = getActiveCivitaiVersion();
+            const currentVerId = String(activeVer?.id || versionItems[0].value);
+            const currentVerItem = versionItems.find((item) => item.value === currentVerId) || versionItems[0];
+            versionLabelEl.textContent = currentVerItem.label;
+            versionBtn.dataset.value = currentVerItem.value;
+
+            versionBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                openDropdownMenu(versionBtn, versionItems, currentVerItem.value, "hf-import-version-menu", (item) => {
+                    selectedCivitaiVersionId = String(item.value);
+                    const nextVer = getActiveCivitaiVersion();
+                    if (nextVer?.folder) {
+                        selectedFolder = normalizeFolderPathInput(nextVer.folder) || selectedFolder;
+                    }
+                    render();
+                });
+            });
+
+            versionWrap.appendChild(versionBtn);
+            versionBlock.appendChild(versionLabelRow);
+            versionBlock.appendChild(versionWrap);
+            stepContainer.appendChild(versionBlock);
+        }
 
         const typeBlock = document.createElement("div");
         typeBlock.className = "hf-import-readout-block";
@@ -1621,95 +1873,18 @@ export function showUnifiedImportModelDialog(options = {}) {
             )}`;
         }
 
-        const openFolderDropdown = () => {
-            if (folderSelect.disabled || isSubmitting) return;
-            if (activeDropdownMenu) {
-                closeFolderDropdown();
-                return;
-            }
-
-            const rect = folderSelect.getBoundingClientRect();
-            const menu = document.createElement("div");
-            menu.className = "hf-import-select-menu scrollbar-custom";
-            menu.setAttribute("role", "listbox");
-            menu.setAttribute("data-testid", "hf-import-folder-menu");
-            menu.style.left = `${rect.left}px`;
-            menu.style.width = `${rect.width}px`;
-
-            const spaceBelow = window.innerHeight - rect.bottom - 8;
-            if (spaceBelow < 180 && rect.top > 200) {
-                menu.style.bottom = `${window.innerHeight - rect.top + 6}px`;
-            } else {
-                menu.style.top = `${rect.bottom + 6}px`;
-            }
-
-            for (const item of folderItems) {
-                const isSelected = item.value === selectedFolder;
-                const optBtn = document.createElement("button");
-                optBtn.type = "button";
-                optBtn.className = `hf-import-select-option${isSelected ? " is-selected" : ""}`;
-                optBtn.setAttribute("role", "option");
-                optBtn.setAttribute("aria-selected", isSelected ? "true" : "false");
-                optBtn.dataset.value = item.value;
-
-                const optText = document.createElement("span");
-                optText.textContent = item.label;
-                optBtn.appendChild(optText);
-
-                if (isSelected) {
-                    const checkIcon = document.createElement("i");
-                    checkIcon.className = "icon-[lucide--check] size-4";
-                    checkIcon.setAttribute("aria-hidden", "true");
-                    optBtn.appendChild(checkIcon);
-                }
-
-                optBtn.addEventListener("click", (e) => {
-                    e.stopPropagation();
-                    selectedFolder = item.value;
-                    updateSelectedDisplay();
-                    if (destPreview) {
-                        destPreview.textContent = `Destination: ${buildFolderDownloadDestinationPreview(
-                            selectedFolder,
-                            detected.filename
-                        )}`;
-                    }
-                    closeFolderDropdown();
-                });
-
-                menu.appendChild(optBtn);
-            }
-
-            document.body.appendChild(menu);
-            folderSelect.classList.add("is-open");
-            folderSelect.setAttribute("aria-expanded", "true");
-            activeDropdownMenu = menu;
-
-            const selectedEl = menu.querySelector(".hf-import-select-option.is-selected");
-            if (selectedEl) {
-                selectedEl.scrollIntoView({ block: "nearest" });
-            }
-
-            const handleOutsidePointerDown = (e) => {
-                if (!menu.contains(e.target) && !folderSelect.contains(e.target)) {
-                    closeFolderDropdown();
-                }
-            };
-            const handleWindowResize = () => closeFolderDropdown();
-
-            document.addEventListener("pointerdown", handleOutsidePointerDown, true);
-            window.addEventListener("resize", handleWindowResize);
-
-            activeDropdownCleanup = () => {
-                document.removeEventListener("pointerdown", handleOutsidePointerDown, true);
-                window.removeEventListener("resize", handleWindowResize);
-                folderSelect.classList.remove("is-open");
-                folderSelect.setAttribute("aria-expanded", "false");
-            };
-        };
-
         folderSelect.addEventListener("click", (e) => {
             e.stopPropagation();
-            openFolderDropdown();
+            openDropdownMenu(folderSelect, folderItems, selectedFolder, "hf-import-folder-menu", (item) => {
+                selectedFolder = item.value;
+                updateSelectedDisplay();
+                if (destPreview) {
+                    destPreview.textContent = `Destination: ${buildFolderDownloadDestinationPreview(
+                        selectedFolder,
+                        detected.filename
+                    )}`;
+                }
+            });
         });
 
         selectWrap.appendChild(folderSelect);
@@ -1720,6 +1895,14 @@ export function showUnifiedImportModelDialog(options = {}) {
         }
 
         stepContainer.appendChild(typeBlock);
+
+        if (detected.earlyAccess) {
+            const eaNote = document.createElement("p");
+            eaNote.className = "hf-import-dest-preview";
+            eaNote.style.color = "var(--warning, #f59e0b)";
+            eaNote.textContent = "Note: This Civitai version is marked Early Access and requires account access to download.";
+            stepContainer.appendChild(eaNote);
+        }
 
         const errorEl = document.createElement("p");
         errorEl.className = "hf-import-error";
@@ -1753,6 +1936,8 @@ export function showUnifiedImportModelDialog(options = {}) {
                 selectedFile = null;
                 activeSource = "url";
             }
+            resolvedCivitai = null;
+            selectedCivitaiVersionId = "";
             stepErrorText = "";
             step = 1;
             render();
@@ -1875,6 +2060,8 @@ export function showUnifiedImportModelDialog(options = {}) {
         anotherBtn.onclick = () => {
             urlValue = "";
             selectedFile = null;
+            resolvedCivitai = null;
+            selectedCivitaiVersionId = "";
             activeSource = "url";
             fullRepoMode = false;
             stepErrorText = "";

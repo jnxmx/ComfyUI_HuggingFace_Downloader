@@ -2531,7 +2531,7 @@ class ModelExplorerDialog {
                     <div>No models found for "${escapeHtml(q)}" in local database.</div>
                     <button type="button" class="hf-me-hfsearch-btn" data-hf-empty-search="1">
                         <i class="icon-[lucide--globe] size-4" aria-hidden="true"></i>
-                        <span>Search "${escapeHtml(q)}" on Hugging Face</span>
+                        <span>Search "${escapeHtml(q)}" online</span>
                     </button>
                 </div>
             `;
@@ -2632,8 +2632,10 @@ class ModelExplorerDialog {
             models: [
                 {
                     filename: variant.filename,
+                    target_filename: variant.filename,
                     url: variant.url,
                     folder: variant.directory || group.category,
+                    ...(variant.content_length ? { expected_size: variant.content_length } : {}),
                 },
             ],
         };
@@ -2681,8 +2683,8 @@ class ModelExplorerDialog {
         };
 
         this.body.innerHTML = `
-            ${renderBanner(`Searching Hugging Face for "${escapeHtml(cleanQuery)}"...`)}
-            <div class="hf-me-empty">Searching Hugging Face for "${escapeHtml(cleanQuery)}"...</div>
+            ${renderBanner(`Searching online for "${escapeHtml(cleanQuery)}"...`)}
+            <div class="hf-me-empty">Searching online for "${escapeHtml(cleanQuery)}"...</div>
         `;
         bindBackButton();
 
@@ -2694,9 +2696,10 @@ class ModelExplorerDialog {
             const resp = await this.fetchExplorer(`/hf_search?${params.toString()}`, {}, 45000);
             const data = await resp.json().catch(() => ({}));
             if (seq !== this.hfSearchSeq || !this.body.isConnected) return;
+            const sourceTitle = data.civitai_enabled ? "Hugging Face & Civitai" : "Hugging Face";
             if (!resp.ok || data.ok === false) {
                 this.body.innerHTML = `
-                    ${renderBanner(`Hugging Face search failed for "${escapeHtml(cleanQuery)}"`)}
+                    ${renderBanner(`Online search failed for "${escapeHtml(cleanQuery)}"`)}
                     <div class="hf-me-empty">Search failed: ${escapeHtml(data.error || `HTTP ${resp.status}`)}</div>
                 `;
                 bindBackButton();
@@ -2705,8 +2708,8 @@ class ModelExplorerDialog {
             const results = Array.isArray(data.results) ? data.results : [];
             if (!results.length) {
                 this.body.innerHTML = `
-                    ${renderBanner(`Hugging Face results for "${escapeHtml(cleanQuery)}" (0)`)}
-                    <div class="hf-me-empty">No matching model files found on Hugging Face for "${escapeHtml(cleanQuery)}".</div>
+                    ${renderBanner(`${sourceTitle} results for "${escapeHtml(cleanQuery)}" (0)`)}
+                    <div class="hf-me-empty">No matching model files found on ${sourceTitle} for "${escapeHtml(cleanQuery)}".</div>
                 `;
                 bindBackButton();
                 return;
@@ -2719,15 +2722,24 @@ class ModelExplorerDialog {
 
             const rowsHtml = results
                 .map((item, idx) => {
-                    const repoUrl = `https://huggingface.co/${escapeHtml(item.repo_id)}`;
+                    const isCivitaiItem = item.provider === "civitai.com" || Boolean(item.source_page_url);
+                    const sourceUrl = escapeHtml(item.source_page_url || `https://huggingface.co/${item.repo_id}`);
+                    const sourceLabel = escapeHtml(item.source_label || item.repo_id || "huggingface.co");
                     const folder = escapeHtml(item.directory || defaultFolder);
                     const tags = [
-                        `<a class="hf-me-tag hf-me-tag--link" href="${repoUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.repo_id)}</a>`,
+                        `<a class="hf-me-tag hf-me-tag--link" href="${sourceUrl}" target="_blank" rel="noopener noreferrer">${sourceLabel}</a>`,
                     ];
                     if (item.is_priority_author) {
                         tags.push(`<span class="hf-me-tag hf-me-tag--priority">priority</span>`);
                     }
+                    if (isCivitaiItem && item.base) {
+                        tags.push(`<span class="hf-me-tag">${escapeHtml(item.base)}</span>`);
+                    }
                     tags.push(`<span class="hf-me-tag">${folder}/</span>`);
+                    const sizeText = item.size_bytes ? this.formatSizeGb(item.size_bytes) : "";
+                    if (sizeText) {
+                        tags.push(`<span class="hf-me-tag hf-me-tag--size">${escapeHtml(sizeText)}</span>`);
+                    }
                     tags.push(`<span class="hf-me-tag hf-me-tag--size">♥ ${Number(item.likes || 0)}</span>`);
 
                     return `
@@ -2750,7 +2762,7 @@ class ModelExplorerDialog {
                 .join("");
 
             this.body.innerHTML = `
-                ${renderBanner(`Hugging Face results for "${escapeHtml(cleanQuery)}" (${results.length})`)}
+                ${renderBanner(`${sourceTitle} results for "${escapeHtml(cleanQuery)}" (${results.length})`)}
                 ${rowsHtml}
             `;
             bindBackButton();
@@ -2769,8 +2781,11 @@ class ModelExplorerDialog {
                                 models: [
                                     {
                                         filename: item.filename,
+                                        target_filename: item.filename,
                                         url: item.url,
                                         folder: item.directory || defaultFolder,
+                                        ...(item.size_bytes ? { expected_size: item.size_bytes } : {}),
+                                        ...(item.sha256 ? { expected_sha: item.sha256 } : {}),
                                     },
                                 ],
                             }),

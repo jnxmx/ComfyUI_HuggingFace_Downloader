@@ -211,8 +211,25 @@ def _remove_tree_with_retry(path: str, attempts: int = 8, delay: float = 0.25) -
     return True
 
 
+_ACTIVE_DIRECT_RESPONSES_LOCK = threading.Lock()
+_ACTIVE_DIRECT_RESPONSES: set = set()
+
+
+def abort_direct_transfers():
+    """Close any active direct HTTP(S) / Civitai response streams so reads unblock immediately."""
+    with _ACTIVE_DIRECT_RESPONSES_LOCK:
+        active = list(_ACTIVE_DIRECT_RESPONSES)
+        _ACTIVE_DIRECT_RESPONSES.clear()
+    for resp in active:
+        try:
+            resp.close()
+        except Exception:
+            pass
+
+
 def abort_hf_transfer():
-    """Abort any in-flight huggingface_hub HTTP and Xet network transfers."""
+    """Abort any in-flight huggingface_hub HTTP, Xet, and direct HTTP network transfers."""
+    abort_direct_transfers()
     try:
         from huggingface_hub.utils._xet import abort_xet_session
         abort_xet_session()
@@ -402,6 +419,24 @@ def get_token():
     if not token:  # Fallback to HF_TOKEN environment variable
         token = os.getenv("HF_TOKEN", "").strip()
     return token if token else None
+
+
+def get_civitai_token() -> Optional[str]:
+    """
+    Load the Civitai API key from comfy.settings.json or environment variables.
+    """
+    settings = _load_comfy_settings_dict()
+    token = str(settings.get("downloader.civitai_api_key", "") or "").strip()
+    if not token:
+        token = str(os.getenv("CIVITAI_API_KEY", "") or "").strip()
+    if not token:
+        token = str(os.getenv("CIVITAI_TOKEN", "") or "").strip()
+    return token if token else None
+
+
+def has_civitai_token() -> bool:
+    """Return True when a Civitai API key is configured in settings or environment."""
+    return bool(get_civitai_token())
 
 
 def _safe_remove(path: str):
@@ -764,7 +799,7 @@ def _parse_content_length(header_value: str) -> Optional[int]:
 
 def _is_retryable_url_error(error: Exception) -> bool:
     if isinstance(error, urllib.error.HTTPError):
-        return int(getattr(error, "code", 0) or 0) in (408, 425, 429, 500, 502, 503, 504)
+        return int(getattr(error, "code", 0) or 0) in (408, 416, 425, 429, 500, 502, 503, 504)
     if isinstance(error, urllib.error.URLError):
         reason = getattr(error, "reason", None)
         if isinstance(reason, socket.timeout):
@@ -772,7 +807,59 @@ def _is_retryable_url_error(error: Exception) -> bool:
         text = str(reason or "").lower()
         return any(token in text for token in ("timeout", "temporarily", "reset", "refused", "unreachable"))
     text = str(error).lower()
-    return "timeout" in text or "temporarily unavailable" in text
+    if any(m in text for m in ("401", "403", "unauthorized", "forbidden", "early access", "api key", "html")):
+        return False
+    return "timeout" in text or "temporarily unavailable" in text or "incomplete download" in text
+
+
+def _parse_content_range_total(header_value: str) -> Optional[int]:
+    if not header_value:
+        return None
+    match = re.search(r"bytes\s+\d+-\d+/(\d+|\*)", str(header_value), flags=re.IGNORECASE)
+    if not match:
+        return None
+    total_str = match.group(1)
+    if total_str == "*":
+        return None
+    try:
+        val = int(total_str)
+        return val if val >= 0 else None
+    except Exception:
+        return None
+
+
+class _CrossOriginAuthStripRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Preserve Authorization only on allowed hosts; strip it on S3/R2 CDN redirects."""
+
+    def __init__(self, allowed_hosts: set[str], user_agent: str):
+        super().__init__()
+        self.allowed_hosts = {h.lower() for h in allowed_hosts}
+        self.user_agent = user_agent
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_req is None:
+            return None
+        new_host = (urllib.parse.urlparse(newurl).hostname or "").lower()
+        if new_host not in self.allowed_hosts:
+            for hdr_name in list(new_req.headers.keys()):
+                if hdr_name.lower() == "authorization":
+                    new_req.headers.pop(hdr_name, None)
+            for hdr_name in list(new_req.unredirected_hdrs.keys()):
+                if hdr_name.lower() == "authorization":
+                    new_req.unredirected_hdrs.pop(hdr_name, None)
+        else:
+            for k, v in list(req.headers.items()) + list(req.unredirected_hdrs.items()):
+                if k.lower() == "authorization":
+                    new_req.add_unredirected_header("Authorization", v)
+                    break
+
+        for k, v in list(req.headers.items()) + list(req.unredirected_hdrs.items()):
+            if k.lower() == "range":
+                new_req.add_unredirected_header("Range", v)
+                break
+        new_req.add_header("User-Agent", self.user_agent)
+        return new_req
 
 
 def run_download(parsed_data: dict,
@@ -1113,10 +1200,15 @@ def run_download_url(url: str,
                      status_cb: Optional[Callable[[str], None]] = None,
                      progress_cb: Optional[Callable[[dict], None]] = None,
                      cancel_check: Optional[Callable[[], bool]] = None,
+                     pause_check: Optional[Callable[[], bool]] = None,
+                     return_info: bool = False,
+                     expected_size: Optional[int] = None,
+                     expected_sha: Optional[str] = None,
                      max_retries: int = 3) -> tuple:
     """
-    Download a single file from a direct HTTP(S) URL into models/<final_folder>.
-    Uses streamed writes with retry/backoff, supports cancellation, and writes atomically.
+    Download a single file from a direct HTTP(S) or Civitai URL into models/<final_folder>.
+    Supports Civitai catalog URL resolution, cross-origin Auth stripping on S3/R2 redirects,
+    HTML paywall detection, HTTP Range resume on pause/retry, and atomic writes.
     """
     raw_url = str(url or "").strip()
     parsed_url = urllib.parse.urlparse(raw_url)
@@ -1126,46 +1218,146 @@ def run_download_url(url: str,
     target_dir = resolve_target_dir(final_folder)
     os.makedirs(target_dir, exist_ok=True)
 
+    from .civitai_client import (
+        CIVITAI_HOSTS,
+        CIVITAI_USER_AGENT,
+        is_civitai_url,
+        parse_civitai_url,
+        resolve_civitai_target,
+        strip_token_from_url,
+    )
+
+    is_civitai = is_civitai_url(raw_url)
+    civitai_token = get_civitai_token() if is_civitai else None
+    effective_url = strip_token_from_url(raw_url) if is_civitai else raw_url
     explicit_target = _sanitize_download_filename(target_filename or "")
-    request_headers = {
-        "User-Agent": "ComfyUI-HuggingFace-Downloader/1.0",
-        "Accept": "*/*",
-    }
+    resolved_civitai_name = ""
+
+    if is_civitai:
+        civitai_parsed = parse_civitai_url(raw_url)
+        if civitai_parsed and civitai_parsed.get("kind") != "download":
+            resolved_meta = resolve_civitai_target(raw_url, token=civitai_token, include_versions=False)
+            effective_url = resolved_meta["download_url"]
+            resolved_civitai_name = _sanitize_download_filename(resolved_meta.get("filename") or "")
+            if expected_size is None:
+                expected_size = resolved_meta.get("size_bytes")
+            if not expected_sha:
+                expected_sha = resolved_meta.get("sha256")
+
+    preknown_name = explicit_target or resolved_civitai_name
+    if preknown_name:
+        preknown_dest = os.path.realpath(os.path.abspath(os.path.join(target_dir, preknown_name)))
+        if not is_path_within_allowed_roots(preknown_dest):
+            raise RuntimeError(f"Destination path '{preknown_dest}' is outside allowed model directories.")
+        if os.path.exists(preknown_dest):
+            if os.path.getsize(preknown_dest) == 0:
+                _safe_remove(preknown_dest)
+            elif overwrite:
+                _safe_remove(preknown_dest)
+            else:
+                return _existing_file_result(
+                    preknown_dest,
+                    preknown_name,
+                    sync=sync,
+                    return_info=return_info,
+                    expected_size=expected_size,
+                    expected_sha=expected_sha,
+                    skip_verify=not bool(expected_sha),
+                )
+
+    ua = CIVITAI_USER_AGENT if is_civitai else "ComfyUI-HuggingFace-Downloader/1.0"
+    opener = (
+        urllib.request.build_opener(_CrossOriginAuthStripRedirectHandler(CIVITAI_HOSTS, ua))
+        if is_civitai
+        else None
+    )
+
+    if overwrite and preknown_name:
+        _safe_remove(os.path.join(target_dir, f".{preknown_name}.part"))
 
     retry_count = max(0, int(max_retries))
     last_error = None
 
-    for attempt in range(retry_count + 1):
-        if cancel_check and cancel_check():
-            cancel_msg = "Download cancelled"
-            print("[DEBUG]", cancel_msg)
-            return (cancel_msg, "") if sync else ("", "")
+    def _is_paused() -> bool:
+        return bool(pause_check and pause_check())
 
-        temp_path = ""
+    def _is_stopped() -> bool:
+        return bool((cancel_check and cancel_check()) or _is_paused())
+
+    def _civitai_access_message(detail: str = "") -> str:
+        if not civitai_token:
+            return (
+                "Civitai requires an API key to download this model. "
+                "Add your Civitai API Key in ComfyUI Settings (Tokens -> Civitai API Key) "
+                "or set the CIVITAI_API_KEY environment variable."
+            )
+        return (
+            "Civitai denied access to this model (requires Early Access unlock, "
+            "creator permission/login agreement on Civitai, or a valid API key)."
+            + (f" ({detail})" if detail else "")
+        )
+
+    for attempt in range(retry_count + 1):
+        if _is_stopped():
+            msg = "Download paused" if _is_paused() else "Download cancelled"
+            print("[DEBUG]", msg)
+            if return_info:
+                return (msg, "", {"expected_size": expected_size, "expected_sha": expected_sha, "skip_verify": True})
+            return (msg, "") if sync else ("", "")
+
+        part_path = ""
         dest_path = ""
+        existing_part_size = 0
+        if preknown_name:
+            candidate_part = os.path.join(target_dir, f".{preknown_name}.part")
+            if os.path.isfile(candidate_part):
+                existing_part_size = os.path.getsize(candidate_part)
+
+        request_headers = {
+            "User-Agent": ua,
+            "Accept": "*/*",
+        }
+        if is_civitai and civitai_token:
+            request_headers["Authorization"] = f"Bearer {civitai_token}"
+        if existing_part_size > 0 and not overwrite:
+            request_headers["Range"] = f"bytes={existing_part_size}-"
+
+        active_resp = None
         try:
             if status_cb:
                 status_cb("downloading")
 
-            request = urllib.request.Request(raw_url, headers=request_headers, method="GET")
-            with urllib.request.urlopen(request, timeout=60) as response:
-                final_url = str(getattr(response, "geturl", lambda: raw_url)() or raw_url)
-                headers = getattr(response, "headers", {})
+            request = urllib.request.Request(effective_url, headers=request_headers, method="GET")
+            response = opener.open(request, timeout=60) if opener else urllib.request.urlopen(request, timeout=60)
+            active_resp = response
+            with _ACTIVE_DIRECT_RESPONSES_LOCK:
+                _ACTIVE_DIRECT_RESPONSES.add(response)
+
+            with response:
+                final_url = str(getattr(response, "geturl", lambda: effective_url)() or effective_url)
+                resp_status = int(getattr(response, "status", None) or getattr(response, "getcode", lambda: 200)() or 200)
+                headers = getattr(response, "headers", {}) or {}
+                content_type = ""
                 content_disposition = ""
                 content_length = None
-                if headers:
-                    try:
-                        content_disposition = headers.get("Content-Disposition", "")
-                        content_length = _parse_content_length(headers.get("Content-Length"))
-                    except Exception:
-                        content_disposition = ""
-                        content_length = None
+                content_range = ""
+                try:
+                    content_type = str(headers.get("Content-Type", "") or "").lower()
+                    content_disposition = str(headers.get("Content-Disposition", "") or "")
+                    content_length = _parse_content_length(headers.get("Content-Length"))
+                    content_range = str(headers.get("Content-Range", "") or "")
+                except Exception:
+                    pass
+
+                if is_civitai and ("text/html" in content_type or "/login" in final_url.lower()):
+                    raise RuntimeError(_civitai_access_message("received HTML login/gate page"))
 
                 resolved_name = (
                     explicit_target
+                    or resolved_civitai_name
                     or _filename_from_content_disposition(content_disposition)
                     or _filename_from_url_path(final_url)
-                    or _filename_from_url_path(raw_url)
+                    or _filename_from_url_path(effective_url)
                     or "download.bin"
                 )
                 target_name = _sanitize_download_filename(resolved_name) or "download.bin"
@@ -1181,31 +1373,52 @@ def run_download_url(url: str,
                         print("[DEBUG] Overwrite requested, deleting existing file before direct URL download.")
                         _safe_remove(dest_path)
                     else:
-                        existing_size = os.path.getsize(dest_path)
-                        size_gb = existing_size / (1024 ** 3)
-                        message = f"{target_name} already exists | {size_gb:.3f} GB"
-                        print("[DEBUG]", message)
-                        return (message, dest_path) if sync else ("", "")
+                        return _existing_file_result(
+                            dest_path,
+                            target_name,
+                            sync=sync,
+                            return_info=return_info,
+                            expected_size=expected_size,
+                            expected_sha=expected_sha,
+                            skip_verify=not bool(expected_sha),
+                        )
 
-                temp_fd, temp_path = tempfile.mkstemp(
-                    prefix=f".{target_name}.",
-                    suffix=".part",
-                    dir=target_dir,
-                )
-                os.close(temp_fd)
-                _safe_remove(temp_path)
+                part_path = os.path.join(target_dir, f".{target_name}.part")
+                is_resumed_206 = (resp_status == 206 and existing_part_size > 0 and os.path.isfile(part_path))
+                if is_resumed_206:
+                    downloaded_bytes = existing_part_size
+                    range_total = _parse_content_range_total(content_range)
+                    if range_total is not None:
+                        total_bytes = range_total
+                    elif content_length is not None:
+                        total_bytes = existing_part_size + content_length
+                    else:
+                        total_bytes = expected_size
+                    file_mode = "ab"
+                else:
+                    downloaded_bytes = 0
+                    total_bytes = content_length if content_length is not None else expected_size
+                    file_mode = "wb"
 
-                downloaded_bytes = 0
-                last_bytes = 0
+                last_bytes = downloaded_bytes
                 last_time = time.time()
                 last_progress_emit = 0.0
                 ema_speed = None
-                chunk_size = 8 * 1024 * 1024
+                chunk_size = 1 * 1024 * 1024
 
-                with open(temp_path, "wb") as out:
+                if progress_cb and total_bytes:
+                    progress_cb({
+                        "downloaded_bytes": downloaded_bytes,
+                        "total_bytes": total_bytes,
+                        "speed_bps": 0,
+                        "eta_seconds": None,
+                        "phase": "downloading",
+                    })
+
+                with open(part_path, file_mode) as out:
                     while True:
-                        if cancel_check and cancel_check():
-                            raise InterruptedError("Download cancelled")
+                        if _is_stopped():
+                            raise InterruptedError("Download stopped")
                         chunk = response.read(chunk_size)
                         if not chunk:
                             break
@@ -1223,40 +1436,40 @@ def run_download_url(url: str,
                         should_emit = False
                         if now - last_progress_emit >= 0.25:
                             should_emit = True
-                        if content_length is not None and downloaded_bytes >= content_length:
+                        if total_bytes is not None and downloaded_bytes >= total_bytes:
                             should_emit = True
                         if should_emit and progress_cb:
                             eta_seconds = None
-                            if content_length and ema_speed and ema_speed > 0:
-                                eta_seconds = max(0, (content_length - downloaded_bytes) / ema_speed)
+                            if total_bytes and ema_speed and ema_speed > 0:
+                                eta_seconds = max(0, (total_bytes - downloaded_bytes) / ema_speed)
                             progress_cb({
                                 "downloaded_bytes": downloaded_bytes,
-                                "total_bytes": content_length,
+                                "total_bytes": total_bytes,
                                 "speed_bps": ema_speed or 0,
                                 "eta_seconds": eta_seconds,
                                 "phase": "downloading",
                             })
                             last_progress_emit = now
 
-                if cancel_check and cancel_check():
-                    raise InterruptedError("Download cancelled")
+                if _is_stopped():
+                    raise InterruptedError("Download stopped")
 
-                if content_length is not None and downloaded_bytes != content_length:
+                if total_bytes is not None and downloaded_bytes != total_bytes:
                     raise RuntimeError(
-                        f"Incomplete download (expected {content_length} bytes, got {downloaded_bytes} bytes)"
+                        f"Incomplete download (expected {total_bytes} bytes, got {downloaded_bytes} bytes)"
                     )
 
                 if status_cb:
                     status_cb("finalizing")
-                os.replace(temp_path, dest_path)
-                temp_path = ""
+                os.replace(part_path, dest_path)
+                part_path = ""
 
                 final_size = os.path.getsize(dest_path)
                 size_gb = final_size / (1024 ** 3)
                 if progress_cb:
                     progress_cb({
                         "downloaded_bytes": final_size,
-                        "total_bytes": content_length if content_length is not None else final_size,
+                        "total_bytes": total_bytes if total_bytes is not None else final_size,
                         "speed_bps": 0,
                         "eta_seconds": 0,
                         "phase": "finalizing",
@@ -1264,20 +1477,42 @@ def run_download_url(url: str,
 
                 final_message = f"Downloaded {target_name} | {size_gb:.3f} GB"
                 print("[DEBUG]", final_message)
+                if return_info:
+                    return (
+                        final_message,
+                        dest_path,
+                        {
+                            "expected_size": total_bytes if total_bytes is not None else final_size,
+                            "expected_sha": expected_sha,
+                            "skip_verify": not bool(expected_sha),
+                        },
+                    )
                 return (final_message, dest_path) if sync else ("", "")
         except InterruptedError:
-            if temp_path:
-                _safe_remove(temp_path)
+            if part_path and not _is_paused():
+                _safe_remove(part_path)
             if status_cb:
-                status_cb("cancelling")
-            cancel_msg = "Download cancelled"
-            print("[DEBUG]", cancel_msg)
-            return (cancel_msg, "") if sync else ("", "")
-        except Exception as e:
-            if temp_path:
-                _safe_remove(temp_path)
+                status_cb("pausing" if _is_paused() else "cancelling")
+            stop_msg = "Download paused" if _is_paused() else "Download cancelled"
+            print("[DEBUG]", stop_msg)
+            if return_info:
+                return (stop_msg, "", {"expected_size": expected_size, "expected_sha": expected_sha, "skip_verify": True})
+            return (stop_msg, "") if sync else ("", "")
+        except urllib.error.HTTPError as e:
+            code = int(getattr(e, "code", 0) or 0)
+            if code == 416 and part_path:
+                _safe_remove(part_path)
+                last_error = e
+                if attempt < retry_count:
+                    continue
+            if is_civitai and code in (401, 403):
+                if part_path:
+                    _safe_remove(part_path)
+                raise RuntimeError(_civitai_access_message(f"HTTP {code}")) from e
             last_error = e
             if attempt >= retry_count or not _is_retryable_url_error(e):
+                if part_path and not _is_paused():
+                    _safe_remove(part_path)
                 break
             backoff_seconds = min(8.0, float(2 ** attempt))
             print(
@@ -1285,6 +1520,29 @@ def run_download_url(url: str,
                 f"after {backoff_seconds:.1f}s: {e}"
             )
             time.sleep(backoff_seconds)
+        except Exception as e:
+            if _is_stopped():
+                if part_path and not _is_paused():
+                    _safe_remove(part_path)
+                stop_msg = "Download paused" if _is_paused() else "Download cancelled"
+                if return_info:
+                    return (stop_msg, "", {"expected_size": expected_size, "expected_sha": expected_sha, "skip_verify": True})
+                return (stop_msg, "") if sync else ("", "")
+            last_error = e
+            if attempt >= retry_count or not _is_retryable_url_error(e):
+                if part_path:
+                    _safe_remove(part_path)
+                break
+            backoff_seconds = min(8.0, float(2 ** attempt))
+            print(
+                f"[DEBUG] Direct URL download retry {attempt + 1}/{retry_count} "
+                f"after {backoff_seconds:.1f}s: {e}"
+            )
+            time.sleep(backoff_seconds)
+        finally:
+            if active_resp is not None:
+                with _ACTIVE_DIRECT_RESPONSES_LOCK:
+                    _ACTIVE_DIRECT_RESPONSES.discard(active_resp)
 
     raise RuntimeError(f"Download failed: {last_error}")
 

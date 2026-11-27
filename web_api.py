@@ -42,8 +42,20 @@ from .downloader import (
     get_remote_file_metadata,
     get_blob_paths,
     get_token,
+    get_civitai_token,
+    has_civitai_token,
+    abort_direct_transfers,
     get_xet_live_progress,
     check_hf_repo_access,
+)
+from .civitai_client import (
+    CIVITAI_HOSTS,
+    CivitaiError,
+    is_civitai_url,
+    parse_civitai_url,
+    resolve_civitai_target,
+    search_civitai_variants,
+    strip_token_from_url,
 )
 from .parse_link import parse_link
 try:
@@ -624,6 +636,10 @@ def _build_retry_payload(item: dict) -> dict:
     target_filename = _sanitize_filename_hint(item.get("target_filename"))
     if target_filename:
         payload["target_filename"] = target_filename
+    if item.get("expected_size") is not None:
+        payload["expected_size"] = item.get("expected_size")
+    if item.get("expected_sha"):
+        payload["expected_sha"] = str(item.get("expected_sha")).strip()
     if item.get("overwrite"):
         payload["overwrite"] = True
     return payload
@@ -716,6 +732,42 @@ def _classify_download_failure(item: dict, error_message: str) -> dict:
         result["repo_id"] = repo_id
     if repo_url:
         result["repo_url"] = repo_url
+
+    is_civitai_related = is_civitai_url(str(item.get("url") or "")) or "civitai" in lowered
+    if is_civitai_related:
+        if "early access" in lowered:
+            result.update(
+                {
+                    "error_code": "civitai_early_access",
+                    "action_hint": "unlock_civitai_early_access",
+                    "needs_token": not has_civitai_token(),
+                    "action_message": "This model is in Early Access on Civitai or requires account permission. Unlock it on Civitai, then retry.",
+                }
+            )
+            return result
+        if (
+            "api key" in lowered
+            or "401" in lowered
+            or "403" in lowered
+            or "unauthorized" in lowered
+            or "forbidden" in lowered
+            or "html" in lowered
+        ):
+            needs_key = not has_civitai_token()
+            result.update(
+                {
+                    "error_code": "civitai_auth",
+                    "action_hint": "check_civitai_api_key",
+                    "needs_token": needs_key,
+                    "action_message": (
+                        "Add your Civitai API Key in Settings (Tokens -> Civitai API Key) or CIVITAI_API_KEY, then retry."
+                        if needs_key
+                        else "Check your Civitai API Key or model access on Civitai, then retry."
+                    ),
+                }
+            )
+            return result
+        return result
 
     gated_markers = (
         "gated",
@@ -2271,16 +2323,38 @@ def _download_worker():
                         "updated_at": time.time()
                     })
 
-                msg, path = run_download_url(
-                    item_url,
-                    item["folder"],
-                    sync=True,
-                    overwrite=overwrite,
-                    target_filename=item.get("target_filename"),
-                    status_cb=direct_status_cb,
-                    progress_cb=direct_progress_cb,
-                    cancel_check=lambda: _should_stop_download(download_id),
-                )
+                if VERIFY_AFTER_QUEUE:
+                    msg, path, info = run_download_url(
+                        item_url,
+                        item["folder"],
+                        sync=True,
+                        overwrite=overwrite,
+                        target_filename=item.get("target_filename"),
+                        status_cb=direct_status_cb,
+                        progress_cb=direct_progress_cb,
+                        cancel_check=lambda: _should_stop_download(download_id),
+                        pause_check=lambda: _is_pause_requested(download_id) and not _is_cancel_requested(download_id),
+                        return_info=True,
+                        expected_size=item.get("expected_size"),
+                        expected_sha=item.get("expected_sha"),
+                    )
+                else:
+                    msg, path = run_download_url(
+                        item_url,
+                        item["folder"],
+                        sync=True,
+                        overwrite=overwrite,
+                        target_filename=item.get("target_filename"),
+                        status_cb=direct_status_cb,
+                        progress_cb=direct_progress_cb,
+                        cancel_check=lambda: _should_stop_download(download_id),
+                        pause_check=lambda: _is_pause_requested(download_id) and not _is_cancel_requested(download_id),
+                        return_info=False,
+                        expected_size=item.get("expected_size"),
+                        expected_sha=item.get("expected_sha"),
+                    )
+                    info = {}
+
                 if _is_pause_requested(download_id) and not _is_cancel_requested(download_id):
                     _mark_download_paused(download_id, item)
                     _touch_queue_activity()
@@ -2301,12 +2375,29 @@ def _download_worker():
                     continue
                 if not path:
                     raise RuntimeError(msg or "Direct URL download failed.")
-                _set_download_status(download_id, {
-                    "status": "completed",
-                    "message": msg,
-                    "path": path,
-                    "finished_at": time.time()
-                })
+                should_enqueue_verify = bool(VERIFY_AFTER_QUEUE and path and not bool(info.get("skip_verify")) and info.get("expected_sha"))
+                if should_enqueue_verify:
+                    _set_download_status(download_id, {
+                        "status": "downloaded",
+                        "message": msg,
+                        "path": path,
+                        "updated_at": time.time()
+                    })
+                    with pending_verifications_lock:
+                        pending_verifications.append({
+                            "download_id": download_id,
+                            "dest_path": path,
+                            "expected_size": info.get("expected_size"),
+                            "expected_sha": info.get("expected_sha"),
+                            "message": msg
+                        })
+                else:
+                    _set_download_status(download_id, {
+                        "status": "completed",
+                        "message": msg,
+                        "path": path,
+                        "finished_at": time.time()
+                    })
                 _touch_queue_activity()
                 continue
 
@@ -3517,10 +3608,56 @@ def setup(app_or_server):
                         "error": "URL must be a valid http(s) link or Hugging Face file link.",
                     })
                     continue
-                filename = _derive_file_display_name(model) or "download"
+
+                resolved_expected_size = model.get("expected_size")
+                resolved_expected_sha = model.get("expected_sha")
+                if url and is_civitai_url(url):
+                    clean_civitai_url = strip_token_from_url(url)
+                    parsed_civitai = parse_civitai_url(clean_civitai_url)
+                    if parsed_civitai and parsed_civitai.get("kind") != "download":
+                        try:
+                            civitai_meta = resolve_civitai_target(
+                                clean_civitai_url,
+                                token=get_civitai_token(),
+                                include_versions=False,
+                            )
+                            url = civitai_meta["download_url"]
+                            if not filename:
+                                filename = civitai_meta.get("filename") or filename
+                            if not model.get("target_filename") and not model.get("filename"):
+                                model = dict(model)
+                                model["target_filename"] = civitai_meta.get("filename")
+                            if resolved_expected_size is None:
+                                resolved_expected_size = civitai_meta.get("size_bytes")
+                            if not resolved_expected_sha:
+                                resolved_expected_sha = civitai_meta.get("sha256")
+                            if (not folder_locked) and (not model.get("folder") or model.get("folder") == "checkpoints") and civitai_meta.get("folder"):
+                                folder = sanitize_rel_folder(civitai_meta["folder"]) or folder
+                        except Exception as e:
+                            rejected.append({
+                                "filename": filename or "",
+                                "error": str(e),
+                            })
+                            continue
+                    else:
+                        url = clean_civitai_url
+
+                model_for_name = dict(model)
+                if url:
+                    model_for_name["url"] = url
+                if filename and not model_for_name.get("filename"):
+                    model_for_name["filename"] = filename
+                filename = _derive_file_display_name(model_for_name) or "download"
 
             download_id = f"dl_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
             item = dict(model)
+            if url:
+                item["url"] = url
+            if download_mode == "file":
+                if resolved_expected_size is not None:
+                    item["expected_size"] = resolved_expected_size
+                if resolved_expected_sha:
+                    item["expected_sha"] = resolved_expected_sha
             requested_filename = _sanitize_filename_hint(model.get("target_filename"))
             if not requested_filename and download_mode == "file" and is_hf_file_download:
                 requested_filename = _sanitize_filename_hint(model.get("filename"))
@@ -3728,10 +3865,15 @@ def setup(app_or_server):
         if download_mode == "file" and folder and target_name:
             try:
                 target_dir = resolve_target_dir(folder)
-                placeholder_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, os.path.basename(target_name))))
+                base_target = os.path.basename(target_name)
+                placeholder_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, base_target)))
                 if is_path_within_allowed_roots(placeholder_path) and os.path.isfile(placeholder_path) and os.path.getsize(placeholder_path) == 0:
                     os.remove(placeholder_path)
                     print(f"[DEBUG] Removed 0-byte placeholder for cancelled download: {placeholder_path}")
+                part_path = os.path.realpath(os.path.abspath(os.path.join(target_dir, f".{base_target}.part")))
+                if is_path_within_allowed_roots(part_path) and os.path.isfile(part_path):
+                    os.remove(part_path)
+                    print(f"[DEBUG] Removed cancelled partial download: {part_path}")
             except Exception as e:
                 print(f"[DEBUG] Failed to remove placeholder for cancelled download {download_id}: {e}")
 
@@ -4714,7 +4856,56 @@ def setup(app_or_server):
         # Reuse the existing queue-based downloader contract.
         return await queue_download(request)
         
+    def _sync_resolve_model_url(payload: dict) -> tuple[dict, int]:
+        raw_url = str(payload.get("url") or "").strip()
+        version_id = str(payload.get("version_id") or "").strip() or None
+        if not raw_url:
+            return {"ok": False, "error": "Missing URL."}, 400
+        if not _is_direct_http_url(raw_url):
+            return {"ok": False, "error": "Please enter a valid http(s) URL."}, 400
+        if not is_civitai_url(raw_url):
+            return {
+                "ok": True,
+                "provider": urlparse(raw_url).netloc.lower(),
+                "has_civitai_key": has_civitai_token(),
+            }, 200
+        try:
+            target = resolve_civitai_target(
+                raw_url,
+                token=get_civitai_token(),
+                preferred_version_id=version_id,
+                include_versions=True,
+            )
+            return {
+                "ok": True,
+                "has_civitai_key": has_civitai_token(),
+                **target,
+            }, 200
+        except CivitaiError as ce:
+            return {
+                "ok": False,
+                "error": str(ce),
+                "error_code": ce.error_code,
+                "has_civitai_key": has_civitai_token(),
+            }, ce.status_code
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": f"Failed to resolve Civitai URL: {exc}",
+                "has_civitai_key": has_civitai_token(),
+            }, 500
+
+    async def resolve_model_url_endpoint(request):
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        payload, status = await asyncio.to_thread(_sync_resolve_model_url, data if isinstance(data, dict) else {})
+        return web.json_response(payload, status=status)
+
     _safe_add_route("POST", "/restart", restart)
+    _safe_add_route("POST", "/api/resolve_model_url", resolve_model_url_endpoint)
+    _safe_add_route("POST", "/api/hf_downloader/resolve_model_url", resolve_model_url_endpoint)
     _safe_add_route("POST", "/queue_download", queue_download)
     _safe_add_route("POST", "/hf_check_access", hf_check_access)
     _safe_add_route("POST", "/api/model_explorer/download", model_explorer_download_proxy)
@@ -4939,7 +5130,18 @@ def _model_explorer_resolve_installed_info(entry: dict, local_name_map: dict[str
 
 def _model_explorer_collect_rows() -> list[dict]:
     rows = _load_model_explorer_catalog()
-    return [dict(v) for v in rows.values() if isinstance(v, dict)]
+    civitai_enabled = has_civitai_token()
+    collected: list[dict] = []
+    for v in rows.values():
+        if not isinstance(v, dict):
+            continue
+        provider = _extract_provider(v)
+        url = str(v.get("url") or "")
+        is_civitai_row = provider in CIVITAI_HOSTS or is_civitai_url(url)
+        if is_civitai_row and not civitai_enabled:
+            continue
+        collected.append(dict(v))
+    return collected
 
 
 def _model_explorer_category_from_local_record(record: dict) -> str:
@@ -5544,16 +5746,72 @@ async def model_explorer_hf_search(request):
     if len(query) < 2:
         return web.json_response({"ok": False, "error": "Query must be at least 2 characters.", "results": []}, status=400)
 
-    try:
-        results = await asyncio.to_thread(
-            model_discovery.search_huggingface_variants,
-            query,
-            category=category,
-            limit=limit,
+    def _run_unified_search() -> tuple[list[dict], bool]:
+        civitai_token = get_civitai_token()
+        civitai_enabled = bool(civitai_token)
+
+        def _search_hf():
+            return model_discovery.search_huggingface_variants(
+                query,
+                category=category,
+                limit=limit,
+            ) or []
+
+        def _search_civitai():
+            if not civitai_token:
+                return []
+            try:
+                return search_civitai_variants(
+                    query,
+                    category=category,
+                    limit=limit,
+                    token=civitai_token,
+                ) or []
+            except Exception as civ_err:
+                print(f"[DEBUG] Civitai online search failed for '{query}': {civ_err}")
+                return []
+
+        if not civitai_enabled:
+            return _search_hf(), False
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            hf_fut = pool.submit(_search_hf)
+            civ_fut = pool.submit(_search_civitai)
+            hf_results = hf_fut.result()
+            civ_results = civ_fut.result()
+
+        q_lower = query.lower()
+        merged: list[dict] = []
+        seen_keys: set[tuple[str, str]] = set()
+        for item in hf_results + civ_results:
+            if not isinstance(item, dict):
+                continue
+            fn = str(item.get("filename") or "").strip()
+            url = str(item.get("url") or "").strip()
+            key = (fn.lower(), url.lower())
+            if not fn or not url or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            merged.append(item)
+
+        merged.sort(
+            key=lambda r: (
+                1 if str(r.get("filename") or "").lower() == q_lower else 0,
+                1 if r.get("is_priority_author") else 0,
+                1 if q_lower in str(r.get("filename") or "").lower() else 0,
+                int(r.get("likes") or 0),
+                int(r.get("downloads") or 0),
+            ),
+            reverse=True,
         )
+        return merged[:limit], True
+
+    try:
+        results, civitai_enabled = await asyncio.to_thread(_run_unified_search)
         return web.json_response({
             "ok": True,
             "query": query,
+            "civitai_enabled": civitai_enabled,
             "results": results or [],
         })
     except Exception as e:

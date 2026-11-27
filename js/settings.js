@@ -12,6 +12,14 @@ app.registerExtension({
       tooltip: "Enter your Hugging Face token to enable downloads from gated repos.",
     },
     {
+      id: "downloader.civitai_api_key",
+      category: ["Hugging Face Download & Backup", "Tokens", "Civitai API Key"],
+      name: "Civitai API Key",
+      type: "text",
+      defaultValue: "",
+      tooltip: "Enter your Civitai API key to enable seamless Civitai downloads, auto-search, and Model Explorer results (or set CIVITAI_API_KEY env var).",
+    },
+    {
       id: "downloader.auto_open_missing_models_on_run",
       category: ["Hugging Face Download & Backup", "Auto download", "Auto-open on workflow-open and Run missing-model checks"],
       name: "Auto-open on workflow-open and Run missing-model checks",
