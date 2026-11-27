@@ -81,6 +81,112 @@ def get_models_root() -> str:
     return os.path.join(get_comfy_root(), "models")
 
 
+_SYSTEM_NON_MODEL_FOLDER_KEYS = {"custom_nodes", "user", "input", "output", "temp"}
+
+
+def _is_within_dir(candidate_real: str, base_real: str) -> bool:
+    try:
+        return os.path.commonpath([base_real, candidate_real]) == base_real
+    except (ValueError, Exception):
+        return False
+
+
+def is_valid_model_folder_type(
+    folder_key: str,
+    *,
+    comfy_root: str | None = None,
+    folder_paths_mod=None,
+) -> bool:
+    """
+    Returns True if a folder_paths key represents a valid model directory rather than a
+    ComfyUI system/artifact directory (such as output/, input/, temp/, user/, custom_nodes/).
+    """
+    key = str(folder_key or "").strip()
+    if not key or key in _SYSTEM_NON_MODEL_FOLDER_KEYS:
+        return False
+
+    if folder_paths_mod is None:
+        try:
+            import folder_paths as folder_paths_mod
+        except ImportError:
+            folder_paths_mod = None
+
+    if not folder_paths_mod or not hasattr(folder_paths_mod, "get_folder_paths"):
+        return True
+
+    try:
+        registered_paths = folder_paths_mod.get_folder_paths(key) or []
+    except Exception:
+        return True
+
+    if not isinstance(registered_paths, (list, tuple, set)):
+        return True
+
+    clean_paths = [str(p).strip() for p in registered_paths if isinstance(p, str) and p.strip()]
+    if not clean_paths:
+        return True
+
+    resolved_comfy_root = os.path.realpath(os.path.abspath(comfy_root or get_comfy_root()))
+    excluded_roots = [
+        os.path.realpath(os.path.join(resolved_comfy_root, sys_dir))
+        for sys_dir in _SYSTEM_NON_MODEL_FOLDER_KEYS
+    ]
+
+    for p in clean_paths:
+        p_real = os.path.realpath(os.path.abspath(p))
+        if not any(_is_within_dir(p_real, excl) for excl in excluded_roots):
+            return True
+
+    return False
+
+
+def get_registered_model_buckets(models_dir: str = None, folder_paths_mod=None) -> list:
+    """
+    Returns deduplicated top-level model bucket names registered in folder_paths
+    (excluding system/output folders) plus existing subdirectories of models_dir.
+    """
+    if folder_paths_mod is None:
+        try:
+            import folder_paths as folder_paths_mod
+        except ImportError:
+            folder_paths_mod = None
+
+    comfy_root = getattr(folder_paths_mod, "base_path", None) if folder_paths_mod else None
+    if not isinstance(comfy_root, str) or not comfy_root.strip():
+        comfy_root = get_comfy_root()
+
+    if models_dir is None:
+        fp_models = getattr(folder_paths_mod, "models_dir", None) if folder_paths_mod else None
+        models_dir = fp_models if isinstance(fp_models, str) and fp_models.strip() else get_models_root()
+
+    base_types: list[str] = []
+    fn_map = getattr(folder_paths_mod, "folder_names_and_paths", None) if folder_paths_mod else None
+    if isinstance(fn_map, dict) and fn_map:
+        for k in fn_map.keys():
+            if is_valid_model_folder_type(k, comfy_root=comfy_root, folder_paths_mod=folder_paths_mod) and k not in base_types:
+                base_types.append(k)
+    else:
+        base_types = [
+            "checkpoints", "clip", "diffusion_models", "vae", "loras",
+            "controlnet", "upscale_models", "text_encoders", "style_models", "embeddings"
+        ]
+
+    if isinstance(models_dir, str) and os.path.exists(models_dir):
+        try:
+            for name in os.listdir(models_dir):
+                if (
+                    not name.startswith(".")
+                    and os.path.isdir(os.path.join(models_dir, name))
+                    and name not in _SYSTEM_NON_MODEL_FOLDER_KEYS
+                    and name not in base_types
+                ):
+                    base_types.append(name)
+        except OSError:
+            pass
+
+    return base_types
+
+
 def get_model_subfolders(models_dir: str = None) -> list:
     try:
         import folder_paths
@@ -90,24 +196,7 @@ def get_model_subfolders(models_dir: str = None) -> list:
     if models_dir is None:
         models_dir = get_models_root()
 
-    # Get candidate folder types (base names like checkpoints, loras, etc.)
-    base_types = []
-    if folder_paths and hasattr(folder_paths, "folder_names_and_paths"):
-        for k in folder_paths.folder_names_and_paths.keys():
-            if k not in ["custom_nodes", "user", "input", "output", "temp"]:
-                base_types.append(k)
-    else:
-        # Fallback list if folder_paths is not available
-        base_types = ["checkpoints", "clip", "diffusion_models", "vae", "loras", "controlnet", "upscale_models", "text_encoders", "style_models", "embeddings"]
-
-    # Also include any actual top-level folders inside models_dir
-    if os.path.exists(models_dir):
-        try:
-            for name in os.listdir(models_dir):
-                if os.path.isdir(os.path.join(models_dir, name)) and name not in base_types:
-                    base_types.append(name)
-        except OSError:
-            pass
+    base_types = get_registered_model_buckets(models_dir)
 
     # Sort base_types with priority
     priority = ["checkpoints", "clip", "diffusion_models", "vae", "loras", "controlnet"]
@@ -159,8 +248,9 @@ def get_allowed_model_roots() -> list:
     try:
         import folder_paths
         if hasattr(folder_paths, "folder_names_and_paths"):
+            comfy_root = get_comfy_root()
             for base_type in folder_paths.folder_names_and_paths.keys():
-                if base_type in ["custom_nodes", "user", "input", "output", "temp"]:
+                if not is_valid_model_folder_type(base_type, comfy_root=comfy_root):
                     continue
                 try:
                     paths = folder_paths.get_folder_paths(base_type) or []
